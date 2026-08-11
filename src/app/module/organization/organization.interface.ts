@@ -50,9 +50,11 @@ export interface IOrganization {
     youtube?: string
     whatsapp?: string
   }
+  templateId?: 'template-1' | 'template-2' | 'template-3' | 'template-4'
   websiteSettings?: {
     heroTitle?: string
     heroSubtitle?: string
+    heroImage?: string
     featuredPropertiesCount?: number
     enableTestimonials?: boolean
     enableLeadForm?: boolean
