@@ -76,6 +76,8 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
       org.metaDescription || `Browse verified real estate properties and luxury estates with ${org.agencyName}.`,
     sub_domain: org.sub_domain,
     domain: org.domain,
+    templateId: org.templateId || 'template-1',
+    font: org.font || 'Inter',
     socialLinks: org.socialLinks,
     websiteSettings: org.websiteSettings,
     stats: {
@@ -91,19 +93,22 @@ const updateWebsiteSettings = async (
   organizationId: string,
   payload: Partial<IOrganization>
 ): Promise<IOrganization | null> => {
+  const updateData: any = {
+    websiteSettings: payload.websiteSettings,
+    socialLinks: payload.socialLinks,
+    primaryColor: payload.primaryColor,
+    secondaryColor: payload.secondaryColor,
+    metaTitle: payload.metaTitle,
+    metaDescription: payload.metaDescription,
+    logo: payload.logo,
+  }
+
+  if (payload.templateId) updateData.templateId = payload.templateId
+  if (payload.font) updateData.font = payload.font
+
   const result = await Organization.findOneAndUpdate(
     { organizationId },
-    {
-      $set: {
-        websiteSettings: payload.websiteSettings,
-        socialLinks: payload.socialLinks,
-        primaryColor: payload.primaryColor,
-        secondaryColor: payload.secondaryColor,
-        metaTitle: payload.metaTitle,
-        metaDescription: payload.metaDescription,
-        logo: payload.logo,
-      },
-    },
+    { $set: updateData },
     { new: true }
   )
 
