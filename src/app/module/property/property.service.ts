@@ -1,0 +1,275 @@
+import httpStatus from 'http-status'
+import ApiError from '../../../errors/ApiError'
+import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
+import paginationHelper from '../../helpers/paginationHelper'
+import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface'
+import { Property } from './property.model'
+
+const generateSlug = async (organizationId: string, title: string): Promise<string> => {
+  let baseSlug = title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+
+  if (!baseSlug) baseSlug = 'property'
+
+  let slug = baseSlug
+  let count = 1
+
+  while (await Property.findOne({ organizationId, slug })) {
+    slug = `${baseSlug}-${count}`
+    count++
+  }
+
+  return slug
+}
+
+const createProperty = async (
+  organizationId: string,
+  payload: Partial<IProperty>
+): Promise<IProperty> => {
+  if (!payload.title) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Property title is required')
+  }
+
+  const slug = await generateSlug(organizationId, payload.title)
+
+  const propertyData: Partial<IProperty> = {
+    ...payload,
+    organizationId,
+    slug,
+    views: 0,
+  }
+
+  const result = await Property.create(propertyData)
+  return result
+}
+
+const getAllProperties = async (
+  filters: IPropertyFilter,
+  paginationOptions: IPaginationOptions
+): Promise<IGenericResponse<IProperty[]>> => {
+  const {
+    searchTerm,
+    organizationId,
+    propertyType,
+    listingType,
+    status,
+    city,
+    state,
+    minPrice,
+    maxPrice,
+    bedrooms,
+    bathrooms,
+    furnished,
+    isFeatured,
+    agentId,
+  } = filters
+
+  const andConditions: Array<Record<string, unknown>> = []
+
+  if (organizationId) {
+    andConditions.push({ organizationId })
+  }
+
+  if (searchTerm) {
+    andConditions.push({
+      $or: ['title', 'description', 'address', 'city', 'state', 'zipCode'].map((field) => ({
+        [field]: { $regex: searchTerm, $options: 'i' },
+      })),
+    })
+  }
+
+  if (propertyType) andConditions.push({ propertyType })
+  if (listingType) andConditions.push({ listingType })
+  if (status) andConditions.push({ status })
+  if (city) andConditions.push({ city: { $regex: city, $options: 'i' } })
+  if (state) andConditions.push({ state: { $regex: state, $options: 'i' } })
+  if (agentId) andConditions.push({ agentId })
+
+  if (minPrice !== undefined && minPrice !== '') {
+    andConditions.push({ price: { $gte: Number(minPrice) } })
+  }
+  if (maxPrice !== undefined && maxPrice !== '') {
+    andConditions.push({ price: { $lte: Number(maxPrice) } })
+  }
+
+  if (bedrooms !== undefined && bedrooms !== '') {
+    andConditions.push({ bedrooms: Number(bedrooms) })
+  }
+  if (bathrooms !== undefined && bathrooms !== '') {
+    andConditions.push({ bathrooms: Number(bathrooms) })
+  }
+
+  if (furnished !== undefined && furnished !== '') {
+    andConditions.push({ furnished: furnished === 'true' || furnished === true })
+  }
+  if (isFeatured !== undefined && isFeatured !== '') {
+    andConditions.push({ isFeatured: isFeatured === 'true' || isFeatured === true })
+  }
+
+  const whereCondition = andConditions.length > 0 ? { $and: andConditions } : {}
+  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+
+  const result = await Property.find(whereCondition)
+    .populate('agentId', 'name email phoneNumber profileImgURL licenseNumber')
+    .sort({ [sortBy]: sortOrder })
+    .skip(skip)
+    .limit(limit)
+
+  const total = await Property.countDocuments(whereCondition)
+
+  return {
+    meta: {
+      page,
+      limit,
+      total,
+    },
+    data: result,
+  }
+}
+
+const getPublicProperties = async (
+  organizationId: string,
+  filters: IPropertyFilter,
+  paginationOptions: IPaginationOptions
+): Promise<IGenericResponse<IProperty[]>> => {
+  return getAllProperties(
+    {
+      ...filters,
+      organizationId,
+      status: 'Available',
+    },
+    paginationOptions
+  )
+}
+
+const getPropertyById = async (organizationId: string, id: string): Promise<IProperty | null> => {
+  const result = await Property.findOne({ _id: id, organizationId }).populate(
+    'agentId',
+    'name email phoneNumber profileImgURL licenseNumber bio'
+  )
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+  return result
+}
+
+const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
+  const result = await Property.findOne({ slug, organizationId }).populate(
+    'agentId',
+    'name email phoneNumber profileImgURL licenseNumber bio'
+  )
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+  return result
+}
+
+const getPublicPropertyDetail = async (
+  idOrSlug: string
+): Promise<{ property: IProperty; similarProperties: IProperty[] }> => {
+  const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
+  const query = isObjectId ? { _id: idOrSlug } : { slug: idOrSlug }
+
+  const property = await Property.findOneAndUpdate(
+    query,
+    { $inc: { views: 1 } },
+    { new: true }
+  ).populate('agentId', 'name email phoneNumber profileImgURL licenseNumber bio specialization')
+
+  if (!property) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+
+  // Find 3 similar properties in the same organization
+  const similarProperties = await Property.find({
+    organizationId: property.organizationId,
+    _id: { $ne: property._id },
+    status: 'Available',
+    $or: [{ city: property.city }, { propertyType: property.propertyType }],
+  })
+    .limit(3)
+    .populate('agentId', 'name email profileImgURL')
+
+  return {
+    property,
+    similarProperties,
+  }
+}
+
+const updateProperty = async (
+  organizationId: string,
+  id: string,
+  payload: Partial<IProperty>
+): Promise<IProperty | null> => {
+  const isExist = await Property.findOne({ _id: id, organizationId })
+  if (!isExist) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+
+  if (payload.title && payload.title !== isExist.title) {
+    payload.slug = await generateSlug(organizationId, payload.title)
+  }
+
+  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, {
+    new: true,
+  }).populate('agentId', 'name email phoneNumber profileImgURL')
+
+  return result
+}
+
+const updatePropertyStatus = async (
+  organizationId: string,
+  id: string,
+  status: string
+): Promise<IProperty | null> => {
+  const result = await Property.findOneAndUpdate(
+    { _id: id, organizationId },
+    { status },
+    { new: true }
+  )
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+  return result
+}
+
+const reorderPropertyImages = async (
+  organizationId: string,
+  id: string,
+  images: IPropertyImage[]
+): Promise<IProperty | null> => {
+  const result = await Property.findOneAndUpdate(
+    { _id: id, organizationId },
+    { images },
+    { new: true }
+  )
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+  return result
+}
+
+const deleteProperty = async (organizationId: string, id: string): Promise<IProperty | null> => {
+  const result = await Property.findOneAndDelete({ _id: id, organizationId })
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  }
+  return result
+}
+
+export const PropertyService = {
+  createProperty,
+  getAllProperties,
+  getPublicProperties,
+  getPropertyById,
+  getPropertyBySlug,
+  getPublicPropertyDetail,
+  updateProperty,
+  updatePropertyStatus,
+  reorderPropertyImages,
+  deleteProperty,
+}
