@@ -126,18 +126,71 @@ const seedDatabase = async () => {
         heroSubtitle: 'Curated exclusive beachfront estates, modern penthouses, and private villas in South Florida.',
       },
       customDomain: 'apexluxuryrealty.com',
+      sub_domain: 'demo',
+      templateId: 'template-1',
       domainVerified: true,
       status: 'active',
     })
 
+    // Seed additional agencies for Templates 2, 3, 4
+    await Organization.deleteMany({ sub_domain: { $in: ['biscaynebay', 'metropolitan', 'urbanboutique'] } })
+    await Organization.create([
+      {
+        organizationId: 'org_biscayne_bay_2026',
+        agencyName: 'Biscayne Bay Properties',
+        agencyType: 'residential',
+        email: 'info@biscaynebay.com',
+        phone: '+1 (305) 555-9988',
+        sub_domain: 'biscaynebay',
+        templateId: 'template-2',
+        status: 'active',
+        subscriptionPlan: 'starter',
+      },
+      {
+        organizationId: 'org_metropolitan_2026',
+        agencyName: 'Metropolitan Real Estate',
+        agencyType: 'commercial',
+        email: 'sales@metropolitan.io',
+        phone: '+1 (305) 555-1122',
+        sub_domain: 'metropolitan',
+        templateId: 'template-3',
+        status: 'active',
+        subscriptionPlan: 'enterprise',
+      },
+      {
+        organizationId: 'org_urban_boutique_2026',
+        agencyName: 'Urban Boutique Realty',
+        agencyType: 'residential',
+        email: 'hello@urbanboutique.com',
+        phone: '+1 (305) 555-4433',
+        sub_domain: 'urbanboutique',
+        templateId: 'template-4',
+        status: 'active',
+        subscriptionPlan: 'growth',
+      },
+    ])
+
     const organizationId = org.organizationId
 
-    // 3. Seed Users (Agency Owner & Agent)
+    // 3. Seed Users (Super-Admin, Agency Owner & Agent)
     console.log('Seeding Users...')
     await User.deleteMany({ organizationId })
+    await User.deleteMany({ userRole: 'super-admin' })
 
     const saltRounds = Number(config.bcrypt_salt_rounds) || 10
     const hashedPassword = await bcrypt.hash('Password123!', saltRounds)
+
+    const superAdminUser = await User.create({
+      organizationId: 'platform_master',
+      name: 'Global System SuperAdmin',
+      email: 'superadmin@realestatesaas.com',
+      password: hashedPassword,
+      phoneNumber: '+1 (555) 000-1111',
+      userRole: 'super-admin',
+      status: 'active',
+      profileImgURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&q=80',
+      designation: 'SaaS Platform Owner',
+    })
 
     const ownerUser = await User.create({
       organizationId,
