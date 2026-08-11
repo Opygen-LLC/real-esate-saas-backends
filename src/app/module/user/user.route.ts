@@ -51,4 +51,17 @@ router.delete(
   UserController.deleteUserById
 )
 
+// Super-admin endpoints
+router.get(
+  '/super-admin/all',
+  authMiddlewares.authSuperAdmin,
+  UserController.getAllUsersSuperAdmin
+)
+
+router.patch(
+  '/super-admin/:id/role',
+  authMiddlewares.authSuperAdmin,
+  UserController.updateUserRoleSuperAdmin
+)
+
 export const UserRoute = router

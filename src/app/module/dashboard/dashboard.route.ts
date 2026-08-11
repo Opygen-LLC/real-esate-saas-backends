@@ -16,4 +16,10 @@ router.get(
   DashboardController.getAnalytics
 )
 
+router.get(
+  '/super-admin-overview',
+  authMiddlewares.authSuperAdmin,
+  DashboardController.getSuperAdminOverviewStats
+)
+
 export const DashboardRoute = router

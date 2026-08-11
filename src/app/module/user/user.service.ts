@@ -227,6 +227,66 @@ const deleteUserById = async (id: string): Promise<IUser | null> => {
   return result
 }
 
+const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IPaginationOptions) => {
+  const { searchTerm, userRole, status, ...filtersData } = filters
+  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+
+  const andConditions: any[] = []
+
+  if (searchTerm) {
+    andConditions.push({
+      $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({
+        [field]: {
+          $regex: searchTerm,
+          $options: 'i',
+        },
+      })),
+    })
+  }
+
+  if (userRole) andConditions.push({ userRole })
+  if (status) andConditions.push({ status })
+
+  if (Object.keys(filtersData).length) {
+    andConditions.push({
+      $and: Object.entries(filtersData).map(([field, value]) => ({
+        [field]: value,
+      })),
+    })
+  }
+
+  const sortConditions: { [key: string]: any } = {}
+  if (sortBy && sortOrder) {
+    sortConditions[sortBy] = sortOrder
+  } else {
+    sortConditions.createdAt = -1
+  }
+
+  const whereConditions = andConditions.length > 0 ? { $and: andConditions } : {}
+
+  const result = await User.find(whereConditions).sort(sortConditions).skip(skip).limit(limit)
+  const total = await User.countDocuments(whereConditions)
+
+  return {
+    meta: {
+      page,
+      limit,
+      total,
+    },
+    data: result,
+  }
+}
+
+const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string }) => {
+  const user = await User.findById(id)
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  }
+
+  const result = await User.findByIdAndUpdate(id, payload, { new: true })
+  return result
+}
+
 export const UserService = {
   createUser,
   inviteAgent,
@@ -237,4 +297,6 @@ export const UserService = {
   getUserById,
   updateUserById,
   deleteUserById,
+  getAllUsersSuperAdmin,
+  updateUserRoleSuperAdmin,
 }

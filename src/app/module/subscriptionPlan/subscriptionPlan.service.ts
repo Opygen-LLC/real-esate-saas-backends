@@ -97,7 +97,25 @@ const getPlanById = async (planId: string): Promise<ISubscriptionPlan | null> =>
   return await SubscriptionPlan.findOne({ planId })
 }
 
+const createPlan = async (payload: ISubscriptionPlan): Promise<ISubscriptionPlan> => {
+  const result = await SubscriptionPlan.create(payload)
+  return result
+}
+
+const updatePlan = async (id: string, payload: Partial<ISubscriptionPlan>): Promise<ISubscriptionPlan | null> => {
+  const result = await SubscriptionPlan.findByIdAndUpdate(id, payload, { new: true })
+  return result
+}
+
+const deletePlan = async (id: string): Promise<ISubscriptionPlan | null> => {
+  const result = await SubscriptionPlan.findByIdAndDelete(id)
+  return result
+}
+
 export const SubscriptionPlanService = {
   getAllPlans,
   getPlanById,
+  createPlan,
+  updatePlan,
+  deletePlan,
 }

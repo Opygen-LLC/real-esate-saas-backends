@@ -119,6 +119,32 @@ const deleteUserById = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => {
+  const filters = pick(req.query, ['searchTerm', 'userRole', 'status', 'organizationId'])
+  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+  const result = await UserService.getAllUsersSuperAdmin(filters, paginationOptions)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Super-admin users directory fetched successfully',
+    meta: result.meta,
+    data: result.data,
+  })
+})
+
+const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) => {
+  const { id } = req.params
+  const result = await UserService.updateUserRoleSuperAdmin(id, req.body)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'User role updated by super-admin',
+    data: result,
+  })
+})
+
 export const UserController = {
   createUser,
   inviteAgent,
@@ -129,4 +155,6 @@ export const UserController = {
   getUserById,
   updateUserById,
   deleteUserById,
+  getAllUsersSuperAdmin,
+  updateUserRoleSuperAdmin,
 }

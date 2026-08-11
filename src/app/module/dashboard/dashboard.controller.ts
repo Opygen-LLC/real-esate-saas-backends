@@ -29,7 +29,19 @@ const getAnalytics = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getSuperAdminOverviewStats = catchAsync(async (req: Request, res: Response) => {
+  const stats = await DashboardService.getSuperAdminOverviewStats()
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Super-admin platform overview stats fetched successfully',
+    data: stats,
+  })
+})
+
 export const DashboardController = {
   getOverviewStats,
   getAnalytics,
+  getSuperAdminOverviewStats,
 }
