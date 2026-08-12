@@ -1,3 +1,5 @@
+import httpStatus from 'http-status'
+import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
@@ -5,22 +7,40 @@ import { User } from '../user/user.model'
 import { Viewing } from '../viewing/viewing.model'
 
 const getOverviewStats = async (organizationId: string) => {
-  const organization = await Organization.findOne({ organizationId })
+  if (!organizationId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID is required to fetch overview stats')
+  }
+
+  const organization = await Organization.findOne({
+    $or: [
+      { organizationId },
+      { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
+    ],
+  })
+
+  const orgIds = organization
+    ? Array.from(new Set([organization.organizationId, organization.sub_domain, organization._id.toString()].filter(Boolean)))
+    : [organizationId]
+
+  const orgFilter = { organizationId: { $in: orgIds } }
+
   const totalAgents = await User.countDocuments({
-    organizationId,
+    ...orgFilter,
     userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
   })
 
-  const totalProperties = await Property.countDocuments({ organizationId })
+  const totalProperties = await Property.countDocuments(orgFilter)
   const activeListings = await Property.countDocuments({
-    organizationId,
+    ...orgFilter,
     status: 'Available',
   })
 
-  const totalLeads = await Lead.countDocuments({ organizationId })
-  const dealsWon = await Lead.countDocuments({ organizationId, leadStatus: 'Won' })
+  const totalLeads = await Lead.countDocuments(orgFilter)
+  const dealsWon = await Lead.countDocuments({ ...orgFilter, leadStatus: 'Won' })
   const scheduledViewings = await Viewing.countDocuments({
-    organizationId,
+    ...orgFilter,
     status: { $in: ['Scheduled', 'Confirmed'] },
   })
 
@@ -48,6 +68,25 @@ const getOverviewStats = async (organizationId: string) => {
 }
 
 const getAnalytics = async (organizationId: string, range: string = '30d') => {
+  if (!organizationId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID is required to fetch analytics data')
+  }
+
+  const organization = await Organization.findOne({
+    $or: [
+      { organizationId },
+      { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
+    ],
+  })
+
+  const orgIds = organization
+    ? Array.from(new Set([organization.organizationId, organization.sub_domain, organization._id.toString()].filter(Boolean)))
+    : [organizationId]
+
+  const orgFilter = { organizationId: { $in: orgIds } }
+
   const now = new Date()
   let startDate = new Date()
 
@@ -64,22 +103,22 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
   }
 
   // Summary Metrics
-  const totalProperties = await Property.countDocuments({ organizationId })
-  const activeListings = await Property.countDocuments({ organizationId, status: 'Available' })
-  const totalLeads = await Lead.countDocuments({ organizationId })
+  const totalProperties = await Property.countDocuments(orgFilter)
+  const activeListings = await Property.countDocuments({ ...orgFilter, status: 'Available' })
+  const totalLeads = await Lead.countDocuments(orgFilter)
   const newLeadsInPeriod = await Lead.countDocuments({
-    organizationId,
+    ...orgFilter,
     createdAt: { $gte: startDate },
   })
 
   const scheduledViewings = await Viewing.countDocuments({
-    organizationId,
+    ...orgFilter,
     status: { $in: ['Scheduled', 'Confirmed'] },
     date: { $gte: startDate.toISOString().split('T')[0] },
   })
 
   const dealsWonLeads = await Lead.find({
-    organizationId,
+    ...orgFilter,
     leadStatus: 'Won',
   })
   const dealsWon = dealsWonLeads.length
@@ -99,7 +138,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
   const sources = ['Website', 'Referral', 'Zillow', 'Portal', 'Social', 'WalkIn', 'ColdCall', 'Other']
   const leadsBySource = await Promise.all(
     sources.map(async (source) => {
-      const count = await Lead.countDocuments({ organizationId, source })
+      const count = await Lead.countDocuments({ ...orgFilter, source })
       return { source, count }
     })
   )
@@ -118,7 +157,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
   ]
   const leadsByStage = await Promise.all(
     stages.map(async (stage) => {
-      const count = await Lead.countDocuments({ organizationId, leadStatus: stage })
+      const count = await Lead.countDocuments({ ...orgFilter, leadStatus: stage })
       return { stage, count }
     })
   )
