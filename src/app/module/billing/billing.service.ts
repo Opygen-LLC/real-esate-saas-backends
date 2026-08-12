@@ -105,12 +105,12 @@ const changeSubscriptionPlan = async (
     organizationId,
     invoiceId,
     amount: price,
-    planName: `${plan.toUpperCase()} Plan (${billingCycle})`,
-    paymentStatus: 'paid',
+    serviceType: 'subscription',
+    serviceName: `${plan.toUpperCase()} Plan (${billingCycle})`,
+    status: 'paid',
+    billingCycle,
+    date: new Date().toISOString().split('T')[0],
     paymentMethod: 'Credit Card (Stripe)',
-    billingDate: new Date(),
-    dueDate: new Date(),
-    pdfUrl: `/invoices/${invoiceId}.pdf`,
   })
 
   return {
@@ -121,9 +121,94 @@ const changeSubscriptionPlan = async (
   }
 }
 
+const cancelSubscription = async (organizationId: string) => {
+  const org = await Organization.findOne({ organizationId })
+  if (!org) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  }
+
+  if (org.subscription) {
+    org.subscription.status = 'inactive'
+    await org.save()
+  }
+
+  return org.subscription
+}
+
+const getInvoiceReceipt = async (organizationId: string, id: string) => {
+  const billing = await Billing.findOne({
+    organizationId,
+    $or: [{ invoiceId: id }, ...(id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: id }] : [])],
+  })
+
+  if (!billing) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Billing invoice record not found')
+  }
+
+  const org = await Organization.findOne({ organizationId })
+
+  const status = (billing as any).paymentStatus || billing.status || 'paid'
+  const dateStr = (billing as any).billingDate ? new Date((billing as any).billingDate).toLocaleDateString() : billing.date
+  const nameStr = (billing as any).planName || billing.serviceName || 'SaaS Subscription'
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Receipt ${billing.invoiceId}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; line-height: 1.5; }
+          .container { max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; p: 32px; padding: 32px; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 24px; }
+          .title { font-size: 20px; font-weight: 800; color: #0f172a; }
+          .status { display: inline-block; padding: 4px 12px; background-color: #dcfce7; color: #15803d; border-radius: 9999px; font-weight: 700; font-size: 12px; text-transform: uppercase; }
+          .details { margin-bottom: 24px; font-size: 13px; color: #475569; }
+          .table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+          .table th, .table td { padding: 12px; border-bottom: 1px solid #f1f5f9; text-align: left; font-size: 13px; }
+          .table th { background-color: #f8fafc; font-weight: 700; }
+          .total { text-align: right; font-size: 18px; font-weight: 800; margin-top: 24px; color: #0f172a; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div>
+              <div class="title">INVOICE RECEIPT</div>
+              <div style="font-size: 13px; color: #64748b;">${org?.agencyName || 'PropSe Agency OS'}</div>
+            </div>
+            <div>
+              <span class="status">${status}</span>
+            </div>
+          </div>
+          <div class="details">
+            <p><strong>Invoice ID:</strong> ${billing.invoiceId}</p>
+            <p><strong>Billing Date:</strong> ${dateStr}</p>
+            <p><strong>Billed To:</strong> ${org?.agencyName || 'Agency Customer'} (${org?.email || ''})</p>
+          </div>
+          <table class="table">
+            <thead>
+              <tr><th>Description</th><th>Amount</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${nameStr}</td>
+                <td>$${billing.amount.toFixed(2)} USD</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="total">Total Paid: $${billing.amount.toFixed(2)} USD</div>
+        </div>
+        <script>window.print();</script>
+      </body>
+    </html>
+  `
+}
+
 export const BillingService = {
   createBillingRecord,
   getBillingHistory,
   getSubscriptionUsage,
   changeSubscriptionPlan,
+  cancelSubscription,
+  getInvoiceReceipt,
 }

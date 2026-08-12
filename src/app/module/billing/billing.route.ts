@@ -22,4 +22,16 @@ router.post(
   BillingController.changeSubscriptionPlan
 )
 
+router.post(
+  '/cancel',
+  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin'),
+  BillingController.cancelSubscription
+)
+
+router.get(
+  '/history/:id/receipt',
+  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin', 'client'),
+  BillingController.getInvoiceReceipt
+)
+
 export const BillingRoute = router

@@ -41,8 +41,31 @@ const changeSubscriptionPlan = catchAsync(async (req: Request, res: Response) =>
   })
 })
 
+const cancelSubscription = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const result = await BillingService.cancelSubscription(organizationId)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Subscription canceled successfully',
+    data: result,
+  })
+})
+
+const getInvoiceReceipt = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const { id } = req.params
+  const html = await BillingService.getInvoiceReceipt(organizationId, id)
+
+  res.setHeader('Content-Type', 'text/html')
+  res.status(httpStatus.OK).send(html)
+})
+
 export const BillingController = {
   getBillingHistory,
   getSubscriptionUsage,
   changeSubscriptionPlan,
+  cancelSubscription,
+  getInvoiceReceipt,
 }
