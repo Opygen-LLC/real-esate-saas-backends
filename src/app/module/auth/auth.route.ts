@@ -32,6 +32,7 @@ router.post(
 router.post('/verify', AuthController.verifyOtp)
 router.post('/resend_otp', AuthController.resendOtp)
 router.post('/refresh-token', AuthController.refreshToken)
+router.post('/logout', AuthController.logoutUser)
 
 router.post(
   '/change-password',

@@ -12,10 +12,13 @@ const app: Application = express()
 // Trust Proxy for Rate Limiter & Reverse Proxies
 app.set('trust proxy', 1)
 
-// 1. Fully open CORS middleware (origin: '*')
+// 1. Credentialed CORS middleware allowing requesting origins
 app.use(
   cors({
-    origin: '*',
+    origin: (origin, callback) => {
+      callback(null, origin || true)
+    },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
@@ -35,7 +38,9 @@ app.options('*', cors() as any)
 
 // 2. Global Headers & Preflight Handler
 app.use((req: Request, res: Response, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  const origin = req.headers.origin || '*'
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
   res.setHeader(
     'Access-Control-Allow-Headers',
