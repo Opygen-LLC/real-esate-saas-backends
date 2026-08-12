@@ -126,10 +126,15 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
     (l: any) => new Date(l.updatedAt || l.createdAt) >= startDate
   ).length
 
-  // Calculate closed volume ($ sum of won deals)
+  // Calculate closed volume ($ sum of won deals with real recorded budgets)
+  let dealsWithoutBudgetCount = 0
   const totalClosedVolume = dealsWonLeads.reduce((acc, lead: any) => {
-    const val = lead.budgetMax || lead.budgetMin || 500000
-    return acc + val
+    const val = lead.budgetMax || lead.budgetMin
+    if (val && typeof val === 'number' && val > 0) {
+      return acc + val
+    }
+    dealsWithoutBudgetCount++
+    return acc
   }, 0)
 
   const conversionRate = totalLeads > 0 ? Math.round((dealsWon / totalLeads) * 100) : 0
@@ -214,12 +219,12 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
     const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0)
 
     const leadsCount = await Lead.countDocuments({
-      organizationId,
+      ...orgFilter,
       createdAt: { $gte: monthStart, $lte: monthEnd },
     })
 
     const wonCount = await Lead.countDocuments({
-      organizationId,
+      ...orgFilter,
       leadStatus: 'Won',
       updatedAt: { $gte: monthStart, $lte: monthEnd },
     })
@@ -242,6 +247,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
       dealsWon,
       dealsWonInPeriod,
       totalClosedVolume,
+      dealsWithoutBudgetCount,
       conversionRate,
     },
     leadsBySource,
