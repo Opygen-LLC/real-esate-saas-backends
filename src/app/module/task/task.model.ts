@@ -35,6 +35,18 @@ const taskSchema = new Schema<ITask, TaskModel>(
       enum: ['Pending', 'InProgress', 'Completed', 'Overdue', 'Cancelled'],
       default: 'Pending',
     },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    approvedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    approvedAt: {
+      type: Date,
+    },
     assignedAgent: {
       type: Schema.Types.ObjectId,
       ref: 'User',

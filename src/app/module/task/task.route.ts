@@ -32,4 +32,10 @@ router.delete(
   TaskController.deleteTask
 )
 
+router.patch(
+  '/:id/approve',
+  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'super-admin'),
+  TaskController.approveTask
+)
+
 export const TaskRoute = router

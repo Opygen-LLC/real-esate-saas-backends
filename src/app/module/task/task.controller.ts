@@ -73,9 +73,26 @@ const deleteTask = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const approveTask = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const userId = req.user?.userId || req.user?._id || ''
+  const { id } = req.params
+  const { approvalStatus } = req.body || { approvalStatus: 'approved' }
+
+  const result = await TaskService.approveTask(organizationId, id, userId, approvalStatus)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: `Task ${approvalStatus} successfully`,
+    data: result,
+  })
+})
+
 export const TaskController = {
   createTask,
   getAllTasks,
   updateTask,
   deleteTask,
+  approveTask,
 }

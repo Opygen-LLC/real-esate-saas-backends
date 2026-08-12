@@ -90,9 +90,34 @@ const deleteTask = async (organizationId: string, id: string): Promise<ITask | n
   return result
 }
 
+const approveTask = async (
+  organizationId: string,
+  id: string,
+  userId: string,
+  approvalStatus: 'approved' | 'rejected'
+): Promise<ITask | null> => {
+  const result = await Task.findOneAndUpdate(
+    { _id: id, organizationId },
+    {
+      approvalStatus,
+      approvedBy: userId,
+      approvedAt: new Date(),
+    },
+    { new: true }
+  )
+    .populate('assignedAgent', 'name email profileImgURL')
+    .populate('approvedBy', 'name email profileImgURL')
+
+  if (!result) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Task not found')
+  }
+  return result
+}
+
 export const TaskService = {
   createTask,
   getAllTasks,
   updateTask,
   deleteTask,
+  approveTask,
 }
