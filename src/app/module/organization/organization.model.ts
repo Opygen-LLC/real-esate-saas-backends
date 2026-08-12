@@ -156,6 +156,12 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableLeadForm: { type: Boolean, default: true },
       enableWhatsAppChat: { type: Boolean, default: true },
     },
+    teamSettings: {
+      defaultRole: { type: String, enum: ['agent', 'staff', 'agency_admin'], default: 'agent' },
+      agentsCanViewAllLeads: { type: Boolean, default: true },
+      leaderboardVisible: { type: Boolean, default: true },
+      autoAssignLeads: { type: Boolean, default: true },
+    },
     totalVisitor: {
       type: Number,
       default: 0,

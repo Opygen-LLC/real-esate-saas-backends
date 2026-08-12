@@ -60,6 +60,12 @@ export interface IOrganization {
     enableLeadForm?: boolean
     enableWhatsAppChat?: boolean
   }
+  teamSettings?: {
+    defaultRole?: 'agent' | 'staff' | 'agency_admin'
+    agentsCanViewAllLeads?: boolean
+    leaderboardVisible?: boolean
+    autoAssignLeads?: boolean
+  }
   totalVisitor?: number
   isBlocked?: boolean
   createdAt?: Date
