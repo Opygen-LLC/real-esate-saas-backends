@@ -20,6 +20,7 @@ import { TaskRoute } from '../module/task/task.route'
 import { UserRoute } from '../module/user/user.route'
 import { ViewingRoute } from '../module/viewing/viewing.route'
 import { VisitorLogsRoute } from '../module/visitorLogs/visitorLogs.route'
+import { WebsiteBuilderRoute } from '../module/websiteBuilder/websiteBuilder.route'
 
 const router = express.Router()
 
@@ -31,6 +32,10 @@ const moduleRoutes = [
   {
     path: '/users',
     route: UserRoute,
+  },
+  {
+    path: '/organization/website',
+    route: WebsiteBuilderRoute,
   },
   {
     path: '/organization',
