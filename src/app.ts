@@ -9,6 +9,9 @@ import { sendResponse } from './shared/customResponse'
 
 const app: Application = express()
 
+// Trust Proxy for Rate Limiter & Reverse Proxies
+app.set('trust proxy', 1)
+
 // 1. Fully open CORS middleware (origin: '*')
 app.use(
   cors({
