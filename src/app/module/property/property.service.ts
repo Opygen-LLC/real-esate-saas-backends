@@ -4,6 +4,7 @@ import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common
 import paginationHelper from '../../helpers/paginationHelper'
 import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface'
 import { Property } from './property.model'
+import { Organization } from '../organization/organization.model'
 
 const generateSlug = async (organizationId: string, title: string): Promise<string> => {
   let baseSlug = title
@@ -71,7 +72,27 @@ const getAllProperties = async (
   const andConditions: Array<Record<string, unknown>> = []
 
   if (organizationId) {
-    andConditions.push({ organizationId })
+    const org = await Organization.findOne({
+      $or: [
+        { organizationId },
+        { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+        { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
+        { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      ],
+    })
+
+    if (org) {
+      andConditions.push({
+        $or: [
+          { organizationId: org.organizationId },
+          { organizationId: org.sub_domain },
+          { organizationId: org._id.toString() },
+          { organizationId: organizationId },
+        ],
+      })
+    } else {
+      andConditions.push({ organizationId })
+    }
   }
 
   if (searchTerm) {

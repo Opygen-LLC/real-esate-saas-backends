@@ -165,8 +165,15 @@ const deleteAsset = async (organizationId: string, assetId: string) => {
 }
 
 const getPublicPage = async (subdomain: string, slug: string = '/') => {
+  const targetSlug = !slug || slug === 'home' ? '/' : slug
+
   const org = await Organization.findOne({
-    $or: [{ sub_domain: subdomain }, { domain: subdomain }, { organizationId: subdomain }],
+    $or: [
+      { sub_domain: { $regex: `^${subdomain}$`, $options: 'i' } },
+      { domain: { $regex: `^${subdomain}$`, $options: 'i' } },
+      { customDomain: { $regex: `^${subdomain}$`, $options: 'i' } },
+      { organizationId: subdomain },
+    ],
   })
 
   if (!org) {
@@ -174,12 +181,21 @@ const getPublicPage = async (subdomain: string, slug: string = '/') => {
   }
 
   const page = await WebsitePage.findOne({
-    organizationId: org.organizationId,
-    slug: slug === 'home' ? '/' : slug,
+    $or: [{ organizationId: org.organizationId }, { organizationId: org._id.toString() }, { organizationId: subdomain }],
+    slug: targetSlug,
   })
 
   if (!page || !page.publishedDocument) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Published page document not found')
+    return {
+      organization: {
+        agencyName: org.agencyName,
+        logo: org.logo,
+        primaryColor: org.primaryColor,
+        secondaryColor: org.secondaryColor,
+        sub_domain: org.sub_domain,
+      },
+      page: null,
+    }
   }
 
   return {

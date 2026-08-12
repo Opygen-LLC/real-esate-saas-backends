@@ -64,6 +64,7 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
     'listingType',
     'city',
     'state',
+    'status',
     'minPrice',
     'maxPrice',
     'bedrooms',
@@ -71,7 +72,6 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
     'isFeatured',
   ])
   filters.organizationId = organizationId
-  filters.status = 'Available'
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await PropertyService.getAllProperties(filters, paginationOptions)
