@@ -9,21 +9,46 @@ import { sendResponse } from './shared/customResponse'
 
 const app: Application = express()
 
-// Security & Global Middlewares
+// 1. Fully open CORS middleware (origin: '*')
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Access-Control-Allow-Origin',
+      'Access-Control-Allow-Headers',
+      'Access-Control-Allow-Methods',
+    ],
+  })
+)
+
+// Explicit preflight OPTIONS handler for all endpoints
+app.options('*', cors() as any)
+
+// 2. Global Headers & Preflight Handler
 app.use((req: Request, res: Response, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+  )
   res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-XSS-Protection', '1; mode=block')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end()
+    return
+  }
   next()
 })
 
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  })
-)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
