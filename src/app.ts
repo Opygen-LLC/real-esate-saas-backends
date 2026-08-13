@@ -16,12 +16,12 @@ const app: Application = express()
 // Trust Proxy for Rate Limiter & Reverse Proxies
 app.set('trust proxy', 1)
 
-// 1. Credentialed CORS middleware allowing requesting origins
+// 1. Credentialed CORS middleware. Never reflect arbitrary origins when cookies are enabled.
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow any requesting client origin dynamically to avoid CORS blocking while supporting credentials
     if (!origin) return callback(null, true)
-    return callback(null, origin)
+    const normalizedOrigin = origin.replace(/\/$/, '')
+    return callback(null, config.allowed_origins.includes(normalizedOrigin))
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -35,6 +35,7 @@ const corsOptions: cors.CorsOptions = {
     'X-Request-ID',
     'Idempotency-Key',
   ],
+  maxAge: 86400,
 }
 app.use(cors(corsOptions))
 

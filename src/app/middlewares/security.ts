@@ -3,27 +3,80 @@ import { NextFunction, Request, Response } from 'express'
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+// These endpoints authenticate with credentials/OTP/reset tokens from the request body,
+// not with an existing cookie session. They must remain usable when a browser still
+// carries stale access/refresh cookies from an older session.
+const CSRF_EXEMPT_POST_PATHS = new Set([
+  '/api/v1/auth/register-agency',
+  '/api/v1/auth/signup',
+  '/api/v1/auth/login',
+  '/api/v1/auth/verify',
+  '/api/v1/auth/resend_otp',
+  '/api/v1/auth/password-reset/request',
+  '/api/v1/auth/password-reset/verify',
+  '/api/v1/auth/password-reset/complete',
+  '/api/v1/auth/reset_password',
+])
+
+const normalizePath = (value: string): string => {
+  const pathname = value.split('?')[0] || '/'
+  if (pathname === '/') return pathname
+  return pathname.replace(/\/+$/, '')
+}
+
+export const isCsrfExemptRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean =>
+  req.method.toUpperCase() === 'POST' && CSRF_EXEMPT_POST_PATHS.has(normalizePath(req.originalUrl))
+
 export const requestContext = (req: Request, res: Response, next: NextFunction): void => {
   const supplied = req.get('x-request-id')
   req.requestId = supplied && /^[A-Za-z0-9._-]{8,128}$/.test(supplied) ? supplied : crypto.randomUUID()
-  res.setHeader('x-request-id', req.requestId); next()
-}
-export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next()
-  const cookieAuth = Boolean(req.cookies?.[config.security.access_cookie_name] || req.cookies?.[config.security.refresh_cookie_name])
-  if (!cookieAuth) return next()
-  const cookieToken = req.cookies?.[config.security.csrf_cookie_name]
-  const headerToken = req.get('x-csrf-token')
-  if (!cookieToken || !headerToken || cookieToken.length !== headerToken.length || !crypto.timingSafeEqual(Buffer.from(cookieToken), Buffer.from(headerToken))) {
-    return next(new ApiError(403, 'Invalid CSRF token'))
-  }
+  res.setHeader('x-request-id', req.requestId)
   next()
 }
+
+export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {
+  const origin = req.get('origin')
+  if (origin && !config.allowed_origins.includes(origin.replace(/\/$/, ''))) {
+    return next(new ApiError(403, 'Origin is not allowed'))
+  }
+
+  if (SAFE_METHODS.has(req.method.toUpperCase()) || isCsrfExemptRequest(req)) return next()
+
+  const cookieAuth = Boolean(
+    req.cookies?.[config.security.access_cookie_name] || req.cookies?.[config.security.refresh_cookie_name],
+  )
+  if (!cookieAuth) return next()
+
+  const cookieToken = req.cookies?.[config.security.csrf_cookie_name]
+  const headerToken = req.get('x-csrf-token')
+
+  if (typeof cookieToken !== 'string' || typeof headerToken !== 'string') {
+    return next(new ApiError(403, 'Invalid CSRF token'))
+  }
+
+  const cookieBuffer = Buffer.from(cookieToken)
+  const headerBuffer = Buffer.from(headerToken)
+  if (cookieBuffer.length !== headerBuffer.length || !crypto.timingSafeEqual(cookieBuffer, headerBuffer)) {
+    return next(new ApiError(403, 'Invalid CSRF token'))
+  }
+
+  next()
+}
+
 export const verifyCronSignature = (req: Request, _res: Response, next: NextFunction): void => {
-  const timestamp = req.get('x-cron-timestamp') || ''; const signature = req.get('x-cron-signature') || ''
-  if (!Number(timestamp) || Math.abs(Date.now() - Number(timestamp) * 1000) > 300000) return next(new ApiError(401, 'Invalid scheduler timestamp'))
-  const expected = crypto.createHmac('sha256', config.security.cron_signing_secret)
-    .update(`${timestamp}.${req.method}.${req.baseUrl}${req.path}`).digest('hex')
-  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return next(new ApiError(401, 'Invalid scheduler signature'))
+  const timestamp = req.get('x-cron-timestamp') || ''
+  const signature = req.get('x-cron-signature') || ''
+  if (!Number(timestamp) || Math.abs(Date.now() - Number(timestamp) * 1000) > 300000) {
+    return next(new ApiError(401, 'Invalid scheduler timestamp'))
+  }
+  const expected = crypto
+    .createHmac('sha256', config.security.cron_signing_secret)
+    .update(`${timestamp}.${req.method}.${req.baseUrl}${req.path}`)
+    .digest('hex')
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return next(new ApiError(401, 'Invalid scheduler signature'))
+  }
   next()
 }

@@ -5,10 +5,22 @@ import { validateOtpChallengeState } from './auth.services'
 import { AuthValidation } from './auth.validation'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { isCsrfExemptRequest } from '../../middlewares/security'
 
 const valid = () => ({ expiresAt: new Date(Date.now() + 60_000), consumedAt: null, attempts: 0, maxAttempts: 5 })
 
 describe('OTP and reset security', () => {
+
+  it('keeps public authentication flows usable when stale auth cookies are present', () => {
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/login' })).toBe(true)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/register-agency' })).toBe(true)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/verify?source=signup' })).toBe(true)
+  })
+  it('keeps cookie-authenticated session mutations behind CSRF protection', () => {
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/refresh-token' })).toBe(false)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/logout' })).toBe(false)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/change-password' })).toBe(false)
+  })
   it('rejects expired OTP challenges', () => {
     expect(() => validateOtpChallengeState({ ...valid(), expiresAt: new Date(Date.now() - 1) })).toThrow(/expired/i)
   })
