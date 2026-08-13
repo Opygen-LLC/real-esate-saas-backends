@@ -22,7 +22,7 @@ const createLead = catchAsync(async (req: Request, res: Response) => {
 })
 
 const publicCaptureLead = catchAsync(async (req: Request, res: Response) => {
-  const result = await LeadService.publicCaptureLead(req.body)
+  const result = await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId })
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,

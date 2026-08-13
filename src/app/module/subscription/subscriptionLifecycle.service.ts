@@ -3,11 +3,12 @@ import { writeAudit } from '../audit/audit.service'
 import { BkashPayment } from '../bkashPayment/bkashPayment.model'
 import { BkashPaymentService } from '../bkashPayment/bkashPayment.service'
 import { Organization } from '../organization/organization.model'
+import { ComplianceService } from '../compliance/compliance.service'
 
 const GRACE_MS = 3 * 24 * 60 * 60 * 1000
 const REMINDER_MS = 3 * 24 * 60 * 60 * 1000
 
-export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number; stalePayments: number }> => {
+export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number; stalePayments: number; completedDeletions: number }> => {
   const now = new Date()
   const pendingAttempts = await BkashPayment.find({ paymentId: { $ne: '' }, status: { $in: ['pending', 'failed'] },
     updatedAt: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }).select('paymentId').limit(100)
@@ -38,5 +39,6 @@ export const reconcileSubscriptions = async (): Promise<{ transitioned: number; 
       subscription.reminderSentAt = now; await org.save(); reminders += 1
     }
   }
-  return { transitioned, reminders, stalePayments: stale.modifiedCount }
+  const completedDeletions = await ComplianceService.executeDueDeletionRequests()
+  return { transitioned, reminders, stalePayments: stale.modifiedCount, completedDeletions }
 }

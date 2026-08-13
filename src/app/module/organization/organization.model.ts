@@ -51,12 +51,21 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
     country: {
       type: String,
-      default: 'USA',
+      default: 'Bangladesh',
     },
     zipCode: {
       type: String,
       default: '',
     },
+    defaultLanguage: { type: String, enum: ['en', 'bn'], default: 'en' },
+    addressDetails: {
+      divisionId: { type: String, default: '' }, division: { type: String, default: '' }, districtId: { type: String, default: '' },
+      district: { type: String, default: '' }, upazilaId: { type: String, default: '' }, upazila: { type: String, default: '' },
+      areaId: { type: String, default: '' }, area: { type: String, default: '' }, road: { type: String, default: '' },
+      block: { type: String, default: '' }, sector: { type: String, default: '' }, mouza: { type: String, default: '' },
+      postalCode: { type: String, default: '' }, landmark: { type: String, default: '' },
+    },
+    areaConversion: { kathaSqft: { type: Number, default: 720, min: 1 }, bighaKatha: { type: Number, default: 20, min: 1 } },
     serviceAreas: {
       type: [Schema.Types.Mixed],
       default: [],

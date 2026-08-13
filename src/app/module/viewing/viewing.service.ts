@@ -10,6 +10,13 @@ import { IViewing, IViewingFilter } from './viewing.interface'
 import { Viewing } from './viewing.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
+import { ConsentRecord } from '../compliance/compliance.model'
+import { PlatformSettings } from '../platformSettings/platformSettings.model'
+import { createHash } from 'crypto'
+
+const normalizePhone = (value: string): string => {
+  try { return normalizeBangladeshPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
+}
 
 // Helper to convert HH:mm to minutes for overlap checking
 const timeToMinutes = (timeStr: string): number => {
@@ -128,8 +135,10 @@ const publicRequestViewing = async (payload: {
   clientPhone: string
   clientEmail?: string
   notes?: string
-}): Promise<IViewing> => {
-  const { organizationId, propertyId, date, startTime, endTime, clientName, clientPhone, clientEmail, notes } =
+  privacyConsent: true
+  policyVersion: string
+}, context: { ip?: string; requestId?: string }): Promise<IViewing> => {
+  const { organizationId, propertyId, date, startTime, endTime, clientName, clientPhone, clientEmail, notes, privacyConsent, policyVersion } =
     payload
 
   await EntitlementService.assertLimit(organizationId, 'leads')
@@ -150,7 +159,10 @@ const publicRequestViewing = async (payload: {
   }
 
   // Find or create Contact & Lead
-  const normalizedPhone = normalizeBangladeshPhone(clientPhone)
+  const normalizedPhone = normalizePhone(clientPhone)
+  const settings = await PlatformSettings.findOne({ key: 'platform' }).lean()
+  if (!settings?.privacy || settings.privacy.legalReviewStatus !== 'approved' || !settings.privacy.policyVersion) throw new ApiError(503, 'Public viewing requests are unavailable until the reviewed privacy policy is configured')
+  if (!privacyConsent || policyVersion !== settings.privacy.policyVersion) throw new ApiError(409, 'Privacy policy consent is missing or out of date')
   let contact = await Contact.findOne({ organizationId, phone: normalizedPhone })
   if (!contact) {
     contact = await Contact.create({
@@ -185,6 +197,8 @@ const publicRequestViewing = async (payload: {
     }
     await lead.save()
   }
+  await ConsentRecord.create({ organizationId, userId: `public:${createHash('sha256').update(normalizedPhone).digest('hex')}`,
+    purpose: 'privacy_policy', policyVersion, granted: true, capturedAt: new Date(), ip: context.ip || '', requestId: context.requestId || '' })
 
   const viewing = await Viewing.create({
     organizationId,

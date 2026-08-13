@@ -9,6 +9,7 @@ import { BkashPaymentClient } from './bkashPayment.client'
 import { BkashGatewayPayment, IBkashPayment } from './bkashPayment.interface'
 import { BkashPayment } from './bkashPayment.model'
 import { writeAudit } from '../audit/audit.service'
+import { PlatformSettings } from '../platformSettings/platformSettings.model'
 
 type CreatePaymentInput = {
   organizationId: string
@@ -64,10 +65,19 @@ const createPayment = async (input: CreatePaymentInput) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not configured for BDT payments')
   }
 
-  const amount = input.billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly
-  if (!Number.isFinite(amount) || amount < 1) {
+  const baseAmount = input.billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly
+  if (!Number.isFinite(baseAmount) || baseAmount < 1) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Subscription plan price is invalid')
   }
+  const settings = await PlatformSettings.findOne({ key: 'platform' }).select('+tax.binEncrypted').lean()
+  const registered = Boolean(settings?.tax?.invoiceEnabled && settings.tax.registrationStatus === 'registered')
+  const vatRate = registered ? (settings?.tax?.vatRate || 0) : 0
+  const pricesIncludeVat = settings?.tax?.pricesIncludeVat ?? true
+  const vatAmount = registered && !pricesIncludeVat ? baseAmount * vatRate / 100 : registered && vatRate > 0 ? baseAmount - baseAmount / (1 + vatRate / 100) : 0
+  const amount = Number((baseAmount + (registered && !pricesIncludeVat ? vatAmount : 0)).toFixed(2))
+  const taxSnapshot = { invoiceEnabled: registered, registrationStatus: registered ? 'registered' as const : 'not_registered' as const,
+    operatorLegalName: settings?.tax?.operatorLegalName || '', binEncrypted: (settings?.tax as any)?.binEncrypted || '', vatRate,
+    pricesIncludeVat, baseAmount: Number((registered && pricesIncludeVat ? baseAmount - vatAmount : baseAmount).toFixed(2)), vatAmount: Number(vatAmount.toFixed(2)) }
 
   const invoiceNumber = `RE-${Date.now().toString(36).toUpperCase()}-${randomUUID()
     .slice(0, 6)
@@ -85,6 +95,7 @@ const createPayment = async (input: CreatePaymentInput) => {
       currency: 'BDT',
       maxProperties: plan.maxProperties,
       maxAgents: plan.maxAgents,
+      taxSnapshot,
       invoiceNumber,
       idempotencyKey: input.idempotencyKey,
       status: 'initialized',
@@ -215,6 +226,10 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     }
   )
 
+  const tax = attempt.taxSnapshot
+  const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,
+    operatorLegalName: tax?.operatorLegalName || '', binEncrypted: tax?.binEncrypted || '', vatRate: tax?.vatRate || 0,
+    pricesIncludeVat: tax?.pricesIncludeVat ?? true, netAmount: tax?.baseAmount || attempt.amount, vatAmount: tax?.vatAmount || 0 }
   await Billing.findOneAndUpdate(
     { paymentId: attempt.paymentId },
     {
@@ -232,6 +247,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         transactionId: payment.trxID || '',
         paymentMethod: 'bKash',
         status: 'paid',
+        taxSnapshot,
       },
     },
     { upsert: true, new: true }
@@ -242,7 +258,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {
-  const attempt = await BkashPayment.findOne({ paymentId })
+  const attempt = await BkashPayment.findOne({ paymentId }).select('+taxSnapshot.binEncrypted')
   if (!attempt) throw new ApiError(httpStatus.NOT_FOUND, 'Payment attempt not found')
 
   if (callbackStatus === 'cancel' || callbackStatus === 'failure') {
@@ -267,7 +283,7 @@ const handleCallback = async (paymentId: string, callbackStatus: string) => {
     },
     { $set: { status: 'executing' } },
     { new: true }
-  )
+  ).select('+taxSnapshot.binEncrypted')
 
   if (!locked) return { status: 'processing', paymentId }
 
@@ -309,7 +325,7 @@ const searchPayments = async (search: string, status?: string) => {
 }
 
 const manualReconcile = async (paymentId: string, reason: string, actor: { id: string; requestId?: string; ip?: string }) => {
-  const attempt = await BkashPayment.findOne({ paymentId })
+  const attempt = await BkashPayment.findOne({ paymentId }).select('+taxSnapshot.binEncrypted')
   if (!attempt) throw new ApiError(404, 'Payment attempt not found')
   const gatewayPayment = await BkashPaymentClient.queryPayment(paymentId)
   if (!gatewayPayment || !isCompletedGatewayPayment(gatewayPayment)) throw new ApiError(409, 'bKash does not report this payment as completed')
@@ -324,7 +340,7 @@ const manualReconcile = async (paymentId: string, reason: string, actor: { id: s
 }
 
 const reconcilePaymentAttempt = async (paymentId: string): Promise<boolean> => {
-  const attempt = await BkashPayment.findOne({ paymentId, status: { $in: ['pending', 'failed'] } })
+  const attempt = await BkashPayment.findOne({ paymentId, status: { $in: ['pending', 'failed'] } }).select('+taxSnapshot.binEncrypted')
   if (!attempt) return false
   const gatewayPayment = await BkashPaymentClient.queryPayment(paymentId)
   if (!gatewayPayment || !isCompletedGatewayPayment(gatewayPayment)) return false

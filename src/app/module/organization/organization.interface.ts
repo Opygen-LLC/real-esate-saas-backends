@@ -33,6 +33,12 @@ export interface IOrganization {
   state?: string
   country?: string
   zipCode?: string
+  defaultLanguage?: 'en' | 'bn'
+  addressDetails?: {
+    divisionId?: string; division?: string; districtId?: string; district?: string; upazilaId?: string; upazila?: string
+    areaId?: string; area?: string; road?: string; block?: string; sector?: string; mouza?: string; postalCode?: string; landmark?: string
+  }
+  areaConversion?: { kathaSqft?: number; bighaKatha?: number }
   serviceAreas?: string[] | IServiceArea[]
   logo?: string
   favicon?: string

@@ -7,6 +7,7 @@ import { IBilling } from './billing.interface'
 import { Billing } from './billing.model'
 import { Lead } from '../lead/lead.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { decryptField } from '../../helpers/fieldEncryption'
 
 const escapeHtml = (value: unknown): string =>
   String(value ?? '')
@@ -93,7 +94,7 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
   const billing = await Billing.findOne({
     organizationId,
     $or: [{ invoiceId: id }, ...(id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: id }] : [])],
-  })
+  }).select('+taxSnapshot.binEncrypted')
 
   if (!billing) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Billing invoice record not found')
@@ -111,6 +112,10 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
     currencyDisplay: 'narrowSymbol',
     minimumFractionDigits: 2,
   }).format(billing.amount)
+  const tax = billing.taxSnapshot
+  const isTaxInvoice = Boolean(tax?.invoiceEnabled && tax.registrationStatus === 'registered')
+  const formatBdt = (amount: number) => new Intl.NumberFormat('en-BD', { style: 'currency', currency: 'BDT', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2 }).format(amount)
+  const bin = isTaxInvoice && tax?.binEncrypted ? decryptField(tax.binEncrypted) : ''
 
   return `
     <!DOCTYPE html>
@@ -134,8 +139,9 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
         <div class="container">
           <div class="header">
             <div>
-              <div class="title">INVOICE RECEIPT</div>
-              <div style="font-size: 13px; color: #64748b;">${escapeHtml(org?.agencyName || 'PropSe Agency OS')}</div>
+              <div class="title">${isTaxInvoice ? 'VAT / TAX INVOICE' : 'PAYMENT RECEIPT'}</div>
+              <div style="font-size: 13px; color: #64748b;">${escapeHtml(tax?.operatorLegalName || 'PropSe Agency OS')}</div>
+              ${bin ? `<div style="font-size: 11px; color: #64748b;">BIN: ${escapeHtml(bin)}</div>` : ''}
             </div>
             <div>
               <span class="status">${escapeHtml(status)}</span>
@@ -157,6 +163,7 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
               </tr>
             </tbody>
           </table>
+          ${isTaxInvoice ? `<div class="details"><p><strong>Net amount:</strong> ${escapeHtml(formatBdt(tax?.netAmount || billing.amount))}</p><p><strong>VAT (${escapeHtml(tax?.vatRate || 0)}%):</strong> ${escapeHtml(formatBdt(tax?.vatAmount || 0))}</p></div>` : ''}
           <div class="total">Total Paid: ${escapeHtml(formattedAmount)}</div>
         </div>
         <script>window.print();</script>

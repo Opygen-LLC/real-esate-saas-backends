@@ -29,6 +29,9 @@ const getAllProperties = catchAsync(async (req: Request, res: Response) => {
     'status',
     'city',
     'state',
+    'divisionId',
+    'districtId',
+    'upazilaId',
     'minPrice',
     'maxPrice',
     'bedrooms',
@@ -63,6 +66,9 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
     'listingType',
     'city',
     'state',
+    'divisionId',
+    'districtId',
+    'upazilaId',
     'status',
     'minPrice',
     'maxPrice',
@@ -73,7 +79,7 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
   filters.organizationId = organizationId
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
-  const result = await PropertyService.getAllProperties(filters, paginationOptions)
+  const result = await PropertyService.getPublicProperties(organizationId, filters, paginationOptions)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

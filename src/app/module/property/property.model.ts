@@ -36,6 +36,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     propertyType: {
       type: String,
+      enum: ['Apartment', 'LandPlot', 'Commercial', 'Office', 'Shop', 'Warehouse', 'ReadyFlat', 'UnderConstruction', 'RentalSublet'],
       required: true,
       default: 'Apartment',
     },
@@ -67,7 +68,8 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     currency: {
       type: String,
-      default: 'USD',
+      enum: ['BDT'],
+      default: 'BDT',
     },
     bedrooms: {
       type: Number,
@@ -83,7 +85,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     areaUnit: {
       type: String,
-      enum: ['sqft', 'sqm', 'marla', 'decimal', 'acre'],
+      enum: ['sqft', 'decimal', 'shotok', 'katha', 'bigha', 'acre'],
       default: 'sqft',
     },
     yearBuilt: {
@@ -113,12 +115,34 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     country: {
       type: String,
-      default: 'USA',
+      enum: ['Bangladesh'],
+      default: 'Bangladesh',
     },
     zipCode: {
       type: String,
       default: '',
     },
+    bangladeshAddress: {
+      divisionId: { type: String, default: '' }, division: { type: String, default: '' },
+      districtId: { type: String, default: '' }, district: { type: String, default: '' },
+      upazilaId: { type: String, default: '' }, upazila: { type: String, default: '' },
+      areaId: { type: String, default: '' }, area: { type: String, default: '' },
+      road: { type: String, default: '' }, block: { type: String, default: '' }, sector: { type: String, default: '' },
+      mouza: { type: String, default: '' }, postalCode: { type: String, default: '' }, landmark: { type: String, default: '' },
+    },
+    facing: { type: String, enum: ['North', 'South', 'East', 'West', 'NorthEast', 'NorthWest', 'SouthEast', 'SouthWest'] },
+    roadWidthFeet: { type: Number, min: 0 }, landShare: { type: String, default: '' },
+    utilities: {
+      electricity: { type: Boolean, default: false }, gas: { type: Boolean, default: false },
+      water: { type: Boolean, default: false }, sewerage: { type: Boolean, default: false }, internet: { type: Boolean, default: false },
+    },
+    regulatory: {
+      approvalAuthority: { type: String, enum: ['none', 'RAJUK', 'CDA', 'RDA', 'KDA', 'other'], default: 'none' },
+      approvalNumber: { type: String, default: '' },
+      mutationStatus: { type: String, enum: ['not_applicable', 'pending', 'completed'], default: 'not_applicable' },
+      khatianNumber: { type: String, default: '' }, holdingTaxPaidThrough: { type: String, default: '' },
+    },
+    developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0, default: 0 },
     latitude: {
       type: Number,
     },
@@ -161,6 +185,8 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       type: Boolean,
       default: false,
     },
+    moderationStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'flagged'], default: 'pending', index: true },
+    moderationReason: { type: String, default: '' }, moderatedBy: { type: String, default: '' }, moderatedAt: { type: Date },
   },
   {
     timestamps: true,
@@ -173,6 +199,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
 propertySchema.index({ organizationId: 1, slug: 1 }, { unique: true })
 propertySchema.index({ organizationId: 1, status: 1, price: 1 })
 propertySchema.index({ organizationId: 1, propertyType: 1, listingType: 1 })
+propertySchema.index({ organizationId: 1, moderationStatus: 1, status: 1 })
 propertySchema.index({ organizationId: 1, _id: 1 })
 
 export const Property = model<IProperty, PropertyModel>('Property', propertySchema)

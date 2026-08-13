@@ -56,8 +56,17 @@ const checkConflictZodSchema = z.object({
   }),
 })
 
+const publicRequestZodSchema = z.object({ body: z.object({
+  organizationId: z.string().trim().min(3).max(80), propertyId: z.string().regex(/^[0-9a-fA-F]{24}$/),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), startTime: z.string().regex(/^\d{2}:\d{2}$/), endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  clientName: z.string().trim().min(2).max(100), clientPhone: z.string().trim().min(11).max(30),
+  clientEmail: z.string().email().optional().or(z.literal('')), notes: z.string().trim().max(2000).optional(),
+  privacyConsent: z.literal(true), policyVersion: z.string().trim().min(1).max(80),
+}).strict() })
+
 export const ViewingValidation = {
   createViewingZodSchema,
   updateViewingZodSchema,
   checkConflictZodSchema,
+  publicRequestZodSchema,
 }

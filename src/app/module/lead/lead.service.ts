@@ -9,13 +9,20 @@ import { ILead, ILeadFilter } from './lead.interface'
 import { Lead } from './lead.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
+import { ConsentRecord } from '../compliance/compliance.model'
+import { PlatformSettings } from '../platformSettings/platformSettings.model'
+import { createHash } from 'crypto'
+
+const normalizePhone = (value: string): string => {
+  try { return normalizeBangladeshPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
+}
 
 const createLead = async (
   organizationId: string,
   payload: Partial<ILead>,
   creatorAgentId?: string
 ): Promise<ILead> => {
-  if (payload.phone) payload.phone = normalizeBangladeshPhone(payload.phone)
+  if (payload.phone) payload.phone = normalizePhone(payload.phone)
   // If contactId is missing, check if a contact exists with phone or create one
   if (!payload.contactId && payload.phone) {
     let contact = await Contact.findOne({ organizationId, phone: payload.phone })
@@ -64,15 +71,23 @@ const publicCaptureLead = async (
     budgetMax?: number
     propertyType?: string
     locationPreference?: string
-  }
+    privacyConsent: true
+    policyVersion: string
+  },
+  context: { ip?: string; requestId?: string }
 ): Promise<ILead> => {
-  const { organizationId, name, phone, email, propertyInterest, message, ...rest } = payload
+  const { organizationId, name, phone, email, propertyInterest, message, privacyConsent, policyVersion, ...rest } = payload
 
   if (!organizationId || !name || !phone) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Organization, client name, and phone are required')
   }
   await EntitlementService.assertLimit(organizationId, 'leads')
-  const normalizedPhone = normalizeBangladeshPhone(phone)
+  const normalizedPhone = normalizePhone(phone)
+  const settings = await PlatformSettings.findOne({ key: 'platform' }).lean()
+  if (!settings?.privacy || settings.privacy.legalReviewStatus !== 'approved' || !settings.privacy.policyVersion) {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Public enquiries are unavailable until the reviewed privacy policy is configured')
+  }
+  if (!privacyConsent || policyVersion !== settings.privacy.policyVersion) throw new ApiError(httpStatus.CONFLICT, 'Privacy policy consent is missing or out of date')
 
   let assignedAgent: any = undefined
   let propertyTitle = ''
@@ -112,6 +127,8 @@ const publicCaptureLead = async (
     notes: message || '',
     lastContact: new Date(),
   })
+  await ConsentRecord.create({ organizationId, userId: `public:${createHash('sha256').update(normalizedPhone).digest('hex')}`,
+    purpose: 'privacy_policy', policyVersion, granted: true, capturedAt: new Date(), ip: context.ip || '', requestId: context.requestId || '' })
 
   // Auto-log activity
   await Activity.create({

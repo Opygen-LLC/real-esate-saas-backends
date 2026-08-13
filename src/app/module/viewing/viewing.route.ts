@@ -7,7 +7,7 @@ import { ViewingValidation } from './viewing.validation'
 const router = express.Router()
 
 // Public Viewing Request
-router.post('/public-request', ViewingController.publicRequestViewing)
+router.post('/public-request', validateRequest(ViewingValidation.publicRequestZodSchema), ViewingController.publicRequestViewing)
 
 // Authenticated viewing endpoints
 router.post(

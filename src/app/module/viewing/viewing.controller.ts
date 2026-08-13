@@ -41,7 +41,7 @@ const createViewing = catchAsync(async (req: Request, res: Response) => {
 })
 
 const publicRequestViewing = catchAsync(async (req: Request, res: Response) => {
-  const result = await ViewingService.publicRequestViewing(req.body)
+  const result = await ViewingService.publicRequestViewing(req.body, { ip: req.ip, requestId: req.requestId })
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,

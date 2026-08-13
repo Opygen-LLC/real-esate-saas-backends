@@ -23,7 +23,7 @@ const createLeadZodSchema = z.object({
       .optional(),
     budgetMin: z.number().optional(),
     budgetMax: z.number().optional(),
-    currency: z.string().optional(),
+    currency: z.literal('BDT').optional(),
     propertyInterest: z.array(z.string()).optional(),
     locationPreference: z.string().optional(),
     propertyType: z.string().optional(),
@@ -48,6 +48,14 @@ const createLeadZodSchema = z.object({
   }),
 })
 
+const publicCaptureZodSchema = z.object({ body: z.object({
+  organizationId: z.string().trim().min(3).max(80), name: z.string().trim().min(2).max(100), phone: z.string().trim().min(11).max(30),
+  email: z.string().email().optional().or(z.literal('')), propertyInterest: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  message: z.string().trim().max(3000).optional(), budgetMin: z.number().nonnegative().optional(), budgetMax: z.number().nonnegative().optional(),
+  propertyType: z.string().max(80).optional(), locationPreference: z.string().max(200).optional(),
+  privacyConsent: z.literal(true), policyVersion: z.string().trim().min(1).max(80),
+}).strict() })
+
 const updateLeadZodSchema = z.object({
   body: z.object({
     name: z.string().optional(),
@@ -71,7 +79,7 @@ const updateLeadZodSchema = z.object({
       .optional(),
     budgetMin: z.number().optional(),
     budgetMax: z.number().optional(),
-    currency: z.string().optional(),
+    currency: z.literal('BDT').optional(),
     propertyInterest: z.array(z.string()).optional(),
     locationPreference: z.string().optional(),
     propertyType: z.string().optional(),
@@ -116,6 +124,7 @@ const updateLeadStatusZodSchema = z.object({
 
 export const LeadValidation = {
   createLeadZodSchema,
+  publicCaptureZodSchema,
   updateLeadZodSchema,
   updateLeadStatusZodSchema,
 }

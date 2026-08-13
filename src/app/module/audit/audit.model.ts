@@ -9,4 +9,11 @@ const auditEventSchema = new Schema({
 }, { timestamps: true, versionKey: false })
 
 auditEventSchema.index({ organizationId: 1, createdAt: -1 })
+const immutable = (next: (error?: Error) => void) => next(new Error('Audit events are immutable'))
+auditEventSchema.pre('updateOne', immutable)
+auditEventSchema.pre('updateMany', immutable)
+auditEventSchema.pre('findOneAndUpdate', immutable)
+auditEventSchema.pre('deleteOne', immutable)
+auditEventSchema.pre('deleteMany', immutable)
+auditEventSchema.pre('findOneAndDelete', immutable)
 export const AuditEvent = model('AuditEvent', auditEventSchema)

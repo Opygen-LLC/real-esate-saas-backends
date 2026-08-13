@@ -8,6 +8,7 @@
     "seed": "ts-node-dev --transpile-only src/app/db/seed.ts",
     "migrate:bdt-plans": "ts-node --transpile-only src/app/db/migratePlansToBdt.ts",
     "migrate:phase-0-1": "ts-node --transpile-only src/app/db/migratePhase01.ts",
+    "migrate:phase-2": "ts-node --transpile-only src/app/db/migratePhase2.ts",
     "start": "node ./dist/server.js",
     "build": "tsc",
     "lint": "eslint src --ext .ts",
@@ -40,6 +41,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "bangladesh-location-data": "1.0.6",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

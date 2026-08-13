@@ -6,10 +6,11 @@ import { jwtHelpers } from '../helpers/jwtHelpers'
 import { User } from '../module/user/user.model'
 
 export type Permission = 'properties.read' | 'properties.write' | 'properties.delete' | 'leads.read' | 'leads.write' |
-  'leads.assign' | 'users.read' | 'users.write' | 'billing.manage' | 'website.write' | 'domains.manage' | 'analytics.advanced'
+  'leads.assign' | 'users.read' | 'users.write' | 'billing.manage' | 'website.write' | 'domains.manage' | 'analytics.advanced' |
+  'compliance.read' | 'compliance.write'
 const matrix: Record<string, Permission[]> = {
-  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced'],
-  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced'],
+  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write'],
+  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read'],
   agent: ['properties.read', 'properties.write', 'leads.read', 'leads.write'],
   viewer: ['properties.read', 'leads.read'], user: ['properties.read'], 'super-admin': [],
 }

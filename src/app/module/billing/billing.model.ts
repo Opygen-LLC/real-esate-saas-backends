@@ -41,19 +41,35 @@ const billingSchema = new Schema<IBilling>(
       type: Number,
       required: true,
     },
+    currency: {
+      type: String,
+      default: 'BDT',
+    },
     paymentId: {
+      type: String,
+      default: '',
+      index: true,
+    },
+    transactionId: {
       type: String,
       default: '',
     },
     paymentMethod: {
       type: String,
-      default: 'Credit Card',
+      default: 'bKash',
     },
     status: {
       type: String,
       enum: ['paid', 'pending', 'failed', 'refunded'],
       default: 'paid',
       required: true,
+    },
+    taxSnapshot: {
+      invoiceEnabled: { type: Boolean, default: false },
+      registrationStatus: { type: String, enum: ['not_registered', 'registered'], default: 'not_registered' },
+      operatorLegalName: { type: String, default: '' }, binEncrypted: { type: String, default: '', select: false },
+      vatRate: { type: Number, default: 0 }, pricesIncludeVat: { type: Boolean, default: true },
+      netAmount: { type: Number, default: 0 }, vatAmount: { type: Number, default: 0 },
     },
   },
   {

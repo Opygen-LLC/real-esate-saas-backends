@@ -48,6 +48,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   const totalProperties = await Property.countDocuments({
     organizationId: org.organizationId,
     status: 'Available',
+    moderationStatus: 'approved',
   })
   const totalAgents = await User.countDocuments({
     organizationId: org.organizationId,
@@ -65,6 +66,8 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     city: org.city,
     state: org.state,
     country: org.country,
+    defaultLanguage: org.defaultLanguage || 'en',
+    addressDetails: org.addressDetails,
     logo: org.logo,
     favicon: org.favicon,
     primaryColor: org.primaryColor,
@@ -102,6 +105,7 @@ const updateWebsiteSettings = async (
     metaTitle: payload.metaTitle,
     metaDescription: payload.metaDescription ? sanitizeRichText(payload.metaDescription) : payload.metaDescription,
     logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
+    defaultLanguage: payload.defaultLanguage,
   }
 
   if (payload.templateId) updateData.templateId = payload.templateId
@@ -123,7 +127,7 @@ const updateMyOrganization = async (
   organizationId: string,
   payload: Partial<IOrganization>
 ): Promise<IOrganization | null> => {
-  const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
+  const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
   const safePayload = Object.fromEntries(allowed.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]))
   const result = await Organization.findOneAndUpdate({ organizationId }, safePayload, {
     new: true,

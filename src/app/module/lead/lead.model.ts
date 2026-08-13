@@ -51,7 +51,8 @@ const leadSchema = new Schema<ILead, LeadModel>(
     },
     currency: {
       type: String,
-      default: 'USD',
+      enum: ['BDT'],
+      default: 'BDT',
     },
     propertyInterest: [
       {

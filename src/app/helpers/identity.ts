@@ -1,7 +1,12 @@
 export const normalizeEmail = (value: string): string => value.trim().toLowerCase()
 
+const BANGLA_DIGITS = '০১২৩৪৫৬৭৮৯'
+
+export const normalizeDigits = (value: string): string =>
+  value.normalize('NFKC').replace(/[০-৯]/g, digit => String(BANGLA_DIGITS.indexOf(digit)))
+
 export const normalizeBangladeshPhone = (value: string): string => {
-  const compact = value.replace(/[\s()-]/g, '')
+  const compact = normalizeDigits(value).replace(/[\s().-]/g, '')
   let national = compact
   if (compact.startsWith('+880')) national = `0${compact.slice(4)}`
   else if (compact.startsWith('880')) national = `0${compact.slice(3)}`

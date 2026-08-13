@@ -4,6 +4,11 @@ import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common
 import paginationHelper from '../../helpers/paginationHelper'
 import { IContact, IContactFilter } from './contact.interface'
 import { Contact } from './contact.model'
+import { normalizeBangladeshPhone } from '../../helpers/identity'
+
+const normalizePhone = (value: string): string => {
+  try { return normalizeBangladeshPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
+}
 
 const createContact = async (
   organizationId: string,
@@ -11,6 +16,7 @@ const createContact = async (
 ): Promise<IContact> => {
   const contactData = {
     ...payload,
+    ...(payload.phone ? { phone: normalizePhone(payload.phone) } : {}),
     organizationId,
   }
   const result = await Contact.create(contactData)
@@ -69,6 +75,7 @@ const updateContact = async (
   id: string,
   payload: Partial<IContact>
 ): Promise<IContact | null> => {
+  if (payload.phone) payload.phone = normalizePhone(payload.phone)
   const result = await Contact.findOneAndUpdate({ _id: id, organizationId }, payload, {
     new: true,
   })

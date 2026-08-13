@@ -5,6 +5,7 @@ import paginationHelper from '../../helpers/paginationHelper'
 import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface'
 import { Property } from './property.model'
 import { Organization } from '../organization/organization.model'
+import { sanitizeRichText } from '../../helpers/sanitize'
 
 const generateSlug = async (organizationId: string, title: string): Promise<string> => {
   let baseSlug = title
@@ -42,6 +43,11 @@ const createProperty = async (
     organizationId,
     slug,
     views: 0,
+    currency: 'BDT',
+    country: 'Bangladesh',
+    description: payload.description ? sanitizeRichText(payload.description) : '',
+    moderationStatus: 'pending',
+    moderationReason: '',
   }
 
   const result = await Property.create(propertyData)
@@ -60,6 +66,9 @@ const getAllProperties = async (
     status,
     city,
     state,
+    divisionId,
+    districtId,
+    upazilaId,
     minPrice,
     maxPrice,
     bedrooms,
@@ -67,6 +76,7 @@ const getAllProperties = async (
     furnished,
     isFeatured,
     agentId,
+    moderationStatus,
   } = filters
 
   const andConditions: Array<Record<string, unknown>> = []
@@ -108,7 +118,11 @@ const getAllProperties = async (
   if (status) andConditions.push({ status })
   if (city) andConditions.push({ city: { $regex: city, $options: 'i' } })
   if (state) andConditions.push({ state: { $regex: state, $options: 'i' } })
+  if (divisionId) andConditions.push({ 'bangladeshAddress.divisionId': divisionId })
+  if (districtId) andConditions.push({ 'bangladeshAddress.districtId': districtId })
+  if (upazilaId) andConditions.push({ 'bangladeshAddress.upazilaId': upazilaId })
   if (agentId) andConditions.push({ agentId })
+  if (moderationStatus) andConditions.push({ moderationStatus })
 
   if (minPrice !== undefined && minPrice !== '') {
     andConditions.push({ price: { $gte: Number(minPrice) } })
@@ -162,6 +176,7 @@ const getPublicProperties = async (
       ...filters,
       organizationId,
       status: 'Available',
+      moderationStatus: 'approved',
     },
     paginationOptions
   )
@@ -179,7 +194,7 @@ const getPropertyById = async (organizationId: string, id: string): Promise<IPro
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ slug, organizationId }).populate(
+  const result = await Property.findOne({ slug, organizationId, status: 'Available', moderationStatus: 'approved' }).populate(
     'agentId',
     'name email phoneNumber profileImgURL licenseNumber bio'
   )
@@ -193,7 +208,8 @@ const getPublicPropertyDetail = async (
   idOrSlug: string
 ): Promise<{ property: IProperty; similarProperties: IProperty[] }> => {
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
-  const query = isObjectId ? { _id: idOrSlug } : { slug: idOrSlug }
+  const query = isObjectId ? { _id: idOrSlug, status: 'Available', moderationStatus: 'approved' } :
+    { slug: idOrSlug, status: 'Available', moderationStatus: 'approved' }
 
   const property = await Property.findOneAndUpdate(
     query,
@@ -210,6 +226,7 @@ const getPublicPropertyDetail = async (
     organizationId: property.organizationId,
     _id: { $ne: property._id },
     status: 'Available',
+    moderationStatus: 'approved',
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
   })
     .limit(3)
@@ -233,6 +250,17 @@ const updateProperty = async (
 
   if (payload.title && payload.title !== isExist.title) {
     payload.slug = await generateSlug(organizationId, payload.title)
+  }
+
+  payload.currency = 'BDT'
+  payload.country = 'Bangladesh'
+  if (payload.description !== undefined) payload.description = sanitizeRichText(payload.description)
+  const materialFields = ['title', 'description', 'propertyType', 'listingType', 'price', 'bangladeshAddress', 'images', 'regulatory']
+  if (materialFields.some(field => (payload as any)[field] !== undefined)) {
+    payload.moderationStatus = 'pending'
+    payload.moderationReason = ''
+    payload.moderatedAt = undefined
+    payload.moderatedBy = ''
   }
 
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, {

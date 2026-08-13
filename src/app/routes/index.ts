@@ -21,10 +21,18 @@ import { UserRoute } from '../module/user/user.route'
 import { ViewingRoute } from '../module/viewing/viewing.route'
 import { VisitorLogsRoute } from '../module/visitorLogs/visitorLogs.route'
 import { WebsiteBuilderRoute } from '../module/websiteBuilder/websiteBuilder.route'
+import { LocalizationRoute } from '../module/localization/localization.route'
+import { ComplianceRoute } from '../module/compliance/compliance.route'
+import { ModerationRoute } from '../module/moderation/moderation.route'
+import { PlatformSettingsRoute } from '../module/platformSettings/platformSettings.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/localization', route: LocalizationRoute },
+  { path: '/compliance', route: ComplianceRoute },
+  { path: '/moderation', route: ModerationRoute },
+  { path: '/platform-settings', route: PlatformSettingsRoute },
   {
     path: '/auth',
     route: AuthRoutes,

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      bangladesh-location-data:
+        specifier: 1.0.6
+        version: 1.0.6
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -515,6 +518,15 @@ packages:
 
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
+
+  bangladesh-location-data@1.0.6:
+    resolution: {integrity: sha512-lf76vgVRRC6GTeIUWYyOkRfP7MlpV27KipINoamLSudnN0A7aGMgzkqj30117m5SA7FjXyU3mcmDvGIBG+rS3g==}
+    engines: {node: '>=12.0.0'}
+    peerDependencies:
+      react: '>=16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   bcryptjs@3.0.3:
     resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
@@ -2249,6 +2261,8 @@ snapshots:
   async@3.2.6: {}
 
   balanced-match@1.0.2: {}
+
+  bangladesh-location-data@1.0.6: {}
 
   bcryptjs@3.0.3: {}
 

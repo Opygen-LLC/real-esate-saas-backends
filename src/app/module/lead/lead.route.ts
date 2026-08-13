@@ -9,7 +9,7 @@ const router = express.Router()
 import { publicLeadRateLimiter } from '../../middlewares/rateLimiter'
 
 // Public Lead Capture endpoint (Rate limited)
-router.post('/public-capture', publicLeadRateLimiter, LeadController.publicCaptureLead)
+router.post('/public-capture', publicLeadRateLimiter, validateRequest(LeadValidation.publicCaptureZodSchema), LeadController.publicCaptureLead)
 
 // Authenticated CRM endpoints
 router.get(

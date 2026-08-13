@@ -42,7 +42,7 @@ const contactSchema = new Schema<IContact, ContactModel>(
     },
     country: {
       type: String,
-      default: 'USA',
+      default: 'Bangladesh',
     },
     company: {
       type: String,

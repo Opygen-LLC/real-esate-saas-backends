@@ -27,6 +27,7 @@ if (isProduction) {
   requiredInProduction('JWT_REFRESH_SECRET', 32)
   requiredInProduction('OTP_PEPPER', 32)
   requiredInProduction('CRON_SIGNING_SECRET', 32)
+  requiredInProduction('DATA_ENCRYPTION_KEY', 32)
   if (process.env.SMS_DEV_MODE === 'true') throw new Error('SMS_DEV_MODE must be false in production')
   const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID']
   requiredSms.forEach((name) => requiredInProduction(name))
@@ -57,6 +58,7 @@ export default {
   security: {
     otp_pepper: process.env.OTP_PEPPER || 'development-only-otp-pepper-change-me',
     cron_signing_secret: process.env.CRON_SIGNING_SECRET || 'development-only-cron-secret-change-me',
+    data_encryption_key: process.env.DATA_ENCRYPTION_KEY || 'development-only-data-encryption-key',
     csrf_cookie_name: 'csrfToken',
     access_cookie_name: 'accessToken',
     refresh_cookie_name: 'refreshToken',
