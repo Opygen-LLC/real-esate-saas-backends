@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import app from './app'
 import config from './config'
 import { errorLogger, logger } from './shared/logger'
+import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 
 let server: Server
 
@@ -33,6 +34,9 @@ async function bootstrap() {
   try {
     await mongoose.connect(config.database_string)
     logger.info('Database connected successfully')
+    const transactionReady = await mongoSupportsTransactions()
+    if (transactionReady) logger.info('MongoDB transactions enabled (replica set/mongos detected)')
+    else logger.warn('MongoDB standalone detected: auth flows will use safe fallback writes. Configure a replica set for full production transaction guarantees.')
 
     server = app.listen(config.port, () => {
       logger.info(`Real Estate SaaS Server listening on port ${config.port}`)

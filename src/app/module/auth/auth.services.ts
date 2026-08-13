@@ -17,6 +17,8 @@ import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RequestMeta }
 import { AuthSession } from './authSession.model'
 import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
 import { randomUUID } from 'crypto'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { AuditEvent } from '../audit/audit.model'
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
@@ -100,22 +102,49 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
   const otp = generateOtp()
   await enforceOtpThrottle(phoneNumber, 'account_verification')
   await sendOtp(phoneNumber, otp)
-  const dbSession = await mongoose.startSession()
-  try {
-    await dbSession.withTransaction(async () => {
-      const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-      await Organization.create([{ _id: organizationObjectId, organizationId, agencyName: payload.agencyName, agencyType: payload.agencyType || 'residential',
-        licenseNumber: payload.licenseNumber || '', ownerId: userId, email, phone: phoneNumber, country: 'Bangladesh', sub_domain: subdomain,
-        subscription: { plan: 'trial', status: 'trialing', currentPeriodEnd: trialEnd, trialEndsAt: trialEnd, lastPaymentDate: null, maxProperties: 10, maxAgents: 2 } }], { session: dbSession })
-      await User.create([{ _id: userId, name: payload.name, email, phoneNumber, password: await hashPassword(payload.password), organizationId,
-        userRole: 'agency_owner', status: 'pending', isVerified: false, isAddProfile: false, licenseNumber: payload.licenseNumber || '' }], { session: dbSession })
-      await WebsitePage.create([{ organizationId, slug: '/', title: 'Home', draftDocument: defaultWebsiteDocument, status: 'draft', updatedBy: userId }], { session: dbSession })
-      await OtpChallenge.create([{ _id: challengeId, phoneNumber, userId, purpose: 'account_verification', codeHash: hashOtp(challengeId.toString(), otp),
-        expiresAt: new Date(Date.now() + OTP_TTL_MS), requestIp: meta.ip || '' }], { session: dbSession })
-      await writeAudit({ organizationId, actorId: userId.toString(), actorRole: 'agency_owner', action: 'tenant.provisioned', entityType: 'organization',
-        entityId: organizationObjectId.toString(), requestId: meta.requestId, ip: meta.ip, metadata: { subdomain, plan: 'trial' } }, dbSession)
-    })
-  } finally { await dbSession.endSession() }
+  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+  const passwordHash = await hashPassword(payload.password)
+
+  const provisionAgency = async (session?: mongoose.ClientSession): Promise<void> => {
+    const sessionOptions = session ? { session } : undefined
+    await Organization.create([{ _id: organizationObjectId, organizationId, agencyName: payload.agencyName, agencyType: payload.agencyType || 'residential',
+      licenseNumber: payload.licenseNumber || '', ownerId: userId, email, phone: phoneNumber, country: 'Bangladesh', sub_domain: subdomain,
+      subscription: { plan: 'trial', status: 'trialing', currentPeriodEnd: trialEnd, trialEndsAt: trialEnd, lastPaymentDate: null, maxProperties: 10, maxAgents: 2 } }], sessionOptions)
+    await User.create([{ _id: userId, name: payload.name, email, phoneNumber, password: passwordHash, organizationId,
+      userRole: 'agency_owner', status: 'pending', isVerified: false, isAddProfile: false, licenseNumber: payload.licenseNumber || '' }], sessionOptions)
+    await WebsitePage.create([{ organizationId, slug: '/', title: 'Home', draftDocument: defaultWebsiteDocument, status: 'draft', updatedBy: userId }], sessionOptions)
+    await OtpChallenge.create([{ _id: challengeId, phoneNumber, userId, purpose: 'account_verification', codeHash: hashOtp(challengeId.toString(), otp),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS), requestIp: meta.ip || '' }], sessionOptions)
+    await writeAudit({ organizationId, actorId: userId.toString(), actorRole: 'agency_owner', action: 'tenant.provisioned', entityType: 'organization',
+      entityId: organizationObjectId.toString(), requestId: meta.requestId, ip: meta.ip, metadata: { subdomain, plan: 'trial' } }, session)
+  }
+
+  if (await mongoSupportsTransactions()) {
+    const dbSession = await mongoose.startSession()
+    try {
+      await dbSession.withTransaction(() => provisionAgency(dbSession))
+    } finally {
+      await dbSession.endSession()
+    }
+  } else {
+    // Standalone MongoDB cannot execute multi-document transactions. Keep the
+    // registration endpoint usable with a compensating rollback. All records
+    // have deterministic IDs/tenant keys, so cleanup cannot touch another tenant.
+    try {
+      await provisionAgency()
+    } catch (error) {
+      await Promise.allSettled([
+        OtpChallenge.deleteOne({ _id: challengeId, userId }),
+        WebsitePage.deleteOne({ organizationId, slug: '/' }),
+        User.deleteOne({ _id: userId, organizationId }),
+        Organization.deleteOne({ _id: organizationObjectId, organizationId }),
+        // AuditEvent is intentionally immutable through Mongoose middleware.
+        // Direct collection cleanup is limited to this failed provisioning event.
+        AuditEvent.collection.deleteMany({ organizationId, action: 'tenant.provisioned', entityId: organizationObjectId.toString() }),
+      ])
+      throw error
+    }
+  }
   return { phoneNumber, subdomain }
 }
 
@@ -176,22 +205,42 @@ const verifyPasswordReset = async (rawPhone: string, code: string): Promise<{ re
 }
 
 const completePasswordReset = async (resetToken: string, newPassword: string, meta: RequestMeta): Promise<void> => {
-  const session = await mongoose.startSession()
-  let completed = false
-  try {
-    await session.withTransaction(async () => {
-      const challenge = await OtpChallenge.findOneAndUpdate({ resetTokenHash: sha256(resetToken), resetTokenUsedAt: null,
-        resetTokenExpiresAt: { $gt: new Date() } }, { resetTokenUsedAt: new Date() }, { new: true, session })
-      if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
-      const user = await User.findByIdAndUpdate(challenge.userId, { password: await hashPassword(newPassword) }, { new: true, session })
-      if (!user) throw new ApiError(401, 'Invalid reset request')
-      await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' }, { session })
-      await writeAudit({ organizationId: user.organizationId, actorId: user._id.toString(), actorRole: user.userRole,
-        action: 'identity.password_reset', entityType: 'user', entityId: user._id.toString(), requestId: meta.requestId, ip: meta.ip }, session)
-      completed = true
-    })
-  } finally { await session.endSession() }
-  if (!completed) throw new ApiError(401, 'Invalid reset request')
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    let completed = false
+    try {
+      await session.withTransaction(async () => {
+        const challenge = await OtpChallenge.findOneAndUpdate({ resetTokenHash: sha256(resetToken), resetTokenUsedAt: null,
+          resetTokenExpiresAt: { $gt: new Date() } }, { resetTokenUsedAt: new Date() }, { new: true, session })
+        if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
+        const user = await User.findByIdAndUpdate(challenge.userId, { password: await hashPassword(newPassword) }, { new: true, session })
+        if (!user) throw new ApiError(401, 'Invalid reset request')
+        await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' }, { session })
+        await writeAudit({ organizationId: user.organizationId, actorId: user._id.toString(), actorRole: user.userRole,
+          action: 'identity.password_reset', entityType: 'user', entityId: user._id.toString(), requestId: meta.requestId, ip: meta.ip }, session)
+        completed = true
+      })
+    } finally {
+      await session.endSession()
+    }
+    if (!completed) throw new ApiError(401, 'Invalid reset request')
+    return
+  }
+
+  // Safe standalone fallback: consume the one-time token atomically, then revoke
+  // existing sessions before changing the password. A later failure may require
+  // another reset request, but cannot leave an old authenticated session active.
+  const challenge = await OtpChallenge.findOneAndUpdate({ resetTokenHash: sha256(resetToken), resetTokenUsedAt: null,
+    resetTokenExpiresAt: { $gt: new Date() } }, { resetTokenUsedAt: new Date() }, { new: true })
+  if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
+  const user = await User.findById(challenge.userId)
+  if (!user) throw new ApiError(401, 'Invalid reset request')
+  const passwordHash = await hashPassword(newPassword)
+  await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' })
+  user.password = passwordHash
+  await user.save()
+  await writeAudit({ organizationId: user.organizationId, actorId: user._id.toString(), actorRole: user.userRole,
+    action: 'identity.password_reset', entityType: 'user', entityId: user._id.toString(), requestId: meta.requestId, ip: meta.ip })
 }
 
 const refreshToken = async (token: string): Promise<AuthResult> => {
