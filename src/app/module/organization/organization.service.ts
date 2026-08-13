@@ -9,6 +9,7 @@ import { Organization } from './organization.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
 import { randomUUID } from 'crypto'
+import { DomainRecord } from '../domain/domain.model'
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   if (!payload.organizationId) {
@@ -30,20 +31,21 @@ const getMyOrganization = async (organizationId: string): Promise<IOrganization 
 }
 
 const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {
-  const result = await Organization.findOne({
-    $or: [{ domain: domainOrSubdomain }, { sub_domain: domainOrSubdomain }],
-  })
-  return result
+  const direct = await Organization.findOne({ sub_domain: domainOrSubdomain.toLowerCase() })
+  if (direct) return direct
+  const normalized = domainOrSubdomain.toLowerCase().replace(/^www\./, '').split(':')[0]
+  const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
+  return domain ? Organization.findOne({ organizationId: domain.organizationId }) : null
 }
 
 const getPublicSiteInfo = async (identifier: string): Promise<any> => {
-  const org = await Organization.findOne({
-    $or: [{ sub_domain: identifier }, { domain: identifier }, { organizationId: identifier }],
-  })
-
+  let org = await Organization.findOne({ $or: [{ sub_domain: identifier.toLowerCase() }, { organizationId: identifier }] })
   if (!org) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Agency website not found')
+    const normalized = identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
+    const verifiedDomain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
+    if (verifiedDomain) org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
   }
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Agency website not found')
 
   const totalProperties = await Property.countDocuments({
     organizationId: org.organizationId,

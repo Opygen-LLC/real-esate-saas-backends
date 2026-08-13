@@ -4,6 +4,7 @@ import app from './app'
 import config from './config'
 import { errorLogger, logger } from './shared/logger'
 import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
+import { startPhase3Worker } from './app/module/cron/phase3.worker'
 
 let server: Server
 
@@ -38,6 +39,7 @@ async function bootstrap() {
     if (transactionReady) logger.info('MongoDB transactions enabled (replica set/mongos detected)')
     else logger.warn('MongoDB standalone detected: auth flows will use safe fallback writes. Configure a replica set for full production transaction guarantees.')
 
+    startPhase3Worker()
     server = app.listen(config.port, () => {
       logger.info(`Real Estate SaaS Server listening on port ${config.port}`)
     })

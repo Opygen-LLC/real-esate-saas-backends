@@ -31,6 +31,7 @@ const websiteRevisionSchema = new Schema<IWebsiteRevision, WebsiteRevisionModel>
       type: String,
       default: 'Published version update',
     },
+    restoredFromVersion: { type: Number },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },
@@ -39,6 +40,8 @@ const websiteRevisionSchema = new Schema<IWebsiteRevision, WebsiteRevisionModel>
     },
   }
 )
+
+websiteRevisionSchema.index({ organizationId: 1, pageId: 1, version: 1 }, { unique: true })
 
 export const WebsiteRevision = model<IWebsiteRevision, WebsiteRevisionModel>(
   'WebsiteRevision',

@@ -1,22 +1,12 @@
 import express from 'express'
-import { authMiddlewares } from '../../middlewares/auth'
-import { DomainController } from './domain.controller'
-import validateRequest from '../../middlewares/validateRequest'
 import { z } from 'zod'
+import { authMiddlewares } from '../../middlewares/auth'
+import validateRequest from '../../middlewares/validateRequest'
+import { DomainController } from './domain.controller'
 
 const router = express.Router()
-
-router.post(
-  '/add',
-  authMiddlewares.requirePermission('domains.manage'),
-  validateRequest(z.object({ body: z.object({ domain: z.string().trim().toLowerCase().regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/) }) })),
-  DomainController.addCustomDomain
-)
-
-router.post(
-  '/verify',
-  authMiddlewares.requirePermission('domains.manage'),
-  DomainController.verifyCustomDomain
-)
-
+router.get('/status', authMiddlewares.requirePermission('domains.manage'), DomainController.getCustomDomain)
+router.post('/add', authMiddlewares.requirePermission('domains.manage'), validateRequest(z.object({ body: z.object({ domain: z.string().trim().min(4).max(253) }) })), DomainController.addCustomDomain)
+router.post('/verify', authMiddlewares.requirePermission('domains.manage'), DomainController.verifyCustomDomain)
+router.get('/resolve/:host', DomainController.resolveHost)
 export const DomainRoute = router

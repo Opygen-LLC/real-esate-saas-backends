@@ -7,6 +7,7 @@ export interface IWebsiteRevision {
   version: number
   createdBy?: Types.ObjectId | string
   message?: string
+  restoredFromVersion?: number
   createdAt?: Date
 }
 

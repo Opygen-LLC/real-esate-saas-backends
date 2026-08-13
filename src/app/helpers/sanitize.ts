@@ -20,5 +20,5 @@ export const assertSafeUrl = (value: string): string => {
 }
 
 export const ALLOWED_ASSET_MIME_TYPES = new Set([
-  'image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/svg+xml', 'font/woff2',
+  'image/jpeg', 'image/png', 'image/webp', 'image/avif', 'font/woff2',
 ])

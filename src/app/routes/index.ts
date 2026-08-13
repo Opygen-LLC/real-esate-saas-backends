@@ -25,10 +25,12 @@ import { LocalizationRoute } from '../module/localization/localization.route'
 import { ComplianceRoute } from '../module/compliance/compliance.route'
 import { ModerationRoute } from '../module/moderation/moderation.route'
 import { PlatformSettingsRoute } from '../module/platformSettings/platformSettings.route'
+import { MetaIntegrationRoute } from '../module/metaIntegration/metaIntegration.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/meta', route: MetaIntegrationRoute },
   { path: '/localization', route: LocalizationRoute },
   { path: '/compliance', route: ComplianceRoute },
   { path: '/moderation', route: ModerationRoute },

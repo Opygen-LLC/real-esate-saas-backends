@@ -163,7 +163,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     websiteSettings: {
       heroTitle: { type: String, default: 'Find Your Dream Home' },
       heroSubtitle: { type: String, default: 'Browse our curated selection of luxury properties' },
-      heroImage: { type: String, default: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=1920&q=80' },
+      heroImage: { type: String, default: '' },
       featuredPropertiesCount: { type: Number, default: 6 },
       enableTestimonials: { type: Boolean, default: true },
       enableLeadForm: { type: Boolean, default: true },
