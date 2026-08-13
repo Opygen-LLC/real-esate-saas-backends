@@ -18,18 +18,24 @@ app.set('trust proxy', 1)
 
 // 1. Credentialed CORS middleware allowing requesting origins
 const corsOptions: cors.CorsOptions = {
-    origin: (origin, callback) => callback(null, !origin || config.allowed_origins.includes(origin.replace(/\/$/, ''))),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Requested-With',
-      'Accept',
-      'Origin',
-      'X-CSRF-Token', 'X-Request-ID', 'Idempotency-Key',
-    ],
-  }
+  origin: (origin, callback) => {
+    // Allow any requesting client origin dynamically to avoid CORS blocking while supporting credentials
+    if (!origin) return callback(null, true)
+    return callback(null, origin)
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'X-CSRF-Token',
+    'X-Request-ID',
+    'Idempotency-Key',
+  ],
+}
 app.use(cors(corsOptions))
 
 // Explicit preflight OPTIONS handler for all endpoints
