@@ -58,10 +58,9 @@ const viewingSchema = new Schema<IViewing, ViewingModel>(
       trim: true,
       lowercase: true,
     },
-    notes: {
-      type: String,
-      default: '',
-    },
+    notes: { type: String, default: '' },
+    calendarSyncStatus: { type: String, enum: ['not_configured','pending_provider_approval','synced','failed'], default: 'not_configured' },
+    calendarProviderEventId: { type: String, default: '' },
     feedback: {
       interestLevel: {
         type: String,

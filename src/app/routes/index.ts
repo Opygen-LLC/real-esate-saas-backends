@@ -26,10 +26,16 @@ import { ComplianceRoute } from '../module/compliance/compliance.route'
 import { ModerationRoute } from '../module/moderation/moderation.route'
 import { PlatformSettingsRoute } from '../module/platformSettings/platformSettings.route'
 import { MetaIntegrationRoute } from '../module/metaIntegration/metaIntegration.route'
+import { CrmRoute } from '../module/crm/crm.route'
+import { WhatsAppRoute } from '../module/whatsapp/whatsapp.route'
+import { NotificationRoute } from '../module/notification/notification.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/notification', route: NotificationRoute },
+  { path: '/crm', route: CrmRoute },
+  { path: '/whatsapp', route: WhatsAppRoute },
   { path: '/meta', route: MetaIntegrationRoute },
   { path: '/localization', route: LocalizationRoute },
   { path: '/compliance', route: ComplianceRoute },

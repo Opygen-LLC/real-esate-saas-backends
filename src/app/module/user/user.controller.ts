@@ -73,7 +73,7 @@ const getPublicAgentDetail = catchAsync(async (req: Request, res: Response) => {
 
 const getAgentLeaderboard = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await UserService.getAgentLeaderboard(organizationId)
+  const result = await UserService.getAgentLeaderboard(organizationId, req.query.startDate as string | undefined, req.query.endDate as string | undefined)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

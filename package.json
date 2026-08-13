@@ -12,7 +12,8 @@
     "start": "node ./dist/server.js",
     "build": "tsc",
     "lint": "eslint src --ext .ts",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "migrate:phase-4": "ts-node --transpile-only src/app/db/migratePhase4.ts"
   },
   "keywords": [
     "real-estate",

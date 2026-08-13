@@ -23,7 +23,7 @@ const createActivity = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getActivitiesByLead = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { leadId } = req.params
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await ActivityService.getActivitiesByLead(organizationId, leadId, paginationOptions)

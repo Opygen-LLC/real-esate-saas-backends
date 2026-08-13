@@ -62,6 +62,7 @@ const publicRequestZodSchema = z.object({ body: z.object({
   clientName: z.string().trim().min(2).max(100), clientPhone: z.string().trim().min(11).max(30),
   clientEmail: z.string().email().optional().or(z.literal('')), notes: z.string().trim().max(2000).optional(),
   privacyConsent: z.literal(true), policyVersion: z.string().trim().min(1).max(80),
+  attribution: z.object({ utmSource: z.string().max(120).optional(), utmMedium: z.string().max(120).optional(), utmCampaign: z.string().max(200).optional(), utmTerm: z.string().max(200).optional(), utmContent: z.string().max(200).optional(), referrer: z.string().max(1000).optional(), landingPage: z.string().max(1000).optional() }).optional(),
 }).strict() })
 
 export const ViewingValidation = {

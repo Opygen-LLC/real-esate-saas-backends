@@ -7,10 +7,10 @@ import { User } from '../module/user/user.model'
 
 export type Permission = 'properties.read' | 'properties.write' | 'properties.delete' | 'leads.read' | 'leads.write' |
   'leads.assign' | 'users.read' | 'users.write' | 'billing.manage' | 'website.write' | 'domains.manage' | 'analytics.advanced' |
-  'compliance.read' | 'compliance.write'
+  'compliance.read' | 'compliance.write' | 'crm.configure' | 'crm.export' | 'messaging.manage' | 'whatsapp.manage'
 const matrix: Record<string, Permission[]> = {
-  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write'],
-  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read'],
+  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage'],
+  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage'],
   agent: ['properties.read', 'properties.write', 'leads.read', 'leads.write'],
   viewer: ['properties.read', 'leads.read'], user: ['properties.read'], 'super-admin': [],
 }

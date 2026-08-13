@@ -8,7 +8,7 @@ import { requireTenant } from '../../middlewares/auth'
 
 const createTask = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await TaskService.createTask(organizationId, req.body)
+  const result = await TaskService.createTask(organizationId, req.body, req.user?._id || req.user?.id)
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -47,7 +47,7 @@ const getAllTasks = catchAsync(async (req: Request, res: Response) => {
 const updateTask = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await TaskService.updateTask(organizationId, id, req.body)
+  const result = await TaskService.updateTask(organizationId, id, req.body, req.user?._id || req.user?.id)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

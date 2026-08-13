@@ -21,10 +21,14 @@ export interface IViewing {
   clientPhone: string
   clientEmail?: string
   notes?: string
+  calendarSyncStatus?: 'not_configured' | 'pending_provider_approval' | 'synced' | 'failed'
+  calendarProviderEventId?: string
   feedback?: {
     interestLevel?: 'Very High' | 'Interested' | 'Neutral' | 'Not Interested'
     clientBudgetFeedback?: string
     notes?: string
+  calendarSyncStatus?: 'not_configured' | 'pending_provider_approval' | 'synced' | 'failed'
+  calendarProviderEventId?: string
   }
   createdAt?: Date
   updatedAt?: Date

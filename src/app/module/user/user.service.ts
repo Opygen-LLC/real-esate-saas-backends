@@ -162,44 +162,37 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
   }
 }
 
-const getAgentLeaderboard = async (organizationId: string): Promise<any[]> => {
-  const agents = await User.find({
-    organizationId,
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
-  }).select('name email phoneNumber profileImgURL licenseNumber specialization')
-
-  const leaderboard = await Promise.all(
-    agents.map(async (agent) => {
-      const agentId = agent._id
-      const totalLeads = await Lead.countDocuments({ organizationId, assignedAgent: agentId })
-      const dealsWon = await Lead.countDocuments({ organizationId, assignedAgent: agentId, leadStatus: 'Won' })
-      const totalViewings = await Viewing.countDocuments({ organizationId, agentId })
-      const activeListings = await Property.countDocuments({ organizationId, agentId, status: 'Available' })
-
-      const conversionRate = totalLeads > 0 ? Math.round((dealsWon / totalLeads) * 100) : 0
-
-      return {
-        agent: {
-          _id: agent._id,
-          name: agent.name,
-          email: agent.email,
-          phoneNumber: agent.phoneNumber,
-          profileImgURL: agent.profileImgURL,
-          licenseNumber: agent.licenseNumber,
-          specialization: agent.specialization,
-        },
-        totalLeads,
-        dealsWon,
-        totalViewings,
-        activeListings,
-        conversionRate,
-      }
-    })
-  )
-
-  return leaderboard.sort((a, b) => b.dealsWon - a.dealsWon || b.totalLeads - a.totalLeads)
+const getAgentLeaderboard = async (organizationId: string, startDate?: string, endDate?: string): Promise<any[]> => {
+  const end = endDate ? new Date(`${endDate}T23:59:59.999+06:00`) : new Date()
+  const start = startDate ? new Date(`${startDate}T00:00:00+06:00`) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
+  const agents = await User.find({ organizationId, status: 'active', userRole: { $in: ['agent', 'agency_admin', 'agency_owner'] } })
+    .select('name email phoneNumber profileImgURL licenseNumber specialization').lean()
+  const agentIds = agents.map((agent: any) => agent._id)
+  const [leadRows, viewingRows, listingRows] = await Promise.all([
+    Lead.aggregate([
+      { $match: { organizationId, assignedAgent: { $in: agentIds }, createdAt: { $gte: start, $lte: end } } },
+      { $group: { _id: '$assignedAgent', totalLeads: { $sum: 1 }, dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } }, respondedLeads: { $sum: { $cond: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, 1, 0] } }, slaCompliant: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $lte: ['$firstResponseAt', '$responseDueAt'] }] }, 1, 0] } }, responseMsTotal: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $ne: [{ $type: '$createdAt' }, 'missing'] }] }, { $subtract: ['$firstResponseAt', '$createdAt'] }, 0] } } } },
+    ]),
+    Viewing.aggregate([
+      { $match: { organizationId, agentId: { $in: agentIds }, date: { $gte: start.toISOString().slice(0,10), $lte: end.toISOString().slice(0,10) } } },
+      { $group: { _id: '$agentId', totalViewings: { $sum: 1 }, completedViewings: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } } } },
+    ]),
+    Property.aggregate([{ $match: { organizationId, agentId: { $in: agentIds }, status: 'Available' } }, { $group: { _id: '$agentId', activeListings: { $sum: 1 } } }]),
+  ])
+  const leads = new Map(leadRows.map((row: any) => [String(row._id), row]))
+  const viewings = new Map(viewingRows.map((row: any) => [String(row._id), row]))
+  const listings = new Map(listingRows.map((row: any) => [String(row._id), row]))
+  return agents.map((agent: any) => {
+    const l: any = leads.get(String(agent._id)) || {}; const v: any = viewings.get(String(agent._id)) || {}; const p: any = listings.get(String(agent._id)) || {}
+    const totalLeads = l.totalLeads || 0, dealsWon = l.dealsWon || 0, responded = l.respondedLeads || 0
+    return { agent, totalLeads, dealsWon, totalViewings: v.totalViewings || 0, completedViewings: v.completedViewings || 0, activeListings: p.activeListings || 0,
+      conversionRate: totalLeads ? Math.round((dealsWon / totalLeads) * 1000) / 10 : 0,
+      responseRate: totalLeads ? Math.round((responded / totalLeads) * 1000) / 10 : 0,
+      slaComplianceRate: responded ? Math.round(((l.slaCompliant || 0) / responded) * 1000) / 10 : 0,
+      avgFirstResponseMinutes: responded ? Math.round((l.responseMsTotal || 0) / responded / 60000) : null,
+      range: { start: start.toISOString(), end: end.toISOString() } }
+  }).sort((a: any, b: any) => b.dealsWon - a.dealsWon || b.slaComplianceRate - a.slaComplianceRate || b.totalLeads - a.totalLeads)
 }
-
 const getUserById = async (organizationId: string, id: string): Promise<IUser | null> => {
   const result = await User.findOne({ _id: id, organizationId }).select('-password')
   if (!result) {

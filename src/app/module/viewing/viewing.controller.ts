@@ -30,7 +30,7 @@ const checkConflict = catchAsync(async (req: Request, res: Response) => {
 
 const createViewing = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await ViewingService.createViewing(organizationId, req.body)
+  const result = await ViewingService.createViewing(organizationId, req.body, req.user?._id || req.user?.id)
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -94,7 +94,7 @@ const getViewingById = catchAsync(async (req: Request, res: Response) => {
 const updateViewing = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await ViewingService.updateViewing(organizationId, id, req.body)
+  const result = await ViewingService.updateViewing(organizationId, id, req.body, req.user?._id || req.user?.id)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

@@ -87,7 +87,7 @@ if (isProduction) {
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
 
   if (smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false in production')
-  const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID']
+  const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
   requiredSms.forEach((name) => requiredInProduction(name))
 
   // Phase 3 publishing must fail at startup rather than silently accepting
@@ -138,6 +138,10 @@ export default {
     api_url: smsApiUrl,
     api_token: process.env.SMS_API_TOKEN?.trim() || '',
     sender_id: process.env.SMS_SENDER_ID?.trim() || '',
+    provider_name: process.env.SMS_PROVIDER_NAME?.trim() || 'generic-bd-http',
+    balance_url: process.env.SMS_BALANCE_URL?.trim() || '',
+    delivery_callback_url: process.env.SMS_DELIVERY_CALLBACK_URL?.trim() || '',
+    webhook_secret: process.env.SMS_WEBHOOK_SECRET?.trim() || '',
     timeout_ms: Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 10000)),
   },
   domains: {
@@ -170,6 +174,11 @@ export default {
     graph_version: process.env.META_GRAPH_API_VERSION || 'v26.0',
     graph_base_url: (process.env.META_GRAPH_BASE_URL || 'https://graph.facebook.com').replace(/\/$/, ''),
     max_attempts: Math.max(1, Number(process.env.META_CAPI_MAX_ATTEMPTS || 6)),
+  },
+  calendar: {
+    provider_approval_status: process.env.CALENDAR_PROVIDER_APPROVAL_STATUS || 'pending',
+    sync_url: process.env.CALENDAR_SYNC_URL?.trim() || '',
+    api_token: process.env.CALENDAR_SYNC_TOKEN?.trim() || '',
   },
   bkash: {
     grant_token_url: process.env.BKASH_GRANT_TOKEN_URL,
