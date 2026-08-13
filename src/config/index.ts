@@ -24,6 +24,15 @@ const requiredInProduction = (name: string, minimum = 1): string => {
   return value || ''
 }
 
+const publicApiUrl = process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`
+
+let publicApi: URL
+try {
+  publicApi = new URL(publicApiUrl)
+} catch {
+  throw new Error('PUBLIC_API_URL must be a valid absolute URL')
+}
+
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || 'http://localhost:3000')
   .split(',')
   .map((origin) => origin.trim().replace(/\/$/, ''))
@@ -32,6 +41,34 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL ||
 // Local/dev environments should never try to call an empty SMS URL. Production is
 // deliberately the opposite: a real SMS provider is mandatory and console OTPs
 // are rejected below.
+
+const rawCookieDomain = process.env.COOKIE_DOMAIN?.trim() || ''
+const cookieDomain = rawCookieDomain || undefined
+if (cookieDomain) {
+  if (cookieDomain.includes('://') || cookieDomain.includes('/') || cookieDomain.includes(':')) {
+    throw new Error('COOKIE_DOMAIN must be a hostname/domain only (for example .faysaldev.com)')
+  }
+
+  const normalizedCookieDomain = cookieDomain.replace(/^\./, '').toLowerCase()
+  const apiHostname = publicApi.hostname.toLowerCase()
+  if (apiHostname !== normalizedCookieDomain && !apiHostname.endsWith(`.${normalizedCookieDomain}`)) {
+    throw new Error(`COOKIE_DOMAIN ${cookieDomain} does not match PUBLIC_API_URL host ${apiHostname}`)
+  }
+}
+
+const cookieSecure = envBoolean('COOKIE_SECURE', isProduction || publicApi.protocol === 'https:')
+if (publicApi.protocol === 'https:' && !cookieSecure) {
+  throw new Error('COOKIE_SECURE must be true when PUBLIC_API_URL uses https://')
+}
+const rawSameSite = process.env.COOKIE_SAME_SITE?.trim().toLowerCase()
+if (rawSameSite && !['lax', 'strict', 'none'].includes(rawSameSite)) {
+  throw new Error('COOKIE_SAME_SITE must be one of: lax, strict, none')
+}
+const cookieSameSite = (rawSameSite || (cookieSecure ? 'none' : 'lax')) as 'lax' | 'strict' | 'none'
+if (cookieSameSite === 'none' && !cookieSecure) {
+  throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true')
+}
+
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
 
 if (isProduction) {
@@ -61,10 +98,12 @@ export default {
   env: process.env.NODE_ENV || 'development',
   isProduction,
   port: Number(process.env.PORT || 5000),
-  public_api_url: process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`,
+  public_api_url: publicApiUrl,
   client_url: process.env.CLIENT_URL || 'http://localhost:3000',
   allowed_origins: allowedOrigins,
-  cookie_domain: process.env.COOKIE_DOMAIN || undefined,
+  cookie_domain: cookieDomain,
+  cookie_secure: cookieSecure,
+  cookie_same_site: cookieSameSite,
   database_string: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
   bcrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS || '12',
   app_email: process.env.APP_EMAIL,

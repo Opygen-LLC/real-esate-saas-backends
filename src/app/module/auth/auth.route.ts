@@ -7,6 +7,7 @@ import { AuthValidation } from './auth.validation'
 
 const router = express.Router()
 router.get('/csrf-token', AuthController.getCsrfToken)
+router.get('/session', authMiddlewares.auth(), AuthController.getSession)
 router.post('/register-agency', authRateLimiter, validateRequest(AuthValidation.registerAgencyZodSchema), AuthController.registerAgency)
 router.post('/signup', authRateLimiter, validateRequest(AuthValidation.registerAgencyZodSchema), AuthController.registerAgency)
 router.post('/login', authRateLimiter, validateRequest(AuthValidation.loginZodSchema), AuthController.loginUser)

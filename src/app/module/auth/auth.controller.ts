@@ -8,8 +8,8 @@ import { AuthResult } from './auth.interface'
 import { AuthServices } from './auth.services'
 
 const cookieBase: CookieOptions = {
-  secure: config.isProduction,
-  sameSite: config.isProduction ? 'none' : 'lax',
+  secure: config.cookie_secure,
+  sameSite: config.cookie_same_site,
   domain: config.cookie_domain,
   path: '/',
 }
@@ -27,7 +27,24 @@ const issueCsrfToken = (res: Response): string => {
   return token
 }
 
+const clearCookieVariants = (res: Response, name: string, httpOnly: boolean) => {
+  // Clear the currently configured cookie and the legacy host-only variant. This
+  // prevents duplicate accessToken/refreshToken cookies when COOKIE_DOMAIN is
+  // introduced or changed on an existing deployment.
+  res.clearCookie(name, { ...cookieBase, httpOnly })
+  if (cookieBase.domain) {
+    res.clearCookie(name, { ...cookieBase, domain: undefined, httpOnly })
+  }
+}
+
+const clearAuthCookies = (res: Response) => {
+  clearCookieVariants(res, config.security.access_cookie_name, true)
+  clearCookieVariants(res, config.security.refresh_cookie_name, true)
+  clearCookieVariants(res, config.security.csrf_cookie_name, false)
+}
+
 const setAuthCookies = (res: Response, result: AuthResult) => {
+  clearAuthCookies(res)
   res.cookie(config.security.access_cookie_name, result.accessToken, {
     ...cookieBase,
     httpOnly: true,
@@ -39,16 +56,6 @@ const setAuthCookies = (res: Response, result: AuthResult) => {
     maxAge: 30 * 24 * 60 * 60 * 1000,
   })
   issueCsrfToken(res)
-}
-
-const clearAuthCookies = (res: Response) => {
-  for (const name of [
-    config.security.access_cookie_name,
-    config.security.refresh_cookie_name,
-    config.security.csrf_cookie_name,
-  ]) {
-    res.clearCookie(name, { ...cookieBase, httpOnly: name !== config.security.csrf_cookie_name })
-  }
 }
 
 const authResponse = (res: Response, result: AuthResult, message: string) => {
@@ -68,6 +75,16 @@ const getCsrfToken = catchAsync(async (req: Request, res: Response) => {
     success: true,
     message: 'CSRF token ready',
     data: { csrfToken },
+  })
+})
+
+const getSession = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0')
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Session is active',
+    data: { authenticated: true, user: req.user },
   })
 })
 
@@ -157,6 +174,7 @@ const logoutUser = catchAsync(async (req: Request, res: Response) => {
 
 export const AuthController = {
   getCsrfToken,
+  getSession,
   registerAgency,
   loginUser,
   verifyOtp,
