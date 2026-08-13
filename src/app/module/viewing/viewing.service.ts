@@ -8,6 +8,8 @@ import { Lead } from '../lead/lead.model'
 import { Property } from '../property/property.model'
 import { IViewing, IViewingFilter } from './viewing.interface'
 import { Viewing } from './viewing.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { normalizeBangladeshPhone } from '../../helpers/identity'
 
 // Helper to convert HH:mm to minutes for overlap checking
 const timeToMinutes = (timeStr: string): number => {
@@ -130,7 +132,8 @@ const publicRequestViewing = async (payload: {
   const { organizationId, propertyId, date, startTime, endTime, clientName, clientPhone, clientEmail, notes } =
     payload
 
-  const prop = await Property.findById(propertyId)
+  await EntitlementService.assertLimit(organizationId, 'leads')
+  const prop = await Property.findOne({ _id: propertyId, organizationId })
   if (!prop) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   }
@@ -147,24 +150,25 @@ const publicRequestViewing = async (payload: {
   }
 
   // Find or create Contact & Lead
-  let contact = await Contact.findOne({ organizationId, phone: clientPhone })
+  const normalizedPhone = normalizeBangladeshPhone(clientPhone)
+  let contact = await Contact.findOne({ organizationId, phone: normalizedPhone })
   if (!contact) {
     contact = await Contact.create({
       organizationId,
       name: clientName,
       email: clientEmail || '',
-      phone: clientPhone,
+      phone: normalizedPhone,
       type: 'Buyer',
       tags: ['ViewingRequest'],
     })
   }
 
-  let lead = await Lead.findOne({ organizationId, phone: clientPhone })
+  let lead = await Lead.findOne({ organizationId, phone: normalizedPhone })
   if (!lead) {
     lead = await Lead.create({
       organizationId,
       name: clientName,
-      phone: clientPhone,
+      phone: normalizedPhone,
       email: clientEmail,
       source: 'Website',
       leadStatus: 'ViewingScheduled',
@@ -191,7 +195,7 @@ const publicRequestViewing = async (payload: {
     startTime,
     endTime,
     clientName,
-    clientPhone,
+    clientPhone: normalizedPhone,
     clientEmail,
     status: 'Scheduled',
     notes,

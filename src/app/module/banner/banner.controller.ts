@@ -3,9 +3,12 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { Banner } from './banner.model'
+import { requireTenant } from '../../middlewares/auth'
+import ApiError from '../../../errors/ApiError'
+import { tenantResourceFilter } from '../../repositories/tenantRepository'
 
 const createBanner = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await Banner.create({ ...req.body, organizationId })
 
   sendResponse(res, {
@@ -17,7 +20,7 @@ const createBanner = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getBanners = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.params.organizationId || req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = req.params.organizationId || requireTenant(req)
   const result = await Banner.find({ organizationId }).sort({ createdAt: -1 })
 
   sendResponse(res, {
@@ -30,7 +33,9 @@ const getBanners = catchAsync(async (req: Request, res: Response) => {
 
 const updateBanner = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await Banner.findByIdAndUpdate(id, req.body, { new: true })
+  const { organizationId: _ignored, ...safeBody } = req.body
+  const result = await Banner.findOneAndUpdate(tenantResourceFilter(requireTenant(req), id), safeBody, { new: true })
+  if (!result) throw new ApiError(404, 'Banner not found')
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -42,7 +47,8 @@ const updateBanner = catchAsync(async (req: Request, res: Response) => {
 
 const deleteBanner = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await Banner.findByIdAndDelete(id)
+  const result = await Banner.findOneAndDelete(tenantResourceFilter(requireTenant(req), id))
+  if (!result) throw new ApiError(404, 'Banner not found')
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

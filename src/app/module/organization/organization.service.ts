@@ -6,10 +6,13 @@ import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter } from './organization.interface'
 import { Organization } from './organization.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
+import { randomUUID } from 'crypto'
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   if (!payload.organizationId) {
-    payload.organizationId = 'org_' + Math.random().toString(36).substring(2, 9)
+    payload.organizationId = `org_${randomUUID()}`
   }
 
   const existingOrg = await Organization.findOne({ organizationId: payload.organizationId })
@@ -34,14 +37,9 @@ const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrga
 }
 
 const getPublicSiteInfo = async (identifier: string): Promise<any> => {
-  let org = await Organization.findOne({
+  const org = await Organization.findOne({
     $or: [{ sub_domain: identifier }, { domain: identifier }, { organizationId: identifier }],
   })
-
-  // Fallback for demo or development
-  if (!org) {
-    org = await Organization.findOne({})
-  }
 
   if (!org) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Agency website not found')
@@ -93,14 +91,17 @@ const updateWebsiteSettings = async (
   organizationId: string,
   payload: Partial<IOrganization>
 ): Promise<IOrganization | null> => {
+  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) {
+    await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
+  }
   const updateData: any = {
     websiteSettings: payload.websiteSettings,
     socialLinks: payload.socialLinks,
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
     metaTitle: payload.metaTitle,
-    metaDescription: payload.metaDescription,
-    logo: payload.logo,
+    metaDescription: payload.metaDescription ? sanitizeRichText(payload.metaDescription) : payload.metaDescription,
+    logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
   }
 
   if (payload.templateId) updateData.templateId = payload.templateId
@@ -122,12 +123,9 @@ const updateMyOrganization = async (
   organizationId: string,
   payload: Partial<IOrganization>
 ): Promise<IOrganization | null> => {
-  const existingOrg = await Organization.findOne({ organizationId })
-  if (!existingOrg) {
-    return await Organization.create({ ...payload, organizationId })
-  }
-
-  const result = await Organization.findOneAndUpdate({ organizationId }, payload, {
+  const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
+  const safePayload = Object.fromEntries(allowed.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]))
+  const result = await Organization.findOneAndUpdate({ organizationId }, safePayload, {
     new: true,
   })
   return result

@@ -1,36 +1,39 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { BillingController } from './billing.controller'
+import { BkashPaymentRoute } from '../bkashPayment/bkashPayment.route'
 
 const router = express.Router()
 
+router.use('/bkash', BkashPaymentRoute)
+
 router.get(
   '/usage',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.auth(),
   BillingController.getSubscriptionUsage
 )
 
 router.get(
   '/history',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('billing.manage'),
   BillingController.getBillingHistory
 )
 
 router.post(
   '/change-plan',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('billing.manage'),
   BillingController.changeSubscriptionPlan
 )
 
 router.post(
   '/cancel',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin'),
+  authMiddlewares.requirePermission('billing.manage'),
   BillingController.cancelSubscription
 )
 
 router.get(
   '/history/:id/receipt',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('billing.manage'),
   BillingController.getInvoiceReceipt
 )
 

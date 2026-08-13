@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { PropertyTypeService } from './propertyType.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const getAllPropertyTypes = catchAsync(async (req: Request, res: Response) => {
   const organizationId = (req.params.organizationId || req.user?.organizationId || req.user?.storeId) as string
@@ -17,7 +18,7 @@ const getAllPropertyTypes = catchAsync(async (req: Request, res: Response) => {
 })
 
 const createPropertyType = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await PropertyTypeService.createPropertyType(organizationId, req.body)
 
   sendResponse(res, {

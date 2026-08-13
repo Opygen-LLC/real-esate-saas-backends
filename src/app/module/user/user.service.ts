@@ -3,22 +3,24 @@ import httpStatus from 'http-status'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
-import generateRandomCode from '../../../shared/generateRandomCode'
 import hashPassword from '../../helpers/hashPassword'
 import paginationHelper from '../../helpers/paginationHelper'
-import sendOtp from '../../helpers/sendOtp'
 import { Lead } from '../lead/lead.model'
 import { Property } from '../property/property.model'
 import { Viewing } from '../viewing/viewing.model'
 import { IUser, IUserFilter } from './user.interface'
 import { User } from './user.model'
+import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { randomToken } from '../../helpers/crypto'
 
-const createUser = async (userData: IUser): Promise<IUser> => {
-  userData.verificationCode = generateRandomCode()
-  userData.codeGenerationTimestamp = Date.now().toString()
+const createUser = async (organizationId: string, userData: IUser): Promise<IUser> => {
+  await EntitlementService.assertLimit(organizationId, 'agents')
+  userData.organizationId = organizationId
+  userData.email = normalizeEmail(userData.email)
+  try { userData.phoneNumber = normalizeBangladeshPhone(userData.phoneNumber) } catch (error) { throw new ApiError(400, (error as Error).message) }
 
   const existedEmail = await User.findOne({
-    organizationId: userData.organizationId,
     email: userData.email,
   })
   if (existedEmail) {
@@ -26,14 +28,13 @@ const createUser = async (userData: IUser): Promise<IUser> => {
   }
 
   const existedPhone = await User.findOne({
-    organizationId: userData.organizationId,
     phoneNumber: userData.phoneNumber,
   })
   if (existedPhone) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'A user with this phone number already exists in this organization')
   }
 
-  userData.password = await hashPassword(userData.password || '12345678')
+  userData.password = await hashPassword(userData.password || randomToken(24))
 
   const user = await User.create(userData)
   if (!user) {
@@ -47,7 +48,7 @@ const inviteAgent = async (
   organizationId: string,
   payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[] }
 ): Promise<IUser> => {
-  const password = generateRandomCode(8) // Temporary auto-generated password
+  const password = randomToken(24)
 
   const userData: Partial<IUser> = {
     ...payload,
@@ -58,7 +59,7 @@ const inviteAgent = async (
     status: 'active',
   }
 
-  const result = await createUser(userData as IUser)
+  const result = await createUser(organizationId, userData as IUser)
   return result
 }
 
@@ -199,28 +200,25 @@ const getAgentLeaderboard = async (organizationId: string): Promise<any[]> => {
   return leaderboard.sort((a, b) => b.dealsWon - a.dealsWon || b.totalLeads - a.totalLeads)
 }
 
-const getUserById = async (id: string): Promise<IUser | null> => {
-  const result = await User.findById(id).select('-password')
+const getUserById = async (organizationId: string, id: string): Promise<IUser | null> => {
+  const result = await User.findOne({ _id: id, organizationId }).select('-password')
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   }
   return result
 }
 
-const updateUserById = async (id: string, userData: Partial<IUser>): Promise<IUser | null> => {
-  if (userData.password) {
-    userData.password = await hashPassword(userData.password)
-  }
-
-  const result = await User.findByIdAndUpdate(id, userData, { new: true }).select('-password')
+const updateUserById = async (organizationId: string, id: string, userData: Partial<IUser>): Promise<IUser | null> => {
+  const { password: _password, organizationId: _org, userRole: _role, isVerified: _verified, ...safeData } = userData
+  const result = await User.findOneAndUpdate({ _id: id, organizationId }, safeData, { new: true }).select('-password')
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   }
   return result
 }
 
-const deleteUserById = async (id: string): Promise<IUser | null> => {
-  const result = await User.findByIdAndDelete(id)
+const deleteUserById = async (organizationId: string, id: string): Promise<IUser | null> => {
+  const result = await User.findOneAndDelete({ _id: id, organizationId, userRole: { $ne: 'agency_owner' } })
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   }

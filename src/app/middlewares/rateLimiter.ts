@@ -24,6 +24,12 @@ export const authRateLimiter = rateLimit({
   },
 })
 
+export const otpRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true,
+  legacyHeaders: false, message: { success: false, message: 'Too many verification requests. Try again later.' } })
+
+export const refreshRateLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 30, standardHeaders: true,
+  legacyHeaders: false, message: { success: false, message: 'Too many session refresh attempts.' } })
+
 // General API rate limiter for public portal routes
 export const generalApiRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

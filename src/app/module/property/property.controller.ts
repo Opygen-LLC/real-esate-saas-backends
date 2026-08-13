@@ -4,9 +4,12 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { PropertyService } from './property.service'
+import { requireTenant } from '../../middlewares/auth'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const createProperty = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
+  await EntitlementService.assertLimit(organizationId, 'properties')
   const result = await PropertyService.createProperty(organizationId, req.body)
 
   sendResponse(res, {
@@ -38,11 +41,7 @@ const getAllProperties = catchAsync(async (req: Request, res: Response) => {
   ])
 
   // Org scoping
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  } else if (req.query.organizationId) {
-    filters.organizationId = req.query.organizationId as string
-  }
+  filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await PropertyService.getAllProperties(filters, paginationOptions)
@@ -98,7 +97,7 @@ const getPublicPropertyDetail = catchAsync(async (req: Request, res: Response) =
 })
 
 const getPropertyById = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.query.organizationId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await PropertyService.getPropertyById(organizationId, id)
 
@@ -123,7 +122,7 @@ const getPublicPropertyBySlug = catchAsync(async (req: Request, res: Response) =
 })
 
 const updateProperty = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await PropertyService.updateProperty(organizationId, id, req.body)
 
@@ -136,7 +135,7 @@ const updateProperty = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updatePropertyStatus = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const { status } = req.body
   const result = await PropertyService.updatePropertyStatus(organizationId, id, status)
@@ -150,7 +149,7 @@ const updatePropertyStatus = catchAsync(async (req: Request, res: Response) => {
 })
 
 const reorderPropertyImages = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const { images } = req.body
   const result = await PropertyService.reorderPropertyImages(organizationId, id, images)
@@ -164,7 +163,7 @@ const reorderPropertyImages = catchAsync(async (req: Request, res: Response) => 
 })
 
 const deleteProperty = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await PropertyService.deleteProperty(organizationId, id)
 

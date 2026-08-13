@@ -3,13 +3,17 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { SupportTicket } from './support.model'
+import { requireTenant } from '../../middlewares/auth'
+import { randomInt } from 'crypto'
+import { sanitizeRichText } from '../../helpers/sanitize'
 
 const createTicket = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
-  const ticketId = 'TCK-' + Math.floor(100000 + Math.random() * 900000)
+  const organizationId = requireTenant(req)
+  const ticketId = `TCK-${randomInt(100000, 1000000)}`
 
   const ticket = await SupportTicket.create({
     ...req.body,
+    description: sanitizeRichText(req.body.description),
     organizationId,
     ticketId,
     userId: req.user?._id,
@@ -24,7 +28,7 @@ const createTicket = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getMyTickets = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const tickets = await SupportTicket.find({ organizationId }).sort({ createdAt: -1 })
 
   sendResponse(res, {
@@ -41,7 +45,7 @@ const replyToTicket = catchAsync(async (req: Request, res: Response) => {
   const role = req.user?.userRole || req.user?.role
   const sender = role === 'super-admin' ? 'support' : 'user'
 
-  const ticket = await SupportTicket.findById(id)
+  const ticket = await SupportTicket.findOne(req.user?.userRole === 'super-admin' ? { _id: id } : { _id: id, organizationId: requireTenant(req) })
   if (!ticket) {
     res.status(httpStatus.NOT_FOUND).json({ success: false, message: 'Ticket not found' })
     return
@@ -49,7 +53,7 @@ const replyToTicket = catchAsync(async (req: Request, res: Response) => {
 
   ticket.messages.push({
     sender,
-    message,
+    message: sanitizeRichText(message),
     timestamp: new Date(),
   })
 
@@ -71,7 +75,7 @@ const updateTicketStatus = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
   const { status, priority } = req.body
 
-  const ticket = await SupportTicket.findById(id)
+  const ticket = await SupportTicket.findOne(req.user?.userRole === 'super-admin' ? { _id: id } : { _id: id, organizationId: requireTenant(req) })
   if (!ticket) {
     res.status(httpStatus.NOT_FOUND).json({ success: false, message: 'Ticket not found' })
     return

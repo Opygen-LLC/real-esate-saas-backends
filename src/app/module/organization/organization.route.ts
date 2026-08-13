@@ -1,6 +1,8 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { OrganizationController } from './organization.controller'
+import validateRequest from '../../middlewares/validateRequest'
+import { OrganizationValidation } from './organization.validation'
 
 const router = express.Router()
 
@@ -11,25 +13,28 @@ router.get('/public/:domain', OrganizationController.getOrganizationByDomain)
 // Authenticated agency owner/admin endpoints
 router.patch(
   '/website-settings',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
+  validateRequest(OrganizationValidation.website),
   OrganizationController.updateWebsiteSettings
 )
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.auth(),
   OrganizationController.getMyOrganization
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  validateRequest(OrganizationValidation.updateProfile),
   OrganizationController.updateMyOrganization
 )
 
 router.patch(
   '/update',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  validateRequest(OrganizationValidation.updateProfile),
   OrganizationController.updateMyOrganization
 )
 
@@ -37,6 +42,7 @@ router.patch(
 router.get(
   '/all',
   authMiddlewares.authSuperAdmin,
+  validateRequest(OrganizationValidation.platformUpdate),
   OrganizationController.getAllOrganizations
 )
 

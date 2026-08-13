@@ -4,9 +4,10 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { TaskService } from './task.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const createTask = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await TaskService.createTask(organizationId, req.body)
 
   sendResponse(res, {
@@ -29,11 +30,7 @@ const getAllTasks = catchAsync(async (req: Request, res: Response) => {
     'dueDate',
   ])
 
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  } else if (req.query.organizationId) {
-    filters.organizationId = req.query.organizationId as string
-  }
+  filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await TaskService.getAllTasks(filters, paginationOptions)
@@ -48,7 +45,7 @@ const getAllTasks = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateTask = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await TaskService.updateTask(organizationId, id, req.body)
 
@@ -61,7 +58,7 @@ const updateTask = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deleteTask = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await TaskService.deleteTask(organizationId, id)
 
@@ -74,7 +71,7 @@ const deleteTask = catchAsync(async (req: Request, res: Response) => {
 })
 
 const approveTask = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const userId = req.user?.userId || req.user?._id || ''
   const { id } = req.params
   const { approvalStatus } = req.body || { approvalStatus: 'approved' }

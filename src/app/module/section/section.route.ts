@@ -6,13 +6,13 @@ const router = express.Router()
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   SectionController.createSection
 )
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.auth(),
   SectionController.getSections
 )
 
@@ -20,13 +20,13 @@ router.get('/public/:organizationId', SectionController.getSections)
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   SectionController.updateSection
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   SectionController.deleteSection
 )
 

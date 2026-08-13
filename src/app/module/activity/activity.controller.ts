@@ -4,9 +4,10 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ActivityService } from './activity.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const createActivity = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const agentId = req.user?._id || req.user?.id
   const result = await ActivityService.createActivity(organizationId, {
     ...req.body,

@@ -6,6 +6,20 @@ import { WebsiteAsset } from './websiteAsset.model'
 import { Organization } from '../organization/organization.model'
 import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.validation'
 import { IWebsitePage } from './websitePage.interface'
+import { ALLOWED_ASSET_MIME_TYPES, assertSafeUrl, sanitizeCustomCss, sanitizeRichText } from '../../helpers/sanitize'
+import { EntitlementService } from '../entitlement/entitlement.service'
+
+const sanitizeDocument = (value: any, key = ''): any => {
+  if (typeof value === 'string') {
+    if (/customcss|css/i.test(key)) return sanitizeCustomCss(value)
+    if (/html|richtext|description|content/i.test(key)) return sanitizeRichText(value)
+    if (/url|href|src|image/i.test(key) && value) return assertSafeUrl(value)
+    return value.slice(0, 20000)
+  }
+  if (Array.isArray(value)) return value.map(item => sanitizeDocument(item, key))
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, sanitizeDocument(child, childKey)]))
+  return value
+}
 
 const getAllPages = async (organizationId: string) => {
   let pages = await WebsitePage.find({ organizationId }).sort({ createdAt: 1 })
@@ -110,7 +124,8 @@ const saveDraft = async (organizationId: string, pageId: string, document: any, 
     throw new ApiError(httpStatus.NOT_FOUND, 'Website page not found')
   }
 
-  page.draftDocument = document
+  if (document?.templateTier === 'premium') await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
+  page.draftDocument = sanitizeDocument(document)
   page.status = 'draft'
   if (userId) page.updatedBy = userId as any
 
@@ -148,11 +163,17 @@ const publishPage = async (organizationId: string, pageId: string, userId?: stri
 }
 
 const addAsset = async (organizationId: string, payload: any, userId?: string) => {
+  if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
+  const size = Number(payload.size || 0)
+  if (!Number.isFinite(size) || size < 0 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
+  await EntitlementService.assertStorage(organizationId, size)
+  payload.url = assertSafeUrl(payload.url)
   const asset = await WebsiteAsset.create({
     ...payload,
     organizationId,
     uploadedBy: userId,
   })
+  await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: size } })
   return asset
 }
 
@@ -161,6 +182,7 @@ const deleteAsset = async (organizationId: string, assetId: string) => {
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Asset not found or unauthorized')
   }
+  await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: -Math.max(0, result.size || 0) } })
   return result
 }
 

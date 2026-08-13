@@ -25,7 +25,7 @@ process.on('unhandledRejection', (error) => {
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...')
   if (server) {
-    server.close()
+    server.close(() => { void mongoose.disconnect() })
   }
 })
 
@@ -39,6 +39,7 @@ async function bootstrap() {
     })
   } catch (error) {
     errorLogger.error('Error connecting to database:', error)
+    process.exitCode = 1
   }
 }
 

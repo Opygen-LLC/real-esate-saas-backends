@@ -4,9 +4,12 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { LeadService } from './lead.service'
+import { requireTenant } from '../../middlewares/auth'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const createLead = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
+  await EntitlementService.assertLimit(organizationId, 'leads')
   const agentId = req.user?._id || req.user?.id
   const result = await LeadService.createLead(organizationId, req.body, agentId)
 
@@ -41,11 +44,7 @@ const getAllLeads = catchAsync(async (req: Request, res: Response) => {
     'maxBudget',
   ])
 
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  } else if (req.query.organizationId) {
-    filters.organizationId = req.query.organizationId as string
-  }
+  filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await LeadService.getAllLeads(filters, paginationOptions)
@@ -60,7 +59,7 @@ const getAllLeads = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getLeadById = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await LeadService.getLeadById(organizationId, id)
 
@@ -73,7 +72,7 @@ const getLeadById = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateLead = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await LeadService.updateLead(organizationId, id, req.body)
 
@@ -86,7 +85,7 @@ const updateLead = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateLeadStatus = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const { leadStatus, lostReason } = req.body
   const agentId = req.user?._id || req.user?.id
@@ -101,7 +100,7 @@ const updateLeadStatus = catchAsync(async (req: Request, res: Response) => {
 })
 
 const assignAgent = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const { assignedAgent, agentName } = req.body
   const result = await LeadService.assignAgent(organizationId, id, assignedAgent, agentName)
@@ -115,7 +114,7 @@ const assignAgent = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deleteLead = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await LeadService.deleteLead(organizationId, id)
 

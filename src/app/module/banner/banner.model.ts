@@ -24,5 +24,6 @@ const bannerSchema = new Schema<IBanner>(
   },
   { timestamps: true }
 )
+bannerSchema.index({ organizationId: 1, _id: 1 })
 
 export const Banner: Model<IBanner> = mongoose.model<IBanner>('Banner', bannerSchema)

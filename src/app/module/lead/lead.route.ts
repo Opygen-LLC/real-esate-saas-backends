@@ -14,46 +14,46 @@ router.post('/public-capture', publicLeadRateLimiter, LeadController.publicCaptu
 // Authenticated CRM endpoints
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.read'),
   LeadController.getAllLeads
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.write'),
   validateRequest(LeadValidation.createLeadZodSchema),
   LeadController.createLead
 )
 
 router.get(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.read'),
   LeadController.getLeadById
 )
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.write'),
   validateRequest(LeadValidation.updateLeadZodSchema),
   LeadController.updateLead
 )
 
 router.patch(
   '/:id/status',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.write'),
   validateRequest(LeadValidation.updateLeadStatusZodSchema),
   LeadController.updateLeadStatus
 )
 
 router.patch(
   '/:id/assign',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.assign'),
   LeadController.assignAgent
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.write'),
   LeadController.deleteLead
 )
 

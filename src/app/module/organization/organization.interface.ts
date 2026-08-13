@@ -2,11 +2,15 @@ import mongoose, { Model } from 'mongoose'
 
 export interface ISubscription {
   plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
-  status: 'active' | 'inactive' | 'expired'
+  status: 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
   currentPeriodEnd: Date | null
   lastPaymentDate: Date | null
   maxProperties?: number
   maxAgents?: number
+  trialEndsAt?: Date | null
+  gracePeriodEnd?: Date | null
+  cancelAtPeriodEnd?: boolean
+  reminderSentAt?: Date | null
 }
 
 export interface IServiceArea {
@@ -68,6 +72,9 @@ export interface IOrganization {
   }
   totalVisitor?: number
   isBlocked?: boolean
+  storageUsedBytes?: number
+  monthlyVisitorCount?: number
+  visitorUsageMonth?: string
   createdAt?: Date
   updatedAt?: Date
 }

@@ -24,6 +24,7 @@ const landingPageSchema = new Schema<ILandingPage>(
 )
 
 landingPageSchema.index({ organizationId: 1, slug: 1 }, { unique: true })
+landingPageSchema.index({ organizationId: 1, _id: 1 })
 
 export const LandingPage: Model<ILandingPage> = mongoose.model<ILandingPage>(
   'LandingPage',

@@ -4,9 +4,10 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ViewingService } from './viewing.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const checkConflict = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const { agentId, propertyId, date, startTime, endTime, excludeViewingId } = req.body
 
   const result = await ViewingService.checkConflict(
@@ -28,7 +29,7 @@ const checkConflict = catchAsync(async (req: Request, res: Response) => {
 })
 
 const createViewing = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await ViewingService.createViewing(organizationId, req.body)
 
   sendResponse(res, {
@@ -63,11 +64,7 @@ const getAllViewings = catchAsync(async (req: Request, res: Response) => {
     'endDate',
   ])
 
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  } else if (req.query.organizationId) {
-    filters.organizationId = req.query.organizationId as string
-  }
+  filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await ViewingService.getAllViewings(filters, paginationOptions)
@@ -82,7 +79,7 @@ const getAllViewings = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getViewingById = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ViewingService.getViewingById(organizationId, id)
 
@@ -95,7 +92,7 @@ const getViewingById = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateViewing = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ViewingService.updateViewing(organizationId, id, req.body)
 
@@ -108,7 +105,7 @@ const updateViewing = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deleteViewing = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ViewingService.deleteViewing(organizationId, id)
 

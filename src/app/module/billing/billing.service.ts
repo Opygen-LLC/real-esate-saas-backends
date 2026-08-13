@@ -5,6 +5,16 @@ import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IBilling } from './billing.interface'
 import { Billing } from './billing.model'
+import { Lead } from '../lead/lead.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 
 const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling> => {
   if (!payload.invoiceId) {
@@ -30,6 +40,8 @@ const getSubscriptionUsage = async (organizationId: string) => {
     organizationId,
     userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
   })
+  const currentLeads = await Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } })
+  const { limits } = await EntitlementService.resolve(organizationId)
 
   const maxProperties = org.subscription?.maxProperties || 100
   const maxAgents = org.subscription?.maxAgents || 3
@@ -41,7 +53,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
 
   return {
     plan: org.subscription?.plan || 'starter',
-    status: org.subscription?.status || 'active',
+    status: org.subscription?.status || 'trialing',
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
     properties: {
       used: currentProperties,
@@ -53,71 +65,12 @@ const getSubscriptionUsage = async (organizationId: string) => {
       limit: maxAgents,
       percentage: agentsPercent,
     },
+    leads: { used: currentLeads, limit: limits.maxLeads, percentage: Math.min(Math.round((currentLeads / limits.maxLeads) * 100), 100) },
+    storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
+    visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
+    features: { customDomain: limits.hasCustomDomain, advancedAnalytics: limits.hasAdvancedAnalytics,
+      whatsAppAutomation: limits.hasWhatsAppIntegration, smsAutomation: limits.hasSmsAutomation, premiumTemplates: limits.hasPremiumTemplates },
     isApproachingLimit,
-  }
-}
-
-const changeSubscriptionPlan = async (
-  organizationId: string,
-  plan: 'starter' | 'professional' | 'agency' | 'enterprise',
-  billingCycle: 'monthly' | 'yearly' = 'monthly'
-) => {
-  const org = await Organization.findOne({ organizationId })
-  if (!org) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  }
-
-  let maxProperties = 25
-  let maxAgents = 2
-  let price = 49
-
-  if (plan === 'starter') {
-    maxProperties = 25
-    maxAgents = 2
-    price = billingCycle === 'yearly' ? 39 : 49
-  } else if (plan === 'professional') {
-    maxProperties = 150
-    maxAgents = 10
-    price = billingCycle === 'yearly' ? 119 : 149
-  } else if (plan === 'agency' || plan === 'enterprise') {
-    maxProperties = 9999
-    maxAgents = 9999
-    price = billingCycle === 'yearly' ? 319 : 399
-  }
-
-  const periodEnd = new Date()
-  periodEnd.setMonth(periodEnd.getMonth() + (billingCycle === 'yearly' ? 12 : 1))
-
-  // Update Organization Subscription
-  org.subscription = {
-    plan,
-    status: 'active',
-    currentPeriodEnd: periodEnd,
-    lastPaymentDate: new Date(),
-    maxProperties,
-    maxAgents,
-  }
-  await org.save()
-
-  // Generate Invoice Record
-  const invoiceId = 'INV-' + Math.random().toString(36).substring(2, 8).toUpperCase()
-  await Billing.create({
-    organizationId,
-    invoiceId,
-    amount: price,
-    serviceType: 'subscription',
-    serviceName: `${plan.toUpperCase()} Plan (${billingCycle})`,
-    status: 'paid',
-    billingCycle,
-    date: new Date().toISOString().split('T')[0],
-    paymentMethod: 'Credit Card (Stripe)',
-  })
-
-  return {
-    organization: org,
-    plan,
-    price,
-    invoiceId,
   }
 }
 
@@ -128,7 +81,8 @@ const cancelSubscription = async (organizationId: string) => {
   }
 
   if (org.subscription) {
-    org.subscription.status = 'inactive'
+    org.subscription.status = 'cancel_at_period_end'
+    org.subscription.cancelAtPeriodEnd = true
     await org.save()
   }
 
@@ -150,6 +104,13 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
   const status = (billing as any).paymentStatus || billing.status || 'paid'
   const dateStr = (billing as any).billingDate ? new Date((billing as any).billingDate).toLocaleDateString() : billing.date
   const nameStr = (billing as any).planName || billing.serviceName || 'SaaS Subscription'
+  const currency = billing.currency || 'BDT'
+  const formattedAmount = new Intl.NumberFormat('en-BD', {
+    style: 'currency',
+    currency,
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2,
+  }).format(billing.amount)
 
   return `
     <!DOCTYPE html>
@@ -174,16 +135,16 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
           <div class="header">
             <div>
               <div class="title">INVOICE RECEIPT</div>
-              <div style="font-size: 13px; color: #64748b;">${org?.agencyName || 'PropSe Agency OS'}</div>
+              <div style="font-size: 13px; color: #64748b;">${escapeHtml(org?.agencyName || 'PropSe Agency OS')}</div>
             </div>
             <div>
-              <span class="status">${status}</span>
+              <span class="status">${escapeHtml(status)}</span>
             </div>
           </div>
           <div class="details">
-            <p><strong>Invoice ID:</strong> ${billing.invoiceId}</p>
-            <p><strong>Billing Date:</strong> ${dateStr}</p>
-            <p><strong>Billed To:</strong> ${org?.agencyName || 'Agency Customer'} (${org?.email || ''})</p>
+            <p><strong>Invoice ID:</strong> ${escapeHtml(billing.invoiceId)}</p>
+            <p><strong>Billing Date:</strong> ${escapeHtml(dateStr)}</p>
+            <p><strong>Billed To:</strong> ${escapeHtml(org?.agencyName || 'Agency Customer')} (${escapeHtml(org?.email || '')})</p>
           </div>
           <table class="table">
             <thead>
@@ -191,12 +152,12 @@ const getInvoiceReceipt = async (organizationId: string, id: string) => {
             </thead>
             <tbody>
               <tr>
-                <td>${nameStr}</td>
-                <td>$${billing.amount.toFixed(2)} USD</td>
+                <td>${escapeHtml(nameStr)}</td>
+                <td>${escapeHtml(formattedAmount)}</td>
               </tr>
             </tbody>
           </table>
-          <div class="total">Total Paid: $${billing.amount.toFixed(2)} USD</div>
+          <div class="total">Total Paid: ${escapeHtml(formattedAmount)}</div>
         </div>
         <script>window.print();</script>
       </body>
@@ -208,7 +169,6 @@ export const BillingService = {
   createBillingRecord,
   getBillingHistory,
   getSubscriptionUsage,
-  changeSubscriptionPlan,
   cancelSubscription,
   getInvoiceReceipt,
 }

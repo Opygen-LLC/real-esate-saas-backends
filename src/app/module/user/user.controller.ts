@@ -4,9 +4,11 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { UserService } from './user.service'
+import { requireTenant } from '../../middlewares/auth'
+import { writeAudit } from '../audit/audit.service'
 
 const createUser = catchAsync(async (req: Request, res: Response) => {
-  const result = await UserService.createUser(req.body)
+  const result = await UserService.createUser(requireTenant(req), req.body)
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
@@ -16,7 +18,7 @@ const createUser = catchAsync(async (req: Request, res: Response) => {
 })
 
 const inviteAgent = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await UserService.inviteAgent(organizationId, req.body)
 
   sendResponse(res, {
@@ -32,9 +34,7 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
 
   // If agency admin/owner, force organizationId scoping
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  }
+  filters.organizationId = requireTenant(req)
 
   const result = await UserService.getAllUsers(filters, paginationOptions)
 
@@ -72,7 +72,7 @@ const getPublicAgentDetail = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getAgentLeaderboard = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const result = await UserService.getAgentLeaderboard(organizationId)
 
   sendResponse(res, {
@@ -85,7 +85,7 @@ const getAgentLeaderboard = catchAsync(async (req: Request, res: Response) => {
 
 const getUserById = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await UserService.getUserById(id)
+  const result = await UserService.getUserById(requireTenant(req), id)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -97,7 +97,7 @@ const getUserById = catchAsync(async (req: Request, res: Response) => {
 
 const updateUserById = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await UserService.updateUserById(id, req.body)
+  const result = await UserService.updateUserById(requireTenant(req), id, req.body)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -109,7 +109,7 @@ const updateUserById = catchAsync(async (req: Request, res: Response) => {
 
 const deleteUserById = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await UserService.deleteUserById(id)
+  const result = await UserService.deleteUserById(requireTenant(req), id)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -136,6 +136,9 @@ const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => 
 const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
   const result = await UserService.updateUserRoleSuperAdmin(id, req.body)
+  await writeAudit({ organizationId: result?.organizationId, actorId: req.user!._id!, actorRole: 'super-admin',
+    action: 'user.platform_updated', entityType: 'user', entityId: id, requestId: req.requestId, ip: req.ip,
+    metadata: { fields: Object.keys(req.body) } })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

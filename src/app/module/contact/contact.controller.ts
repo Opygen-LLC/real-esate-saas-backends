@@ -4,9 +4,10 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ContactService } from './contact.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const createContact = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await ContactService.createContact(organizationId, req.body)
 
   sendResponse(res, {
@@ -20,11 +21,7 @@ const createContact = catchAsync(async (req: Request, res: Response) => {
 const getAllContacts = catchAsync(async (req: Request, res: Response) => {
   const filters = pick(req.query, ['searchTerm', 'organizationId', 'type', 'city', 'tag'])
 
-  if (req.user && req.user.userRole !== 'super-admin' && (req.user.organizationId || req.user.storeId)) {
-    filters.organizationId = req.user.organizationId || req.user.storeId
-  } else if (req.query.organizationId) {
-    filters.organizationId = req.query.organizationId as string
-  }
+  filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await ContactService.getAllContacts(filters, paginationOptions)
@@ -39,7 +36,7 @@ const getAllContacts = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getContactById = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ContactService.getContactById(organizationId, id)
 
@@ -52,7 +49,7 @@ const getContactById = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateContact = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ContactService.updateContact(organizationId, id, req.body)
 
@@ -65,7 +62,7 @@ const updateContact = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deleteContact = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await ContactService.deleteContact(organizationId, id)
 

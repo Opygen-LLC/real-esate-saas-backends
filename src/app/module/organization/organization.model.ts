@@ -96,7 +96,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     sub_domain: {
       type: String,
       default: '',
-      index: true,
+      lowercase: true,
     },
     domain_Verify: {
       type: Boolean,
@@ -114,8 +114,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       },
       status: {
         type: String,
-        enum: ['active', 'inactive', 'expired'],
-        default: 'active',
+        enum: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended'],
+        default: 'trialing',
       },
       currentPeriodEnd: {
         type: Date,
@@ -133,6 +133,10 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
         type: Number,
         default: 3,
       },
+      trialEndsAt: { type: Date, default: () => new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+      gracePeriodEnd: { type: Date, default: null },
+      cancelAtPeriodEnd: { type: Boolean, default: false },
+      reminderSentAt: { type: Date, default: null },
     },
     socialLinks: {
       facebook: { type: String, default: '' },
@@ -170,6 +174,9 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       type: Boolean,
       default: false,
     },
+    storageUsedBytes: { type: Number, default: 0, min: 0 },
+    monthlyVisitorCount: { type: Number, default: 0, min: 0 },
+    visitorUsageMonth: { type: String, default: '' },
   },
   {
     timestamps: true,
@@ -178,6 +185,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
   }
 )
+
+organizationSchema.index({ sub_domain: 1 }, { unique: true })
 
 export const Organization = model<IOrganization, OrganizationModel>(
   'Organization',

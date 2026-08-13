@@ -120,5 +120,6 @@ const leadSchema = new Schema<ILead, LeadModel>(
 
 leadSchema.index({ organizationId: 1, leadStatus: 1 })
 leadSchema.index({ organizationId: 1, assignedAgent: 1 })
+leadSchema.index({ organizationId: 1, _id: 1 })
 
 export const Lead = model<ILead, LeadModel>('Lead', leadSchema)

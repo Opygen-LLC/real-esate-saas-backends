@@ -98,4 +98,9 @@ export function checkGuardrails(document: any): { valid: boolean; message?: stri
 export const WebsiteBuilderValidation = {
   builderDocumentSchema,
   checkGuardrails,
+  saveDraftSchema: z.object({ body: z.object({ document: builderDocumentSchema.passthrough() }) }),
+  assetSchema: z.object({ body: z.object({ key: z.string().trim().min(1).max(255), url: z.string().url().max(2048),
+    mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/svg+xml', 'font/woff2']),
+    size: z.number().int().min(0).max(20 * 1024 * 1024), width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(), altText: z.string().max(300).optional() }) }),
 }

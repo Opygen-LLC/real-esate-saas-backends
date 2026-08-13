@@ -1,6 +1,8 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { WebsiteBuilderController } from './websiteBuilder.controller'
+import validateRequest from '../../middlewares/validateRequest'
+import { WebsiteBuilderValidation } from './websiteBuilder.validation'
 
 const router = express.Router()
 
@@ -13,37 +15,39 @@ router.get(
 // Authenticated builder endpoints (Agency Owner / Admin)
 router.get(
   '/pages',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.auth(),
   WebsiteBuilderController.getAllPages
 )
 
 router.get(
   '/pages/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.auth(),
   WebsiteBuilderController.getPageById
 )
 
 router.put(
   '/pages/:id/draft',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('website.write'),
+  validateRequest(WebsiteBuilderValidation.saveDraftSchema),
   WebsiteBuilderController.saveDraft
 )
 
 router.post(
   '/pages/:id/publish',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('website.write'),
   WebsiteBuilderController.publishPage
 )
 
 router.post(
   '/assets',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('website.write'),
+  validateRequest(WebsiteBuilderValidation.assetSchema),
   WebsiteBuilderController.addAsset
 )
 
 router.delete(
   '/assets/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('website.write'),
   WebsiteBuilderController.deleteAsset
 )
 

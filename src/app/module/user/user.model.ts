@@ -13,6 +13,7 @@ const userSchema = new Schema<IUser, UserModel>(
       type: String,
       required: true,
       trim: true,
+      lowercase: true,
     },
     phoneNumber: {
       type: String,
@@ -38,16 +39,13 @@ const userSchema = new Schema<IUser, UserModel>(
         'agent',
         'viewer',
         'user',
-        'admin',
-        'client',
-        'staff',
       ],
       default: 'agent',
     },
     status: {
       type: String,
       enum: ['pending', 'active', 'blocked'],
-      default: 'active',
+      default: 'pending',
     },
     profileImgURL: {
       type: String,
@@ -87,7 +85,7 @@ const userSchema = new Schema<IUser, UserModel>(
     },
     isVerified: {
       type: Boolean,
-      default: true,
+      default: false,
     },
     isAddProfile: {
       type: Boolean,
@@ -106,8 +104,10 @@ const userSchema = new Schema<IUser, UserModel>(
   }
 )
 
-userSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true })
-userSchema.index({ organizationId: 1, email: 1 }, { unique: true })
+// Login identifiers are platform-wide, so uniqueness is intentionally global.
+userSchema.index({ phoneNumber: 1 }, { unique: true })
+userSchema.index({ email: 1 }, { unique: true })
+userSchema.index({ organizationId: 1, _id: 1 })
 
 userSchema.statics.isUserExist = async function (
   phoneNumber: string

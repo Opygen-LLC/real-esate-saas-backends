@@ -13,6 +13,10 @@ export interface ISubscriptionPlan {
   hasAdvancedAnalytics: boolean
   hasWhatsAppIntegration: boolean
   hasLeadAutomations: boolean
+  hasSmsAutomation: boolean
+  hasPremiumTemplates: boolean
+  maxStorageMb: number
+  maxMonthlyVisitors: number
   isPopular?: boolean
   isActive: boolean
 }

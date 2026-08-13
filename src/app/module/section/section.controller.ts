@@ -3,9 +3,12 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { Section } from './section.model'
+import { requireTenant } from '../../middlewares/auth'
+import ApiError from '../../../errors/ApiError'
+import { tenantResourceFilter } from '../../repositories/tenantRepository'
 
 const createSection = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await Section.create({ ...req.body, organizationId })
 
   sendResponse(res, {
@@ -17,7 +20,7 @@ const createSection = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getSections = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.params.organizationId || req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = req.params.organizationId || requireTenant(req)
   const result = await Section.find({ organizationId }).sort({ order: 1 })
 
   sendResponse(res, {
@@ -30,7 +33,9 @@ const getSections = catchAsync(async (req: Request, res: Response) => {
 
 const updateSection = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await Section.findByIdAndUpdate(id, req.body, { new: true })
+  const { organizationId: _ignored, ...safeBody } = req.body
+  const result = await Section.findOneAndUpdate(tenantResourceFilter(requireTenant(req), id), safeBody, { new: true })
+  if (!result) throw new ApiError(404, 'Section not found')
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -42,7 +47,8 @@ const updateSection = catchAsync(async (req: Request, res: Response) => {
 
 const deleteSection = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await Section.findByIdAndDelete(id)
+  const result = await Section.findOneAndDelete(tenantResourceFilter(requireTenant(req), id))
+  if (!result) throw new ApiError(404, 'Section not found')
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { AmenityService } from './amenity.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const getAllAmenities = catchAsync(async (req: Request, res: Response) => {
   const organizationId = (req.params.organizationId || req.user?.organizationId || req.user?.storeId) as string
@@ -17,7 +18,7 @@ const getAllAmenities = catchAsync(async (req: Request, res: Response) => {
 })
 
 const createAmenity = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId || req.body.organizationId) as string
+  const organizationId = requireTenant(req)
   const result = await AmenityService.createAmenity(organizationId, req.body)
 
   sendResponse(res, {

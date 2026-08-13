@@ -6,13 +6,13 @@ const router = express.Router()
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   LandingPageController.createLandingPage
 )
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.auth(),
   LandingPageController.getLandingPages
 )
 
@@ -20,13 +20,13 @@ router.get('/public/:organizationId', LandingPageController.getLandingPages)
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   LandingPageController.updateLandingPage
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   LandingPageController.deleteLandingPage
 )
 

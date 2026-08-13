@@ -173,5 +173,6 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
 propertySchema.index({ organizationId: 1, slug: 1 }, { unique: true })
 propertySchema.index({ organizationId: 1, status: 1, price: 1 })
 propertySchema.index({ organizationId: 1, propertyType: 1, listingType: 1 })
+propertySchema.index({ organizationId: 1, _id: 1 })
 
 export const Property = model<IProperty, PropertyModel>('Property', propertySchema)

@@ -30,5 +30,6 @@ const sectionSchema = new Schema<ISection>(
   },
   { timestamps: true }
 )
+sectionSchema.index({ organizationId: 1, _id: 1 })
 
 export const Section: Model<ISection> = mongoose.model<ISection>('Section', sectionSchema)

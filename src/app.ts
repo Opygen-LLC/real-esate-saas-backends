@@ -1,11 +1,15 @@
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import express, { Application, Request, Response } from 'express'
+import helmet from 'helmet'
 import httpStatus from 'http-status'
 import { CronRoute } from './app/module/cron/cron.route'
 import globalErrorHandler from './app/middlewares/globalErrorHandler'
 import routes from './app/routes/index'
 import { sendResponse } from './shared/customResponse'
+import config from './config'
+import { csrfProtection, requestContext, verifyCronSignature } from './app/middlewares/security'
+import mongoose from 'mongoose'
 
 const app: Application = express()
 
@@ -13,11 +17,8 @@ const app: Application = express()
 app.set('trust proxy', 1)
 
 // 1. Credentialed CORS middleware allowing requesting origins
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      callback(null, origin || true)
-    },
+const corsOptions: cors.CorsOptions = {
+    origin: (origin, callback) => callback(null, !origin || config.allowed_origins.includes(origin.replace(/\/$/, ''))),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -26,40 +27,23 @@ app.use(
       'X-Requested-With',
       'Accept',
       'Origin',
-      'Access-Control-Allow-Origin',
-      'Access-Control-Allow-Headers',
-      'Access-Control-Allow-Methods',
+      'X-CSRF-Token', 'X-Request-ID', 'Idempotency-Key',
     ],
-  })
-)
+  }
+app.use(cors(corsOptions))
 
 // Explicit preflight OPTIONS handler for all endpoints
-app.options('*', cors() as any)
+app.options('*', cors(corsOptions) as any)
 
 // 2. Global Headers & Preflight Handler
-app.use((req: Request, res: Response, next) => {
-  const origin = req.headers.origin || '*'
-  res.setHeader('Access-Control-Allow-Origin', origin)
-  res.setHeader('Access-Control-Allow-Credentials', 'true')
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Requested-With, Accept, Origin'
-  )
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('X-XSS-Protection', '1; mode=block')
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end()
-    return
-  }
-  next()
-})
-
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+  hsts: config.isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false }))
+app.use(requestContext)
 app.use(cookieParser())
+app.use('/api/v1/organization/website', express.json({ limit: '5mb' }))
+app.use(express.json({ limit: '1mb' }))
+app.use(express.urlencoded({ extended: true, limit: '256kb' }))
+app.use(csrfProtection)
 
 // Root testing route
 app.get('/', (req: Request, res: Response) => {
@@ -75,9 +59,15 @@ app.get('/', (req: Request, res: Response) => {
   })
 })
 
+app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }))
+app.get('/ready', (_req, res) => {
+  const ready = mongoose.connection.readyState === 1
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready' })
+})
+
 // Main API routes
 app.use('/api/v1', routes)
-app.use('/api/cron', CronRoute)
+app.use('/api/cron', verifyCronSignature, CronRoute)
 
 // Global Error Handler
 app.use(globalErrorHandler)

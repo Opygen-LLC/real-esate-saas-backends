@@ -22,7 +22,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     },
     currency: {
       type: String,
-      default: 'USD',
+      default: 'BDT',
     },
     description: {
       type: String,
@@ -60,6 +60,10 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
       type: Boolean,
       default: false,
     },
+    hasSmsAutomation: { type: Boolean, default: false },
+    hasPremiumTemplates: { type: Boolean, default: false },
+    maxStorageMb: { type: Number, default: 1024, min: 0 },
+    maxMonthlyVisitors: { type: Number, default: 10000, min: 0 },
     isPopular: {
       type: Boolean,
       default: false,

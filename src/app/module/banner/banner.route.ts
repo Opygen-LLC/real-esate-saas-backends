@@ -6,13 +6,13 @@ const router = express.Router()
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   BannerController.createBanner
 )
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.auth(),
   BannerController.getBanners
 )
 
@@ -20,13 +20,13 @@ router.get('/public/:organizationId', BannerController.getBanners)
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   BannerController.updateBanner
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('website.write'),
   BannerController.deleteBanner
 )
 

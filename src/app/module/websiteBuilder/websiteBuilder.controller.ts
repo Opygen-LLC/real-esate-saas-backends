@@ -3,9 +3,10 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { WebsiteBuilderService } from './websiteBuilder.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const getAllPages = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const result = await WebsiteBuilderService.getAllPages(organizationId)
 
   sendResponse(res, {
@@ -17,7 +18,7 @@ const getAllPages = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getPageById = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await WebsiteBuilderService.getPageById(organizationId, id)
 
@@ -30,7 +31,7 @@ const getPageById = catchAsync(async (req: Request, res: Response) => {
 })
 
 const saveDraft = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const userId = req.user?.userId
   const { id } = req.params
   const { document } = req.body
@@ -46,7 +47,7 @@ const saveDraft = catchAsync(async (req: Request, res: Response) => {
 })
 
 const publishPage = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const userId = req.user?.userId
   const { id } = req.params
 
@@ -61,7 +62,7 @@ const publishPage = catchAsync(async (req: Request, res: Response) => {
 })
 
 const addAsset = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const userId = req.user?.userId
 
   const result = await WebsiteBuilderService.addAsset(organizationId, req.body, userId)
@@ -75,7 +76,7 @@ const addAsset = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deleteAsset = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
 
   const result = await WebsiteBuilderService.deleteAsset(organizationId, id)

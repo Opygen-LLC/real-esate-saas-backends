@@ -4,10 +4,11 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { OrganizationService } from './organization.service'
+import { requireTenant } from '../../middlewares/auth'
+import { writeAudit } from '../audit/audit.service'
 
 const getMyOrganization = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = req.user?.organizationId || req.user?.storeId
-  const result = await OrganizationService.getMyOrganization(organizationId as string)
+  const result = await OrganizationService.getMyOrganization(requireTenant(req))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -18,9 +19,8 @@ const getMyOrganization = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateMyOrganization = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = req.user?.organizationId || req.user?.storeId
   const payload = req.body
-  const result = await OrganizationService.updateMyOrganization(organizationId as string, payload)
+  const result = await OrganizationService.updateMyOrganization(requireTenant(req), payload)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -55,7 +55,7 @@ const getPublicSiteInfo = catchAsync(async (req: Request, res: Response) => {
 })
 
 const updateWebsiteSettings = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const result = await OrganizationService.updateWebsiteSettings(organizationId, req.body)
 
   sendResponse(res, {
@@ -84,6 +84,8 @@ const updateOrganizationBySuperAdmin = catchAsync(async (req: Request, res: Resp
   const { id } = req.params
   const payload = req.body
   const result = await OrganizationService.updateOrganizationBySuperAdmin(id, payload)
+  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'organization.platform_updated', entityType: 'organization',
+    entityId: id, requestId: req.requestId, ip: req.ip, metadata: { fields: Object.keys(payload) } })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

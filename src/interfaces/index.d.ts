@@ -14,6 +14,8 @@ declare global {
         organizationId?: string
         storeId?: string
       }
+      tenant?: { organizationId: string; userId: string; role: string; permissions: string[] }
+      requestId: string
     }
   }
 }

@@ -7,9 +7,6 @@ export type IUserRole =
   | 'agent'
   | 'viewer'
   | 'user'
-  | 'admin'
-  | 'client'
-  | 'staff'
 
 export interface IUser {
   name: string

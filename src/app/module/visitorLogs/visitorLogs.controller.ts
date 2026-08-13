@@ -4,12 +4,15 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { Organization } from '../organization/organization.model'
 import { VisitorLog } from './visitorLogs.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { requireTenant } from '../../middlewares/auth'
 
 const logVisitor = catchAsync(async (req: Request, res: Response) => {
   const { organizationId, urlPath, referrer, device, browser, os } = req.body
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress
 
   if (organizationId) {
+    await EntitlementService.consumeVisitor(organizationId)
     await VisitorLog.create({
       organizationId,
       ip: String(ip),
@@ -20,10 +23,6 @@ const logVisitor = catchAsync(async (req: Request, res: Response) => {
       os,
     })
 
-    await Organization.findOneAndUpdate(
-      { organizationId },
-      { $inc: { totalVisitor: 1 } }
-    )
   }
 
   sendResponse(res, {
@@ -35,7 +34,8 @@ const logVisitor = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getVisitorAnalytics = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
+  await EntitlementService.assertFeature(organizationId, 'advancedAnalytics')
   const logs = await VisitorLog.find({ organizationId }).sort({ createdAt: -1 }).limit(100)
   const total = await VisitorLog.countDocuments({ organizationId })
 

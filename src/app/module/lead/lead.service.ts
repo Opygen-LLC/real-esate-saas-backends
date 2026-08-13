@@ -7,12 +7,15 @@ import { Contact } from '../contact/contact.model'
 import { Property } from '../property/property.model'
 import { ILead, ILeadFilter } from './lead.interface'
 import { Lead } from './lead.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { normalizeBangladeshPhone } from '../../helpers/identity'
 
 const createLead = async (
   organizationId: string,
   payload: Partial<ILead>,
   creatorAgentId?: string
 ): Promise<ILead> => {
+  if (payload.phone) payload.phone = normalizeBangladeshPhone(payload.phone)
   // If contactId is missing, check if a contact exists with phone or create one
   if (!payload.contactId && payload.phone) {
     let contact = await Contact.findOne({ organizationId, phone: payload.phone })
@@ -68,12 +71,14 @@ const publicCaptureLead = async (
   if (!organizationId || !name || !phone) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Organization, client name, and phone are required')
   }
+  await EntitlementService.assertLimit(organizationId, 'leads')
+  const normalizedPhone = normalizeBangladeshPhone(phone)
 
   let assignedAgent: any = undefined
   let propertyTitle = ''
 
   if (propertyInterest) {
-    const prop = await Property.findById(propertyInterest)
+    const prop = await Property.findOne({ _id: propertyInterest, organizationId })
     if (prop) {
       assignedAgent = prop.agentId
       propertyTitle = prop.title
@@ -81,13 +86,13 @@ const publicCaptureLead = async (
   }
 
   // Create or link contact
-  let contact = await Contact.findOne({ organizationId, phone })
+  let contact = await Contact.findOne({ organizationId, phone: normalizedPhone })
   if (!contact) {
     contact = await Contact.create({
       organizationId,
       name,
       email: email || '',
-      phone,
+      phone: normalizedPhone,
       type: 'Buyer',
       tags: ['WebsiteInquiry'],
     })
@@ -97,7 +102,7 @@ const publicCaptureLead = async (
     ...rest,
     organizationId,
     name,
-    phone,
+    phone: normalizedPhone,
     email,
     source: 'Website',
     leadStatus: 'New',
