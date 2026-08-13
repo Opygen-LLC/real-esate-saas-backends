@@ -1,6 +1,7 @@
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
 import { logger } from '../../shared/logger'
+import { Resilience } from '../../shared/resilience'
 
 export interface SmsProvider { send(phoneNumber: string, message: string): Promise<void> }
 
@@ -23,47 +24,21 @@ class UnconfiguredSmsProvider implements SmsProvider {
 
 class BangladeshHttpSmsProvider implements SmsProvider {
   async send(phoneNumber: string, message: string): Promise<void> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), config.sms.timeout_ms)
-
     try {
-      const response = await fetch(config.sms.api_url, {
+      const response = await Resilience.fetch('sms-verification', config.sms.api_url, {
         method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${config.sms.api_token}`,
-        },
-        body: JSON.stringify({
-          to: phoneNumber,
-          senderId: config.sms.sender_id,
-          message,
-        }),
-      })
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${config.sms.api_token}` },
+        body: JSON.stringify({ to: phoneNumber, senderId: config.sms.sender_id, message }),
+      }, { timeoutMs: config.sms.timeout_ms })
 
       if (!response.ok) {
-        // Keep provider response bodies out of the API response because they may
-        // contain account/provider metadata. Status is enough for operations.
-        logger.error('SMS provider rejected verification message', {
-          providerStatus: response.status,
-          phoneSuffix: phoneNumber.slice(-4),
-        })
+        logger.error('SMS provider rejected verification message', { providerStatus: response.status, phoneSuffix: phoneNumber.slice(-4) })
         throw new ApiError(502, 'Verification message could not be delivered')
       }
     } catch (error) {
       if (error instanceof ApiError) throw error
-
-      const timedOut = error instanceof Error && error.name === 'AbortError'
-      logger.error('SMS delivery request failed', {
-        error: error instanceof Error ? error.message : 'unknown',
-        timedOut,
-        phoneSuffix: phoneNumber.slice(-4),
-      })
-      throw new ApiError(502, timedOut
-        ? 'Verification provider timed out. Please try again.'
-        : 'Verification message could not be delivered')
-    } finally {
-      clearTimeout(timer)
+      logger.error('SMS verification delivery failed', { error, phoneSuffix: phoneNumber.slice(-4) })
+      throw new ApiError(502, 'Verification message could not be delivered')
     }
   }
 }

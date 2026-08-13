@@ -2,31 +2,38 @@ import nodemailer from 'nodemailer'
 import config from '../../config'
 import { logger } from '../../shared/logger'
 
+let transport: ReturnType<typeof nodemailer.createTransport> | null = null
+
+const transporter = () => {
+  if (transport) return transport
+  if (!config.email.host || !config.email.user || !config.email.password) return null
+  transport = nodemailer.createTransport({
+    host: config.email.host,
+    port: config.email.port,
+    secure: config.email.secure,
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
+    connectionTimeout: config.email.connection_timeout_ms,
+    greetingTimeout: config.email.connection_timeout_ms,
+    socketTimeout: config.email.socket_timeout_ms,
+    auth: { user: config.email.user, pass: config.email.password },
+  })
+  return transport
+}
+
 const sendEmail = async (to: string, subject: string, html: string): Promise<boolean> => {
   try {
-    if (!config.app_email || !config.app_password) {
-      logger.info(`[Email Service Simulation] Subject: "${subject}" to: ${to}`)
+    const client = transporter()
+    if (!client) {
+      if (config.isProduction) throw new Error('SMTP provider is not configured')
+      logger.info('[Email simulation]', { subject, recipientConfigured: Boolean(to) })
       return true
     }
-
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: config.app_email,
-        pass: config.app_password,
-      },
-    })
-
-    await transporter.sendMail({
-      from: `"Real Estate SaaS" <${config.app_email}>`,
-      to,
-      subject,
-      html,
-    })
-
+    await client.sendMail({ from: config.email.from, to, subject, html })
     return true
   } catch (error) {
-    logger.error('Failed to send email:', error)
+    logger.error('Email delivery failed', { error })
     return false
   }
 }

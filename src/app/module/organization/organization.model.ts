@@ -121,6 +121,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
         enum: ['trial', 'starter', 'professional', 'agency', 'enterprise'],
         default: 'trial',
       },
+      planVersion: { type: Number, default: 1, min: 1 },
       status: {
         type: String,
         enum: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended'],
@@ -182,6 +183,17 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     isBlocked: {
       type: Boolean,
       default: false,
+      index: true,
+    },
+    platformAccess: {
+      status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
+      suspendedAt: { type: Date, default: null },
+      suspendedBy: { type: String, default: '' },
+      suspensionReason: { type: String, default: '', maxlength: 500 },
+      previousSubscriptionStatus: { type: String, enum: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended', null], default: null },
+      reactivatedAt: { type: Date, default: null },
+      reactivatedBy: { type: String, default: '' },
+      reactivationReason: { type: String, default: '', maxlength: 500 },
     },
     storageUsedBytes: { type: Number, default: 0, min: 0 },
     monthlyVisitorCount: { type: Number, default: 0, min: 0 },

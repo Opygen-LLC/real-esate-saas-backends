@@ -82,10 +82,10 @@ const getAllOrganizations = catchAsync(async (req: Request, res: Response) => {
 
 const updateOrganizationBySuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const payload = req.body
+  const { reason, ...payload } = req.body
   const result = await OrganizationService.updateOrganizationBySuperAdmin(id, payload)
-  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'organization.platform_updated', entityType: 'organization',
-    entityId: id, requestId: req.requestId, ip: req.ip, metadata: { fields: Object.keys(payload) } })
+  await writeAudit({ organizationId: result?.organizationId, actorId: req.user!._id!, actorRole: 'super-admin', action: 'organization.platform_updated', entityType: 'organization',
+    entityId: id, reason, requestId: req.requestId, ip: req.ip, metadata: { fields: Object.keys(payload) } })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

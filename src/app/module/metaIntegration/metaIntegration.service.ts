@@ -7,6 +7,7 @@ import { Organization } from '../organization/organization.model'
 import { DomainRecord } from '../domain/domain.model'
 import { MetaIntegration } from './metaIntegration.model'
 import { MetaEvent } from './metaEvent.model'
+import { Resilience } from '../../../shared/resilience'
 
 const ALLOWED_EVENTS = new Set(['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -14,6 +15,48 @@ const normalizeEmail = (value?: string) => value?.trim().toLowerCase() || ''
 const normalizePhone = (value?: string) => value?.replace(/[^0-9]/g, '') || ''
 const cleanUrl = (value: string) => {
   try { const url = new URL(value); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); return url.toString().slice(0, 2048) } catch { throw new ApiError(400, 'Invalid canonical event URL') }
+}
+
+export const normalizeMetaUserData = (input: Record<string, any> = {}) => {
+  const email = normalizeEmail(input.email)
+  const phone = normalizePhone(input.phone)
+  const firstName = String(input.firstName || '').trim().toLowerCase()
+  const lastName = String(input.lastName || '').trim().toLowerCase()
+  const userData: Record<string, any> = {}
+  if (email) userData.em = [sha(email)]
+  if (phone) userData.ph = [sha(phone)]
+  if (firstName) userData.fn = [sha(firstName)]
+  if (lastName) userData.ln = [sha(lastName)]
+  if (input.fbp) userData.fbp = String(input.fbp).slice(0, 255)
+  if (input.fbc) userData.fbc = String(input.fbc).slice(0, 255)
+  return userData
+}
+
+export const buildMetaCapiBody = (event: any, userData: Record<string, any>) => {
+  const body: any = { data: [{
+    event_name: event.eventName,
+    event_time: event.eventTime,
+    event_id: event.eventId,
+    action_source: 'website',
+    event_source_url: event.eventSourceUrl,
+    user_data: userData,
+    custom_data: event.customData || {},
+  }] }
+  if (event.testEventCode) body.test_event_code = event.testEventCode
+  return body
+}
+
+export const metaRetryDelayMs = (attempts: number): number => Math.min(6 * 60 * 60_000, 2 ** Math.max(0, attempts) * 30_000)
+
+export const parseMetaCapiResponse = (ok: boolean, status: number, payload: any) => {
+  if (!ok || payload?.error) {
+    const code = String(payload?.error?.code || status)
+    const message = String(payload?.error?.message || `Meta CAPI HTTP ${status}`).slice(0, 500)
+    const error = new Error(message) as Error & { code?: string }
+    error.code = code
+    throw error
+  }
+  return payload
 }
 
 const serialize = (doc: any) => {
@@ -67,17 +110,7 @@ const queuePublicEvent = async (identifier: string, payload: any, context: { ip?
   if (eventName === 'Schedule' && !integration.enableSchedule) return { queued: false, reason: 'schedule_disabled' }
 
   const eventId = String(payload.eventId || randomUUID()).slice(0, 120)
-  const email = normalizeEmail(payload.userData?.email)
-  const phone = normalizePhone(payload.userData?.phone)
-  const firstName = String(payload.userData?.firstName || '').trim().toLowerCase()
-  const lastName = String(payload.userData?.lastName || '').trim().toLowerCase()
-  const userData: Record<string, any> = {}
-  if (email) userData.em = [sha(email)]
-  if (phone) userData.ph = [sha(phone)]
-  if (firstName) userData.fn = [sha(firstName)]
-  if (lastName) userData.ln = [sha(lastName)]
-  if (payload.userData?.fbp) userData.fbp = String(payload.userData.fbp).slice(0, 255)
-  if (payload.userData?.fbc) userData.fbc = String(payload.userData.fbc).slice(0, 255)
+  const userData = normalizeMetaUserData(payload.userData || {})
 
   try {
     const event = await MetaEvent.create({
@@ -99,20 +132,11 @@ const sendEvent = async (event: any) => {
   const userData = { ...event.userData }
   if (event.clientIpEncrypted) userData.client_ip_address = decryptField(event.clientIpEncrypted)
   if (event.clientUserAgent) userData.client_user_agent = event.clientUserAgent
-  const body: any = { data: [{
-    event_name: event.eventName, event_time: event.eventTime, event_id: event.eventId, action_source: 'website',
-    event_source_url: event.eventSourceUrl, user_data: userData, custom_data: event.customData || {},
-  }] }
-  if (event.testEventCode) body.test_event_code = event.testEventCode
-  const response = await fetch(`${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events?access_token=${encodeURIComponent(accessToken)}`, {
+  const body = buildMetaCapiBody(event, userData)
+  const response = await Resilience.fetch('meta-capi', `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events?access_token=${encodeURIComponent(accessToken)}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  })
-  const responsePayload = await response.json().catch(() => ({})) as any
-  if (!response.ok || responsePayload?.error) {
-    const code = String(responsePayload?.error?.code || response.status)
-    const message = String(responsePayload?.error?.message || `Meta CAPI HTTP ${response.status}`).slice(0, 500)
-    const error = new Error(message) as Error & { code?: string }; error.code = code; throw error
-  }
+  }, { timeoutMs: config.meta.timeout_ms })
+  const responsePayload = parseMetaCapiResponse(response.ok, response.status, await response.json().catch(() => ({})))
   integration.lastSuccessAt = new Date(); integration.diagnostics = { lastResponse: { eventsReceived: responsePayload?.events_received ?? null }, updatedAt: new Date() }
   await integration.save()
   return responsePayload
@@ -128,9 +152,19 @@ const processOne = async (event: any, alreadyClaimed = false) => {
     event.lastErrorCode = String(error?.code || 'CAPI_ERROR').slice(0, 80)
     event.lastErrorMessage = String(error?.message || 'Meta CAPI delivery failed').slice(0, 500)
     if (event.attempts >= config.meta.max_attempts) event.status = 'dead'
-    else { event.status = 'queued'; event.nextAttemptAt = new Date(Date.now() + Math.min(6 * 60 * 60_000, 2 ** event.attempts * 30_000)) }
+    else { event.status = 'queued'; event.nextAttemptAt = new Date(Date.now() + metaRetryDelayMs(event.attempts)) }
     await event.save(); return false
   }
+}
+
+
+const processById = async (eventId: string) => {
+  const event: any = await MetaEvent.findById(eventId)
+  if (!event || event.status === 'sent') return { sent: Boolean(event) }
+  if (event.status === 'dead') throw new Error('Meta event is in dead-letter state')
+  const ok = await processOne(event)
+  if (!ok) throw new Error(event.lastErrorMessage || 'Meta CAPI delivery failed')
+  return { sent: true }
 }
 
 const processQueue = async (limit = 50) => {
@@ -163,4 +197,4 @@ const test = async (organizationId: string, sourceUrl: string) => {
 const deadLetters = async (organizationId: string) => MetaEvent.find({ organizationId, status: 'dead' }).select('eventName eventId attempts lastErrorCode lastErrorMessage createdAt updatedAt').sort({ updatedAt: -1 }).limit(100).lean()
 const retryDeadLetter = async (organizationId: string, id: string) => MetaEvent.findOneAndUpdate({ _id: id, organizationId, status: 'dead' }, { $set: { status: 'queued', attempts: 0, nextAttemptAt: new Date(), lastErrorCode: '', lastErrorMessage: '' } }, { new: true }).select('eventName eventId status attempts')
 
-export const MetaIntegrationService = { save, get, publicConfig, queuePublicEvent, processQueue, test, deadLetters, retryDeadLetter }
+export const MetaIntegrationService = { save, get, publicConfig, queuePublicEvent, processById, processQueue, test, deadLetters, retryDeadLetter }

@@ -42,13 +42,13 @@ router.patch(
 router.get(
   '/all',
   authMiddlewares.authSuperAdmin,
-  validateRequest(OrganizationValidation.platformUpdate),
   OrganizationController.getAllOrganizations
 )
 
 router.patch(
   '/:id',
   authMiddlewares.authSuperAdmin,
+  validateRequest(OrganizationValidation.platformUpdate),
   OrganizationController.updateOrganizationBySuperAdmin
 )
 

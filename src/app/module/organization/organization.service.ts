@@ -10,6 +10,8 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
 import { randomUUID } from 'crypto'
 import { DomainRecord } from '../domain/domain.model'
+import { Cache } from '../../../shared/cache'
+import { DomainEventService } from '../domainEvent/domainEvent.service'
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   if (!payload.organizationId) {
@@ -39,58 +41,45 @@ const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrga
 }
 
 const getPublicSiteInfo = async (identifier: string): Promise<any> => {
-  let org = await Organization.findOne({ $or: [{ sub_domain: identifier.toLowerCase() }, { organizationId: identifier }] })
+  const cacheKey = identifier.toLowerCase().trim()
+  const cached = await Cache.tenantPublic.get<any>(cacheKey)
+  if (cached) return cached
+
+  let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
+    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings')
+    .lean()
   if (!org) {
-    const normalized = identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
-    const verifiedDomain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
-    if (verifiedDomain) org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
+    const normalized = cacheKey.replace(/^www\./, '').split(':')[0]
+    const resolved = await Cache.tenantResolve.get(normalized)
+    const verifiedDomain: any = resolved || await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
+    if (verifiedDomain?.organizationId) {
+      await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
+      org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings')
+        .lean()
+    }
   }
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Agency website not found')
 
-  const totalProperties = await Property.countDocuments({
-    organizationId: org.organizationId,
-    status: 'Available',
-    moderationStatus: 'approved',
-  })
-  const totalAgents = await User.countDocuments({
-    organizationId: org.organizationId,
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] },
-  })
-
-  return {
-    organizationId: org.organizationId,
-    agencyName: org.agencyName,
-    agencyType: org.agencyType,
-    licenseNumber: org.licenseNumber,
-    email: org.email,
-    phone: org.phone,
-    address: org.address,
-    city: org.city,
-    state: org.state,
-    country: org.country,
+  const [totalProperties, totalAgents] = await Promise.all([
+    Property.countDocuments({ organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }),
+    User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
+  ])
+  const result = {
+    ...org,
     defaultLanguage: org.defaultLanguage || 'en',
-    addressDetails: org.addressDetails,
-    logo: org.logo,
-    favicon: org.favicon,
-    primaryColor: org.primaryColor,
-    secondaryColor: org.secondaryColor,
-    metaTitle: org.metaTitle || `${org.agencyName} | Luxury Real Estate & Homes for Sale`,
-    metaDescription:
-      org.metaDescription || `Browse verified real estate properties and luxury estates with ${org.agencyName}.`,
-    sub_domain: org.sub_domain,
-    domain: org.domain,
+    metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
+    metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
     templateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
-    socialLinks: org.socialLinks,
-    websiteSettings: org.websiteSettings,
-    stats: {
-      totalProperties,
-      totalAgents,
-      experienceYears: 12,
-      happyClients: 1500,
-    },
+    stats: { totalProperties, totalAgents },
   }
+  const identifiers = [cacheKey, org.organizationId, org.sub_domain, org.domain].filter(Boolean).map(String)
+  await Promise.all(identifiers.map((key) => Cache.tenantPublic.set(key, result, 300)))
+  await Promise.all(identifiers.map((key) => Cache.tenantResolve.set(key, org.organizationId, 300)))
+  return result
 }
+
 
 const updateWebsiteSettings = async (
   organizationId: string,
@@ -122,6 +111,7 @@ const updateWebsiteSettings = async (
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   }
+  await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData).filter((key) => updateData[key] !== undefined) } })
   return result
 }
 
@@ -131,9 +121,8 @@ const updateMyOrganization = async (
 ): Promise<IOrganization | null> => {
   const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
   const safePayload = Object.fromEntries(allowed.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]))
-  const result = await Organization.findOneAndUpdate({ organizationId }, safePayload, {
-    new: true,
-  })
+  const result = await Organization.findOneAndUpdate({ organizationId }, safePayload, { new: true })
+  if (result) await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.updated', payload: { fields: Object.keys(safePayload) } })
   return result
 }
 
@@ -187,7 +176,15 @@ const updateOrganizationBySuperAdmin = async (
   id: string,
   payload: Partial<IOrganization>
 ): Promise<IOrganization | null> => {
-  const result = await Organization.findByIdAndUpdate(id, payload, { new: true })
+  const safePayload: any = {}
+  if (payload.subscription) {
+    const subscription: any = payload.subscription
+    for (const key of ['status', 'currentPeriodEnd', 'gracePeriodEnd']) {
+      if (subscription[key] !== undefined) safePayload[`subscription.${key}`] = subscription[key]
+    }
+  }
+  if (!Object.keys(safePayload).length) throw new ApiError(httpStatus.BAD_REQUEST, 'No supported platform fields supplied')
+  const result = await Organization.findByIdAndUpdate(id, { $set: safePayload }, { new: true })
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   }

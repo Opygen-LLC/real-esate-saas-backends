@@ -19,6 +19,7 @@ import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
 import { randomUUID } from 'crypto'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { AuditEvent } from '../audit/audit.model'
+import { captureOtpForTest } from '../../../testSupport/otpCapture'
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
@@ -83,6 +84,7 @@ const createOtpChallenge = async (phoneNumber: string, purpose: OtpPurpose, meta
   const challenge = { _id: challengeId, phoneNumber, userId, purpose, codeHash: hashOtp(challengeId.toString(), otp),
     expiresAt: new Date(Date.now() + OTP_TTL_MS), requestIp: meta.ip || '' }
   await sendOtp(phoneNumber, otp)
+  captureOtpForTest(phoneNumber, purpose, otp)
   await OtpChallenge.create([challenge], session ? { session } : undefined)
 }
 
@@ -102,6 +104,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
   const otp = generateOtp()
   await enforceOtpThrottle(phoneNumber, 'account_verification')
   await sendOtp(phoneNumber, otp)
+  captureOtpForTest(phoneNumber, 'account_verification', otp)
   const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
   const passwordHash = await hashPassword(payload.password)
 

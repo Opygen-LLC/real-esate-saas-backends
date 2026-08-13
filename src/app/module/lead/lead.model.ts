@@ -13,4 +13,8 @@ leadSchema.index({organizationId:1,normalizedPhone:1},{unique:true,partialFilter
 leadSchema.index({organizationId:1,normalizedEmail:1},{unique:true,partialFilterExpression:{normalizedEmail:{$type:'string',$gt:''}}})
 leadSchema.index({organizationId:1,leadStatus:1,assignedAgent:1})
 leadSchema.index({organizationId:1,responseDueAt:1,firstResponseAt:1})
+leadSchema.index({organizationId:1,createdAt:-1})
+leadSchema.index({organizationId:1,assignedAgent:1,createdAt:-1})
+leadSchema.index({organizationId:1,leadStatus:1,updatedAt:-1})
+
 export const Lead=model<ILead,LeadModel>('Lead',leadSchema)

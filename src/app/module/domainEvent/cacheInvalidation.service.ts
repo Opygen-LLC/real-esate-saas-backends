@@ -1,0 +1,21 @@
+import { Cache } from '../../../shared/cache'
+import { Organization } from '../organization/organization.model'
+
+type CacheEvent = { organizationId: string; aggregateType: string; eventType: string; payload?: Record<string, unknown> }
+
+const invalidateTenant = async (organizationId: string) => {
+  if (!organizationId || organizationId === '__platform__') return
+  const org: any = await Organization.findOne({ organizationId }).select('organizationId sub_domain domain customDomain').lean()
+  const identifiers = [organizationId, org?.organizationId, org?.sub_domain, org?.domain, org?.customDomain].filter(Boolean).map(String)
+  await Promise.all([Cache.tenantPublic.del(...identifiers), Cache.tenantResolve.del(...identifiers)])
+}
+
+const fromEvent = async (event: CacheEvent): Promise<void> => {
+  if (event.aggregateType === 'subscription_plan' || event.eventType.startsWith('plan.')) {
+    await Cache.plans.del('catalog')
+    return
+  }
+  if (['organization', 'website', 'domain', 'property'].includes(event.aggregateType)) await invalidateTenant(event.organizationId)
+}
+
+export const CacheInvalidationService = { fromEvent, invalidateTenant }

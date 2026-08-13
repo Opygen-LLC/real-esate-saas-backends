@@ -9,6 +9,7 @@ const router = express.Router()
 
 router.get('/', SubscriptionPlanController.getAllPlans)
 router.get('/plans', SubscriptionPlanController.getAllPlans)
+router.get('/admin/versions', authMiddlewares.authSuperAdmin, SubscriptionPlanController.getAllPlanVersions)
 
 router.post(
   '/',
@@ -27,6 +28,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddlewares.authSuperAdmin,
+  validateRequest(SubscriptionPlanValidation.archive),
   SubscriptionPlanController.deletePlan
 )
 

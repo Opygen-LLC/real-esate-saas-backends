@@ -16,5 +16,7 @@ const domainEventSchema = new Schema({
 
 domainEventSchema.index({ organizationId: 1, leadId: 1, occurredAt: -1 })
 domainEventSchema.index({ organizationId: 1, eventType: 1, occurredAt: -1 })
+domainEventSchema.index({ organizationId: 1, occurredAt: -1 })
+domainEventSchema.index({ organizationId: 1, aggregateType: 1, aggregateId: 1, occurredAt: -1 })
 
 export const DomainEvent = model('DomainEvent', domainEventSchema)

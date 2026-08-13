@@ -6,7 +6,7 @@ import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { User } from '../user/user.model'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates'
-const trial = { maxAgents: 2, maxProperties: 10, maxLeads: 100, maxStorageMb: 512, maxMonthlyVisitors: 5000,
+export const trialEntitlements = { maxAgents: 2, maxProperties: 10, maxLeads: 100, maxStorageMb: 512, maxMonthlyVisitors: 5000,
   hasCustomDomain: false, hasAdvancedAnalytics: false, hasWhatsAppIntegration: false, hasSmsAutomation: false, hasPremiumTemplates: false }
 
 const resolve = async (organizationId: string) => {
@@ -15,10 +15,23 @@ const resolve = async (organizationId: string) => {
   if (!['trialing', 'active', 'grace', 'cancel_at_period_end'].includes(organization.subscription.status)) {
     throw new ApiError(402, `Subscription is ${organization.subscription.status}`)
   }
-  const plan = organization.subscription.plan === 'trial' ? null : await SubscriptionPlan.findOne({ planId: organization.subscription.plan, isActive: true }).lean()
-  return { organization, limits: { ...trial, ...(plan || {}), maxAgents: organization.subscription.maxAgents || plan?.maxAgents || trial.maxAgents,
-    maxProperties: organization.subscription.maxProperties || plan?.maxProperties || trial.maxProperties } }
+  let plan = null as any
+  if (organization.subscription.plan !== 'trial') {
+    const exactVersion = organization.subscription.planVersion
+      ? await SubscriptionPlan.findOne({ planId: organization.subscription.plan, version: organization.subscription.planVersion }).lean()
+      : null
+    plan = exactVersion || await SubscriptionPlan.findOne({
+      planId: organization.subscription.plan,
+      isActive: true,
+      effectiveFrom: { $lte: new Date() },
+      $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gt: new Date() } }],
+    }).sort({ version: -1 }).lean()
+  }
+  return { organization, limits: { ...trialEntitlements, ...(plan || {}), maxAgents: organization.subscription.maxAgents || plan?.maxAgents || trialEntitlements.maxAgents,
+    maxProperties: organization.subscription.maxProperties || plan?.maxProperties || trialEntitlements.maxProperties } }
 }
+
+export const wouldExceedEntitlementLimit = (usage: number, maximum: number, increment = 1): boolean => usage + increment > maximum
 
 const assertLimit = async (organizationId: string, resource: 'properties' | 'agents' | 'leads', increment = 1): Promise<void> => {
   const { limits } = await resolve(organizationId)
@@ -27,14 +40,23 @@ const assertLimit = async (organizationId: string, resource: 'properties' | 'age
     : resource === 'agents'
       ? [await User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] } }), limits.maxAgents]
       : [await Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } }), limits.maxLeads]
-  if (usage + increment > maximum) throw new ApiError(402, `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`)
+  if (wouldExceedEntitlementLimit(usage, maximum, increment)) throw new ApiError(402, `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`)
+}
+
+export const featureEnabled = (limits: Record<string, any>, feature: Feature): boolean => {
+  const mapping: Record<Feature, boolean> = {
+    customDomain: Boolean(limits.hasCustomDomain),
+    advancedAnalytics: Boolean(limits.hasAdvancedAnalytics),
+    whatsAppAutomation: Boolean(limits.hasWhatsAppIntegration),
+    smsAutomation: Boolean(limits.hasSmsAutomation),
+    premiumTemplates: Boolean(limits.hasPremiumTemplates),
+  }
+  return mapping[feature]
 }
 
 const assertFeature = async (organizationId: string, feature: Feature): Promise<void> => {
   const { limits } = await resolve(organizationId)
-  const mapping: Record<Feature, boolean> = { customDomain: limits.hasCustomDomain, advancedAnalytics: limits.hasAdvancedAnalytics,
-    whatsAppAutomation: limits.hasWhatsAppIntegration, smsAutomation: limits.hasSmsAutomation, premiumTemplates: limits.hasPremiumTemplates }
-  if (!mapping[feature]) throw new ApiError(402, `${feature} is not included in the current plan`)
+  if (!featureEnabled(limits, feature)) throw new ApiError(402, `${feature} is not included in the current plan`)
 }
 
 const assertStorage = async (organizationId: string, additionalBytes: number): Promise<void> => {

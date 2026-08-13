@@ -1,5 +1,6 @@
 import { Activity } from '../activity/activity.model'
 import { DomainEvent } from './domainEvent.model'
+import { CacheInvalidationService } from './cacheInvalidation.service'
 
 type EmitInput = {
   organizationId: string
@@ -63,6 +64,7 @@ const emit = async (input: EmitInput) => {
       metadata: { domainEventId: event._id, eventType: input.eventType },
     })
   }
+  await CacheInvalidationService.fromEvent(input).catch(() => undefined)
   return event
 }
 

@@ -15,6 +15,7 @@ declare global {
         storeId?: string
       }
       tenant?: { organizationId: string; userId: string; role: string; permissions: string[] }
+      impersonation?: { sessionId: string; adminUserId: string; organizationId: string; readOnly: boolean; expiresAt: Date }
       requestId: string
     }
   }

@@ -29,10 +29,14 @@ import { MetaIntegrationRoute } from '../module/metaIntegration/metaIntegration.
 import { CrmRoute } from '../module/crm/crm.route'
 import { WhatsAppRoute } from '../module/whatsapp/whatsapp.route'
 import { NotificationRoute } from '../module/notification/notification.route'
+import { PlatformAdminRoute } from '../module/platformAdmin/platformAdmin.route'
+import { ObservabilityRoute } from '../module/observability/observability.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/observability', route: ObservabilityRoute },
+  { path: '/platform-admin', route: PlatformAdminRoute },
   { path: '/notification', route: NotificationRoute },
   { path: '/crm', route: CrmRoute },
   { path: '/whatsapp', route: WhatsAppRoute },

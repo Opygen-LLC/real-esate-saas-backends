@@ -1,6 +1,7 @@
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { logger } from '../../../shared/logger'
+import { Resilience } from '../../../shared/resilience'
 import { BkashGatewayPayment } from './bkashPayment.interface'
 
 type TokenState = {
@@ -20,17 +21,11 @@ const requiredConfig = (): void => {
 }
 
 const fetchJson = async (url: string, init: RequestInit): Promise<any> => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), config.bkash.timeout_ms)
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal })
+    const response = await Resilience.fetch('bkash', url, init, { timeoutMs: config.bkash.timeout_ms })
     const text = await response.text()
     let body: any
-    try {
-      body = text ? JSON.parse(text) : {}
-    } catch {
-      throw new ApiError(502, 'bKash returned an invalid response')
-    }
+    try { body = text ? JSON.parse(text) : {} } catch { throw new ApiError(502, 'bKash returned an invalid response') }
     if (!response.ok) {
       const message = body?.errorMessage || body?.statusMessage || `bKash gateway returned ${response.status}`
       const error = new ApiError(502, message)
@@ -40,15 +35,11 @@ const fetchJson = async (url: string, init: RequestInit): Promise<any> => {
     return body
   } catch (error) {
     if (error instanceof ApiError) throw error
-    if ((error as Error)?.name === 'AbortError') {
-      throw new ApiError(504, 'bKash gateway request timed out')
-    }
-    logger.error('bKash gateway request failed', { url, error: error instanceof Error ? error.message : 'unknown' })
+    logger.error('bKash gateway request failed', { error: error instanceof Error ? error.message : 'unknown' })
     throw new ApiError(502, 'bKash gateway request failed')
-  } finally {
-    clearTimeout(timer)
   }
 }
+
 
 const grantToken = async (): Promise<TokenState> => {
   const body = await fetchJson(config.bkash.grant_token_url as string, {

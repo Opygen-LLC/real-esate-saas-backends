@@ -1,8 +1,11 @@
 import mongoose, { Model } from 'mongoose'
 
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
+
 export interface ISubscription {
   plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
-  status: 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
+  planVersion?: number
+  status: SubscriptionStatus
   currentPeriodEnd: Date | null
   lastPaymentDate: Date | null
   maxProperties?: number
@@ -11,6 +14,17 @@ export interface ISubscription {
   gracePeriodEnd?: Date | null
   cancelAtPeriodEnd?: boolean
   reminderSentAt?: Date | null
+}
+
+export interface IPlatformAccess {
+  status: 'active' | 'suspended'
+  suspendedAt?: Date | null
+  suspendedBy?: string
+  suspensionReason?: string
+  previousSubscriptionStatus?: SubscriptionStatus | null
+  reactivatedAt?: Date | null
+  reactivatedBy?: string
+  reactivationReason?: string
 }
 
 export interface IServiceArea {
@@ -52,6 +66,7 @@ export interface IOrganization {
   domain_Verify?: boolean
   domain_dns?: Array<{ type: string; name: string; value: string }>
   subscription: ISubscription
+  platformAccess?: IPlatformAccess
   socialLinks?: {
     facebook?: string
     instagram?: string

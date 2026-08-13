@@ -121,5 +121,6 @@ userSchema.statics.isPasswordMatch = async function (
 ): Promise<boolean> {
   return await bcrypt.compare(givenPassword, savedPassword)
 }
+userSchema.index({ organizationId: 1, userRole: 1, status: 1 })
 
 export const User = model<IUser, UserModel>('User', userSchema)

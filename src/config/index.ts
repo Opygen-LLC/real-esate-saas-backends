@@ -87,6 +87,15 @@ if (isProduction) {
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
 
   if (smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false in production')
+  if (envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))) {
+    requiredInProduction('REDIS_PASSWORD', 8)
+    if (!envBoolean('REDIS_TLS', false)) throw new Error('REDIS_TLS must be true when Redis is enabled in production')
+  }
+  requiredInProduction('METRICS_TOKEN', 24)
+  requiredInProduction('SMTP_HOST')
+  requiredInProduction('SMTP_USER')
+  requiredInProduction('SMTP_PASSWORD', 8)
+  requiredInProduction('SMTP_FROM')
   const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
   requiredSms.forEach((name) => requiredInProduction(name))
 
@@ -116,9 +125,28 @@ export default {
   cookie_secure: cookieSecure,
   cookie_same_site: cookieSameSite,
   database_string: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
+  mongo: {
+    max_pool_size: Math.max(5, Number(process.env.MONGO_MAX_POOL_SIZE || 50)),
+    min_pool_size: Math.max(0, Number(process.env.MONGO_MIN_POOL_SIZE || 5)),
+    server_selection_timeout_ms: Math.max(1000, Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 5000)),
+    connect_timeout_ms: Math.max(1000, Number(process.env.MONGO_CONNECT_TIMEOUT_MS || 10000)),
+    socket_timeout_ms: Math.max(5000, Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 30000)),
+    wait_queue_timeout_ms: Math.max(1000, Number(process.env.MONGO_WAIT_QUEUE_TIMEOUT_MS || 5000)),
+    query_timeout_ms: Math.max(500, Number(process.env.MONGO_QUERY_TIMEOUT_MS || 10000)),
+  },
   bcrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS || '12',
   app_email: process.env.APP_EMAIL,
   app_password: process.env.APP_PASSWORD,
+  email: {
+    host: process.env.SMTP_HOST?.trim() || '',
+    port: Math.max(1, Number(process.env.SMTP_PORT || 587)),
+    secure: envBoolean('SMTP_SECURE', false),
+    user: process.env.SMTP_USER?.trim() || process.env.APP_EMAIL?.trim() || '',
+    password: process.env.SMTP_PASSWORD || process.env.APP_PASSWORD || '',
+    from: process.env.SMTP_FROM?.trim() || process.env.APP_EMAIL?.trim() || '',
+    connection_timeout_ms: Math.max(1000, Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 5000)),
+    socket_timeout_ms: Math.max(1000, Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 10000)),
+  },
   jwt: {
     secret: process.env.JWT_SECRET || 'development-only-access-secret-change-me',
     refresh_secret: process.env.JWT_REFRESH_SECRET || 'development-only-refresh-secret-change-me',
@@ -132,6 +160,7 @@ export default {
     csrf_cookie_name: 'csrfToken',
     access_cookie_name: 'accessToken',
     refresh_cookie_name: 'refreshToken',
+    impersonation_cookie_name: 'supportImpersonationToken',
   },
   sms: {
     development_mode: smsDevelopmentMode,
@@ -156,8 +185,17 @@ export default {
     enabled: envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST)),
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Math.max(1, Number(process.env.REDIS_PORT || 6379)),
+    username: process.env.REDIS_USERNAME || '',
     password: process.env.REDIS_PASSWORD || '',
     db: Math.max(0, Number(process.env.REDIS_DB || 0)),
+    tls: envBoolean('REDIS_TLS', false),
+    servername: process.env.REDIS_TLS_SERVERNAME || '',
+    reject_unauthorized: envBoolean('REDIS_TLS_REJECT_UNAUTHORIZED', true),
+    connect_timeout_ms: Math.max(250, Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 1500)),
+    command_timeout_ms: Math.max(250, Number(process.env.REDIS_COMMAND_TIMEOUT_MS || 1000)),
+    key_prefix: (process.env.REDIS_KEY_PREFIX || 're-saas').replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 80) || 're-saas',
+    cache_namespace: process.env.REDIS_CACHE_NAMESPACE || 'cache',
+    queue_namespace: process.env.REDIS_QUEUE_NAMESPACE || 'queue',
   },
   assets: {
     bucket: process.env.OBJECT_STORAGE_BUCKET || '',
@@ -174,11 +212,25 @@ export default {
     graph_version: process.env.META_GRAPH_API_VERSION || 'v26.0',
     graph_base_url: (process.env.META_GRAPH_BASE_URL || 'https://graph.facebook.com').replace(/\/$/, ''),
     max_attempts: Math.max(1, Number(process.env.META_CAPI_MAX_ATTEMPTS || 6)),
+    timeout_ms: Math.max(1000, Number(process.env.META_CAPI_TIMEOUT_MS || 10000)),
   },
   calendar: {
     provider_approval_status: process.env.CALENDAR_PROVIDER_APPROVAL_STATUS || 'pending',
     sync_url: process.env.CALENDAR_SYNC_URL?.trim() || '',
     api_token: process.env.CALENDAR_SYNC_TOKEN?.trim() || '',
+    timeout_ms: Math.max(1000, Number(process.env.CALENDAR_SYNC_TIMEOUT_MS || 10000)),
+  },
+  runtime: {
+    worker_enabled: envBoolean('WORKER_ENABLED', true),
+    worker_poll_ms: Math.max(1000, Number(process.env.WORKER_POLL_MS || 5000)),
+    worker_batch_size: Math.max(1, Math.min(200, Number(process.env.WORKER_BATCH_SIZE || 50))),
+    shutdown_timeout_ms: Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS || 15000)),
+    max_page_size: Math.max(10, Math.min(500, Number(process.env.MAX_PAGE_SIZE || 100))),
+  },
+  observability: {
+    metrics_token: process.env.METRICS_TOKEN || '',
+    client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
+    client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
   },
   bkash: {
     grant_token_url: process.env.BKASH_GRANT_TOKEN_URL,

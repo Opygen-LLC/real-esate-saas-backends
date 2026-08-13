@@ -201,5 +201,8 @@ propertySchema.index({ organizationId: 1, status: 1, price: 1 })
 propertySchema.index({ organizationId: 1, propertyType: 1, listingType: 1 })
 propertySchema.index({ organizationId: 1, moderationStatus: 1, status: 1 })
 propertySchema.index({ organizationId: 1, _id: 1 })
+propertySchema.index({ organizationId: 1, createdAt: -1 })
+propertySchema.index({ organizationId: 1, agentId: 1, status: 1 })
+propertySchema.index({ organizationId: 1, views: -1, updatedAt: -1 })
 
 export const Property = model<IProperty, PropertyModel>('Property', propertySchema)

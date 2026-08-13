@@ -2,6 +2,7 @@ import net from 'net'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { ObjectStorageService } from './objectStorage.service'
+import { Resilience } from '../../../shared/resilience'
 
 const writeChunk = (socket: net.Socket, chunk: Buffer) => {
   const size = Buffer.alloc(4)
@@ -16,7 +17,7 @@ export const scanStoredObject = async (key: string): Promise<{ status: 'clean' |
     return { status: 'skipped', detail: 'CLAMAV_HOST is not configured in development' }
   }
 
-  const response = await fetch(ObjectStorageService.presignDownload(key, 180))
+  const response = await Resilience.fetch('object-storage', ObjectStorageService.presignDownload(key, 180), {}, { timeoutMs: 15000 })
   if (!response.ok || !response.body) throw new ApiError(502, 'Unable to read uploaded asset for virus scanning')
 
   return new Promise(async (resolve, reject) => {

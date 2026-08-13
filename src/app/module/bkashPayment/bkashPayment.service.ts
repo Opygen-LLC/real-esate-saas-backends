@@ -10,6 +10,8 @@ import { BkashGatewayPayment, IBkashPayment } from './bkashPayment.interface'
 import { BkashPayment } from './bkashPayment.model'
 import { writeAudit } from '../audit/audit.service'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
+import { calculateSubscriptionCharge } from '../billing/pricing'
+import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashCheckoutUrl } from './bkashPayment.verification'
 
 type CreatePaymentInput = {
   organizationId: string
@@ -17,25 +19,6 @@ type CreatePaymentInput = {
   planId: IBkashPayment['planId']
   billingCycle: IBkashPayment['billingCycle']
   idempotencyKey: string
-}
-
-const trustedBkashCheckoutUrl = (value: string | undefined): string => {
-  if (!value) throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash returned no checkout URL')
-
-  try {
-    const url = new URL(value)
-    const hostname = url.hostname.toLowerCase()
-    const isBkashHost =
-      hostname === 'bka.sh' ||
-      hostname.endsWith('.bka.sh') ||
-      hostname === 'bkash.com' ||
-      hostname.endsWith('.bkash.com')
-
-    if (url.protocol !== 'https:' || !isBkashHost) throw new Error('Untrusted URL')
-    return url.toString()
-  } catch {
-    throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash returned an invalid checkout URL')
-  }
 }
 
 const createPayment = async (input: CreatePaymentInput) => {
@@ -56,7 +39,7 @@ const createPayment = async (input: CreatePaymentInput) => {
 
   const [organization, plan] = await Promise.all([
     Organization.findOne({ organizationId: input.organizationId }),
-    SubscriptionPlan.findOne({ planId: input.planId, isActive: true }),
+    SubscriptionPlan.findOne({ planId: input.planId, isActive: true, effectiveFrom: { $lte: new Date() }, $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gt: new Date() } }] }).sort({ version: -1 }),
   ])
 
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
@@ -65,19 +48,19 @@ const createPayment = async (input: CreatePaymentInput) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not configured for BDT payments')
   }
 
-  const baseAmount = input.billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly
-  if (!Number.isFinite(baseAmount) || baseAmount < 1) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Subscription plan price is invalid')
-  }
   const settings = await PlatformSettings.findOne({ key: 'platform' }).select('+tax.binEncrypted').lean()
-  const registered = Boolean(settings?.tax?.invoiceEnabled && settings.tax.registrationStatus === 'registered')
-  const vatRate = registered ? (settings?.tax?.vatRate || 0) : 0
-  const pricesIncludeVat = settings?.tax?.pricesIncludeVat ?? true
-  const vatAmount = registered && !pricesIncludeVat ? baseAmount * vatRate / 100 : registered && vatRate > 0 ? baseAmount - baseAmount / (1 + vatRate / 100) : 0
-  const amount = Number((baseAmount + (registered && !pricesIncludeVat ? vatAmount : 0)).toFixed(2))
-  const taxSnapshot = { invoiceEnabled: registered, registrationStatus: registered ? 'registered' as const : 'not_registered' as const,
-    operatorLegalName: settings?.tax?.operatorLegalName || '', binEncrypted: (settings?.tax as any)?.binEncrypted || '', vatRate,
-    pricesIncludeVat, baseAmount: Number((registered && pricesIncludeVat ? baseAmount - vatAmount : baseAmount).toFixed(2)), vatAmount: Number(vatAmount.toFixed(2)) }
+  let charge
+  try {
+    charge = calculateSubscriptionCharge({
+      priceMonthly: plan.priceMonthly,
+      priceYearly: plan.priceYearly,
+      billingCycle: input.billingCycle,
+      tax: settings?.tax ? { ...(settings.tax as any), binEncrypted: (settings.tax as any)?.binEncrypted || '' } : null,
+    })
+  } catch (error) {
+    throw new ApiError(httpStatus.BAD_REQUEST, error instanceof Error ? error.message : 'Subscription plan price is invalid')
+  }
+  const { amount, taxSnapshot } = charge
 
   const invoiceNumber = `RE-${Date.now().toString(36).toUpperCase()}-${randomUUID()
     .slice(0, 6)
@@ -90,11 +73,13 @@ const createPayment = async (input: CreatePaymentInput) => {
       initiatedBy: input.initiatedBy,
       planId: input.planId,
       planName: plan.name,
+      planVersion: plan.version || 1,
       billingCycle: input.billingCycle,
       amount,
       currency: 'BDT',
       maxProperties: plan.maxProperties,
       maxAgents: plan.maxAgents,
+      maxLeads: plan.maxLeads,
       taxSnapshot,
       invoiceNumber,
       idempotencyKey: input.idempotencyKey,
@@ -161,11 +146,6 @@ const createPayment = async (input: CreatePaymentInput) => {
   }
 }
 
-const isCompletedGatewayPayment = (payment: BkashGatewayPayment | null): boolean => {
-  if (!payment || payment.statusCode !== '0000') return false
-  return !payment.transactionStatus || payment.transactionStatus.toLowerCase() === 'completed'
-}
-
 const verifyGatewayPayment = async (paymentId: string): Promise<BkashGatewayPayment> => {
   try {
     const executed = await BkashPaymentClient.executePayment(paymentId)
@@ -181,20 +161,6 @@ const verifyGatewayPayment = async (paymentId: string): Promise<BkashGatewayPaym
     httpStatus.BAD_GATEWAY,
     queried?.statusMessage || 'bKash payment could not be verified as completed'
   )
-}
-
-const ensurePaymentMatchesAttempt = (payment: BkashGatewayPayment, attempt: IBkashPayment) => {
-  if (payment.paymentID && payment.paymentID !== attempt.paymentId) {
-    throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash payment ID mismatch')
-  }
-  if (payment.currency && payment.currency !== 'BDT') {
-    throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash payment currency mismatch')
-  }
-
-  const gatewayAmount = Number(payment.amount)
-  if (!Number.isFinite(gatewayAmount) || Math.abs(gatewayAmount - attempt.amount) > 0.001) {
-    throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash payment amount mismatch')
-  }
 }
 
 const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewayPayment) => {
@@ -215,6 +181,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     {
       $set: {
         'subscription.plan': attempt.planId,
+        'subscription.planVersion': attempt.planVersion || 1,
         'subscription.status': 'active',
         'subscription.currentPeriodEnd': periodEnd,
         'subscription.lastPaymentDate': now,
@@ -239,6 +206,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         serviceType: 'subscription',
         serviceName: `${attempt.planName} Plan (${attempt.billingCycle})`,
         plan: attempt.planId,
+        planVersion: attempt.planVersion || 1,
         billingCycle: attempt.billingCycle,
         date: now.toISOString().split('T')[0],
         amount: attempt.amount,
@@ -254,7 +222,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
   )
   await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
     action: 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
-    metadata: { transactionId: payment.trxID || '', planId: attempt.planId, billingCycle: attempt.billingCycle } })
+    metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle } })
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {
@@ -310,7 +278,7 @@ const handleCallback = async (paymentId: string, callbackStatus: string) => {
 
 const getPaymentStatus = async (organizationId: string, paymentId: string) => {
   const payment = await BkashPayment.findOne({ organizationId, paymentId }).select(
-    'paymentId invoiceNumber planId planName billingCycle amount currency status transactionId createdAt updatedAt'
+    'paymentId invoiceNumber planId planName planVersion billingCycle amount currency status transactionId reconciliationNotes createdAt updatedAt'
   )
   if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Payment attempt not found')
   return payment

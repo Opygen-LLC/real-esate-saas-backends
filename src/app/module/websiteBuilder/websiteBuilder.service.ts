@@ -3,11 +3,13 @@ import httpStatus from 'http-status'
 import mongoose from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
+import { Cache } from '../../../shared/cache'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { ALLOWED_ASSET_MIME_TYPES, assertSafeUrl, sanitizeCustomCss, sanitizeRichText } from '../../helpers/sanitize'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { DomainRecord } from '../domain/domain.model'
+import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { WebsitePage } from './websitePage.model'
 import { WebsiteRevision } from './websiteRevision.model'
 import { WebsiteAsset } from './websiteAsset.model'
@@ -17,8 +19,8 @@ import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.vali
 import { TemplateRegistry } from './templateRegistry'
 import { WebsiteCache } from './websiteCache'
 import { ObjectStorageService } from './objectStorage.service'
-import { scanStoredObject } from './virusScan.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { assertTemplateQuality } from './templateQa'
 
 const sanitizeDocument = (value: any, key = ''): any => {
@@ -41,13 +43,31 @@ const defaultDocument = () => ({
   theme: { primaryColor: '#0f172a', secondaryColor: '#2563eb', accentColor: '#7c3aed', fontFamily: 'Inter' },
 })
 
+const normalizeIdentifier = (identifier: string) => identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
+
+const cacheOrganizationResolution = async (identifier: string, org: any) => {
+  const identifiers = [identifier, org.organizationId, org.sub_domain, org.domain, org.customDomain].filter(Boolean).map(String)
+  await Promise.all(identifiers.map((value) => Cache.tenantResolve.set(normalizeIdentifier(value), org.organizationId, 300)))
+}
+
 const resolveOrganization = async (identifier: string) => {
-  const direct = await Organization.findOne({ $or: [{ organizationId: identifier }, { sub_domain: identifier }] })
-  if (direct) return direct
-  const normalized = identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
+  const normalized = normalizeIdentifier(identifier)
+  const resolution = await Cache.tenantResolve.get(normalized)
+  if (resolution?.organizationId) {
+    const cachedOrg = await Organization.findOne({ organizationId: resolution.organizationId })
+    if (cachedOrg) return cachedOrg
+    await Cache.tenantResolve.del(normalized)
+  }
+  const direct = await Organization.findOne({ $or: [{ organizationId: identifier }, { sub_domain: normalized }] })
+  if (direct) {
+    await cacheOrganizationResolution(normalized, direct)
+    return direct
+  }
   const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
   if (!domain) return null
-  return Organization.findOne({ organizationId: domain.organizationId })
+  const org = await Organization.findOne({ organizationId: domain.organizationId })
+  if (org) await cacheOrganizationResolution(normalized, org)
+  return org
 }
 
 const getAllPages = async (organizationId: string) => {
@@ -108,6 +128,14 @@ const performPublish = async (organizationId: string, pageId: string, userId?: s
     else await execute()
   } finally { if (session) await session.endSession() }
   await Promise.all([WebsiteCache.del('draft', organizationId, pageId), WebsiteCache.del('published', organizationId, result.slug)])
+  await DomainEventService.emit({
+    organizationId,
+    aggregateType: 'website',
+    aggregateId: pageId,
+    eventType: 'website.published',
+    actorId: userId,
+    payload: { summary: `Website page published: ${result.title || result.slug}`, slug: result.slug, version: result.publishedVersion },
+  })
   return result
 }
 
@@ -197,40 +225,24 @@ const presignAsset = async (organizationId: string, payload: any) => {
 
 const completeAsset = async (organizationId: string, payload: any, userId?: string) => {
   if (!String(payload.key).startsWith(`tenants/${organizationId}/website/`)) throw new ApiError(403, 'Asset key does not belong to this tenant')
-  const [original, intent, existingAsset] = await Promise.all([
-    ObjectStorageService.head(payload.key),
-    WebsiteUploadIntent.findOne({ organizationId, key: payload.key }),
-    WebsiteAsset.findOne({ organizationId, key: payload.key }),
-  ])
-  if (!intent && !existingAsset) throw new ApiError(409, 'Upload intent expired or was not created by this tenant')
+  const intent: any = await WebsiteUploadIntent.findOne({ organizationId, key: payload.key })
+  if (!intent) throw new ApiError(409, 'Upload intent expired or was not created by this tenant')
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
-  if (intent && intent.mimeType !== payload.mimeType) throw new ApiError(400, 'Uploaded asset type does not match its signed upload intent')
-  const actualMime = original.contentType.split(';')[0].trim().toLowerCase()
-  if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== payload.mimeType) throw new ApiError(400, 'Uploaded object content type does not match the signed upload')
-  const scan = await scanStoredObject(payload.key)
-  const variants: any[] = []
+  if (intent.mimeType !== payload.mimeType) throw new ApiError(400, 'Uploaded asset type does not match its signed upload intent')
   for (const variant of payload.variants || []) {
-    if (!String(variant.key).startsWith(`${payload.key}.`)) throw new ApiError(400, 'Invalid asset variant key')
-    if (intent && !intent.objectKeys.includes(String(variant.key))) throw new ApiError(400, 'Asset variant was not included in the signed upload intent')
-    const meta = await ObjectStorageService.head(variant.key)
-    const expectedMime = `image/${variant.format}`
-    const variantMime = meta.contentType.split(';')[0].trim().toLowerCase()
-    if (variantMime && variantMime !== 'application/octet-stream' && variantMime !== expectedMime) throw new ApiError(400, `Asset variant content type must be ${expectedMime}`)
-    await scanStoredObject(variant.key)
-    variants.push({ key: variant.key, url: ObjectStorageService.publicUrl(variant.key), format: variant.format, width: Number(variant.width), height: variant.height ? Number(variant.height) : undefined, size: meta.size })
+    if (!String(variant.key).startsWith(`${payload.key}.`) || !intent.objectKeys.includes(String(variant.key))) throw new ApiError(400, 'Asset variant was not included in the signed upload intent')
   }
-  const totalSize = original.size + variants.reduce((sum: number, v: any) => sum + v.size, 0)
-  const previousSize = Number(existingAsset?.size || 0)
-  const storageDelta = Math.max(0, totalSize - previousSize)
-  if (storageDelta) await EntitlementService.assertStorage(organizationId, storageDelta)
-  const asset = await WebsiteAsset.findOneAndUpdate({ organizationId, key: payload.key }, { $set: { url: ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, size: totalSize, altText: String(payload.altText || '').slice(0, 300), status: 'ready', etag: original.etag, scanStatus: scan.status, variants, uploadedBy: userId, lastReferencedAt: new Date() } }, { new: true, upsert: true, setDefaultsOnInsert: true })
-  const delta = totalSize - previousSize
-  if (delta) await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: delta } })
-  if (intent) await intent.deleteOne()
+  const asset: any = await WebsiteAsset.findOneAndUpdate(
+    { organizationId, key: payload.key },
+    { $set: { url: ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, lastReferencedAt: new Date() } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  )
+  await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
   return asset
 }
 
-const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId, status: 'ready' }).sort({ createdAt: -1 }).limit(200)
+
+const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
 const assetIsReferenced = async (organizationId: string, asset: any) => {
   const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean)
   const pages = await WebsitePage.find({ organizationId }).select('draftDocument publishedDocument').lean()
@@ -240,6 +252,7 @@ const deleteAsset = async (organizationId: string, assetId: string, allowReferen
   const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId })
   if (!asset) throw new ApiError(404, 'Asset not found or unauthorized')
   if (!allowReferenced && await assetIsReferenced(organizationId, asset)) throw new ApiError(409, 'Asset is still used by a draft or published page')
+  await OperationsQueueService.cancel(organizationId, 'asset_finalize', assetId)
   await Promise.allSettled([ObjectStorageService.remove(asset.key), ...(asset.variants || []).map((v) => ObjectStorageService.remove(v.key))])
   await asset.deleteOne()
   await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: -Math.max(0, asset.size || 0) } })
@@ -274,11 +287,19 @@ const canonicalBase = async (org: any) => {
 
 const getPublicPage = async (identifier: string, slug = '/') => {
   const targetSlug = !slug || slug === 'home' ? '/' : `/${slug}`.replace(/\/+/g, '/')
+  const normalized = normalizeIdentifier(identifier)
+  const resolution = await Cache.tenantResolve.get(normalized)
+  if (resolution?.organizationId) {
+    const hot = await WebsiteCache.get<any>('published', resolution.organizationId, targetSlug)
+    if (hot) return hot
+  }
   const org = await resolveOrganization(identifier)
   if (!org) throw new ApiError(404, 'Agency website not found')
   const cached = await WebsiteCache.get<any>('published', org.organizationId, targetSlug)
   if (cached) return cached
-  const page = await WebsitePage.findOne({ organizationId: org.organizationId, slug: targetSlug, status: 'published', publishedDocument: { $ne: null } }).lean()
+  const page = await WebsitePage.findOne({ organizationId: org.organizationId, slug: targetSlug, status: 'published', publishedDocument: { $ne: null } })
+    .select('title slug publishedDocument seo updatedAt')
+    .lean()
   const base = await canonicalBase(org)
   const result = { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain, domain: org.domain }, page: page ? { title: page.title, slug: page.slug, publishedDocument: page.publishedDocument, seo: { ...(page.seo || {}), canonicalUrl: page.seo?.canonicalUrl || `${base}${targetSlug === '/' ? '' : targetSlug}` } } : null }
   await WebsiteCache.set('published', org.organizationId, targetSlug, result, 300)

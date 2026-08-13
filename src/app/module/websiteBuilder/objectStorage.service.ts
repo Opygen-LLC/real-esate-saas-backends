@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'crypto'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
+import { Resilience } from '../../../shared/resilience'
 
 const encodePath = (value: string) => value.split('/').map(encodeURIComponent).join('/')
 const hmac = (key: Buffer | string, value: string) => createHmac('sha256', key).update(value).digest()
@@ -52,7 +53,7 @@ const publicUrl = (key: string) => {
 }
 
 const head = async (key: string) => {
-  const response = await fetch(presign('HEAD', key, 120), { method: 'HEAD' })
+  const response = await Resilience.fetch('object-storage', presign('HEAD', key, 120), { method: 'HEAD' }, { timeoutMs: 10000 })
   if (!response.ok) throw new ApiError(409, `Uploaded object is not available (${response.status})`)
   return {
     size: Number(response.headers.get('content-length') || 0),
@@ -62,7 +63,7 @@ const head = async (key: string) => {
 }
 
 const remove = async (key: string) => {
-  const response = await fetch(presign('DELETE', key, 120), { method: 'DELETE' })
+  const response = await Resilience.fetch('object-storage', presign('DELETE', key, 120), { method: 'DELETE' }, { timeoutMs: 10000 })
   if (!response.ok && response.status !== 404) throw new ApiError(502, 'Object storage delete failed')
 }
 

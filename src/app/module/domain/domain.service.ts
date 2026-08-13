@@ -7,9 +7,15 @@ import config from '../../../config'
 import { Organization } from '../organization/organization.model'
 import { DomainRecord } from './domain.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { Resilience } from '../../../shared/resilience'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 
 const normalizeDomain = (input: string): string => {
-  const raw = String(input || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, '')
+  const candidate = String(input || '').trim().toLowerCase()
+  if (!candidate || candidate.includes('://') || /[/?#]/.test(candidate) || candidate.includes(':') || candidate.startsWith('*.')) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Enter a bare domain name without protocol, path, port or wildcard')
+  }
+  const raw = candidate.replace(/\.$/, '')
   const withoutWww = raw.startsWith('www.') ? raw.slice(4) : raw
   const ascii = domainToASCII(withoutWww)
   if (!ascii || ascii.length > 253 || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(ascii)) {
@@ -44,6 +50,7 @@ const add = async (organizationId: string, input: string) => {
   }
   if (!record) throw new ApiError(500, 'Failed to persist custom domain configuration')
   await Organization.updateOne({ organizationId }, { $set: { domain, domain_Verify: false, domain_dns: record.requiredDns } })
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return record
 }
 
@@ -62,10 +69,10 @@ const requestTls = async (record: any) => {
     if (config.isProduction) throw new ApiError(503, 'TLS provider is not configured')
     return { tlsStatus: 'provisioning' as const, providerRequestId: 'development-manual' }
   }
-  const response = await fetch(config.domains.tls_provider_url, {
+  const response = await Resilience.fetch('domain-tls-provider', config.domains.tls_provider_url, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(config.domains.tls_provider_token ? { authorization: `Bearer ${config.domains.tls_provider_token}` } : {}) },
     body: JSON.stringify({ domain: record.domain, domains: [record.domain, `www.${record.domain}`], organizationId: record.organizationId, requestId: record.providerRequestId || undefined }),
-  })
+  }, { timeoutMs: 10000 })
   if (!response.ok) throw new ApiError(502, `TLS provider rejected domain provisioning (${response.status})`)
   const payload = await response.json().catch(() => ({})) as any
   return { tlsStatus: payload.status === 'active' ? 'active' as const : 'provisioning' as const, providerRequestId: String(payload.id || payload.requestId || '') }
@@ -106,7 +113,26 @@ const verifyRecord = async (record: any) => {
   record.nextCheckAt = new Date(Date.now() + nextMinutes * 60_000)
   await record.save()
   await Organization.updateOne({ organizationId: record.organizationId }, { $set: { domain: record.domain, domain_Verify: verified, domain_dns: record.requiredDns } })
+  await CacheInvalidationService.invalidateTenant(record.organizationId)
   return record
+}
+
+
+const verifyById = async (recordId: string) => {
+  const record: any = await DomainRecord.findById(recordId)
+  if (!record) return null
+  try { return await verifyRecord(record) }
+  catch (error) {
+    const failureCount = Number(record.failureCount || 0) + 1
+    record.failureCount = failureCount
+    if (record.status === 'verified') record.tlsStatus = 'failed'
+    if (failureCount >= 12) record.status = 'failed'
+    record.diagnostics = [...(record.diagnostics || []), { check: 'lifecycle', ok: false, message: error instanceof Error ? error.message : 'Unknown domain verification failure', at: new Date() }].slice(-20)
+    record.nextCheckAt = new Date(Date.now() + Math.min(360, Math.max(5, 2 ** Math.min(failureCount, 8))) * 60_000)
+    await record.save()
+    await CacheInvalidationService.invalidateTenant(record.organizationId)
+    throw error
+  }
 }
 
 const verify = async (organizationId: string) => {
@@ -140,4 +166,4 @@ const resolveVerifiedDomain = async (host: string): Promise<string | null> => {
   return record?.organizationId || null
 }
 
-export const DomainService = { add, get, verify, retryDue, resolveVerifiedDomain, normalizeDomain }
+export const DomainService = { add, get, verify, verifyById, retryDue, resolveVerifiedDomain, normalizeDomain }

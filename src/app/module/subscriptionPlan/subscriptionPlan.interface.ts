@@ -1,9 +1,12 @@
+export type SubscriptionPlanId = 'starter' | 'professional' | 'agency' | 'enterprise'
+
 export interface ISubscriptionPlan {
-  planId: 'starter' | 'professional' | 'agency' | 'enterprise'
+  planId: SubscriptionPlanId
+  version: number
   name: string
   priceMonthly: number
   priceYearly: number
-  currency: string
+  currency: 'BDT'
   description: string
   features: string[]
   maxAgents: number
@@ -19,4 +22,13 @@ export interface ISubscriptionPlan {
   maxMonthlyVisitors: number
   isPopular?: boolean
   isActive: boolean
+  isCurrent: boolean
+  effectiveFrom: Date
+  effectiveTo?: Date | null
+  grandfatherExisting: boolean
+  migrationAppliedAt?: Date | null
+  changeReason?: string
+  createdBy?: string
+  createdAt?: Date
+  updatedAt?: Date
 }

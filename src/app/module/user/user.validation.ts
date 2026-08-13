@@ -8,5 +8,5 @@ export const UserValidation = {
     bio: z.string().max(1000).optional(), licenseNumber: z.string().max(100).optional(), specialization: z.array(z.string().max(80)).max(20).optional(),
     serviceAreas: z.array(z.string().max(100)).max(100).optional(), address: z.string().max(300).optional(), gender: z.string().max(30).optional() }).strict() }),
   platformRole: z.object({ body: z.object({ userRole: z.enum(['super-admin', 'agency_owner', 'agency_admin', 'agent', 'viewer', 'user']).optional(),
-    status: z.enum(['pending', 'active', 'blocked']).optional() }).refine(value => value.userRole || value.status, 'Role or status is required') }),
+    status: z.enum(['pending', 'active', 'blocked']).optional(), reason: z.string().trim().min(10).max(500) }).refine(value => value.userRole || value.status, 'Role or status is required') }),
 }

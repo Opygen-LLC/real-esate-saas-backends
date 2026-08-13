@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { NextFunction, Request, Response } from 'express'
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
+import { RequestContext } from '../../shared/requestContext'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -33,7 +34,10 @@ export const requestContext = (req: Request, res: Response, next: NextFunction):
   const supplied = req.get('x-request-id')
   req.requestId = supplied && /^[A-Za-z0-9._-]{8,128}$/.test(supplied) ? supplied : crypto.randomUUID()
   res.setHeader('x-request-id', req.requestId)
-  next()
+  RequestContext.run({ requestId: req.requestId, traceparent: req.get('traceparent') }, () => {
+    res.setHeader('traceparent', RequestContext.childTraceparent())
+    next()
+  })
 }
 
 export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {

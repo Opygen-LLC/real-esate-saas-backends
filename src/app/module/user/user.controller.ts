@@ -137,8 +137,8 @@ const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) 
   const { id } = req.params
   const result = await UserService.updateUserRoleSuperAdmin(id, req.body)
   await writeAudit({ organizationId: result?.organizationId, actorId: req.user!._id!, actorRole: 'super-admin',
-    action: 'user.platform_updated', entityType: 'user', entityId: id, requestId: req.requestId, ip: req.ip,
-    metadata: { fields: Object.keys(req.body) } })
+    action: 'user.platform_updated', entityType: 'user', entityId: id, reason: req.body.reason, requestId: req.requestId, ip: req.ip,
+    metadata: { fields: Object.keys(req.body).filter((field) => field !== 'reason') } })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

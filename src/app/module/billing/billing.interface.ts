@@ -4,6 +4,7 @@ export interface IBilling {
   serviceType: 'subscription' | 'messaging' | 'design' | 'domain' | 'service'
   serviceName: string
   plan?: string
+  planVersion?: number
   billingCycle: 'monthly' | 'yearly' | 'one-time'
   date: string
   amount: number

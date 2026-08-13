@@ -27,6 +27,7 @@ const billingSchema = new Schema<IBilling>(
       type: String,
       default: 'starter',
     },
+    planVersion: { type: Number, default: 1, min: 1 },
     billingCycle: {
       type: String,
       enum: ['monthly', 'yearly', 'one-time'],

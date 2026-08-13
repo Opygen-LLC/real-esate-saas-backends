@@ -11,11 +11,7 @@ import { IGenericErrorMessage } from '../../interfaces/common'
 import { errorLogger } from '../../shared/logger'
 
 const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
-  if (config.env === 'development') {
-    // console.log('GlobalErrorHandler ~ ', error)
-  } else {
-    errorLogger.error('GlobalErrorHandler ~ ', error)
-  }
+  errorLogger.error('Unhandled request error', { error, method: req.method, path: req.path, statusCode: error?.statusCode || 500 })
 
   let statusCode = 500
   let message = 'Something went wrong !'
@@ -48,15 +44,8 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
         ]
       : []
   } else if (error instanceof Error) {
-    message = error?.message
-    errorMessages = error?.message
-      ? [
-          {
-            path: '',
-            message: error?.message,
-          },
-        ]
-      : []
+    message = config.env === 'production' ? 'Internal server error' : error.message
+    errorMessages = config.env === 'production' ? [] : [{ path: '', message: error.message }]
   }
 
   res.status(statusCode).json({

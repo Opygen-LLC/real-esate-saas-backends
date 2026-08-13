@@ -1,5 +1,6 @@
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
+import { Resilience } from '../../../shared/resilience'
 import { decryptField, encryptField } from '../../helpers/fieldEncryption'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
@@ -15,7 +16,7 @@ const verify = async (organizationId: string) => {
   const doc: any = await WhatsAppIntegration.findOne({ organizationId }).select('+encryptedAccessToken')
   if (!doc?.phoneNumberId || !doc?.encryptedAccessToken) throw new ApiError(409, 'Phone number ID and access token are required before verification')
   const token = decryptField(doc.encryptedAccessToken)
-  const response = await fetch(`${config.meta.graph_base_url}/${config.meta.graph_version}/${doc.phoneNumberId}?fields=id,display_phone_number,verified_name`, { headers: { authorization: `Bearer ${token}` } })
+  const response = await Resilience.fetch('whatsapp', `${config.meta.graph_base_url}/${config.meta.graph_version}/${doc.phoneNumberId}?fields=id,display_phone_number,verified_name`, { headers: { authorization: `Bearer ${token}` } }, { timeoutMs: config.meta.timeout_ms })
   const body: any = await response.json().catch(() => ({}))
   const testedAt = new Date()
   if (!response.ok || !body?.id) {
@@ -48,7 +49,7 @@ const sendTemplate = async (organizationId: string, input: { phone: string; temp
   if (!integration || integration.status !== 'connected' || !integration.phoneNumberId || !integration.encryptedAccessToken) throw new ApiError(409, 'Official WhatsApp Business integration is not connected')
   const token = decryptField(integration.encryptedAccessToken)
   const phone = normalizeBangladeshPhone(input.phone).replace(/^\+/, '')
-  const response = await fetch(`${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: input.templateName, language: { code: input.languageCode || 'en' }, ...(input.components?.length ? { components: input.components } : {}) } }) })
+  const response = await Resilience.fetch('whatsapp', `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: input.templateName, language: { code: input.languageCode || 'en' }, ...(input.components?.length ? { components: input.components } : {}) } }) }, { timeoutMs: config.meta.timeout_ms })
   const body: any = await response.json().catch(() => ({}))
   if (!response.ok) { await WhatsAppIntegration.updateOne({ _id: integration._id }, { $set: { status: 'error', lastError: `Graph API ${response.status}`, lastTestAt: new Date() } }); throw new ApiError(502, 'WhatsApp Business provider rejected the message') }
   await WhatsAppIntegration.updateOne({ _id: integration._id }, { $set: { status: 'connected', lastError: '', lastTestAt: new Date() } })

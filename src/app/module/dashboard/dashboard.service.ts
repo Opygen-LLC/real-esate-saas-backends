@@ -1,302 +1,423 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
+import { DomainEvent } from '../domainEvent/domainEvent.model'
 import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
+import { PlatformAdminService } from '../platformAdmin/platformAdmin.service'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { Viewing } from '../viewing/viewing.model'
 
-const getOverviewStats = async (organizationId: string) => {
+const agentRoles = ['agent', 'agency_admin', 'agency_owner']
+
+const resolveOrganizationScope = async (organizationId: string) => {
   if (!organizationId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID is required to fetch overview stats')
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID is required')
   }
 
-  const organization = await Organization.findOne({
+  const escaped = organizationId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const organization: any = await Organization.findOne({
     $or: [
       { organizationId },
-      { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-      { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-      { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
+      { sub_domain: { $regex: `^${escaped}$`, $options: 'i' } },
+      { domain: { $regex: `^${escaped}$`, $options: 'i' } },
+      { customDomain: { $regex: `^${escaped}$`, $options: 'i' } },
     ],
   })
+    .select('organizationId sub_domain agencyName subscription totalVisitor')
+    .lean()
 
-  const orgIds = organization
-    ? Array.from(new Set([organization.organizationId, organization.sub_domain, organization._id.toString()].filter(Boolean)))
+  const organizationIds = organization
+    ? Array.from(
+        new Set(
+          [organization.organizationId, organization.sub_domain, organization._id?.toString()].filter(Boolean)
+        )
+      )
     : [organizationId]
 
-  const orgFilter = { organizationId: { $in: orgIds } }
+  return { organization, organizationIds }
+}
 
-  const totalAgents = await User.countDocuments({
-    ...orgFilter,
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
-  })
+const getOverviewStats = async (organizationId: string) => {
+  const { organization, organizationIds } = await resolveOrganizationScope(organizationId)
+  const orgMatch = { organizationId: { $in: organizationIds } }
 
-  const totalProperties = await Property.countDocuments(orgFilter)
-  const activeListings = await Property.countDocuments({
-    ...orgFilter,
-    status: 'Available',
-  })
+  const [agentCount, propertyStats, leadStats, viewingStats, recentEvents] = await Promise.all([
+    User.countDocuments({ ...orgMatch, userRole: { $in: agentRoles }, status: { $ne: 'blocked' } }),
+    Property.aggregate([
+      { $match: orgMatch },
+      {
+        $group: {
+          _id: null,
+          totalProperties: { $sum: 1 },
+          activeListings: { $sum: { $cond: [{ $eq: ['$status', 'Available'] }, 1, 0] } },
+        },
+      },
+    ]),
+    Lead.aggregate([
+      { $match: orgMatch },
+      {
+        $group: {
+          _id: null,
+          totalLeads: { $sum: 1 },
+          dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+        },
+      },
+    ]),
+    Viewing.aggregate([
+      { $match: orgMatch },
+      {
+        $group: {
+          _id: null,
+          scheduledViewings: {
+            $sum: { $cond: [{ $in: ['$status', ['Scheduled', 'Confirmed']] }, 1, 0] },
+          },
+        },
+      },
+    ]),
+    DomainEvent.find(orgMatch)
+      .sort({ occurredAt: -1 })
+      .limit(8)
+      .select('eventType aggregateType aggregateId payload occurredAt')
+      .lean(),
+  ])
 
-  const totalLeads = await Lead.countDocuments(orgFilter)
-  const dealsWon = await Lead.countDocuments({ ...orgFilter, leadStatus: 'Won' })
-  const scheduledViewings = await Viewing.countDocuments({
-    ...orgFilter,
-    status: { $in: ['Scheduled', 'Confirmed'] },
-  })
+  const properties = propertyStats[0] || { totalProperties: 0, activeListings: 0 }
+  const leads = leadStats[0] || { totalLeads: 0, dealsWon: 0 }
+  const viewings = viewingStats[0] || { scheduledViewings: 0 }
 
   return {
-    totalProperties,
-    activeListings,
-    totalLeads,
-    scheduledViewings,
-    dealsWon,
-    totalAgents,
+    totalProperties: properties.totalProperties,
+    activeListings: properties.activeListings,
+    totalLeads: leads.totalLeads,
+    scheduledViewings: viewings.scheduledViewings,
+    dealsWon: leads.dealsWon,
+    totalAgents: agentCount,
     plan: organization?.subscription?.plan || 'trial',
-    planStatus: organization?.subscription?.status || 'active',
+    planStatus: organization?.subscription?.status || 'trialing',
     currentPeriodEnd: organization?.subscription?.currentPeriodEnd,
     totalVisitors: organization?.totalVisitor || 0,
-    recentActivities: [
-      {
-        id: 'act_1',
-        title: 'CRM Hub Active',
-        desc: `Managing ${totalLeads} active client leads and ${scheduledViewings} scheduled property viewings for ${organization?.agencyName || 'Agency'}`,
-        date: new Date(),
-        type: 'system',
-      },
-    ],
+    recentActivities: recentEvents.map((event: any) => ({
+      id: event._id.toString(),
+      title: event.payload?.summary || event.eventType,
+      desc: event.payload?.description || event.payload?.summary || event.eventType,
+      date: event.occurredAt,
+      type: event.aggregateType,
+      eventType: event.eventType,
+      aggregateId: event.aggregateId,
+    })),
   }
 }
 
+const rangeStart = (range: string, now: Date) => {
+  const start = new Date(now)
+  if (range === '7d') start.setDate(start.getDate() - 7)
+  else if (range === '90d') start.setDate(start.getDate() - 90)
+  else if (range === '1y') start.setFullYear(start.getFullYear() - 1)
+  else if (range === 'all') return new Date(0)
+  else start.setDate(start.getDate() - 30)
+  return start
+}
+
 const getAnalytics = async (organizationId: string, range: string = '30d') => {
-  if (!organizationId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID is required to fetch analytics data')
-  }
-
-  const organization = await Organization.findOne({
-    $or: [
-      { organizationId },
-      { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-      { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-      { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
-    ],
-  })
-
-  const orgIds = organization
-    ? Array.from(new Set([organization.organizationId, organization.sub_domain, organization._id.toString()].filter(Boolean)))
-    : [organizationId]
-
-  const orgFilter = { organizationId: { $in: orgIds } }
-
+  const { organizationIds } = await resolveOrganizationScope(organizationId)
+  const orgMatch = { organizationId: { $in: organizationIds } }
   const now = new Date()
-  let startDate = new Date()
+  const startDate = rangeStart(range, now)
+  const viewingStartDate = startDate.toISOString().slice(0, 10)
+  const sixMonthStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
 
-  if (range === '7d') {
-    startDate.setDate(now.getDate() - 7)
-  } else if (range === '30d') {
-    startDate.setDate(now.getDate() - 30)
-  } else if (range === '90d') {
-    startDate.setDate(now.getDate() - 90)
-  } else if (range === '1y') {
-    startDate.setFullYear(now.getFullYear() - 1)
-  } else if (range === 'all') {
-    startDate = new Date(0)
+  const [leadFacetRaw, propertyFacetRaw, viewingFacetRaw, agents] = await Promise.all([
+    Lead.aggregate([
+      { $match: orgMatch },
+      {
+        $facet: {
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalLeads: { $sum: 1 },
+                newLeadsInPeriod: {
+                  $sum: { $cond: [{ $gte: ['$createdAt', startDate] }, 1, 0] },
+                },
+                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+                dealsWonInPeriod: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ['$leadStatus', 'Won'] },
+                          { $gte: [{ $ifNull: ['$updatedAt', '$createdAt'] }, startDate] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                totalClosedVolume: {
+                  $sum: {
+                    $cond: [
+                      { $eq: ['$leadStatus', 'Won'] },
+                      {
+                        $cond: [
+                          { $gt: ['$budgetMax', 0] },
+                          '$budgetMax',
+                          { $cond: [{ $gt: ['$budgetMin', 0] }, '$budgetMin', 0] },
+                        ],
+                      },
+                      0,
+                    ],
+                  },
+                },
+                dealsWithoutBudgetCount: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ['$leadStatus', 'Won'] },
+                          { $lte: [{ $ifNull: ['$budgetMax', 0] }, 0] },
+                          { $lte: [{ $ifNull: ['$budgetMin', 0] }, 0] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+          bySource: [
+            { $group: { _id: { $ifNull: ['$source', 'Other'] }, count: { $sum: 1 } } },
+            { $sort: { count: -1, _id: 1 } },
+          ],
+          byStage: [
+            { $group: { _id: { $ifNull: ['$leadStatus', 'New'] }, count: { $sum: 1 } } },
+            { $sort: { count: -1, _id: 1 } },
+          ],
+          byAgent: [
+            { $match: { assignedAgent: { $ne: null } } },
+            {
+              $group: {
+                _id: '$assignedAgent',
+                leadsHandled: { $sum: 1 },
+                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+              },
+            },
+          ],
+          monthlyLeads: [
+            { $match: { createdAt: { $gte: sixMonthStart } } },
+            {
+              $group: {
+                _id: { $dateToString: { format: '%Y-%m', date: '$createdAt', timezone: 'Asia/Dhaka' } },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          monthlyWon: [
+            { $match: { leadStatus: 'Won', updatedAt: { $gte: sixMonthStart } } },
+            {
+              $group: {
+                _id: { $dateToString: { format: '%Y-%m', date: '$updatedAt', timezone: 'Asia/Dhaka' } },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ]),
+    Property.aggregate([
+      { $match: orgMatch },
+      {
+        $facet: {
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalProperties: { $sum: 1 },
+                activeListings: { $sum: { $cond: [{ $eq: ['$status', 'Available'] }, 1, 0] } },
+              },
+            },
+          ],
+          byType: [
+            { $group: { _id: { $ifNull: ['$propertyType', 'Other'] }, count: { $sum: 1 } } },
+            { $sort: { count: -1, _id: 1 } },
+          ],
+          top: [
+            { $sort: { views: -1, updatedAt: -1 } },
+            { $limit: 5 },
+            {
+              $project: {
+                title: 1,
+                price: 1,
+                city: 1,
+                propertyType: 1,
+                listingType: 1,
+                views: 1,
+                images: { $slice: ['$images', 1] },
+              },
+            },
+          ],
+        },
+      },
+    ]),
+    Viewing.aggregate([
+      { $match: orgMatch },
+      {
+        $facet: {
+          summary: [
+            {
+              $group: {
+                _id: null,
+                scheduledViewings: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $in: ['$status', ['Scheduled', 'Confirmed']] },
+                          { $gte: ['$date', viewingStartDate] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+          byAgent: [
+            { $match: { agentId: { $ne: null } } },
+            { $group: { _id: '$agentId', viewingsConducted: { $sum: 1 } } },
+          ],
+        },
+      },
+    ]),
+    User.find({ ...orgMatch, userRole: { $in: agentRoles }, status: { $ne: 'blocked' } })
+      .select('name email profileImgURL licenseNumber')
+      .lean(),
+  ])
+
+  const leadFacet = leadFacetRaw[0] || {}
+  const propertyFacet = propertyFacetRaw[0] || {}
+  const viewingFacet = viewingFacetRaw[0] || {}
+  const leadSummary = leadFacet.summary?.[0] || {
+    totalLeads: 0,
+    newLeadsInPeriod: 0,
+    dealsWon: 0,
+    dealsWonInPeriod: 0,
+    totalClosedVolume: 0,
+    dealsWithoutBudgetCount: 0,
   }
+  const propertySummary = propertyFacet.summary?.[0] || { totalProperties: 0, activeListings: 0 }
+  const viewingSummary = viewingFacet.summary?.[0] || { scheduledViewings: 0 }
 
-  // Summary Metrics
-  const totalProperties = await Property.countDocuments(orgFilter)
-  const activeListings = await Property.countDocuments({ ...orgFilter, status: 'Available' })
-  const totalLeads = await Lead.countDocuments(orgFilter)
-  const newLeadsInPeriod = await Lead.countDocuments({
-    ...orgFilter,
-    createdAt: { $gte: startDate },
-  })
-
-  const scheduledViewings = await Viewing.countDocuments({
-    ...orgFilter,
-    status: { $in: ['Scheduled', 'Confirmed'] },
-    date: { $gte: startDate.toISOString().split('T')[0] },
-  })
-
-  const dealsWonLeads = await Lead.find({
-    ...orgFilter,
-    leadStatus: 'Won',
-  })
-  const dealsWon = dealsWonLeads.length
-  const dealsWonInPeriod = dealsWonLeads.filter(
-    (l: any) => new Date(l.updatedAt || l.createdAt) >= startDate
-  ).length
-
-  // Calculate closed volume ($ sum of won deals with real recorded budgets)
-  let dealsWithoutBudgetCount = 0
-  const totalClosedVolume = dealsWonLeads.reduce((acc, lead: any) => {
-    const val = lead.budgetMax || lead.budgetMin
-    if (val && typeof val === 'number' && val > 0) {
-      return acc + val
+  const leadByAgent = new Map((leadFacet.byAgent || []).map((row: any) => [String(row._id), row]))
+  const viewingByAgent = new Map((viewingFacet.byAgent || []).map((row: any) => [String(row._id), row]))
+  const brokerPerformance = agents.map((agent: any) => {
+    const leadRow: any = leadByAgent.get(String(agent._id)) || { leadsHandled: 0, dealsWon: 0 }
+    const viewingRow: any = viewingByAgent.get(String(agent._id)) || { viewingsConducted: 0 }
+    const rate = leadRow.leadsHandled > 0 ? Math.round((leadRow.dealsWon / leadRow.leadsHandled) * 100) : 0
+    return {
+      _id: agent._id,
+      name: agent.name,
+      email: agent.email,
+      profileImgURL: agent.profileImgURL,
+      licenseNumber: agent.licenseNumber,
+      leadsHandled: leadRow.leadsHandled,
+      viewingsConducted: viewingRow.viewingsConducted,
+      dealsWon: leadRow.dealsWon,
+      conversionRate: rate,
     }
-    dealsWithoutBudgetCount++
-    return acc
-  }, 0)
+  })
 
-  const conversionRate = totalLeads > 0 ? Math.round((dealsWon / totalLeads) * 100) : 0
-
-  // Lead Source Attribution Breakdown
-  const sources = ['Website', 'Referral', 'Zillow', 'Portal', 'Social', 'WalkIn', 'ColdCall', 'Other']
-  const leadsBySource = await Promise.all(
-    sources.map(async (source) => {
-      const count = await Lead.countDocuments({ ...orgFilter, source })
-      return { source, count }
-    })
-  )
-
-  // 8-Stage CRM Pipeline Funnel
-  const stages = [
-    'New',
-    'Contacted',
-    'Qualified',
-    'ViewingScheduled',
-    'ViewingCompleted',
-    'OfferMade',
-    'Negotiation',
-    'Won',
-    'Lost',
-  ]
-  const leadsByStage = await Promise.all(
-    stages.map(async (stage) => {
-      const count = await Lead.countDocuments({ ...orgFilter, leadStatus: stage })
-      return { stage, count }
-    })
-  )
-
-  // Property Type Distribution
-  const propertyTypes = ['Apartment', 'Villa', 'House', 'Condo', 'Commercial', 'Land']
-  const propertiesByType = await Promise.all(
-    propertyTypes.map(async (type) => {
-      const count = await Property.countDocuments({ organizationId, propertyType: type })
-      return { type, count }
-    })
-  )
-
-  // Top 5 Viewed & Inquired Properties
-  const topProperties = await Property.find({ organizationId })
-    .sort({ views: -1 })
-    .limit(5)
-    .select('title price city propertyType listingType views images')
-
-  // Broker Performance Leaderboard
-  const agents = await User.find({
-    organizationId,
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
-  }).select('name email phoneNumber profileImgURL licenseNumber')
-
-  const brokerPerformance = await Promise.all(
-    agents.map(async (agent) => {
-      const agentLeads = await Lead.countDocuments({ organizationId, assignedAgent: agent._id })
-      const agentWon = await Lead.countDocuments({ organizationId, assignedAgent: agent._id, leadStatus: 'Won' })
-      const agentViewings = await Viewing.countDocuments({ organizationId, agentId: agent._id })
-      const rate = agentLeads > 0 ? Math.round((agentWon / agentLeads) * 100) : 0
-
-      return {
-        _id: agent._id,
-        name: agent.name,
-        email: agent.email,
-        profileImgURL: agent.profileImgURL,
-        licenseNumber: agent.licenseNumber,
-        leadsHandled: agentLeads,
-        viewingsConducted: agentViewings,
-        dealsWon: agentWon,
-        conversionRate: rate,
-      }
-    })
-  )
-
-  // 6-Month Rolling Velocity Trend Data
-  const monthlyTrend = []
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
-    const monthName = d.toLocaleString('en-US', { month: 'short' })
-    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1)
-    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0)
-
-    const leadsCount = await Lead.countDocuments({
-      ...orgFilter,
-      createdAt: { $gte: monthStart, $lte: monthEnd },
-    })
-
-    const wonCount = await Lead.countDocuments({
-      ...orgFilter,
-      leadStatus: 'Won',
-      updatedAt: { $gte: monthStart, $lte: monthEnd },
-    })
-
-    monthlyTrend.push({
-      month: monthName,
-      leads: leadsCount,
-      dealsWon: wonCount,
-    })
-  }
+  const monthlyLeadMap = new Map((leadFacet.monthlyLeads || []).map((row: any) => [row._id, row.count]))
+  const monthlyWonMap = new Map((leadFacet.monthlyWon || []).map((row: any) => [row._id, row.count]))
+  const monthlyTrend = Array.from({ length: 6 }, (_, offset) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - offset), 1)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    return {
+      month: d.toLocaleString('en-US', { month: 'short' }),
+      leads: Number(monthlyLeadMap.get(key) || 0),
+      dealsWon: Number(monthlyWonMap.get(key) || 0),
+    }
+  })
 
   return {
     range,
     kpis: {
-      totalProperties,
-      activeListings,
-      totalLeads,
-      newLeadsInPeriod,
-      scheduledViewings,
-      dealsWon,
-      dealsWonInPeriod,
-      totalClosedVolume,
-      dealsWithoutBudgetCount,
-      conversionRate,
+      totalProperties: propertySummary.totalProperties,
+      activeListings: propertySummary.activeListings,
+      totalLeads: leadSummary.totalLeads,
+      newLeadsInPeriod: leadSummary.newLeadsInPeriod,
+      scheduledViewings: viewingSummary.scheduledViewings,
+      dealsWon: leadSummary.dealsWon,
+      dealsWonInPeriod: leadSummary.dealsWonInPeriod,
+      totalClosedVolume: leadSummary.totalClosedVolume,
+      dealsWithoutBudgetCount: leadSummary.dealsWithoutBudgetCount,
+      conversionRate:
+        leadSummary.totalLeads > 0 ? Math.round((leadSummary.dealsWon / leadSummary.totalLeads) * 100) : 0,
     },
-    leadsBySource,
-    leadsByStage,
-    propertiesByType,
-    topProperties,
+    leadsBySource: (leadFacet.bySource || []).map((row: any) => ({ source: row._id, count: row.count })),
+    leadsByStage: (leadFacet.byStage || []).map((row: any) => ({ stage: row._id, count: row.count })),
+    propertiesByType: (propertyFacet.byType || []).map((row: any) => ({ type: row._id, count: row.count })),
+    topProperties: propertyFacet.top || [],
     brokerPerformance,
     monthlyTrend,
   }
 }
 
 const getSuperAdminOverviewStats = async () => {
-  const totalOrganizations = await Organization.countDocuments()
-  const activeAgencies = await Organization.countDocuments({ status: 'active' })
-  const totalUsers = await User.countDocuments()
-  const totalProperties = await Property.countDocuments()
-  const totalLeads = await Lead.countDocuments()
-  const totalViewings = await Viewing.countDocuments()
+  const [organizationStats, entityStats, revenue, health] = await Promise.all([
+    Organization.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalOrganizations: { $sum: 1 },
+          activeAgencies: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$isBlocked', true] },
+                    { $in: ['$subscription.status', ['trialing', 'active', 'grace', 'cancel_at_period_end']] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
+    Promise.all([
+      User.estimatedDocumentCount(),
+      Property.estimatedDocumentCount(),
+      Lead.estimatedDocumentCount(),
+      Viewing.estimatedDocumentCount(),
+    ]),
+    PlatformAdminService.getRevenueDashboard(),
+    PlatformAdminService.getTenantHealth({ page: 1, limit: 10 }),
+  ])
 
-  const organizations = await Organization.find()
-    .sort({ createdAt: -1 })
-    .limit(10)
-    .lean()
-
-  // Calculate MRR ($) based on subscriptions
-  const activeOrgs = await Organization.find({ status: 'active' })
-  let totalMRR = 0
-  activeOrgs.forEach((org: any) => {
-    if (org.subscriptionPlan === 'enterprise') totalMRR += 299
-    else if (org.subscriptionPlan === 'growth') totalMRR += 129
-    else totalMRR += 49
-  })
-
+  const organizations = organizationStats[0] || { totalOrganizations: 0, activeAgencies: 0 }
   return {
-    totalOrganizations,
-    activeAgencies,
-    totalUsers,
-    totalProperties,
-    totalLeads,
-    totalViewings,
-    totalMRR,
-    activeSubscriptions: activeAgencies,
-    churnRate: '3.2%',
-    recentAgencies: organizations,
+    totalOrganizations: organizations.totalOrganizations,
+    activeAgencies: organizations.activeAgencies,
+    totalUsers: entityStats[0],
+    totalProperties: entityStats[1],
+    totalLeads: entityStats[2],
+    totalViewings: entityStats[3],
+    totalMRR: revenue.mrr,
+    totalRevenue: revenue.totalRevenue,
+    monthRevenue: revenue.monthRevenue,
+    paidInvoices: revenue.paidInvoices,
+    activeSubscriptions: revenue.activeSubscriptions,
+    churnRate: null,
+    recentAgencies: health.data,
   }
 }
 
-export const DashboardService = {
-  getOverviewStats,
-  getAnalytics,
-  getSuperAdminOverviewStats,
-}
+export const DashboardService = { getOverviewStats, getAnalytics, getSuperAdminOverviewStats }

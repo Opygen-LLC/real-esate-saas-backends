@@ -18,7 +18,8 @@ export const OrganizationValidation = {
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.string().max(80).optional(), metaTitle: z.string().max(120).optional(), metaDescription: z.string().max(300).optional(),
     logo: optionalUrl.optional(), defaultLanguage: z.enum(['en', 'bn']).optional(), socialLinks: z.record(optionalUrl).optional(), websiteSettings: z.record(z.unknown()).optional() }).strict() }),
-  platformUpdate: z.object({ body: z.object({ isBlocked: z.boolean().optional(),
-    subscription: z.object({ status: z.enum(['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended']).optional(),
-      currentPeriodEnd: z.coerce.date().optional(), gracePeriodEnd: z.coerce.date().nullable().optional() }).optional() }).strict() }),
+  platformUpdate: z.object({ body: z.object({ reason: z.string().trim().min(10).max(500),
+    subscription: z.object({ status: z.enum(['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired']).optional(),
+      currentPeriodEnd: z.coerce.date().optional(), gracePeriodEnd: z.coerce.date().nullable().optional() }).strict().optional() }).strict()
+      .refine((value) => value.subscription && Object.keys(value.subscription).length > 0, 'Subscription change is required') }),
 }

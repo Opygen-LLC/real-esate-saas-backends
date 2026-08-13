@@ -11,11 +11,13 @@ const bkashPaymentSchema = new Schema<IBkashPayment>(
       required: true,
     },
     planName: { type: String, required: true },
+    planVersion: { type: Number, required: true, default: 1, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true, min: 1 },
     currency: { type: String, enum: ['BDT'], default: 'BDT' },
     maxProperties: { type: Number, required: true },
     maxAgents: { type: Number, required: true },
+    maxLeads: { type: Number, required: true, default: 500 },
     taxSnapshot: {
       invoiceEnabled: { type: Boolean, default: false }, registrationStatus: { type: String, enum: ['not_registered', 'registered'], default: 'not_registered' },
       operatorLegalName: { type: String, default: '' }, binEncrypted: { type: String, default: '', select: false },
@@ -30,6 +32,7 @@ const bkashPaymentSchema = new Schema<IBkashPayment>(
     payerAccount: { type: String, default: '' },
     gatewayStatusCode: { type: String, default: '' },
     gatewayStatusMessage: { type: String, default: '' },
+    reconciliationNotes: { type: [{ authorId: String, note: { type: String, maxlength: 1000 }, createdAt: { type: Date, default: Date.now } }], default: [] },
     status: {
       type: String,
       enum: ['initialized', 'pending', 'executing', 'succeeded', 'failed', 'cancelled'],

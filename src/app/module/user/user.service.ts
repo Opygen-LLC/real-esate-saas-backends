@@ -268,13 +268,20 @@ const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IP
   }
 }
 
-const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string }) => {
+const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }) => {
   const user = await User.findById(id)
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   }
 
-  const result = await User.findByIdAndUpdate(id, payload, { new: true })
+  const { reason: _reason, ...changes } = payload
+  const resultingRole = changes.userRole ?? user.userRole
+  const resultingStatus = changes.status ?? user.status
+  if (user.userRole === 'super-admin' && user.status === 'active' && (resultingRole !== 'super-admin' || resultingStatus !== 'active')) {
+    const activePlatformAdmins = await User.countDocuments({ userRole: 'super-admin', status: 'active' })
+    if (activePlatformAdmins <= 1) throw new ApiError(httpStatus.CONFLICT, 'At least one active super administrator must remain')
+  }
+  const result = await User.findByIdAndUpdate(id, changes, { new: true, runValidators: true }).select('-password')
   return result
 }
 
