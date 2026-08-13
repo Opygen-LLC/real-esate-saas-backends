@@ -7,6 +7,15 @@ dotenv.config({
 })
 
 const isProduction = process.env.NODE_ENV === 'production'
+
+const envBoolean = (name: string, fallback: boolean): boolean => {
+  const raw = process.env[name]?.trim().toLowerCase()
+  if (!raw) return fallback
+  if (raw === 'true' || raw === '1' || raw === 'yes') return true
+  if (raw === 'false' || raw === '0' || raw === 'no') return false
+  throw new Error(`${name} must be true or false`)
+}
+
 const requiredInProduction = (name: string, minimum = 1): string => {
   const value = process.env[name]?.trim()
   if (isProduction && (!value || value.length < minimum)) {
@@ -20,6 +29,11 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL ||
   .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean)
 
+// Local/dev environments should never try to call an empty SMS URL. Production is
+// deliberately the opposite: a real SMS provider is mandatory and console OTPs
+// are rejected below.
+const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
+
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS', 'COOKIE_DOMAIN']
   requiredUrls.forEach((name) => requiredInProduction(name))
@@ -28,13 +42,19 @@ if (isProduction) {
   requiredInProduction('OTP_PEPPER', 32)
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
-  if (process.env.SMS_DEV_MODE === 'true') throw new Error('SMS_DEV_MODE must be false in production')
+
+  if (smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false in production')
   const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID']
   requiredSms.forEach((name) => requiredInProduction(name))
 }
 
 for (const origin of allowedOrigins) {
   if (!z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
+}
+
+const smsApiUrl = process.env.SMS_API_URL?.trim() || ''
+if (smsApiUrl && !z.string().url().safeParse(smsApiUrl).success) {
+  throw new Error('SMS_API_URL must be a valid absolute URL')
 }
 
 export default {
@@ -64,11 +84,11 @@ export default {
     refresh_cookie_name: 'refreshToken',
   },
   sms: {
-    development_mode: process.env.SMS_DEV_MODE === 'true',
-    api_url: process.env.SMS_API_URL || '',
-    api_token: process.env.SMS_API_TOKEN || '',
-    sender_id: process.env.SMS_SENDER_ID || '',
-    timeout_ms: Number(process.env.SMS_TIMEOUT_MS || 10000),
+    development_mode: smsDevelopmentMode,
+    api_url: smsApiUrl,
+    api_token: process.env.SMS_API_TOKEN?.trim() || '',
+    sender_id: process.env.SMS_SENDER_ID?.trim() || '',
+    timeout_ms: Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 10000)),
   },
   domains: {
     a_target: process.env.DOMAIN_A_TARGET || '76.76.21.21',
