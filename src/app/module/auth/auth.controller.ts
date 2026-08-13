@@ -28,12 +28,12 @@ const issueCsrfToken = (res: Response): string => {
 }
 
 const clearCookieVariants = (res: Response, name: string, httpOnly: boolean) => {
-  // Clear the currently configured cookie and the legacy host-only variant. This
-  // prevents duplicate accessToken/refreshToken cookies when COOKIE_DOMAIN is
-  // introduced or changed on an existing deployment.
-  res.clearCookie(name, { ...cookieBase, httpOnly })
-  if (cookieBase.domain) {
-    res.clearCookie(name, { ...cookieBase, domain: undefined, httpOnly })
+  // Current auth cookies are host-only. Also clear the old domain-scoped variant
+  // when COOKIE_DOMAIN is still present in the deployment environment so users
+  // migrate cleanly without duplicate access/refresh cookies.
+  res.clearCookie(name, { ...cookieBase, domain: undefined, httpOnly })
+  if (config.legacy_cookie_domain) {
+    res.clearCookie(name, { ...cookieBase, domain: config.legacy_cookie_domain, httpOnly })
   }
 }
 

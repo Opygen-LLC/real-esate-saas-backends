@@ -43,18 +43,24 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL ||
 // are rejected below.
 
 const rawCookieDomain = process.env.COOKIE_DOMAIN?.trim() || ''
-const cookieDomain = rawCookieDomain || undefined
-if (cookieDomain) {
-  if (cookieDomain.includes('://') || cookieDomain.includes('/') || cookieDomain.includes(':')) {
+// Authentication cookies are intentionally host-only (no Domain attribute).
+// This works for direct API requests and, importantly, allows the Next.js
+// same-origin reverse proxy to bind the cookies to the frontend host (including
+// localhost) instead of exposing them as third-party cookies. COOKIE_DOMAIN is
+// retained only so older domain-scoped cookies can be cleared during migration.
+const legacyCookieDomain = rawCookieDomain || undefined
+if (legacyCookieDomain) {
+  if (legacyCookieDomain.includes('://') || legacyCookieDomain.includes('/') || legacyCookieDomain.includes(':')) {
     throw new Error('COOKIE_DOMAIN must be a hostname/domain only (for example .faysaldev.com)')
   }
 
-  const normalizedCookieDomain = cookieDomain.replace(/^\./, '').toLowerCase()
+  const normalizedCookieDomain = legacyCookieDomain.replace(/^\./, '').toLowerCase()
   const apiHostname = publicApi.hostname.toLowerCase()
   if (apiHostname !== normalizedCookieDomain && !apiHostname.endsWith(`.${normalizedCookieDomain}`)) {
-    throw new Error(`COOKIE_DOMAIN ${cookieDomain} does not match PUBLIC_API_URL host ${apiHostname}`)
+    throw new Error(`COOKIE_DOMAIN ${legacyCookieDomain} does not match PUBLIC_API_URL host ${apiHostname}`)
   }
 }
+const cookieDomain = undefined
 
 const cookieSecure = envBoolean('COOKIE_SECURE', isProduction || publicApi.protocol === 'https:')
 if (publicApi.protocol === 'https:' && !cookieSecure) {
@@ -72,7 +78,7 @@ if (cookieSameSite === 'none' && !cookieSecure) {
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
 
 if (isProduction) {
-  const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS', 'COOKIE_DOMAIN']
+  const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
   requiredUrls.forEach((name) => requiredInProduction(name))
   requiredInProduction('JWT_SECRET', 32)
   requiredInProduction('JWT_REFRESH_SECRET', 32)
@@ -102,6 +108,7 @@ export default {
   client_url: process.env.CLIENT_URL || 'http://localhost:3000',
   allowed_origins: allowedOrigins,
   cookie_domain: cookieDomain,
+  legacy_cookie_domain: legacyCookieDomain,
   cookie_secure: cookieSecure,
   cookie_same_site: cookieSameSite,
   database_string: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
