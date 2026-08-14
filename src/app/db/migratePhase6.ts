@@ -37,7 +37,7 @@ const run = async () => {
     let existing = await collection.indexes()
     const intendedName = typeof options.name === 'string' ? options.name : ''
     const conflictingName = intendedName ? existing.find((index: any) => index.name === intendedName && JSON.stringify(index.key) !== JSON.stringify(keys)) : undefined
-    if (conflictingName) {
+    if (conflictingName?.name) {
       await collection.dropIndex(conflictingName.name)
       existing = await collection.indexes()
     }

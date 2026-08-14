@@ -2,6 +2,7 @@ import mongoose, { ClientSession } from 'mongoose'
 import config from '../../config'
 import { mongoSupportsTransactions } from './mongoCapabilities'
 import { SubscriptionPlan } from '../module/subscriptionPlan/subscriptionPlan.model'
+import { SubscriptionPlanService } from '../module/subscriptionPlan/subscriptionPlan.service'
 import { Cache } from '../../shared/cache'
 import { RedisClient } from '../../shared/redisClient'
 
@@ -11,11 +12,50 @@ const STARTER_YEARLY = 5000
 const applyMigration = async (session?: ClientSession): Promise<'updated' | 'noop'> => {
   const currentQuery = SubscriptionPlan.findOne({ planId: 'starter', isCurrent: true }).sort({ version: -1 })
   if (session) currentQuery.session(session)
-  const current = await currentQuery
+  let current = await currentQuery
 
   if (!current) {
-    throw new Error('Starter plan was not found. Bootstrap the subscription catalog before applying the ৳500 migration.')
+    await SubscriptionPlanService.getAllPlans()
+    const retryQuery = SubscriptionPlan.findOne({ planId: 'starter', isCurrent: true }).sort({ version: -1 })
+    if (session) retryQuery.session(session)
+    current = await retryQuery
   }
+
+  if (!current) {
+    const now = new Date()
+    const [created] = await SubscriptionPlan.create([{
+      planId: 'starter',
+      version: 1,
+      name: 'Starter',
+      priceMonthly: STARTER_MONTHLY,
+      priceYearly: STARTER_YEARLY,
+      currency: 'BDT',
+      description: 'A practical starting point for independent agents and small property businesses in Bangladesh.',
+      features: ['1–3 Team Agents', '100 Property Listings', '500 Active Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
+      maxAgents: 3,
+      maxProperties: 100,
+      maxLeads: 500,
+      hasCustomDomain: false,
+      hasAdvancedAnalytics: false,
+      hasWhatsAppIntegration: false,
+      hasLeadAutomations: false,
+      hasSmsAutomation: false,
+      hasPremiumTemplates: false,
+      maxStorageMb: 1024,
+      maxMonthlyVisitors: 10000,
+      isPopular: false,
+      isCurrent: true,
+      isActive: true,
+      effectiveFrom: now,
+      effectiveTo: null,
+      grandfatherExisting: true,
+      migrationAppliedAt: now,
+      createdBy: 'starter-500-migration',
+      changeReason: 'Initial bootstrap of Starter plan at BDT 500/month.',
+    }], session ? { session } : undefined)
+    current = created
+  }
+
 
   if (current.currency === 'BDT' && current.priceMonthly === STARTER_MONTHLY && current.priceYearly === STARTER_YEARLY) {
     return 'noop'
@@ -60,6 +100,17 @@ const applyMigration = async (session?: ClientSession): Promise<'updated' | 'noo
 
 const run = async (): Promise<void> => {
   await mongoose.connect(config.database_string, { autoIndex: false })
+  const collection = mongoose.connection.collection('subscriptionplans')
+  try {
+    const indexes = await collection.indexes()
+    const legacyIndex = indexes.find((idx: any) => idx.name === 'planId_1' && idx.unique && Object.keys(idx.key || {}).length === 1 && idx.key.planId)
+    if (legacyIndex) {
+      await collection.dropIndex('planId_1')
+    }
+  } catch (_e) {
+    // collection might not exist yet
+  }
+
   const supportsTransactions = await mongoSupportsTransactions()
 
   let result: 'updated' | 'noop'
