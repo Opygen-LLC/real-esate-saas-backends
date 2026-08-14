@@ -75,7 +75,7 @@ const sendEmail = async (to: string, subject: string, html: string): Promise<boo
   const client = transporter()
   if (!client) {
     if (config.email.development_mode && !config.isProduction) {
-      logger.info('[EMAIL_DEV_MODE] Email delivery simulated', { subject, recipientConfigured: Boolean(to) })
+      logger.info('[EMAIL_DEV_MODE] Email delivery simulated (No real email sent to inbox). Set EMAIL_DEV_MODE=false and configure SMTP in .env for real emails.', { subject, recipient: to })
       return true
     }
     logger.error('SMTP provider is not configured')
