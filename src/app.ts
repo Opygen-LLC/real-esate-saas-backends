@@ -14,6 +14,8 @@ import { Metrics } from './shared/metrics'
 import { RedisClient } from './shared/redisClient'
 import { logger } from './shared/logger'
 import { getWorkerHealth } from './app/module/cron/phase3.worker'
+import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
+import { emailProviderStatus, verifyEmailProvider } from './app/helpers/sendEmail'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -73,11 +75,27 @@ app.get('/', (_req: Request, res: Response) => {
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString() }))
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
-  const redis = await RedisClient.ping()
+  const [transactions, redis, email] = await Promise.all([
+    mongo ? mongoSupportsTransactions() : Promise.resolve(false),
+    RedisClient.ping(),
+    verifyEmailProvider(),
+  ])
   const worker = getWorkerHealth()
   const workerReady = !config.runtime.worker_enabled || worker.healthy
-  const ready = mongo && redis && workerReady
-  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', dependencies: { mongo, redis: config.redis.enabled ? redis : 'disabled', worker: config.runtime.worker_enabled ? worker : 'disabled' } })
+  const transactionReady = !config.isProduction || transactions
+  const emailReady = !config.isProduction || email
+  const ready = mongo && transactionReady && redis && emailReady && workerReady
+  const emailStatus = emailProviderStatus()
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    dependencies: {
+      mongo,
+      mongoTransactions: transactions,
+      redis: config.redis.enabled ? redis : 'disabled',
+      email: { configured: emailStatus.configured, healthy: emailReady, lastCheckedAt: emailStatus.lastCheckedAt },
+      worker: config.runtime.worker_enabled ? worker : 'disabled',
+    },
+  })
 })
 app.get('/metrics', (req, res) => {
   if (config.isProduction) {

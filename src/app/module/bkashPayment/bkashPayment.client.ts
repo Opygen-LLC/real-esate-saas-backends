@@ -14,9 +14,10 @@ let tokenState: TokenState | null = null
 let tokenPromise: Promise<TokenState> | null = null
 
 const requiredConfig = (): void => {
-  const { grant_token_url, create_payment_url, execute_payment_url, query_payment_url, app_key, app_secret, username, password } = config.bkash
+  const { enabled, grant_token_url, create_payment_url, execute_payment_url, query_payment_url, app_key, app_secret, username, password } = config.bkash
+  if (!enabled) throw new ApiError(503, 'bKash payments are currently disabled', '', 'BKASH_DISABLED')
   if (!grant_token_url || !create_payment_url || !execute_payment_url || !query_payment_url || !app_key || !app_secret || !username || !password) {
-    throw new ApiError(502, 'bKash gateway is not configured')
+    throw new ApiError(503, 'bKash gateway is not configured', '', 'BKASH_NOT_CONFIGURED')
   }
 }
 

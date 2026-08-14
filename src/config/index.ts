@@ -8,6 +8,31 @@ dotenv.config({
 
 const isProduction = process.env.NODE_ENV === 'production'
 
+const normalizeApiOrigin = (value: string): string => {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new Error('PUBLIC_API_URL must be a valid absolute URL')
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('PUBLIC_API_URL must use http:// or https://')
+  const pathname = parsed.pathname.replace(/\/$/, '')
+  if (pathname && pathname !== '/api/v1') {
+    throw new Error('PUBLIC_API_URL must be the API origin only (for example https://api.faysaldev.com)')
+  }
+  return parsed.origin
+}
+
+const isPrivateNetworkHost = (host: string): boolean => {
+  const value = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (!value) return false
+  if (value === 'localhost' || value === '::1' || value === 'host.docker.internal') return true
+  if (!value.includes('.') && !value.includes(':')) return true // Docker/private DNS service name (for example `redis`).
+  if (/^127\./.test(value) || /^10\./.test(value) || /^192\.168\./.test(value)) return true
+  const match = value.match(/^172\.(\d{1,3})\./)
+  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31)
+}
+
 const envBoolean = (name: string, fallback: boolean): boolean => {
   const raw = process.env[name]?.trim().toLowerCase()
   if (!raw) return fallback
@@ -24,15 +49,10 @@ const requiredInProduction = (name: string, minimum = 1): string => {
   return value || ''
 }
 
-const publicApiUrl = process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`
+const publicApiUrl = normalizeApiOrigin(process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`)
 const publicSiteOrigin = (process.env.PUBLIC_SITE_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '')
 
-let publicApi: URL
-try {
-  publicApi = new URL(publicApiUrl)
-} catch {
-  throw new Error('PUBLIC_API_URL must be a valid absolute URL')
-}
+const publicApi = new URL(publicApiUrl)
 
 if (!z.string().url().safeParse(publicSiteOrigin).success) {
   throw new Error('PUBLIC_SITE_ORIGIN must be a valid absolute URL')
@@ -81,6 +101,11 @@ if (cookieSameSite === 'none' && !cookieSecure) {
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
 const smsEnabled = envBoolean('SMS_ENABLED', false)
 const emailDevelopmentMode = envBoolean('EMAIL_DEV_MODE', false)
+const redisEnabled = envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))
+const redisTls = envBoolean('REDIS_TLS', false)
+const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK', false)
+const redisHost = process.env.REDIS_HOST || '127.0.0.1'
+const bkashEnabled = envBoolean('BKASH_ENABLED', isProduction)
 
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
@@ -93,15 +118,25 @@ if (isProduction) {
 
   if (emailDevelopmentMode) throw new Error('EMAIL_DEV_MODE must be false in production')
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
-  if (envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))) {
+  if (redisEnabled) {
     requiredInProduction('REDIS_PASSWORD', 8)
-    if (!envBoolean('REDIS_TLS', false)) throw new Error('REDIS_TLS must be true when Redis is enabled in production')
+    if (!redisTls) {
+      if (!redisAllowInsecurePrivateNetwork) {
+        throw new Error('REDIS_TLS must be true in production unless REDIS_ALLOW_INSECURE_PRIVATE_NETWORK=true is explicitly set for an isolated private network')
+      }
+      if (!isPrivateNetworkHost(redisHost)) {
+        throw new Error('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK may only be used with localhost, RFC1918, or private Docker DNS Redis hosts')
+      }
+    }
   }
   requiredInProduction('METRICS_TOKEN', 24)
   requiredInProduction('SMTP_HOST')
   requiredInProduction('SMTP_USER')
   requiredInProduction('SMTP_PASSWORD', 8)
   requiredInProduction('SMTP_FROM')
+  if (bkashEnabled) {
+    ;['BKASH_GRANT_TOKEN_URL', 'BKASH_CREATE_PAYMENT_URL', 'BKASH_EXECUTE_PAYMENT_URL', 'BKASH_QUERY_PAYMENT_URL', 'BKASH_APP_KEY', 'BKASH_APP_SECRET', 'BKASH_USERNAME', 'BKASH_PASSWORD'].forEach((name) => requiredInProduction(name))
+  }
   if (smsEnabled) {
     const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
     requiredSms.forEach((name) => requiredInProduction(name))
@@ -155,6 +190,10 @@ export default {
     from: process.env.SMTP_FROM?.trim() || process.env.APP_EMAIL?.trim() || '',
     connection_timeout_ms: Math.max(1000, Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 5000)),
     socket_timeout_ms: Math.max(1000, Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 10000)),
+    verify_on_startup: envBoolean('SMTP_VERIFY_ON_STARTUP', isProduction),
+    health_cache_ms: Math.max(5000, Number(process.env.SMTP_HEALTH_CACHE_MS || 60000)),
+    max_attempts: Math.max(1, Math.min(4, Number(process.env.SMTP_MAX_ATTEMPTS || 2))),
+    retry_delay_ms: Math.max(100, Number(process.env.SMTP_RETRY_DELAY_MS || 500)),
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'development-only-access-secret-change-me',
@@ -192,13 +231,14 @@ export default {
     public_site_origin: publicSiteOrigin,
   },
   redis: {
-    enabled: envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST)),
-    host: process.env.REDIS_HOST || '127.0.0.1',
+    enabled: redisEnabled,
+    host: redisHost,
     port: Math.max(1, Number(process.env.REDIS_PORT || 6379)),
     username: process.env.REDIS_USERNAME || '',
     password: process.env.REDIS_PASSWORD || '',
     db: Math.max(0, Number(process.env.REDIS_DB || 0)),
-    tls: envBoolean('REDIS_TLS', false),
+    tls: redisTls,
+    allow_insecure_private_network: redisAllowInsecurePrivateNetwork,
     servername: process.env.REDIS_TLS_SERVERNAME || '',
     reject_unauthorized: envBoolean('REDIS_TLS_REJECT_UNAUTHORIZED', true),
     connect_timeout_ms: Math.max(250, Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 1500)),
@@ -243,6 +283,7 @@ export default {
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
   },
   bkash: {
+    enabled: bkashEnabled,
     grant_token_url: process.env.BKASH_GRANT_TOKEN_URL,
     create_payment_url: process.env.BKASH_CREATE_PAYMENT_URL,
     execute_payment_url: process.env.BKASH_EXECUTE_PAYMENT_URL,

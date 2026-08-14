@@ -6,6 +6,7 @@ import { errorLogger, logger } from './shared/logger'
 import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 import { startPhase3Worker } from './app/module/cron/phase3.worker'
 import { RedisClient } from './shared/redisClient'
+import { verifyEmailProvider } from './app/helpers/sendEmail'
 
 let server: Server | undefined
 let stopWorker: (() => void) | undefined
@@ -61,6 +62,9 @@ async function bootstrap() {
     else logger.warn('mongo_standalone_development_mode')
 
     if (config.redis.enabled && !(await RedisClient.ping())) throw new Error('Redis is enabled but unavailable during startup')
+    if (config.email.verify_on_startup && !(await verifyEmailProvider(true))) {
+      throw new Error('SMTP verification failed during startup. Check SMTP_HOST/PORT/SECURE/USER/PASSWORD/FROM and provider network access.')
+    }
     stopWorker = startPhase3Worker()
     server = app.listen(config.port, () => logger.info('server_listening', { port: config.port, workerEnabled: config.runtime.worker_enabled }))
     server.requestTimeout = 30_000

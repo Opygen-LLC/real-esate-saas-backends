@@ -27,7 +27,7 @@ const shell = (heading: string, intro: string, code: string, footer: string) => 
 
 const deliver = async (to: string, subject: string, html: string): Promise<void> => {
   const sent = await sendEmail(to, subject, html)
-  if (!sent) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Verification email could not be delivered. Please try again.')
+  if (!sent) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Verification email could not be delivered. Please try again shortly.', '', 'EMAIL_DELIVERY_UNAVAILABLE')
 }
 
 export const sendAccountVerificationEmail = async (input: { email: string; code: string; name?: string; agencyName?: string }) => {
