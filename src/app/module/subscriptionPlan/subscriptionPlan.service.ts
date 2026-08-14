@@ -10,7 +10,7 @@ import { SubscriptionPlan } from './subscriptionPlan.model'
 
 const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId: SubscriptionPlanId }> = [
   {
-    planId: 'starter', name: 'Starter', priceMonthly: 1490, priceYearly: 14900, currency: 'BDT',
+    planId: 'starter', name: 'Starter', priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
     description: 'Perfect for solo real estate agents and boutique teams starting out.',
     features: ['1–3 Team Agents', '100 Property Listings', '500 Active Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
     maxAgents: 3, maxProperties: 100, maxLeads: 500, hasCustomDomain: false, hasAdvancedAnalytics: false,

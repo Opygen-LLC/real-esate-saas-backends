@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import config from '../../config'
 
 const TARGET_PRICES: Record<string, { monthly: number; yearly: number }> = {
-  starter: { monthly: 1490, yearly: 14900 },
+  starter: { monthly: 500, yearly: 5000 },
   professional: { monthly: 3490, yearly: 34900 },
   agency: { monthly: 6990, yearly: 69900 },
   enterprise: { monthly: 12990, yearly: 129900 },
