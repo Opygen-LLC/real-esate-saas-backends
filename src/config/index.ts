@@ -33,10 +33,32 @@ try {
   throw new Error('PUBLIC_API_URL must be a valid absolute URL')
 }
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || 'http://localhost:3000')
-  .split(',')
-  .map((origin) => origin.trim().replace(/\/$/, ''))
-  .filter(Boolean)
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'https://opygenesate.vercel.app',
+  'https://opygeneestate.vercel.app',
+]
+
+if (process.env.CLIENT_URL) {
+  defaultAllowedOrigins.push(process.env.CLIENT_URL)
+}
+
+const rawOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : defaultAllowedOrigins
+
+const allowedOrigins = Array.from(
+  new Set(
+    rawOrigins
+      .map((origin) => origin.trim().replace(/\/$/, ''))
+      .filter(Boolean)
+  )
+)
+
 
 // Local/dev environments should never try to call an empty SMS URL. Production is
 // deliberately the opposite: a real SMS provider is mandatory and console OTPs
