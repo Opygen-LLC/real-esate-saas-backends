@@ -99,6 +99,8 @@ const reserveSubdomain = async (agencyName: string, email: string): Promise<stri
 }
 
 const enforceOtpThrottle = async (email: string, purpose: OtpPurpose): Promise<void> => {
+  if (!config.isProduction) return
+
   const since = new Date(Date.now() - OTP_WINDOW_MS)
   const [count, latest] = await Promise.all([
     OtpChallenge.countDocuments({ email, purpose, channel: 'email', createdAt: { $gte: since } }),
@@ -109,6 +111,7 @@ const enforceOtpThrottle = async (email: string, purpose: OtpPurpose): Promise<v
     throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Please wait before requesting another code')
   }
 }
+
 
 const createOtpChallenge = async (
   email: string,
