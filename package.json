@@ -29,7 +29,8 @@
     "test:load": "node scripts/load-test.mjs",
     "verify:ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:ci",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
-    "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts"
+    "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts",
+    "test:smtp": "node scripts/verify-smtp.mjs"
   },
   "keywords": [
     "real-estate",
