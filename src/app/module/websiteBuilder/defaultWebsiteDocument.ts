@@ -37,5 +37,5 @@ export const buildDefaultWebsiteDocument = (agencyName = 'Your Agency', agencyTy
       }],
     }],
   }],
-  theme: { primaryColor: '#0f172a', secondaryColor: '#2563eb', accentColor: '#7c3aed', fontFamily: 'Inter' },
+  theme: { primaryColor: '#1877F2', secondaryColor: '#0f172a', accentColor: '#1877F2', fontFamily: 'Inter' },
 })

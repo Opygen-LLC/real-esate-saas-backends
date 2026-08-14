@@ -92,7 +92,8 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
 
 const getPublicPropertyDetail = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await PropertyService.getPublicPropertyDetail(id)
+  const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId.trim() : undefined
+  const result = await PropertyService.getPublicPropertyDetail(id, organizationId || undefined)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

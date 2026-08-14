@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import httpStatus from 'http-status'
 import mongoose, { Types } from 'mongoose'
@@ -13,6 +13,7 @@ import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { writeAudit } from '../audit/audit.service'
 import { AuditEvent } from '../audit/audit.model'
 import { DomainRecord } from '../domain/domain.model'
+import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
 import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDocument'
@@ -74,6 +75,11 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     createdIp: meta.ip || '',
     userAgent: meta.userAgent || '',
   })
+  const [organization, verifiedDomain] = await Promise.all([
+    Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
+    DomainRecord.findOne({ organizationId: user.organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+  ])
+  const onboarding = organization?.onboarding || { status: 'completed' as const, currentStep: 5, version: 1 }
   return {
     accessToken: accessTokenFor(user),
     refreshToken,
@@ -81,21 +87,31 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     organizationId: user.organizationId,
     user: publicUser(user),
     isVerified: user.isVerified,
+    websiteStatus: organization?.websiteStatus || 'published',
+    onboarding,
+    websiteUrl: organization ? buildTenantWebsiteUrl(organization.sub_domain || user.organizationId, verifiedDomain?.domain) : undefined,
   }
 }
 
-const reserveSubdomain = async (agencyName: string, email: string): Promise<string> => {
+const reserveSubdomain = async (agencyName: string): Promise<string> => {
   let base = normalizeSubdomain(agencyName) || 'agency'
   if (RESERVED_SUBDOMAINS.has(base)) base = `${base}-agency`
-  if (!(await Organization.exists({ sub_domain: base }))) return base
-  const suffix = sha256(email).slice(0, 6)
-  const suggestion = `${base.slice(0, 41)}-${suffix}`
-  if (!(await Organization.exists({ sub_domain: suggestion }))) return suggestion
-  for (let n = 2; n < 100; n += 1) {
-    const candidate = `${suggestion.slice(0, 45)}-${n}`
-    if (!(await Organization.exists({ sub_domain: candidate }))) return candidate
+
+  const available = async (candidate: string) => {
+    const [org, alias] = await Promise.all([
+      Organization.exists({ sub_domain: candidate }),
+      SubdomainAlias.exists({ alias: candidate }),
+    ])
+    return !org && !alias
   }
-  throw new ApiError(httpStatus.CONFLICT, `Subdomain unavailable. Suggested prefix: ${suggestion}`)
+
+  if (await available(base)) return base
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const suffix = randomBytes(3).toString('base64url').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4).padEnd(4, 'x')
+    const candidate = `${base.slice(0, 43)}-${suffix}`
+    if (await available(candidate)) return candidate
+  }
+  throw new ApiError(httpStatus.CONFLICT, 'Unable to reserve a unique agency website address. Please try again.')
 }
 
 const enforceOtpThrottle = async (email: string, purpose: OtpPurpose): Promise<void> => {
@@ -175,7 +191,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
 
   if (await User.exists({ $or: [{ email }, { phoneNumber }] })) throw new ApiError(409, 'Email or phone is already registered')
 
-  const subdomain = await reserveSubdomain(payload.agencyName, email)
+  const subdomain = await reserveSubdomain(payload.agencyName)
   const organizationId = `org_${randomUUID()}`
   const userId = new Types.ObjectId()
   const organizationObjectId = new Types.ObjectId()
@@ -203,7 +219,11 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       country: 'Bangladesh',
       sub_domain: subdomain,
       templateId: 'template-1',
+      primaryColor: '#1877F2',
+      secondaryColor: '#0f172a',
+      font: 'Inter',
       websiteStatus: 'provisioned',
+      onboarding: { status: 'not_started', currentStep: 1, version: 1 },
       metaTitle: `${payload.agencyName} | Real Estate in Bangladesh`,
       metaDescription: `Browse homes, land and commercial property with ${payload.agencyName}.`,
       websiteSettings: {
@@ -214,6 +234,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
         enableTestimonials: true,
         enableLeadForm: true,
         enableWhatsAppChat: true,
+        renderMode: 'template',
       },
       subscription: {
         plan: 'trial',

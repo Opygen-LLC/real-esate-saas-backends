@@ -1,31 +1,27 @@
+import { randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
+import { Cache } from '../../../shared/cache'
 import paginationHelper from '../../helpers/paginationHelper'
+import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
+import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
+import { DomainRecord } from '../domain/domain.model'
+import { SubdomainAlias } from '../domain/subdomainAlias.model'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { DomainEventService } from '../domainEvent/domainEvent.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
-import { IOrganization, IOrganizationFilter } from './organization.interface'
+import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
 import { Organization } from './organization.model'
-import { EntitlementService } from '../entitlement/entitlement.service'
-import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
-import { randomUUID } from 'crypto'
-import { DomainRecord } from '../domain/domain.model'
-import { Cache } from '../../../shared/cache'
-import { DomainEventService } from '../domainEvent/domainEvent.service'
-import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
+
+const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
-  if (!payload.organizationId) {
-    payload.organizationId = `org_${randomUUID()}`
-  }
-
-  const existingOrg = await Organization.findOne({ organizationId: payload.organizationId })
-  if (existingOrg) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
-  }
-
-  const result = await Organization.create(payload)
-  return result
+  if (!payload.organizationId) payload.organizationId = `org_${randomUUID()}`
+  if (await Organization.exists({ organizationId: payload.organizationId })) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
+  return Organization.create(payload)
 }
 
 const getMyOrganization = async (organizationId: string): Promise<IOrganization | null> => {
@@ -36,15 +32,18 @@ const getMyOrganization = async (organizationId: string): Promise<IOrganization 
   if (!result) return null
   return {
     ...result,
-    websiteStatus: result.websiteStatus || 'provisioned',
+    websiteStatus: result.websiteStatus || 'published',
+    onboarding: result.onboarding || { status: 'completed', currentStep: 5, version: 1, completedAt: result.createdAt || new Date() },
     websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
   } as IOrganization
 }
 
 const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {
-  const direct = await Organization.findOne({ sub_domain: domainOrSubdomain.toLowerCase() })
-  if (direct) return direct
   const normalized = domainOrSubdomain.toLowerCase().replace(/^www\./, '').split(':')[0]
+  const direct = await Organization.findOne({ sub_domain: normalized })
+  if (direct) return direct
+  const alias = await SubdomainAlias.findOne({ alias: normalized }).lean()
+  if (alias) return Organization.findOne({ organizationId: alias.organizationId })
   const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
   return domain ? Organization.findOne({ organizationId: domain.organizationId }) : null
 }
@@ -55,8 +54,18 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (cached) return cached
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
-    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings')
+    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
     .lean()
+
+  if (!org) {
+    const alias = await SubdomainAlias.findOne({ alias: cacheKey }).lean()
+    if (alias) {
+      org = await Organization.findOne({ organizationId: alias.organizationId })
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
+        .lean()
+    }
+  }
+
   if (!org) {
     const normalized = cacheKey.replace(/^www\./, '').split(':')[0]
     const resolved = await Cache.tenantResolve.get(normalized)
@@ -64,11 +73,12 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     if (verifiedDomain?.organizationId) {
       await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
       org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
         .lean()
     }
   }
-  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Agency website not found')
+
+  if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
 
   const [totalProperties, totalAgents] = await Promise.all([
     Property.countDocuments({ organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }),
@@ -81,6 +91,9 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
     templateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
+    primaryColor: org.primaryColor || '#1877F2',
+    secondaryColor: org.secondaryColor || '#0f172a',
+    websiteSettings: { renderMode: 'template', ...(org.websiteSettings || {}) },
     stats: { totalProperties, totalAgents },
   }
   const identifiers = [cacheKey, org.organizationId, org.sub_domain, org.domain].filter(Boolean).map(String)
@@ -89,16 +102,11 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   return result
 }
 
+const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
+  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
 
-const updateWebsiteSettings = async (
-  organizationId: string,
-  payload: Partial<IOrganization>
-): Promise<IOrganization | null> => {
-  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) {
-    await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
-  }
-  const updateData: any = {
-    websiteSettings: payload.websiteSettings,
+  const websiteSettings = payload.websiteSettings ? definedEntries(payload.websiteSettings as Record<string, unknown>) : undefined
+  const updateData: Record<string, unknown> = definedEntries({
     socialLinks: payload.socialLinks,
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
@@ -106,97 +114,106 @@ const updateWebsiteSettings = async (
     metaDescription: payload.metaDescription ? sanitizeRichText(payload.metaDescription) : payload.metaDescription,
     logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
     defaultLanguage: payload.defaultLanguage,
+    templateId: payload.templateId,
+    font: payload.font,
+  })
+
+  if (websiteSettings && Object.keys(websiteSettings).length) {
+    for (const [key, value] of Object.entries(websiteSettings)) updateData[`websiteSettings.${key}`] = value
   }
+  if (payload.templateId) updateData['websiteSettings.renderMode'] = 'template'
 
-  if (payload.templateId) updateData.templateId = payload.templateId
-  if (payload.font) updateData.font = payload.font
-
-  const result = await Organization.findOneAndUpdate(
-    { organizationId },
-    { $set: updateData },
-    { new: true }
-  )
-
-  if (!result) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  }
-  await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData).filter((key) => updateData[key] !== undefined) } })
+  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: updateData }, { new: true })
+  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData) } })
   return result
 }
 
-const updateMyOrganization = async (
-  organizationId: string,
-  payload: Partial<IOrganization>
-): Promise<IOrganization | null> => {
+const updateMyOrganization = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
-  const safePayload = Object.fromEntries(allowed.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]))
-  const result = await Organization.findOneAndUpdate({ organizationId }, safePayload, { new: true })
-  if (result) await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.updated', payload: { fields: Object.keys(safePayload) } })
+  const safePayload = Object.fromEntries(allowed.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]]))
+  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: safePayload }, { new: true })
+  if (result) {
+    await CacheInvalidationService.invalidateTenant(organizationId)
+    await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.updated', payload: { fields: Object.keys(safePayload) } })
+  }
   return result
 }
 
-const getAllOrganizations = async (
-  filters: IOrganizationFilter,
-  paginationOptions: IPaginationOptions
-): Promise<IGenericResponse<IOrganization[]>> => {
+const saveOnboarding = async (organizationId: string, payload: Record<string, any>): Promise<IOrganization> => {
+  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
+  const currentStep = Math.max(1, Math.min(5, Number(payload.currentStep || 1)))
+  const update: Record<string, unknown> = definedEntries({
+    agencyName: payload.agencyName,
+    agencyType: payload.agencyType,
+    licenseNumber: payload.licenseNumber,
+    address: payload.address,
+    city: payload.city,
+    state: payload.state,
+    country: payload.country,
+    defaultLanguage: payload.defaultLanguage,
+    addressDetails: payload.addressDetails,
+    serviceAreas: payload.serviceAreas,
+    logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
+    primaryColor: payload.primaryColor,
+    secondaryColor: payload.secondaryColor,
+    font: payload.font,
+    templateId: payload.templateId,
+    socialLinks: payload.socialLinks,
+    'onboarding.status': 'in_progress',
+    'onboarding.currentStep': currentStep,
+    'onboarding.version': 1,
+  })
+  if (payload.websiteSettings) for (const [key, value] of Object.entries(definedEntries(payload.websiteSettings))) update[`websiteSettings.${key}`] = value
+  if (payload.templateId) update['websiteSettings.renderMode'] = 'template'
+
+  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: update }, { new: true })
+  if (!result) throw new ApiError(404, 'Organization not found')
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  return result
+}
+
+const finalizeOnboarding = async (organizationId: string, status: Extract<OnboardingStatus, 'completed' | 'skipped'>): Promise<IOrganization> => {
+  const now = new Date()
+  const set: Record<string, unknown> = {
+    websiteStatus: 'published',
+    'onboarding.status': status,
+    'onboarding.currentStep': 5,
+    'onboarding.version': 1,
+    'websiteSettings.renderMode': 'template',
+    ...(status === 'completed' ? { 'onboarding.completedAt': now, 'onboarding.skippedAt': null } : { 'onboarding.skippedAt': now, 'onboarding.completedAt': null }),
+  }
+  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: set }, { new: true })
+  if (!result) throw new ApiError(404, 'Organization not found')
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({ organizationId, aggregateType: 'website', aggregateId: result._id.toString(), eventType: 'website.onboarding_finalized', payload: { status } })
+  return result
+}
+
+const getAllOrganizations = async (filters: IOrganizationFilter, paginationOptions: IPaginationOptions): Promise<IGenericResponse<IOrganization[]>> => {
   const { searchTerm, ...filterData } = filters
   const andConditions: Array<Record<string, unknown>> = []
-
-  if (searchTerm) {
-    andConditions.push({
-      $or: ['agencyName', 'email', 'phone', 'city', 'organizationId'].map((field) => ({
-        [field]: {
-          $regex: searchTerm,
-          $options: 'i',
-        },
-      })),
-    })
-  }
-
-  if (Object.keys(filterData).length) {
-    andConditions.push({
-      $and: Object.entries(filterData).map(([field, value]) => ({
-        [field]: value,
-      })),
-    })
-  }
-
+  if (searchTerm) andConditions.push({ $or: ['agencyName', 'email', 'phone', 'city', 'organizationId'].map((field) => ({ [field]: { $regex: searchTerm, $options: 'i' } })) })
+  if (Object.keys(filterData).length) andConditions.push({ $and: Object.entries(filterData).map(([field, value]) => ({ [field]: value })) })
   const whereConditions = andConditions.length > 0 ? { $and: andConditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-
-  const result = await Organization.find(whereConditions)
-    .sort({ [sortBy]: sortOrder })
-    .skip(skip)
-    .limit(limit)
-
-  const total = await Organization.countDocuments(whereConditions)
-
-  return {
-    meta: {
-      page,
-      limit,
-      total,
-    },
-    data: result,
-  }
+  const [result, total] = await Promise.all([
+    Organization.find(whereConditions).sort({ [sortBy]: sortOrder }).skip(skip).limit(limit),
+    Organization.countDocuments(whereConditions),
+  ])
+  return { meta: { page, limit, total }, data: result }
 }
 
-const updateOrganizationBySuperAdmin = async (
-  id: string,
-  payload: Partial<IOrganization>
-): Promise<IOrganization | null> => {
+const updateOrganizationBySuperAdmin = async (id: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   const safePayload: any = {}
   if (payload.subscription) {
     const subscription: any = payload.subscription
-    for (const key of ['status', 'currentPeriodEnd', 'gracePeriodEnd']) {
-      if (subscription[key] !== undefined) safePayload[`subscription.${key}`] = subscription[key]
-    }
+    for (const key of ['status', 'currentPeriodEnd', 'gracePeriodEnd']) if (subscription[key] !== undefined) safePayload[`subscription.${key}`] = subscription[key]
   }
   if (!Object.keys(safePayload).length) throw new ApiError(httpStatus.BAD_REQUEST, 'No supported platform fields supplied')
   const result = await Organization.findByIdAndUpdate(id, { $set: safePayload }, { new: true })
-  if (!result) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  }
+  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   return result
 }
 
@@ -207,6 +224,9 @@ export const OrganizationService = {
   getPublicSiteInfo,
   updateWebsiteSettings,
   updateMyOrganization,
+  saveOnboarding,
+  completeOnboarding: (organizationId: string) => finalizeOnboarding(organizationId, 'completed'),
+  skipOnboarding: (organizationId: string) => finalizeOnboarding(organizationId, 'skipped'),
   getAllOrganizations,
   updateOrganizationBySuperAdmin,
 }

@@ -9,6 +9,9 @@ import { DomainRecord } from './domain.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { Resilience } from '../../../shared/resilience'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { normalizeSubdomain, RESERVED_SUBDOMAINS } from '../../helpers/identity'
+import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
+import { SubdomainAlias } from './subdomainAlias.model'
 
 const normalizeDomain = (input: string): string => {
   const candidate = String(input || '').trim().toLowerCase()
@@ -52,6 +55,81 @@ const add = async (organizationId: string, input: string) => {
   await Organization.updateOne({ organizationId }, { $set: { domain, domain_Verify: false, domain_dns: record.requiredDns } })
   await CacheInvalidationService.invalidateTenant(organizationId)
   return record
+}
+
+
+const normalizeTenantSubdomain = (input: string): string => {
+  const value = normalizeSubdomain(input)
+  if (value.length < 2) throw new ApiError(httpStatus.BAD_REQUEST, 'Website address must contain at least 2 letters or numbers')
+  if (RESERVED_SUBDOMAINS.has(value)) throw new ApiError(httpStatus.BAD_REQUEST, 'This website address is reserved')
+  return value
+}
+
+const isSubdomainAvailable = async (input: string, organizationId?: string) => {
+  const subdomain = normalizeTenantSubdomain(input)
+  const [organization, alias] = await Promise.all([
+    Organization.findOne({ sub_domain: subdomain }).select('organizationId').lean(),
+    SubdomainAlias.findOne({ alias: subdomain }).select('organizationId').lean(),
+  ])
+  const occupiedByOther = Boolean(
+    (organization && organization.organizationId !== organizationId)
+    || (alias && alias.organizationId !== organizationId),
+  )
+  return { subdomain, available: !occupiedByOther, websiteUrl: buildTenantWebsiteUrl(subdomain) }
+}
+
+const changeSubdomain = async (organizationId: string, input: string) => {
+  const subdomain = normalizeTenantSubdomain(input)
+  const org = await Organization.findOne({ organizationId }).select('sub_domain websiteStatus').lean()
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  const previousSubdomain = String(org.sub_domain || '')
+  if (previousSubdomain === subdomain) return { subdomain, previousSubdomain, websiteUrl: buildTenantWebsiteUrl(subdomain) }
+
+  const availability = await isSubdomainAvailable(subdomain, organizationId)
+  if (!availability.available) throw new ApiError(httpStatus.CONFLICT, 'This website address is already taken')
+
+  try {
+    await Organization.updateOne({ organizationId, sub_domain: previousSubdomain }, { $set: { sub_domain: subdomain } })
+    if (previousSubdomain) {
+      await SubdomainAlias.findOneAndUpdate(
+        { alias: previousSubdomain },
+        { $set: { organizationId, canonicalSubdomain: subdomain } },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      )
+    }
+    await SubdomainAlias.deleteOne({ alias: subdomain, organizationId })
+    await SubdomainAlias.updateMany({ organizationId }, { $set: { canonicalSubdomain: subdomain } })
+  } catch (error: any) {
+    if (error?.code === 11000) throw new ApiError(httpStatus.CONFLICT, 'This website address is already taken')
+    throw error
+  }
+
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  return { subdomain, previousSubdomain, websiteUrl: buildTenantWebsiteUrl(subdomain) }
+}
+
+const resolveSubdomain = async (input: string) => {
+  const subdomain = normalizeSubdomain(input)
+  if (!subdomain) return null
+  const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId sub_domain websiteStatus').lean()
+  if (direct) return {
+    organizationId: direct.organizationId,
+    canonicalSubdomain: direct.sub_domain,
+    isAlias: false,
+    websiteStatus: direct.websiteStatus || 'published',
+    websiteUrl: buildTenantWebsiteUrl(direct.sub_domain),
+  }
+  const alias = await SubdomainAlias.findOne({ alias: subdomain }).lean()
+  if (!alias) return null
+  const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('sub_domain websiteStatus').lean()
+  if (!canonical) return null
+  return {
+    organizationId: alias.organizationId,
+    canonicalSubdomain: canonical.sub_domain || alias.canonicalSubdomain,
+    isAlias: true,
+    websiteStatus: canonical.websiteStatus || 'published',
+    websiteUrl: buildTenantWebsiteUrl(canonical.sub_domain || alias.canonicalSubdomain),
+  }
 }
 
 const resolveTxt = async (name: string) => {
@@ -166,4 +244,4 @@ const resolveVerifiedDomain = async (host: string): Promise<string | null> => {
   return record?.organizationId || null
 }
 
-export const DomainService = { add, get, verify, verifyById, retryDue, resolveVerifiedDomain, normalizeDomain }
+export const DomainService = { add, get, verify, verifyById, retryDue, resolveVerifiedDomain, normalizeDomain, isSubdomainAvailable, changeSubdomain, resolveSubdomain }

@@ -1,6 +1,7 @@
 import mongoose, { Model } from 'mongoose'
 
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
+export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped'
 
 export interface ISubscription {
   plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
@@ -32,6 +33,14 @@ export interface IServiceArea {
   state?: string
   country?: string
   zipCodes?: string[]
+}
+
+export interface IOnboardingState {
+  status: OnboardingStatus
+  currentStep: number
+  version: number
+  completedAt?: Date | null
+  skippedAt?: Date | null
 }
 
 export interface IOrganization {
@@ -67,6 +76,7 @@ export interface IOrganization {
   websiteStatus?: 'provisioned' | 'published' | 'suspended'
   websiteUrl?: string
   domain_dns?: Array<{ type: string; name: string; value: string }>
+  onboarding?: IOnboardingState
   subscription: ISubscription
   platformAccess?: IPlatformAccess
   socialLinks?: {
@@ -86,6 +96,7 @@ export interface IOrganization {
     enableTestimonials?: boolean
     enableLeadForm?: boolean
     enableWhatsAppChat?: boolean
+    renderMode?: 'template' | 'builder'
   }
   teamSettings?: {
     defaultRole?: 'agent' | 'staff' | 'agency_admin'

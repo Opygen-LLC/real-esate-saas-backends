@@ -18,6 +18,25 @@ router.patch(
   OrganizationController.updateWebsiteSettings
 )
 
+router.patch(
+  '/onboarding',
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  validateRequest(OrganizationValidation.onboarding),
+  OrganizationController.saveOnboarding
+)
+
+router.post(
+  '/onboarding/complete',
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  OrganizationController.completeOnboarding
+)
+
+router.post(
+  '/onboarding/skip',
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  OrganizationController.skipOnboarding
+)
+
 router.get(
   '/',
   authMiddlewares.auth(),

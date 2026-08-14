@@ -24,5 +24,24 @@ const verifyCustomDomain = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Domain lifecycle check completed', data })
 })
 
+
+const getSubdomainAvailability = catchAsync(async (req: Request, res: Response) => {
+  const data = await DomainService.isSubdomainAvailable(req.params.value, requireTenant(req))
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Website address availability checked', data })
+})
+
+const changeSubdomain = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const data = await DomainService.changeSubdomain(organizationId, req.body.subdomain)
+  await writeAudit({ organizationId, actorId: req.user?._id || 'unknown', actorRole: req.user?.userRole || 'tenant', action: 'domain.subdomain_changed', entityType: 'organization', entityId: organizationId, requestId: req.requestId, ip: req.ip, metadata: data })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Website address changed successfully', data })
+})
+
+const resolveSubdomain = catchAsync(async (req: Request, res: Response) => {
+  const data = await DomainService.resolveSubdomain(req.params.subdomain)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subdomain resolution completed', data })
+})
+
+
 const resolveHost = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data: { organizationId: await DomainService.resolveVerifiedDomain(req.params.host) } }))
-export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, resolveHost }
+export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, getSubdomainAvailability, changeSubdomain, resolveSubdomain, resolveHost }

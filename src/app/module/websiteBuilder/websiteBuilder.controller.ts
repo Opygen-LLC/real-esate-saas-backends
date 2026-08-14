@@ -17,6 +17,7 @@ const restoreRevision = catchAsync(async (req, res) => ok(res, 'Revision restore
 const createPreviewToken = catchAsync(async (req, res) => ok(res, 'Preview token created', await WebsiteBuilderService.createPreviewToken(requireTenant(req), req.params.id, req.user?.userId), httpStatus.CREATED))
 const getPreview = catchAsync(async (req, res) => ok(res, 'Preview fetched', await WebsiteBuilderService.getPreview(req.params.token)))
 const presignAsset = catchAsync(async (req, res) => ok(res, 'Signed asset uploads created', await WebsiteBuilderService.presignAsset(requireTenant(req), req.body), httpStatus.CREATED))
+const importAssetUrl = catchAsync(async (req, res) => ok(res, 'Remote image imported and queued for verification', await WebsiteBuilderService.importAssetFromUrl(requireTenant(req), req.body, req.user?._id), httpStatus.ACCEPTED))
 const completeAsset = catchAsync(async (req, res) => ok(res, 'Asset uploaded and queued for malware/variant verification', await WebsiteBuilderService.completeAsset(requireTenant(req), req.body, req.user?._id), httpStatus.ACCEPTED))
 const listAssets = catchAsync(async (req, res) => ok(res, 'Website assets fetched', await WebsiteBuilderService.listAssets(requireTenant(req))))
 const deleteAsset = catchAsync(async (req, res) => ok(res, 'Asset deleted successfully', await WebsiteBuilderService.deleteAsset(requireTenant(req), req.params.id)))
@@ -25,4 +26,4 @@ const sitemap = catchAsync(async (req, res) => { const data = await WebsiteBuild
 const robots = catchAsync(async (req, res) => res.type('text/plain').send(await WebsiteBuilderService.getRobots(req.params.identifier)))
 const propertyShareCard = catchAsync(async (req, res) => ok(res, 'Property share metadata fetched', await WebsiteBuilderService.getPropertyShareCard(req.params.identifier, req.params.propertyId)))
 const escapeXml = (value: string) => value.replace(/[<>&'\"]/g, (char) => ({ '<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;' }[char] || char))
-export const WebsiteBuilderController = { getTemplates, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }
+export const WebsiteBuilderController = { getTemplates, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, importAssetUrl, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }

@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose from 'mongoose'
+import dns from 'dns/promises'
+import { isIP } from 'net'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { Cache } from '../../../shared/cache'
@@ -118,7 +120,7 @@ const performPublish = async (organizationId: string, pageId: string, userId?: s
     page.publishedVersion = version
     if (userId) page.updatedBy = userId as any
     result = await page.save(session ? { session } : undefined)
-    await Organization.updateOne({ organizationId }, { $set: { websiteStatus: 'published' } }, session ? { session } : undefined)
+    await Organization.updateOne({ organizationId }, { $set: { websiteStatus: 'published', 'websiteSettings.renderMode': 'builder' } }, session ? { session } : undefined)
   }
   try {
     if (session) await session.withTransaction(execute)
@@ -239,6 +241,93 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
 }
 
 
+const MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024
+const REMOTE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
+
+const isPrivateIp = (address: string) => {
+  if (isIP(address) === 4) {
+    const octets = address.split('.').map(Number)
+    const [a, b] = octets
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224
+  }
+  if (isIP(address) === 6) {
+    const value = address.toLowerCase()
+    if (value.startsWith('::ffff:')) return isPrivateIp(value.slice(7))
+    return value === '::1' || value === '::' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe8') || value.startsWith('fe9') || value.startsWith('fea') || value.startsWith('feb')
+  }
+  return true
+}
+
+const assertPublicRemoteUrl = async (value: string) => {
+  let url: URL
+  try { url = new URL(value) } catch { throw new ApiError(400, 'Enter a valid image URL') }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) throw new ApiError(400, 'Remote images must use a public HTTPS URL without credentials or custom ports')
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '')
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')) throw new ApiError(400, 'Private network image URLs are not allowed')
+  const addresses = await dns.lookup(hostname, { all: true, verbatim: true }).catch(() => [])
+  if (!addresses.length || addresses.some((entry) => isPrivateIp(entry.address))) throw new ApiError(400, 'Image URL must resolve to a public internet address')
+  return url
+}
+
+const readRemoteImage = async (input: string) => {
+  let url = await assertPublicRemoteUrl(input)
+  let response: Response | null = null
+  for (let redirect = 0; redirect <= 3; redirect += 1) {
+    try {
+      response = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10_000), headers: { accept: 'image/avif,image/webp,image/png,image/jpeg' } })
+    } catch {
+      throw new ApiError(400, 'Image URL could not be downloaded')
+    }
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location')
+      if (!location || redirect === 3) throw new ApiError(400, 'Image URL has too many redirects')
+      url = await assertPublicRemoteUrl(new URL(location, url).toString())
+      continue
+    }
+    break
+  }
+  if (!response?.ok) throw new ApiError(400, `Image URL could not be downloaded (${response?.status || 'network error'})`)
+  const mimeType = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase()
+  if (!REMOTE_IMAGE_TYPES.has(mimeType)) throw new ApiError(400, 'URL must point directly to a JPEG, PNG, WebP, or AVIF image')
+  const declaredSize = Number(response.headers.get('content-length') || 0)
+  if (declaredSize > MAX_REMOTE_IMAGE_BYTES) throw new ApiError(413, 'Remote image exceeds the 20 MB limit')
+  const reader = response.body?.getReader()
+  if (!reader) throw new ApiError(400, 'Image response has no readable body')
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_REMOTE_IMAGE_BYTES) { await reader.cancel(); throw new ApiError(413, 'Remote image exceeds the 20 MB limit') }
+    chunks.push(value)
+  }
+  const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
+  const validMagic = mimeType === 'image/jpeg' ? buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+    : mimeType === 'image/png' ? buffer.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))
+      : mimeType === 'image/webp' ? buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP'
+        : buffer.subarray(4, 12).toString().startsWith('ftypavi')
+  if (!validMagic) throw new ApiError(400, 'Downloaded content does not match its declared image type')
+  const rawSegment = url.pathname.split('/').filter(Boolean).pop() || 'imported-image'
+  let decodedName = rawSegment
+  try { decodedName = decodeURIComponent(rawSegment) } catch { decodedName = rawSegment }
+  const rawName = decodedName.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-120)
+  const extension = mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/png' ? '.png' : mimeType === 'image/webp' ? '.webp' : '.avif'
+  const filename = /\.(jpe?g|png|webp|avif)$/i.test(rawName) ? rawName : `${rawName}${extension}`
+  return { buffer, mimeType, filename, size: buffer.length }
+}
+
+const importAssetFromUrl = async (organizationId: string, payload: { url: string; altText?: string }, userId?: string) => {
+  const remote = await readRemoteImage(payload.url)
+  await EntitlementService.assertStorage(organizationId, remote.size)
+  const signed: any = await presignAsset(organizationId, { filename: remote.filename, mimeType: remote.mimeType, size: remote.size })
+  const upload = await fetch(signed.original.uploadUrl, { method: 'PUT', headers: { 'content-type': remote.mimeType }, body: remote.buffer })
+  if (!upload.ok) throw new ApiError(502, 'Imported image could not be saved to object storage')
+  return completeAsset(organizationId, { key: signed.original.key, originalName: remote.filename, mimeType: remote.mimeType, altText: payload.altText || '', variants: [] }, userId)
+}
+
+
 const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
 const assetIsReferenced = async (organizationId: string, asset: any) => {
   const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
@@ -284,6 +373,13 @@ const cleanupOrphanAssets = async (limit = 100) => {
   return { checked: candidates.length, deleted, incompleteUploadsDeleted: incompleteDeleted }
 }
 
+const assertPublicWebsite = (org: any) => {
+  if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') {
+    throw new ApiError(404, 'Agency website not found')
+  }
+  return org
+}
+
 const canonicalBase = async (org: any) => {
   const verified = org.domain ? await DomainRecord.findOne({ organizationId: org.organizationId, domain: org.domain, status: 'verified', tlsStatus: 'active' }).lean() : null
   return buildTenantWebsiteUrl(org.sub_domain || org.organizationId, verified?.domain)
@@ -298,7 +394,7 @@ const getPublicPage = async (identifier: string, slug = '/') => {
     if (hot) return hot
   }
   const org = await resolveOrganization(identifier)
-  if (!org) throw new ApiError(404, 'Agency website not found')
+  assertPublicWebsite(org)
   const cached = await WebsiteCache.get<any>('published', org.organizationId, targetSlug)
   if (cached) return cached
   const page = await WebsitePage.findOne({ organizationId: org.organizationId, slug: targetSlug, status: 'published', publishedDocument: { $ne: null } })
@@ -311,13 +407,13 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 }
 
 const getSitemap = async (identifier: string) => {
-  const org = await resolveOrganization(identifier); if (!org) throw new ApiError(404, 'Agency website not found')
+  const org = assertPublicWebsite(await resolveOrganization(identifier))
   const base = await canonicalBase(org)
   const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }
 
-const getRobots = async (identifier: string) => { const org = await resolveOrganization(identifier); if (!org) throw new ApiError(404, 'Agency website not found'); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
-const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = await resolveOrganization(identifier); if (!org) throw new ApiError(404, 'Agency website not found'); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, moderationStatus: 'approved' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
+const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
+const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, listAssets, deleteAsset, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, deleteAsset, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

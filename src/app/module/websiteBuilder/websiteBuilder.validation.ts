@@ -31,5 +31,6 @@ export const WebsiteBuilderValidation = {
   saveDraftSchema: z.object({ body: z.object({ document: z.record(z.any()) }) }),
   scheduleSchema: z.object({ body: z.object({ publishAt: z.string().datetime() }) }),
   presignAssetSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: z.enum(['image/jpeg','image/png','image/webp','image/avif','font/woff2']), size: z.number().int().positive().max(20 * 1024 * 1024) }) }),
+  importAssetUrlSchema: z.object({ body: z.object({ url: z.string().url().max(2048), altText: z.string().max(300).optional() }) }),
   completeAssetSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: z.enum(['image/jpeg','image/png','image/webp','image/avif','font/woff2']), width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(z.object({ key: z.string().min(1).max(1200), format: z.enum(['webp','avif']), width: z.number().int().positive(), height: z.number().int().positive().optional() })).max(8).optional() }) }),
 }

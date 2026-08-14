@@ -66,6 +66,46 @@ const updateWebsiteSettings = catchAsync(async (req: Request, res: Response) => 
   })
 })
 
+
+const saveOnboarding = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  await OrganizationService.saveOnboarding(organizationId, req.body)
+  const result = await OrganizationService.getMyOrganization(organizationId)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Website setup progress saved successfully',
+    data: result,
+  })
+})
+
+const completeOnboarding = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  await OrganizationService.completeOnboarding(organizationId)
+  const result = await OrganizationService.getMyOrganization(organizationId)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Website setup completed and website published',
+    data: result,
+  })
+})
+
+const skipOnboarding = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  await OrganizationService.skipOnboarding(organizationId)
+  const result = await OrganizationService.getMyOrganization(organizationId)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Website setup skipped and default website published',
+    data: result,
+  })
+})
+
 const getAllOrganizations = catchAsync(async (req: Request, res: Response) => {
   const filters = pick(req.query, ['searchTerm', 'agencyType', 'status'])
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
@@ -101,6 +141,9 @@ export const OrganizationController = {
   getOrganizationByDomain,
   getPublicSiteInfo,
   updateWebsiteSettings,
+  saveOnboarding,
+  completeOnboarding,
+  skipOnboarding,
   getAllOrganizations,
   updateOrganizationBySuperAdmin,
 }

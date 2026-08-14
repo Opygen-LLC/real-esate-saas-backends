@@ -80,11 +80,11 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
     primaryColor: {
       type: String,
-      default: '#0f172a',
+      default: '#1877F2',
     },
     secondaryColor: {
       type: String,
-      default: '#3b82f6',
+      default: '#0f172a',
     },
     font: {
       type: String,
@@ -116,6 +116,13 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enum: ['provisioned', 'published', 'suspended'],
       default: 'provisioned',
       index: true,
+    },
+    onboarding: {
+      status: { type: String, enum: ['not_started', 'in_progress', 'completed', 'skipped'], default: 'not_started', index: true },
+      currentStep: { type: Number, default: 1, min: 1, max: 5 },
+      version: { type: Number, default: 1, min: 1 },
+      completedAt: { type: Date, default: null },
+      skippedAt: { type: Date, default: null },
     },
     domain_dns: {
       type: [Object],
@@ -175,6 +182,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableTestimonials: { type: Boolean, default: true },
       enableLeadForm: { type: Boolean, default: true },
       enableWhatsAppChat: { type: Boolean, default: true },
+      renderMode: { type: String, enum: ['template', 'builder'], default: 'template' },
     },
     teamSettings: {
       defaultRole: { type: String, enum: ['agent', 'staff', 'agency_admin'], default: 'agent' },

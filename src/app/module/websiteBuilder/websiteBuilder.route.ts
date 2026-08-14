@@ -21,6 +21,7 @@ router.post('/pages/:id/revisions/:version/restore', authMiddlewares.requirePerm
 router.post('/pages/:id/preview-token', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.createPreviewToken)
 router.get('/assets', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.listAssets)
 router.post('/assets/presign', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteBuilderValidation.presignAssetSchema), WebsiteBuilderController.presignAsset)
+router.post('/assets/import-url', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteBuilderValidation.importAssetUrlSchema), WebsiteBuilderController.importAssetUrl)
 router.post('/assets/complete', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteBuilderValidation.completeAssetSchema), WebsiteBuilderController.completeAsset)
 router.delete('/assets/:id', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.deleteAsset)
 export const WebsiteBuilderRoute = router
