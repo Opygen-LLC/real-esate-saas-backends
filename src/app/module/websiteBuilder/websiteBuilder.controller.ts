@@ -5,7 +5,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import { requireTenant } from '../../middlewares/auth'
 import { WebsiteBuilderService } from './websiteBuilder.service'
 
-const ok = (res: Response, message: string, data: any, statusCode = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
+const ok = (res: Response, message: string, data: any, statusCode: number = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
 const getTemplates = catchAsync(async (_req, res) => ok(res, 'Template registry fetched', WebsiteBuilderService.listTemplates()))
 const getAllPages = catchAsync(async (req, res) => ok(res, 'Tenant website pages fetched successfully', await WebsiteBuilderService.getAllPages(requireTenant(req))))
 const getPageById = catchAsync(async (req, res) => ok(res, 'Website page fetched successfully', await WebsiteBuilderService.getPageById(requireTenant(req), req.params.id)))

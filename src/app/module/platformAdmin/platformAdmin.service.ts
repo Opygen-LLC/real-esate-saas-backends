@@ -71,9 +71,9 @@ const getTenantHealth = async (query: any) => {
   const data = organizations.map((org: any) => {
     const domain: any = domainMap.get(org.organizationId)
     const payment: any = paymentMap.get(org.organizationId)
-    const errorCount = (failedJobs.get(org.organizationId) || 0) + (deadMeta.get(org.organizationId) || 0) + (domain?.status === 'failed' || domain?.tlsStatus === 'failed' ? 1 : 0)
-    const slaBreaches = breachedSupport.get(org.organizationId) || 0
-    const health = org.isBlocked ? 'suspended' : errorCount > 0 || slaBreaches > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['failed', 'cancelled'].includes(payment?.status) ? 'attention' : 'healthy'
+    const errorCount = Number(failedJobs.get(org.organizationId) || 0) + Number(deadMeta.get(org.organizationId) || 0) + (domain?.status === 'failed' || domain?.tlsStatus === 'failed' ? 1 : 0)
+    const slaBreaches = Number(breachedSupport.get(org.organizationId) || 0)
+    const health = org.isBlocked ? 'suspended' : (errorCount > 0 || slaBreaches > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['failed', 'cancelled'].includes(payment?.status)) ? 'attention' : 'healthy'
     return {
       _id: org._id,
       organizationId: org.organizationId,
