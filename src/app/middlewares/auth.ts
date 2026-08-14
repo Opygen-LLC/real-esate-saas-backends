@@ -56,11 +56,13 @@ const authenticate = async (req: Request): Promise<void> => {
   let payload: any
   try { payload = jwtHelpers.verifyToken(token, config.jwt.secret as Secret) } catch { throw new ApiError(401, 'Invalid or expired access token') }
   const user: any = await User.findById(payload._id).select('_id email phoneNumber userRole organizationId status isVerified').lean()
-  if (!user || user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
+  if (!user) throw new ApiError(401, 'Account is unavailable')
+  if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
+  if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
   if (payload.organizationId !== user.organizationId) throw new ApiError(401, 'Token tenant mismatch')
   if (user.userRole !== 'super-admin') {
     const organizationAvailable = await Organization.exists({ organizationId: user.organizationId, isBlocked: { $ne: true } })
-    if (!organizationAvailable) throw new ApiError(403, 'Organization access is suspended')
+    if (!organizationAvailable) throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
   }
   req.user = { _id: user._id.toString(), email: user.email, phoneNumber: user.phoneNumber, userRole: user.userRole, organizationId: user.organizationId }
   if (user.userRole !== 'super-admin') {

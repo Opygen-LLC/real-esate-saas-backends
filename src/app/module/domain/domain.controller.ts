@@ -43,5 +43,5 @@ const resolveSubdomain = catchAsync(async (req: Request, res: Response) => {
 })
 
 
-const resolveHost = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data: { organizationId: await DomainService.resolveVerifiedDomain(req.params.host) } }))
+const resolveHost = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data: await DomainService.resolveVerifiedHost(req.params.host) }))
 export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, getSubdomainAvailability, changeSubdomain, resolveSubdomain, resolveHost }

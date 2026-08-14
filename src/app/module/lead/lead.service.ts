@@ -12,6 +12,7 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
+import { Organization } from '../organization/organization.model'
 import { ILead, ILeadFilter } from './lead.interface'
 import { Lead } from './lead.model'
 
@@ -76,6 +77,10 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
 const publicCaptureLead=async(payload:any,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
   const {organizationId,name,phone,email,propertyInterest,message,privacyConsent,policyVersion,attribution,...rest}=payload
   if(!organizationId||!name||!phone)throw new ApiError(400,'Organization, client name, and phone are required')
+  const organization:any=await Organization.findOne({organizationId}).select('isBlocked websiteStatus').lean()
+  if(!organization)throw new ApiError(404,'Agency not found')
+  if(organization.isBlocked||organization.websiteStatus==='suspended')throw new ApiError(423,'This agency is currently suspended','', 'TENANT_SUSPENDED')
+  if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
   const settings:any=await PlatformSettings.findOne({key:'platform'}).lean();if(!settings?.privacy||settings.privacy.legalReviewStatus!=='approved'||!settings.privacy.policyVersion)throw new ApiError(503,'Public enquiries are unavailable until the reviewed privacy policy is configured');if(!privacyConsent||policyVersion!==settings.privacy.policyVersion)throw new ApiError(409,'Privacy policy consent is missing or out of date')
   const normalizedPhone=normalizePhone(phone)
   const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined)

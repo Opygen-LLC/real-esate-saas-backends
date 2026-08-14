@@ -6,6 +6,7 @@ import pick from '../../../shared/pick'
 import { UserService } from './user.service'
 import { requireTenant } from '../../middlewares/auth'
 import { writeAudit } from '../audit/audit.service'
+import { TeamInvitationService } from '../teamInvitation/teamInvitation.service'
 
 const createUser = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.createUser(requireTenant(req), req.body)
@@ -19,12 +20,12 @@ const createUser = catchAsync(async (req: Request, res: Response) => {
 
 const inviteAgent = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await UserService.inviteAgent(organizationId, req.body)
+  const result = await TeamInvitationService.createInvitation(organizationId, req.user!._id!, req.body)
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
-    message: 'Agent invited successfully',
+    message: 'Invitation email sent successfully',
     data: result,
   })
 })
@@ -135,7 +136,7 @@ const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => 
 
 const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const result = await UserService.updateUserRoleSuperAdmin(id, req.body)
+  const result = await UserService.updateUserRoleSuperAdmin(id, req.body, req.user!._id!)
   await writeAudit({ organizationId: result?.organizationId, actorId: req.user!._id!, actorRole: 'super-admin',
     action: 'user.platform_updated', entityType: 'user', entityId: id, reason: req.body.reason, requestId: req.requestId, ip: req.ip,
     metadata: { fields: Object.keys(req.body).filter((field) => field !== 'reason') } })
@@ -143,7 +144,7 @@ const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: 'User role updated by super-admin',
+    message: 'User access updated by super-admin',
     data: result,
   })
 })

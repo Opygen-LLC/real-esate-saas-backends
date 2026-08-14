@@ -13,6 +13,9 @@ import { User } from './user.model'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { randomToken } from '../../helpers/crypto'
+import { AuthSession } from '../auth/authSession.model'
+import { Organization } from '../organization/organization.model'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 
 const createUser = async (organizationId: string, userData: IUser): Promise<IUser> => {
   await EntitlementService.assertLimit(organizationId, 'agents')
@@ -42,25 +45,6 @@ const createUser = async (organizationId: string, userData: IUser): Promise<IUse
   }
 
   return user
-}
-
-const inviteAgent = async (
-  organizationId: string,
-  payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[] }
-): Promise<IUser> => {
-  const password = randomToken(24)
-
-  const userData: Partial<IUser> = {
-    ...payload,
-    organizationId,
-    password,
-    userRole: (payload.userRole as any) || 'agent',
-    isVerified: true,
-    status: 'active',
-  }
-
-  const result = await createUser(organizationId, userData as IUser)
-  return result
 }
 
 const getAllUsers = async (
@@ -268,26 +252,59 @@ const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IP
   }
 }
 
-const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }) => {
-  const user = await User.findById(id)
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
-  }
+const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }, actorId?: string) => {
+  const user: any = await User.findById(id)
+  if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
 
-  const { reason: _reason, ...changes } = payload
+  const { reason, ...changes } = payload
   const resultingRole = changes.userRole ?? user.userRole
   const resultingStatus = changes.status ?? user.status
   if (user.userRole === 'super-admin' && user.status === 'active' && (resultingRole !== 'super-admin' || resultingStatus !== 'active')) {
     const activePlatformAdmins = await User.countDocuments({ userRole: 'super-admin', status: 'active' })
     if (activePlatformAdmins <= 1) throw new ApiError(httpStatus.CONFLICT, 'At least one active super administrator must remain')
   }
+
   const result = await User.findByIdAndUpdate(id, changes, { new: true, runValidators: true }).select('-password')
+  if (changes.status === 'blocked') {
+    await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'platform_user_suspended' } })
+    if (user.userRole === 'agency_owner') {
+      const org: any = await Organization.findOne({ organizationId: user.organizationId })
+      if (org && !org.isBlocked) {
+        const previousSubscriptionStatus = org.subscription?.status || 'active'
+        const previousWebsiteStatus = org.websiteStatus || 'published'
+        org.isBlocked = true
+        org.websiteStatus = 'suspended'
+        if (org.subscription) org.subscription.status = 'suspended'
+        org.platformAccess = {
+          ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'suspended', suspendedAt: new Date(), suspendedBy: actorId || '',
+          suspensionReason: reason, previousSubscriptionStatus, previousWebsiteStatus, suspensionSource: 'owner_user', suspensionUserId: String(user._id),
+        }
+        await org.save()
+        await Promise.all([
+          AuthSession.updateMany({ organizationId: user.organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_owner_suspended' } }),
+          CacheInvalidationService.invalidateTenant(user.organizationId),
+        ])
+      }
+    }
+  }
+  if (changes.status === 'active' && user.userRole === 'agency_owner') {
+    const org: any = await Organization.findOne({ organizationId: user.organizationId })
+    if (org?.isBlocked && org.platformAccess?.suspensionSource === 'owner_user' && String(org.platformAccess?.suspensionUserId || '') === String(user._id)) {
+      const restoredSubscription = org.platformAccess?.previousSubscriptionStatus && org.platformAccess.previousSubscriptionStatus !== 'suspended' ? org.platformAccess.previousSubscriptionStatus : (org.subscription?.plan === 'trial' ? 'trialing' : 'active')
+      const restoredWebsite = org.platformAccess?.previousWebsiteStatus && org.platformAccess.previousWebsiteStatus !== 'suspended' ? org.platformAccess.previousWebsiteStatus : 'published'
+      org.isBlocked = false
+      org.websiteStatus = restoredWebsite
+      if (org.subscription) org.subscription.status = restoredSubscription
+      org.platformAccess = { ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'active', reactivatedAt: new Date(), reactivatedBy: actorId || '', reactivationReason: reason, suspensionSource: null, suspensionUserId: null }
+      await org.save()
+      await CacheInvalidationService.invalidateTenant(user.organizationId)
+    }
+  }
   return result
 }
 
 export const UserService = {
   createUser,
-  inviteAgent,
   getAllUsers,
   getPublicAgents,
   getPublicAgentDetail,

@@ -6,6 +6,7 @@ import pick from '../../../shared/pick'
 import { PropertyService } from './property.service'
 import { requireTenant } from '../../middlewares/auth'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
 
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -21,6 +22,26 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
     message: 'Property listing created successfully',
     data: result,
   })
+})
+
+
+
+const presignPropertyImage = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.presignAsset(requireTenant(req), req.body)
+  sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Property image upload prepared', data })
+})
+const completePropertyImage = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.completeAsset(requireTenant(req), req.body, req.user?._id)
+  sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image uploaded and queued for verification', data })
+})
+const getPropertyImageAsset = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.getAssetById(requireTenant(req), req.params.assetId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property image status fetched', data })
+})
+
+const importPropertyImageUrl = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.importAssetFromUrl(requireTenant(req), req.body, req.user?._id)
+  sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image imported and queued for verification', data })
 })
 
 const getAllProperties = catchAsync(async (req: Request, res: Response) => {
@@ -193,6 +214,10 @@ const deleteProperty = catchAsync(async (req: Request, res: Response) => {
 
 export const PropertyController = {
   createProperty,
+  importPropertyImageUrl,
+  presignPropertyImage,
+  completePropertyImage,
+  getPropertyImageAsset,
   getAllProperties,
   getPublicProperties,
   getPublicPropertyDetail,

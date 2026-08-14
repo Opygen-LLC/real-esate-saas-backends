@@ -19,7 +19,11 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   '/api/v1/auth/password-reset/verify',
   '/api/v1/auth/password-reset/complete',
   '/api/v1/auth/reset_password',
+  '/api/v1/lead/public-capture',
+  '/api/v1/team-invitations/accept',
 ])
+
+const PUBLIC_CROSS_ORIGIN_POST_PATHS = new Set(['/api/v1/lead/public-capture'])
 
 const normalizePath = (value: string): string => {
   const pathname = value.split('?')[0] || '/'
@@ -29,6 +33,9 @@ const normalizePath = (value: string): string => {
 
 export const isCsrfExemptRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean =>
   req.method.toUpperCase() === 'POST' && CSRF_EXEMPT_POST_PATHS.has(normalizePath(req.originalUrl))
+
+const isPublicCrossOriginRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean =>
+  req.method.toUpperCase() === 'POST' && PUBLIC_CROSS_ORIGIN_POST_PATHS.has(normalizePath(req.originalUrl))
 
 export const requestContext = (req: Request, res: Response, next: NextFunction): void => {
   const supplied = req.get('x-request-id')
@@ -42,8 +49,15 @@ export const requestContext = (req: Request, res: Response, next: NextFunction):
 
 export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {
   const origin = req.get('origin')
-  if (origin && !config.allowed_origins.includes('*') && !config.allowed_origins.includes(origin.replace(/\/$/, ''))) {
-    return next(new ApiError(403, 'Origin is not allowed'))
+  if (origin && !config.allowed_origins.includes('*') && !isPublicCrossOriginRequest(req)) {
+    const normalizedOrigin = origin.replace(/\/$/, '')
+    let tenantOriginAllowed = false
+    try {
+      const originUrl = new URL(normalizedOrigin)
+      const platformUrl = new URL(config.domains.public_site_origin)
+      tenantOriginAllowed = originUrl.protocol === platformUrl.protocol && (originUrl.hostname === platformUrl.hostname || originUrl.hostname.endsWith(`.${platformUrl.hostname}`))
+    } catch { tenantOriginAllowed = false }
+    if (!config.allowed_origins.includes(normalizedOrigin) && !tenantOriginAllowed) return next(new ApiError(403, 'Origin is not allowed'))
   }
 
 

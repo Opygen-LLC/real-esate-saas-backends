@@ -31,10 +31,12 @@ import { WhatsAppRoute } from '../module/whatsapp/whatsapp.route'
 import { NotificationRoute } from '../module/notification/notification.route'
 import { PlatformAdminRoute } from '../module/platformAdmin/platformAdmin.route'
 import { ObservabilityRoute } from '../module/observability/observability.route'
+import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/team-invitations', route: TeamInvitationRoute },
   { path: '/observability', route: ObservabilityRoute },
   { path: '/platform-admin', route: PlatformAdminRoute },
   { path: '/notification', route: NotificationRoute },

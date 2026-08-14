@@ -12,6 +12,12 @@ router.get('/public/:organizationId', PropertyController.getPublicProperties)
 router.get('/public/:organizationId/slug/:slug', PropertyController.getPublicPropertyBySlug)
 
 // Authenticated endpoints
+// Property media uses property permissions while reusing the hardened storage pipeline.
+router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
+router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
+router.post('/assets/import-url', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.importImageUrlZodSchema), PropertyController.importPropertyImageUrl)
+router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.write'), PropertyController.getPropertyImageAsset)
+
 router.get(
   '/',
   authMiddlewares.requirePermission('properties.read'),

@@ -6,6 +6,7 @@ import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface
 import { Property } from './property.model'
 import { Organization } from '../organization/organization.model'
 import { sanitizeRichText } from '../../helpers/sanitize'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 
 const AUTO_APPROVE_ROLES = new Set(['agency_owner', 'agency_admin', 'admin', 'super-admin'])
 
@@ -62,6 +63,7 @@ const createProperty = async (
   }
 
   const result = await Property.create(propertyData)
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 
@@ -301,6 +303,7 @@ const updateProperty = async (
     new: true,
   }).populate('agentId', 'name email phoneNumber profileImgURL')
 
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 
@@ -327,6 +330,7 @@ const updatePropertyStatus = async (
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   }
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 
@@ -343,6 +347,7 @@ const reorderPropertyImages = async (
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   }
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 
@@ -351,6 +356,7 @@ const deleteProperty = async (organizationId: string, id: string): Promise<IProp
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   }
+  await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 

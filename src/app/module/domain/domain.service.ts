@@ -80,7 +80,7 @@ const isSubdomainAvailable = async (input: string, organizationId?: string) => {
 
 const changeSubdomain = async (organizationId: string, input: string) => {
   const subdomain = normalizeTenantSubdomain(input)
-  const org = await Organization.findOne({ organizationId }).select('sub_domain websiteStatus').lean()
+  const org = await Organization.findOne({ organizationId }).select('agencyName sub_domain websiteStatus isBlocked').lean()
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const previousSubdomain = String(org.sub_domain || '')
   if (previousSubdomain === subdomain) return { subdomain, previousSubdomain, websiteUrl: buildTenantWebsiteUrl(subdomain) }
@@ -111,24 +111,26 @@ const changeSubdomain = async (organizationId: string, input: string) => {
 const resolveSubdomain = async (input: string) => {
   const subdomain = normalizeSubdomain(input)
   if (!subdomain) return null
-  const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId sub_domain websiteStatus').lean()
+  const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId agencyName sub_domain websiteStatus isBlocked').lean()
   if (direct) return {
     organizationId: direct.organizationId,
+    agencyName: direct.agencyName,
     canonicalSubdomain: direct.sub_domain,
     isAlias: false,
-    websiteStatus: direct.websiteStatus || 'published',
+    websiteStatus: direct.isBlocked ? 'suspended' : (direct.websiteStatus || 'published'),
     websiteUrl: buildTenantWebsiteUrl(direct.sub_domain || direct.organizationId),
 
   }
   const alias = await SubdomainAlias.findOne({ alias: subdomain }).lean()
   if (!alias) return null
-  const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('sub_domain websiteStatus').lean()
+  const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('agencyName sub_domain websiteStatus isBlocked').lean()
   if (!canonical) return null
   return {
     organizationId: alias.organizationId,
+    agencyName: canonical.agencyName,
     canonicalSubdomain: canonical.sub_domain || alias.canonicalSubdomain,
     isAlias: true,
-    websiteStatus: canonical.websiteStatus || 'published',
+    websiteStatus: canonical.isBlocked ? 'suspended' : (canonical.websiteStatus || 'published'),
     websiteUrl: buildTenantWebsiteUrl(canonical.sub_domain || alias.canonicalSubdomain),
   }
 }
@@ -240,9 +242,17 @@ const retryDue = async (limit = 50) => {
 }
 
 const resolveVerifiedDomain = async (host: string): Promise<string | null> => {
-  const domain = normalizeDomain(host.split(':')[0])
-  const record = await DomainRecord.findOne({ domain, status: 'verified', tlsStatus: 'active' }).lean()
-  return record?.organizationId || null
+  const details = await resolveVerifiedHost(host)
+  return details?.organizationId || null
 }
 
-export const DomainService = { add, get, verify, verifyById, retryDue, resolveVerifiedDomain, normalizeDomain, isSubdomainAvailable, changeSubdomain, resolveSubdomain }
+const resolveVerifiedHost = async (host: string) => {
+  const domain = normalizeDomain(host.split(':')[0])
+  const record = await DomainRecord.findOne({ domain, status: 'verified', tlsStatus: 'active' }).lean()
+  if (!record?.organizationId) return null
+  const org: any = await Organization.findOne({ organizationId: record.organizationId }).select('organizationId agencyName sub_domain websiteStatus isBlocked platformAccess.status').lean()
+  if (!org) return null
+  return { organizationId: org.organizationId, agencyName: org.agencyName, canonicalSubdomain: org.sub_domain || org.organizationId, websiteStatus: org.isBlocked ? 'suspended' : (org.websiteStatus || 'published'), isBlocked: Boolean(org.isBlocked) }
+}
+
+export const DomainService = { add, get, verify, verifyById, retryDue, resolveVerifiedDomain, resolveVerifiedHost, normalizeDomain, isSubdomainAvailable, changeSubdomain, resolveSubdomain }

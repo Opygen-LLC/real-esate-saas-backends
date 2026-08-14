@@ -23,6 +23,9 @@ export interface IPlatformAccess {
   suspendedBy?: string
   suspensionReason?: string
   previousSubscriptionStatus?: SubscriptionStatus | null
+  previousWebsiteStatus?: 'provisioned' | 'published' | 'suspended' | null
+  suspensionSource?: 'tenant' | 'owner_user' | null
+  suspensionUserId?: string | null
   reactivatedAt?: Date | null
   reactivatedBy?: string
   reactivationReason?: string

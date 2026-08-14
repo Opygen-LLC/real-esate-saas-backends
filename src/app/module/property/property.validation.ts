@@ -24,6 +24,15 @@ const googleMapsUrl = z.string().trim().url().max(2048).refine((value) => {
   }
 }, 'A valid Google Maps link is required')
 
+
+const imageMime = z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
+const assetVariant = z.object({
+  key: z.string().min(1).max(1200),
+  format: z.enum(['webp', 'avif']),
+  width: z.number().int().positive(),
+  height: z.number().int().positive().optional(),
+}).strict()
+
 const image = z.object({ url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
 const fields = {
@@ -50,8 +59,11 @@ const fields = {
 }
 
 export const PropertyValidation = {
+  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024) }).strict() }),
+  completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: z.object(fields).strict() }),
   updatePropertyZodSchema: z.object({ body: z.object(Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()])))
     .strict().refine(value => Object.keys(value).length > 0, 'At least one field is required') }),
   updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(statuses) }).strict() }),
+  importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional() }).strict() }),
 }
