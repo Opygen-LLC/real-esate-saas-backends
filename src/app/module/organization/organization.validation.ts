@@ -12,6 +12,36 @@ const socialLinks = z.object({
   facebook: optionalUrl.optional(), instagram: optionalUrl.optional(), twitter: optionalUrl.optional(), linkedin: optionalUrl.optional(),
   youtube: optionalUrl.optional(), whatsapp: z.union([z.literal(''), z.string().max(40)]).optional(),
 }).strict()
+const shortText = (max = 200) => z.string().trim().max(max)
+const websiteFeature = z.object({ title: shortText(120), description: shortText(500) }).strict()
+const websiteStat = z.object({ label: shortText(80), value: shortText(40), caption: shortText(160) }).strict()
+const websiteContent = z.object({
+  navigation: z.object({
+    tagline: shortText(120), homeLabel: shortText(40), propertiesLabel: shortText(40), agentsLabel: shortText(40),
+    aboutLabel: shortText(40), contactLabel: shortText(40), headerCtaLabel: shortText(60),
+    footerDescription: shortText(600), footerTrustText: shortText(180),
+  }).strict().optional(),
+  home: z.object({
+    eyebrow: shortText(160), heroTitle: shortText(200), heroSubtitle: shortText(600), heroImage: optionalUrl,
+    trustItems: z.array(shortText(140)).max(3), featuredEyebrow: shortText(120), featuredTitle: shortText(160), featuredSubtitle: shortText(400),
+    whyEyebrow: shortText(120), whyTitle: shortText(180), whySubtitle: shortText(400), features: z.array(websiteFeature).max(4),
+    agentsEyebrow: shortText(120), agentsTitle: shortText(160), agentsSubtitle: shortText(400), consultationEyebrow: shortText(120),
+    consultationTitle: shortText(180), consultationSubtitle: shortText(500), consultationButtonText: shortText(80),
+    showFeaturedProperties: z.boolean(), showWhyChooseUs: z.boolean(), showAgents: z.boolean(), showConsultation: z.boolean(),
+  }).strict().optional(),
+  about: z.object({
+    eyebrow: shortText(120), title: shortText(200), intro: shortText(900), image: optionalUrl, storyTitle: shortText(180), storyBody: shortText(1500),
+    values: z.array(websiteFeature).max(3), stats: z.array(websiteStat).max(4), ctaEyebrow: shortText(120), ctaTitle: shortText(200),
+    ctaText: shortText(700), ctaButtonText: shortText(80), showStats: z.boolean(),
+  }).strict().optional(),
+  properties: z.object({ eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500) }).strict().optional(),
+  agents: z.object({ eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500) }).strict().optional(),
+  contact: z.object({
+    eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500), officeTitle: shortText(120), hoursTitle: shortText(120),
+    weekdaysHours: shortText(80), fridayHours: shortText(80), whatsappHours: shortText(100), formTitle: shortText(120),
+    formSubtitle: shortText(400), submitButtonText: shortText(80),
+  }).strict().optional(),
+}).strict()
 const websiteSettings = z.object({
   heroTitle: z.string().max(160).optional(),
   heroSubtitle: z.string().max(400).optional(),
@@ -21,7 +51,9 @@ const websiteSettings = z.object({
   enableLeadForm: z.boolean().optional(),
   enableWhatsAppChat: z.boolean().optional(),
   renderMode: z.enum(['template', 'builder']).optional(),
+  content: websiteContent.optional(),
 }).strict()
+
 
 export const OrganizationValidation = {
   updateProfile: z.object({ body: z.object({

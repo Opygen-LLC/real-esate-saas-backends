@@ -183,6 +183,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableLeadForm: { type: Boolean, default: true },
       enableWhatsAppChat: { type: Boolean, default: true },
       renderMode: { type: String, enum: ['template', 'builder'], default: 'template' },
+      content: { type: Schema.Types.Mixed, default: {} },
     },
     teamSettings: {
       defaultRole: { type: String, enum: ['agent', 'staff', 'agency_admin'], default: 'agent' },

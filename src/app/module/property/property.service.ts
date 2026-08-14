@@ -7,6 +7,12 @@ import { Property } from './property.model'
 import { Organization } from '../organization/organization.model'
 import { sanitizeRichText } from '../../helpers/sanitize'
 
+const AUTO_APPROVE_ROLES = new Set(['agency_owner', 'agency_admin', 'admin', 'super-admin'])
+
+const canAutoApprove = (actorRole?: string): boolean =>
+  Boolean(actorRole && AUTO_APPROVE_ROLES.has(actorRole))
+
+
 const generateSlug = async (organizationId: string, title: string): Promise<string> => {
   let baseSlug = title
     .toLowerCase()
@@ -30,13 +36,16 @@ const generateSlug = async (organizationId: string, title: string): Promise<stri
 
 const createProperty = async (
   organizationId: string,
-  payload: Partial<IProperty>
+  payload: Partial<IProperty>,
+  actor?: { id?: string; role?: string }
 ): Promise<IProperty> => {
   if (!payload.title) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Property title is required')
   }
 
   const slug = await generateSlug(organizationId, payload.title)
+
+  const autoApprove = canAutoApprove(actor?.role)
 
   const propertyData: Partial<IProperty> = {
     ...payload,
@@ -46,8 +55,10 @@ const createProperty = async (
     currency: 'BDT',
     country: 'Bangladesh',
     description: payload.description ? sanitizeRichText(payload.description) : '',
-    moderationStatus: 'pending',
+    moderationStatus: autoApprove ? 'approved' : 'pending',
     moderationReason: '',
+    moderatedAt: autoApprove ? new Date() : undefined,
+    moderatedBy: autoApprove ? actor?.id || 'system' : '',
   }
 
   const result = await Property.create(propertyData)
@@ -244,7 +255,8 @@ const getPublicPropertyDetail = async (
 const updateProperty = async (
   organizationId: string,
   id: string,
-  payload: Partial<IProperty>
+  payload: Partial<IProperty>,
+  actor?: { id?: string; role?: string }
 ): Promise<IProperty | null> => {
   const isExist = await Property.findOne({ _id: id, organizationId })
   if (!isExist) {
@@ -258,8 +270,27 @@ const updateProperty = async (
   payload.currency = 'BDT'
   payload.country = 'Bangladesh'
   if (payload.description !== undefined) payload.description = sanitizeRichText(payload.description)
-  const materialFields = ['title', 'description', 'propertyType', 'listingType', 'price', 'bangladeshAddress', 'images', 'regulatory']
-  if (materialFields.some(field => (payload as any)[field] !== undefined)) {
+  const materialFields = [
+    'title',
+    'description',
+    'propertyType',
+    'listingType',
+    'price',
+    'bangladeshAddress',
+    'images',
+    'regulatory',
+  ]
+  const hasMaterialChange = materialFields.some(field => (payload as any)[field] !== undefined)
+
+  if (canAutoApprove(actor?.role)) {
+    // Agency owners/admins control their own storefront. Keep edits live while public
+    // visibility is still governed by `status === Available` in getPublicProperties.
+    payload.moderationStatus = 'approved'
+    payload.moderationReason = ''
+    payload.moderatedAt = new Date()
+    payload.moderatedBy = actor?.id || 'system'
+  } else if (hasMaterialChange) {
+    // Non-admin editors keep the existing moderation workflow.
     payload.moderationStatus = 'pending'
     payload.moderationReason = ''
     payload.moderatedAt = undefined
@@ -276,11 +307,21 @@ const updateProperty = async (
 const updatePropertyStatus = async (
   organizationId: string,
   id: string,
-  status: string
+  status: string,
+  actor?: { id?: string; role?: string }
 ): Promise<IProperty | null> => {
+  const update: Partial<IProperty> = { status: status as IProperty['status'] }
+
+  if (canAutoApprove(actor?.role)) {
+    update.moderationStatus = 'approved'
+    update.moderationReason = ''
+    update.moderatedAt = new Date()
+    update.moderatedBy = actor?.id || 'system'
+  }
+
   const result = await Property.findOneAndUpdate(
     { _id: id, organizationId },
-    { status },
+    update,
     { new: true }
   )
   if (!result) {

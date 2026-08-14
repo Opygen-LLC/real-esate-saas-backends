@@ -10,7 +10,10 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   await EntitlementService.assertLimit(organizationId, 'properties')
-  const result = await PropertyService.createProperty(organizationId, req.body)
+  const result = await PropertyService.createProperty(organizationId, req.body, {
+    id: req.user?._id || req.user?.id,
+    role: req.user?.userRole || req.user?.role || req.tenant?.role,
+  })
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -131,7 +134,10 @@ const getPublicPropertyBySlug = catchAsync(async (req: Request, res: Response) =
 const updateProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await PropertyService.updateProperty(organizationId, id, req.body)
+  const result = await PropertyService.updateProperty(organizationId, id, req.body, {
+    id: req.user?._id || req.user?.id,
+    role: req.user?.userRole || req.user?.role || req.tenant?.role,
+  })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -145,7 +151,10 @@ const updatePropertyStatus = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
   const { status } = req.body
-  const result = await PropertyService.updatePropertyStatus(organizationId, id, status)
+  const result = await PropertyService.updatePropertyStatus(organizationId, id, status, {
+    id: req.user?._id || req.user?.id,
+    role: req.user?.userRole || req.user?.role || req.tenant?.role,
+  })
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

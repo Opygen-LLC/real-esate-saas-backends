@@ -97,6 +97,7 @@ export interface IOrganization {
     enableLeadForm?: boolean
     enableWhatsAppChat?: boolean
     renderMode?: 'template' | 'builder'
+    content?: Record<string, any>
   }
   teamSettings?: {
     defaultRole?: 'agent' | 'staff' | 'agency_admin'
