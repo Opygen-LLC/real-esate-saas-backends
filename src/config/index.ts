@@ -100,7 +100,7 @@ if (cookieSameSite === 'none' && !cookieSecure) {
 
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
 const smsEnabled = envBoolean('SMS_ENABLED', false)
-const emailDevelopmentMode = envBoolean('EMAIL_DEV_MODE', false)
+const emailDevelopmentMode = envBoolean('EMAIL_DEV_MODE', !isProduction)
 const redisEnabled = envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))
 const redisTls = envBoolean('REDIS_TLS', false)
 const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK', false)

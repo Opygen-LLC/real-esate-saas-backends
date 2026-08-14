@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer'
 import config from '../../config'
 import { logger } from '../../shared/logger'
 
-let transport: ReturnType<typeof nodemailer.createTransport> | null = null
+let transport: any = null
 let lastHealthCheckAt = 0
 let lastHealthResult = false
 
