@@ -17,25 +17,33 @@ const data = {
   bn: { division: divisions_bn, district: districts_bn, upazila: upazilas_bn, area: unions_bn },
 } as const
 
+const getLevelItems = (source: LocationItem[] | LocationMap, parentId?: string): LocationItem[] => {
+  if (Array.isArray(source)) return source
+  return source[String(parentId)] || []
+}
+
 const getLocations = (level: Level, parentId?: string, locale: Locale = 'en', search = '') => {
   if (level !== 'division' && !parentId) throw new ApiError(400, 'parentId is required for this location level')
-  const source = data[locale][level]
-  const items = Array.isArray(source) ? source : (source as LocationMap)[String(parentId)] || []
-  const translatedSource = data[locale === 'en' ? 'bn' : 'en'][level]
-  const translatedItems = Array.isArray(translatedSource)
-    ? translatedSource
-    : (translatedSource as LocationMap)[String(parentId)] || []
+
+  const items = getLevelItems(data[locale][level] as LocationItem[] | LocationMap, parentId)
+  const translatedItems = getLevelItems(
+    data[locale === 'en' ? 'bn' : 'en'][level] as LocationItem[] | LocationMap,
+    parentId,
+  )
+  // Never pair translations by array position: package ordering can differ between
+  // English and Bangla datasets. The numeric location value is the stable key.
+  const translatedById = new Map(translatedItems.map((item) => [String(item.value), item.title]))
   const query = search.trim().toLocaleLowerCase(locale === 'bn' ? 'bn-BD' : 'en-BD')
 
   return items
-    .map((item, index) => ({
+    .map((item) => ({
       id: String(item.value),
       name: item.title,
-      alternateName: translatedItems[index]?.title || '',
+      alternateName: translatedById.get(String(item.value)) || '',
       level,
       parentId: parentId || null,
     }))
-    .filter(item => !query || `${item.name} ${item.alternateName}`.toLocaleLowerCase().includes(query))
+    .filter((item) => !query || `${item.name} ${item.alternateName}`.toLocaleLowerCase().includes(query))
 }
 
 export type AreaUnit = 'sqft' | 'decimal' | 'shotok' | 'katha' | 'bigha' | 'acre'

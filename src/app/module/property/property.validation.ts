@@ -10,6 +10,20 @@ const address = z.object({
   road: z.string().max(100).optional(), block: z.string().max(50).optional(), sector: z.string().max(50).optional(),
   mouza: z.string().max(100).optional(), postalCode: z.string().regex(/^\d{4}$/).optional(), landmark: z.string().max(200).optional(),
 }).strict()
+
+const googleMapsUrl = z.string().trim().url().max(2048).refine((value) => {
+  try {
+    const url = new URL(value)
+    const hostname = url.hostname.toLowerCase()
+    if (hostname === 'maps.app.goo.gl' || hostname === 'maps.google.com') return true
+    if (hostname === 'goo.gl') return url.pathname.startsWith('/maps')
+    if (hostname === 'www.google.com' || hostname === 'google.com') return url.pathname.startsWith('/maps')
+    return false
+  } catch {
+    return false
+  }
+}, 'A valid Google Maps link is required')
+
 const image = z.object({ url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
 const fields = {
@@ -21,7 +35,7 @@ const fields = {
   yearBuilt: z.number().int().min(1800).max(2200).optional(), parking: z.number().int().nonnegative().max(1000).optional(), furnished: z.boolean().optional(),
   address: z.string().max(500).optional(), city: z.string().max(100).optional(), state: z.string().max(100).optional(),
   country: z.literal('Bangladesh').default('Bangladesh'), zipCode: z.string().regex(/^\d{4}$/).optional(),
-  bangladeshAddress: address.optional(), latitude: z.number().min(20).max(27).optional(), longitude: z.number().min(88).max(93).optional(),
+  bangladeshAddress: address.optional(), latitude: z.number().min(20).max(27).optional(), longitude: z.number().min(88).max(93).optional(), mapUrl: z.union([z.literal(''), googleMapsUrl]).optional(),
   facing: z.enum(['North', 'South', 'East', 'West', 'NorthEast', 'NorthWest', 'SouthEast', 'SouthWest']).optional(),
   roadWidthFeet: z.number().nonnegative().max(1000).optional(), landShare: z.string().max(100).optional(),
   utilities: z.object({ electricity: z.boolean().optional(), gas: z.boolean().optional(), water: z.boolean().optional(),

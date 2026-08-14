@@ -75,6 +75,7 @@ export interface IProperty {
   serviceCharge?: number
   latitude?: number
   longitude?: number
+  mapUrl?: string
   images: IPropertyImage[]
   videos?: string[]
   amenities: string[]

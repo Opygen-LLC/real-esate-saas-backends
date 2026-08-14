@@ -244,9 +244,16 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
 
 const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
 const assetIsReferenced = async (organizationId: string, asset: any) => {
-  const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean)
-  const pages = await WebsitePage.find({ organizationId }).select('draftDocument publishedDocument').lean()
-  return pages.some((page) => { const serialized = JSON.stringify(page); return needles.some((needle) => serialized.includes(String(needle))) })
+  const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
+  const [pages, properties] = await Promise.all([
+    WebsitePage.find({ organizationId }).select('draftDocument publishedDocument').lean(),
+    Property.find({ organizationId }).select('images videos').lean(),
+  ])
+  const referencesAsset = (value: unknown) => {
+    const serialized = JSON.stringify(value)
+    return needles.some((needle) => serialized.includes(needle))
+  }
+  return pages.some(referencesAsset) || properties.some(referencesAsset)
 }
 const deleteAsset = async (organizationId: string, assetId: string, allowReferenced = false) => {
   const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId })

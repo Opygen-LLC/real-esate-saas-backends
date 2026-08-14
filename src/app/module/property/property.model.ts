@@ -149,6 +149,11 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     longitude: {
       type: Number,
     },
+    mapUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     images: {
       type: [propertyImageSchema],
       default: [],
