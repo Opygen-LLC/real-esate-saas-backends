@@ -56,7 +56,7 @@ const dateCondition = (startDate?: Date, endDate?: Date) => ({
   ...(endDate ? { $lte: endDate } : {}),
 })
 
-const makeNumber = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomBytes(3).toString('hex').toUpperCase()}`
+const makeNumber = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`
 const actorObjectId = (actorId: string) => {
   if (!mongoose.isValidObjectId(actorId)) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid authenticated user')
   return new mongoose.Types.ObjectId(actorId)
@@ -447,7 +447,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
   const status = asString(query.status); if (status) match.status = status
   if (startDate || endDate) match.transactionDate = dateCondition(startDate, endDate)
   const rows: any[] = await FinanceTransaction.find(match).populate('vendorId', 'name').sort({ transactionDate: -1 }).limit(10_000).lean()
-  const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
+  const quote = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
   const header = ['Date', 'Type', 'Category', 'Description', 'Amount (BDT)', 'Status', 'Payment Method', 'Vendor', 'Reference']
   const lines = rows.map((row) => [new Date(row.transactionDate).toISOString().slice(0, 10), row.type, row.category, row.description, row.amount, row.status, row.paymentMethod, row.vendorId?.name || '', row.reference || ''].map(quote).join(','))
   return [header.map(quote).join(','), ...lines].join('\n')
