@@ -393,8 +393,8 @@ const getPublicPage = async (identifier: string, slug = '/') => {
     const hot = await WebsiteCache.get<any>('published', resolution.organizationId, targetSlug)
     if (hot) return hot
   }
-  const org = await resolveOrganization(identifier)
-  assertPublicWebsite(org)
+  const org = assertPublicWebsite(await resolveOrganization(identifier))
+
   const cached = await WebsiteCache.get<any>('published', org.organizationId, targetSlug)
   if (cached) return cached
   const page = await WebsitePage.findOne({ organizationId: org.organizationId, slug: targetSlug, status: 'published', publishedDocument: { $ne: null } })

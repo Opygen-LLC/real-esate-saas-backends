@@ -58,10 +58,31 @@ if (!z.string().url().safeParse(publicSiteOrigin).success) {
   throw new Error('PUBLIC_SITE_ORIGIN must be a valid absolute URL')
 }
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || 'http://localhost:3000')
-  .split(',')
-  .map((origin) => origin.trim().replace(/\/$/, ''))
-  .filter(Boolean)
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'https://realestate.opygen.com',
+]
+
+if (process.env.CLIENT_URL) {
+  defaultAllowedOrigins.push(process.env.CLIENT_URL)
+}
+
+const rawOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : defaultAllowedOrigins
+
+const allowedOrigins = Array.from(
+  new Set(
+    rawOrigins
+      .map((origin) => origin.trim().replace(/\/$/, ''))
+      .filter(Boolean)
+  )
+)
+
 
 // Authentication verification is email-first. SMS remains an optional CRM channel.
 

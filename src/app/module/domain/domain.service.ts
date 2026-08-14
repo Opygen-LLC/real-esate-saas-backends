@@ -117,7 +117,8 @@ const resolveSubdomain = async (input: string) => {
     canonicalSubdomain: direct.sub_domain,
     isAlias: false,
     websiteStatus: direct.websiteStatus || 'published',
-    websiteUrl: buildTenantWebsiteUrl(direct.sub_domain),
+    websiteUrl: buildTenantWebsiteUrl(direct.sub_domain || direct.organizationId),
+
   }
   const alias = await SubdomainAlias.findOne({ alias: subdomain }).lean()
   if (!alias) return null
