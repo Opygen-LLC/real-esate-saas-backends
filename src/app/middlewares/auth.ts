@@ -10,10 +10,10 @@ import { RequestContext } from '../../shared/requestContext'
 
 export type Permission = 'properties.read' | 'properties.write' | 'properties.delete' | 'leads.read' | 'leads.write' |
   'leads.assign' | 'users.read' | 'users.write' | 'billing.manage' | 'website.write' | 'domains.manage' | 'analytics.advanced' |
-  'compliance.read' | 'compliance.write' | 'crm.configure' | 'crm.export' | 'messaging.manage' | 'whatsapp.manage'
+  'compliance.read' | 'compliance.write' | 'crm.configure' | 'crm.export' | 'messaging.manage' | 'whatsapp.manage' | 'finance.read' | 'finance.write'
 export const permissionMatrix: Record<string, Permission[]> = {
-  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage'],
-  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage'],
+  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage', 'finance.read', 'finance.write'],
+  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage', 'finance.read', 'finance.write'],
   agent: ['properties.read', 'properties.write', 'leads.read', 'leads.write'],
   viewer: ['properties.read', 'leads.read'], user: ['properties.read'], 'super-admin': [],
 }

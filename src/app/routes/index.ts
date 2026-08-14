@@ -32,10 +32,12 @@ import { NotificationRoute } from '../module/notification/notification.route'
 import { PlatformAdminRoute } from '../module/platformAdmin/platformAdmin.route'
 import { ObservabilityRoute } from '../module/observability/observability.route'
 import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.route'
+import { FinanceRoute } from '../module/finance/finance.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/finance', route: FinanceRoute },
   { path: '/team-invitations', route: TeamInvitationRoute },
   { path: '/observability', route: ObservabilityRoute },
   { path: '/platform-admin', route: PlatformAdminRoute },

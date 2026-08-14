@@ -30,7 +30,8 @@
     "verify:ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:ci",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts",
-    "test:smtp": "node scripts/verify-smtp.mjs"
+    "test:smtp": "node scripts/verify-smtp.mjs",
+    "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts"
   },
   "keywords": [
     "real-estate",
