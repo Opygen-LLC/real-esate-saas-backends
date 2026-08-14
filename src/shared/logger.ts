@@ -1,4 +1,6 @@
-import { createLogger, format, transports } from 'winston'
+import winston from 'winston'
+import 'winston-daily-rotate-file'
+import path from 'path'
 import { RequestContext } from './requestContext'
 
 const sensitiveKey = /^(ip|ipAddress|clientIp)$|(?:authorization|cookie|password|secret|token|otp|access.?token|refresh.?token|payerAccount|nid|tin|bin)/i
@@ -23,34 +25,60 @@ const scrub = (value: unknown, depth = 0): unknown => {
   return value
 }
 
-const jsonLine = format.printf((info) => {
+// Formatter for readable console & daily file logs
+const customFormat = winston.format.printf(({ level, message, ...meta }) => {
   const context = RequestContext.current()
-  const payload: Record<string, unknown> = {
-    timestamp: info.timestamp,
-    level: info.level,
-    service: 'real-estate-saas-api',
-    message: scrubString(String(info.message || '')),
-    ...(context ? {
-      requestId: context.requestId,
-      traceId: context.traceId,
-      organizationId: context.organizationId,
-      userId: context.userId,
-      paymentId: context.paymentId,
-    } : {}),
+  const reqId = context?.requestId ? `[${context.requestId}] ` : meta.requestId ? `[${meta.requestId}] ` : ''
+
+  // Special formatting for http_request logs
+  if (message === 'http_request' && meta.method && meta.path) {
+    const statusStr = meta.statusCode ? ` - ${meta.statusCode}` : ''
+    const durationStr = meta.durationMs !== undefined ? ` - ${meta.durationMs}ms` : ''
+    return `${level}: ${reqId}${meta.method} ${meta.path}${statusStr}${durationStr}`
   }
-  for (const [key, value] of Object.entries(info)) {
-    if (['timestamp', 'level', 'message', 'splat'].includes(key)) continue
-    payload[key] = sensitiveKey.test(key) ? '[redacted]' : scrub(value)
+
+  let msg = scrubString(String(message || ''))
+  const metaKeys = Object.keys(meta).filter((k) => !['timestamp', 'level', 'splat', 'requestId'].includes(k))
+  if (metaKeys.length > 0) {
+    // Exclude redundant http keys if present
+    const cleanMeta: Record<string, unknown> = {}
+    for (const key of metaKeys) {
+      if (!['method', 'path', 'statusCode', 'durationMs'].includes(key)) {
+        cleanMeta[key] = sensitiveKey.test(key) ? '[redacted]' : scrub(meta[key])
+      }
+    }
+    if (Object.keys(cleanMeta).length > 0) {
+      msg = `${msg} ${JSON.stringify(cleanMeta)}`
+    }
   }
-  return JSON.stringify(payload)
+
+  return `${level}: ${reqId}${msg}`
 })
 
-const base = createLogger({
+const fileTransport = new winston.transports.DailyRotateFile({
+  filename: path.join(process.cwd(), 'logs', 'server-%DATE%.log'),
+  datePattern: 'YYYY-MM-DD',
+  zippedArchive: true,
+  maxSize: '20m',
+  maxFiles: '7d',
+  level: 'info',
+  format: customFormat,
+})
+
+const baseLogger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  format: format.combine(format.timestamp(), jsonLine),
-  transports: [new transports.Console()],
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        customFormat
+      ),
+    }),
+    fileTransport,
+  ],
 })
 
-export const logger = base
-export const errorLogger = base
+export const logger = baseLogger
+export const errorLogger = baseLogger
 export { scrub as scrubLogValue }
+export default logger

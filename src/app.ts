@@ -54,12 +54,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'
     logger.log(level, 'http_request', {
       method: req.method,
-      path: Metrics.normalizeRoute(req.path),
+      path: req.originalUrl || req.path,
       statusCode: res.statusCode,
       durationMs: Math.round(durationMs * 10) / 10,
-      ip: req.ip,
-      organizationId: req.tenant?.organizationId,
     })
+
   })
   next()
 })
