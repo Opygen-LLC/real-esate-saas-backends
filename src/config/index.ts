@@ -25,6 +25,7 @@ const requiredInProduction = (name: string, minimum = 1): string => {
 }
 
 const publicApiUrl = process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`
+const publicSiteOrigin = (process.env.PUBLIC_SITE_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '')
 
 let publicApi: URL
 try {
@@ -33,36 +34,16 @@ try {
   throw new Error('PUBLIC_API_URL must be a valid absolute URL')
 }
 
-const defaultAllowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:3001',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:5173',
-  'https://opygenesate.vercel.app',
-  'https://opygeneestate.vercel.app',
-]
-
-if (process.env.CLIENT_URL) {
-  defaultAllowedOrigins.push(process.env.CLIENT_URL)
+if (!z.string().url().safeParse(publicSiteOrigin).success) {
+  throw new Error('PUBLIC_SITE_ORIGIN must be a valid absolute URL')
 }
 
-const rawOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : defaultAllowedOrigins
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean)
 
-const allowedOrigins = Array.from(
-  new Set(
-    rawOrigins
-      .map((origin) => origin.trim().replace(/\/$/, ''))
-      .filter(Boolean)
-  )
-)
-
-
-// Local/dev environments should never try to call an empty SMS URL. Production is
-// deliberately the opposite: a real SMS provider is mandatory and console OTPs
-// are rejected below.
+// Authentication verification is email-first. SMS remains an optional CRM channel.
 
 const rawCookieDomain = process.env.COOKIE_DOMAIN?.trim() || ''
 // Authentication cookies are intentionally host-only (no Domain attribute).
@@ -98,6 +79,8 @@ if (cookieSameSite === 'none' && !cookieSecure) {
 }
 
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
+const smsEnabled = envBoolean('SMS_ENABLED', false)
+const emailDevelopmentMode = envBoolean('EMAIL_DEV_MODE', false)
 
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
@@ -108,7 +91,8 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
 
-  if (smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false in production')
+  if (emailDevelopmentMode) throw new Error('EMAIL_DEV_MODE must be false in production')
+  if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))) {
     requiredInProduction('REDIS_PASSWORD', 8)
     if (!envBoolean('REDIS_TLS', false)) throw new Error('REDIS_TLS must be true when Redis is enabled in production')
@@ -118,8 +102,10 @@ if (isProduction) {
   requiredInProduction('SMTP_USER')
   requiredInProduction('SMTP_PASSWORD', 8)
   requiredInProduction('SMTP_FROM')
-  const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
-  requiredSms.forEach((name) => requiredInProduction(name))
+  if (smsEnabled) {
+    const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
+    requiredSms.forEach((name) => requiredInProduction(name))
+  }
 
   // Phase 3 publishing must fail at startup rather than silently accepting
   // uploads/domains that cannot be secured or scanned in production.
@@ -160,6 +146,7 @@ export default {
   app_email: process.env.APP_EMAIL,
   app_password: process.env.APP_PASSWORD,
   email: {
+    development_mode: emailDevelopmentMode,
     host: process.env.SMTP_HOST?.trim() || '',
     port: Math.max(1, Number(process.env.SMTP_PORT || 587)),
     secure: envBoolean('SMTP_SECURE', false),
@@ -185,6 +172,7 @@ export default {
     impersonation_cookie_name: 'supportImpersonationToken',
   },
   sms: {
+    enabled: smsEnabled,
     development_mode: smsDevelopmentMode,
     api_url: smsApiUrl,
     api_token: process.env.SMS_API_TOKEN?.trim() || '',
@@ -201,7 +189,7 @@ export default {
     ownership_prefix: process.env.DOMAIN_OWNERSHIP_PREFIX || '_realestate-verification',
     tls_provider_url: process.env.DOMAIN_TLS_PROVIDER_URL?.trim() || '',
     tls_provider_token: process.env.DOMAIN_TLS_PROVIDER_TOKEN?.trim() || '',
-    public_site_origin: (process.env.PUBLIC_SITE_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, ''),
+    public_site_origin: publicSiteOrigin,
   },
   redis: {
     enabled: envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST)),

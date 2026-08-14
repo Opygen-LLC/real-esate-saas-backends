@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { DomainRecord } from '../domain/domain.model'
 import { Cache } from '../../../shared/cache'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
+import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   if (!payload.organizationId) {
@@ -28,8 +29,16 @@ const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrg
 }
 
 const getMyOrganization = async (organizationId: string): Promise<IOrganization | null> => {
-  const result = await Organization.findOne({ organizationId })
-  return result
+  const [result, verifiedDomain] = await Promise.all([
+    Organization.findOne({ organizationId }).lean(),
+    DomainRecord.findOne({ organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+  ])
+  if (!result) return null
+  return {
+    ...result,
+    websiteStatus: result.websiteStatus || 'provisioned',
+    websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
+  } as IOrganization
 }
 
 const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {

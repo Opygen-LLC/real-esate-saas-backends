@@ -26,9 +26,12 @@ const sendEmail = async (to: string, subject: string, html: string): Promise<boo
   try {
     const client = transporter()
     if (!client) {
-      if (config.isProduction) throw new Error('SMTP provider is not configured')
-      logger.info('[Email simulation]', { subject, recipientConfigured: Boolean(to) })
-      return true
+      if (config.email.development_mode && !config.isProduction) {
+        logger.info('[EMAIL_DEV_MODE] Email delivery simulated', { subject, recipientConfigured: Boolean(to) })
+        return true
+      }
+      logger.error('SMTP provider is not configured')
+      return false
     }
     await client.sendMail({ from: config.email.from, to, subject, html })
     return true

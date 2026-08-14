@@ -13,7 +13,7 @@ let Organization: any
 let SubscriptionPlan: any
 let PlatformSettings: any
 let BkashPaymentClient: any
-let readCapturedOtpForTest: (phone: string, purpose: string) => string | null
+let readCapturedOtpForTest: (identity: string, purpose: string) => string | null
 
 const request = async (path: string, init: RequestInit = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -41,6 +41,7 @@ suite('production journey integration', () => {
     process.env.REDIS_ENABLED = 'false'
     process.env.WORKER_ENABLED = 'false'
     process.env.SMS_DEV_MODE = 'true'
+    process.env.EMAIL_DEV_MODE = 'true'
     process.env.CLIENT_URL = 'http://localhost:3000'
     process.env.PUBLIC_API_URL = 'http://127.0.0.1:5000'
     process.env.ALLOWED_ORIGINS = 'http://localhost:3000'
@@ -83,9 +84,9 @@ suite('production journey integration', () => {
     expect(register.body?.data?.subdomain).toBeTruthy()
 
     const normalizedPhone = '+8801712345678'
-    const otp = readCapturedOtpForTest(normalizedPhone, 'account_verification')
+    const otp = readCapturedOtpForTest('phase7@example.com', 'account_verification')
     expect(otp).toMatch(/^\d{6}$/)
-    const verify = await request('/api/v1/auth/verify', { method: 'POST', body: JSON.stringify({ phoneNumber: normalizedPhone, verificationCode: otp }) })
+    const verify = await request('/api/v1/auth/verify', { method: 'POST', body: JSON.stringify({ email: 'phase7@example.com', verificationCode: otp }) })
     expect(verify.response.status).toBe(200)
     const token = await bearerFor(normalizedPhone)
     const auth = { authorization: `Bearer ${token}` }

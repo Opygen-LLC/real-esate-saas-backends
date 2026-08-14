@@ -93,7 +93,7 @@ const registerAgency = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, {
     statusCode: 201,
     success: true,
-    message: 'Agency created. Verify your phone to activate owner access.',
+    message: 'Agency created. Check your email for the verification code.',
     data: result,
   })
 })
@@ -105,13 +105,17 @@ const loginUser = catchAsync(async (req: Request, res: Response) =>
 const verifyOtp = catchAsync(async (req: Request, res: Response) =>
   authResponse(
     res,
-    await AuthServices.verifyOtp(req.body.phoneNumber, req.body.verificationCode, meta(req)),
-    'Phone verified successfully',
+    await (async () => {
+      const result = await AuthServices.verifyOtp(req.body.email, req.body.verificationCode, meta(req))
+      result.websiteUrl = await AuthServices.getWebsiteUrlForUser(result.organizationId)
+      return result
+    })(),
+    'Email verified successfully',
   ),
 )
 
 const resendOtp = catchAsync(async (req: Request, res: Response) => {
-  await AuthServices.resendOtp(req.body.phoneNumber, meta(req))
+  await AuthServices.resendOtp(req.body.email, meta(req))
   sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -121,7 +125,7 @@ const resendOtp = catchAsync(async (req: Request, res: Response) => {
 })
 
 const requestPasswordReset = catchAsync(async (req: Request, res: Response) => {
-  await AuthServices.requestPasswordReset(req.body.phoneNumber, meta(req))
+  await AuthServices.requestPasswordReset(req.body.email, meta(req))
   sendResponse(res, {
     statusCode: 202,
     success: true,
@@ -135,7 +139,7 @@ const verifyPasswordReset = catchAsync(async (req: Request, res: Response) =>
     statusCode: 200,
     success: true,
     message: 'Reset code verified',
-    data: await AuthServices.verifyPasswordReset(req.body.phoneNumber, req.body.verificationCode),
+    data: await AuthServices.verifyPasswordReset(req.body.email, req.body.verificationCode),
   }),
 )
 

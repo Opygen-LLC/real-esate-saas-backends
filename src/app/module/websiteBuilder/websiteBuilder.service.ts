@@ -6,6 +6,7 @@ import config from '../../../config'
 import { Cache } from '../../../shared/cache'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { ALLOWED_ASSET_MIME_TYPES, assertSafeUrl, sanitizeCustomCss, sanitizeRichText } from '../../helpers/sanitize'
+import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { DomainRecord } from '../domain/domain.model'
@@ -21,6 +22,7 @@ import { WebsiteCache } from './websiteCache'
 import { ObjectStorageService } from './objectStorage.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
+import { buildDefaultWebsiteDocument } from './defaultWebsiteDocument'
 import { assertTemplateQuality } from './templateQa'
 
 const sanitizeDocument = (value: any, key = ''): any => {
@@ -35,13 +37,7 @@ const sanitizeDocument = (value: any, key = ''): any => {
   return value
 }
 
-const defaultDocument = () => ({
-  schemaVersion: 2,
-  template: { id: 'template-1', version: '2.0.0' },
-  seo: { canonicalUrl: '', title: '', description: '', openGraph: { title: '', description: '', image: '' }, robots: { index: true, follow: true }, structuredData: { enabled: true } },
-  pages: [{ id: 'home', slug: '/', title: 'Home Page', nodes: [{ id: 'section-hero', type: 'section', label: 'Hero Section', props: { fullWidth: true }, styles: { desktop: { paddingTop: 80, paddingBottom: 80, backgroundColor: '#0f172a', textColor: '#ffffff' } }, children: [{ id: 'container-hero', type: 'container', label: 'Hero Container', props: {}, styles: { desktop: { maxWidth: 1120, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 } }, children: [{ id: 'heading-1', type: 'heading', label: 'Hero Title', props: { level: 1, text: 'Find Your Signature Residence' }, styles: { desktop: { fontSize: 52, fontWeight: '800', textColor: '#ffffff' } } }, { id: 'paragraph-1', type: 'paragraph', label: 'Hero Subtitle', props: { text: 'Discover verified homes, land and commercial property from a trusted local agency.' }, styles: { desktop: { fontSize: 16, textColor: '#94a3b8' } } }] }] }] }],
-  theme: { primaryColor: '#0f172a', secondaryColor: '#2563eb', accentColor: '#7c3aed', fontFamily: 'Inter' },
-})
+const defaultDocument = () => buildDefaultWebsiteDocument()
 
 const normalizeIdentifier = (identifier: string) => identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
 
@@ -122,6 +118,7 @@ const performPublish = async (organizationId: string, pageId: string, userId?: s
     page.publishedVersion = version
     if (userId) page.updatedBy = userId as any
     result = await page.save(session ? { session } : undefined)
+    await Organization.updateOne({ organizationId }, { $set: { websiteStatus: 'published' } }, session ? { session } : undefined)
   }
   try {
     if (session) await session.withTransaction(execute)
@@ -289,7 +286,7 @@ const cleanupOrphanAssets = async (limit = 100) => {
 
 const canonicalBase = async (org: any) => {
   const verified = org.domain ? await DomainRecord.findOne({ organizationId: org.organizationId, domain: org.domain, status: 'verified', tlsStatus: 'active' }).lean() : null
-  return verified ? `https://${verified.domain}` : `${config.domains.public_site_origin}/portal/${org.sub_domain || org.organizationId}`
+  return buildTenantWebsiteUrl(org.sub_domain || org.organizationId, verified?.domain)
 }
 
 const getPublicPage = async (identifier: string, slug = '/') => {

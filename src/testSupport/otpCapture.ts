@@ -1,16 +1,16 @@
 type CapturedOtp = { code: string; purpose: string; capturedAt: Date }
 const captured = new Map<string, CapturedOtp>()
 
-const key = (phoneNumber: string, purpose: string) => `${phoneNumber}:${purpose}`
+const key = (identity: string, purpose: string) => `${identity}:${purpose}`
 
-export const captureOtpForTest = (phoneNumber: string, purpose: string, code: string): void => {
+export const captureOtpForTest = (identity: string, purpose: string, code: string): void => {
   if (process.env.NODE_ENV !== 'test') return
-  captured.set(key(phoneNumber, purpose), { code, purpose, capturedAt: new Date() })
+  captured.set(key(identity, purpose), { code, purpose, capturedAt: new Date() })
 }
 
-export const readCapturedOtpForTest = (phoneNumber: string, purpose: string): string | null => {
+export const readCapturedOtpForTest = (identity: string, purpose: string): string | null => {
   if (process.env.NODE_ENV !== 'test') return null
-  return captured.get(key(phoneNumber, purpose))?.code || null
+  return captured.get(key(identity, purpose))?.code || null
 }
 
 export const clearCapturedOtpsForTest = (): void => { captured.clear() }

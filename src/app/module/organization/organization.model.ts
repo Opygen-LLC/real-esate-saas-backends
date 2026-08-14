@@ -111,6 +111,12 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       type: Boolean,
       default: false,
     },
+    websiteStatus: {
+      type: String,
+      enum: ['provisioned', 'published', 'suspended'],
+      default: 'provisioned',
+      index: true,
+    },
     domain_dns: {
       type: [Object],
       default: [],

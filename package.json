@@ -28,7 +28,8 @@
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:load": "node scripts/load-test.mjs",
     "verify:ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:ci",
-    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts"
   },
   "keywords": [
     "real-estate",
@@ -54,7 +55,8 @@
     "eslint": "^8.57.1",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "ts-node": "^10.9.2"
   },
   "dependencies": {
     "bangladesh-location-data": "1.0.6",

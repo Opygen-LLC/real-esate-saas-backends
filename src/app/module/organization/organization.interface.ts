@@ -64,6 +64,8 @@ export interface IOrganization {
   domain?: string
   sub_domain?: string
   domain_Verify?: boolean
+  websiteStatus?: 'provisioned' | 'published' | 'suspended'
+  websiteUrl?: string
   domain_dns?: Array<{ type: string; name: string; value: string }>
   subscription: ISubscription
   platformAccess?: IPlatformAccess
