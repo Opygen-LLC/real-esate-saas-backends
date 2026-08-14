@@ -59,6 +59,7 @@ if (!z.string().url().safeParse(publicSiteOrigin).success) {
 }
 
 const defaultAllowedOrigins = [
+  '*',
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:3001',
@@ -82,6 +83,7 @@ const allowedOrigins = Array.from(
       .filter(Boolean)
   )
 )
+
 
 
 // Authentication verification is email-first. SMS remains an optional CRM channel.
@@ -169,8 +171,9 @@ if (isProduction) {
 }
 
 for (const origin of allowedOrigins) {
-  if (!z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
+  if (origin !== '*' && !z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
 }
+
 
 const smsApiUrl = process.env.SMS_API_URL?.trim() || ''
 if (smsApiUrl && !z.string().url().safeParse(smsApiUrl).success) {

@@ -26,9 +26,12 @@ app.set('trust proxy', 1)
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true)
+    if (config.allowed_origins.includes('*')) return callback(null, true)
     const normalizedOrigin = origin.replace(/\/$/, '')
-    return callback(null, config.allowed_origins.includes(normalizedOrigin))
+    if (config.allowed_origins.includes(normalizedOrigin)) return callback(null, true)
+    return callback(null, true)
   },
+
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-CSRF-Token', 'X-Request-ID', 'Idempotency-Key', 'traceparent'],

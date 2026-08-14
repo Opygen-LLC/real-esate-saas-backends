@@ -42,9 +42,10 @@ export const requestContext = (req: Request, res: Response, next: NextFunction):
 
 export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {
   const origin = req.get('origin')
-  if (origin && !config.allowed_origins.includes(origin.replace(/\/$/, ''))) {
+  if (origin && !config.allowed_origins.includes('*') && !config.allowed_origins.includes(origin.replace(/\/$/, ''))) {
     return next(new ApiError(403, 'Origin is not allowed'))
   }
+
 
   if (SAFE_METHODS.has(req.method.toUpperCase()) || isCsrfExemptRequest(req)) return next()
 
