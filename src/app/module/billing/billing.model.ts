@@ -57,7 +57,7 @@ const billingSchema = new Schema<IBilling>(
     },
     paymentMethod: {
       type: String,
-      default: 'bKash',
+      default: 'Manual',
     },
     status: {
       type: String,

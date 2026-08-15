@@ -6,13 +6,15 @@ import { writeAudit } from '../audit/audit.service'
 import { PlatformSettings } from './platformSettings.model'
 import { encryptField, maskSensitive, decryptField } from '../../helpers/fieldEncryption'
 import { invalidateTrialPolicy } from './trialPolicy.service'
+import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 
 const publicSettings = catchAsync(async (_req: Request, res: Response) => {
   const settings = await PlatformSettings.findOneAndUpdate({ key: 'platform' }, { $setOnInsert: { key: 'platform' } }, { upsert: true, new: true })
+  const privacy = await PrivacyPolicyService.getPublicPolicyState()
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Public localization settings fetched', data: {
     currency: 'BDT', supportedLanguages: ['en', 'bn'], areaConversion: settings.areaConversion,
-    privacy: { policyUrl: settings.privacy?.policyUrl || '', policyVersion: settings.privacy?.policyVersion || '',
-      legalReviewStatus: settings.privacy?.legalReviewStatus || 'required' },
+    privacy,
+    support: settings.support,
     taxInvoiceEnabled: Boolean(settings.tax?.invoiceEnabled && settings.tax?.registrationStatus === 'registered'),
   } })
 })

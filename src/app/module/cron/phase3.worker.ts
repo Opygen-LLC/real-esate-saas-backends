@@ -4,7 +4,6 @@ import { Metrics } from '../../../shared/metrics'
 import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { Lead } from '../lead/lead.model'
-import { SupportService } from '../support/support.service'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 
 let running = false
@@ -28,9 +27,8 @@ export const runPhase3Maintenance = async () => {
       OperationsQueueService.schedulePendingDomainChecks(100),
       OperationsQueueService.schedulePendingCalendarSync(50),
     ])
-    const [operations, supportSla, planVersions, sla] = await Promise.all([
+    const [operations, planVersions, sla] = await Promise.all([
       OperationsQueueService.processDue(config.runtime.worker_batch_size),
-      SupportService.markSlaBreaches(),
       SubscriptionPlanService.applyDuePlanVersions(),
       Lead.updateMany({ firstResponseAt: { $exists: false }, responseDueAt: { $lt: new Date() }, slaBreachedAt: { $exists: false } }, { $set: { slaBreachedAt: new Date() } }),
     ])
@@ -45,7 +43,7 @@ export const runPhase3Maintenance = async () => {
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
     Metrics.setGauge('worker_last_duration_ms', lastDurationMs)
-    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, supportSla, planVersions, slaMarked: sla.modifiedCount, assets }
+    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, planVersions, slaMarked: sla.modifiedCount, assets }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     lastDurationMs = performance.now() - started

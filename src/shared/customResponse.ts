@@ -12,13 +12,17 @@ type IApiResponse<T> = {
   data?: T | null
 }
 
+type IApiResponseBody<T> = IApiResponse<T> & { requestId?: string }
+
 export const sendResponse = <T>(res: Response, data: IApiResponse<T>): void => {
-  const responseData: IApiResponse<T> = {
+  const requestIdHeader = res.getHeader('x-request-id')
+  const responseData: IApiResponseBody<T> = {
     statusCode: data.statusCode,
     success: data.success,
-    message: data.message || null,
-    meta: data.meta || null || undefined,
-    data: data.data || null,
+    message: data.message ?? null,
+    ...(data.meta ? { meta: data.meta } : {}),
+    data: data.data ?? null,
+    ...(typeof requestIdHeader === 'string' ? { requestId: requestIdHeader } : {}),
   }
 
   res.status(data.statusCode).json(responseData)

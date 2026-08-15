@@ -1,22 +1,23 @@
 import mongoose from 'mongoose'
+import { API_ERROR_CODES, buildFieldErrors } from '../contracts/apiContract'
 import { IGenericErrorMessage, IGenericErrorResponse } from '../interfaces/common'
 
 const handleValidationError = (
-  error: mongoose.Error.ValidationError
+  error: mongoose.Error.ValidationError,
 ): IGenericErrorResponse => {
-  const errors: IGenericErrorMessage[] = Object.values(error.errors).map(
-    (el: mongoose.Error.ValidatorError | mongoose.Error.CastError) => {
-      return {
-        path: el?.path,
-        message: el?.message,
-      }
-    }
+  const errorMessages: IGenericErrorMessage[] = Object.values(error.errors).map(
+    (item: mongoose.Error.ValidatorError | mongoose.Error.CastError) => ({
+      path: item.path,
+      message: item.message,
+    }),
   )
-  const statusCode = 400
+
   return {
-    statusCode,
-    message: 'Validation Error',
-    errorMessages: errors,
+    statusCode: 400,
+    code: API_ERROR_CODES.VALIDATION_ERROR,
+    message: 'Please correct the highlighted fields',
+    errorMessages,
+    fieldErrors: buildFieldErrors(errorMessages),
   }
 }
 

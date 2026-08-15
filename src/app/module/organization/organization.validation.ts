@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
 const agencyType = z.enum(['residential', 'commercial', 'mixed', 'brokerage', 'developer', 'general'])
@@ -58,6 +59,7 @@ const websiteSettings = z.object({
 export const OrganizationValidation = {
   updateProfile: z.object({ body: z.object({
     agencyName: z.string().trim().min(2).max(120).optional(), agencyType: agencyType.optional(),
+    email: emailSchema.optional(), phone: bangladeshPhoneSchema.optional(),
     licenseNumber: z.string().max(100).optional(), address: z.string().max(300).optional(), city: z.string().max(100).optional(),
     state: z.string().max(100).optional(), country: z.literal('Bangladesh').optional(), zipCode: z.union([z.literal(''), z.string().regex(/^\d{4}$/)]).optional(),
     defaultLanguage: z.enum(['en', 'bn']).optional(), addressDetails: addressDetails.optional(),
@@ -65,6 +67,12 @@ export const OrganizationValidation = {
     serviceAreas: z.array(z.union([z.string().max(100), z.record(z.unknown())])).max(100).optional(), socialLinks: socialLinks.optional(),
     teamSettings: z.object({ defaultRole: z.enum(['agent', 'staff', 'agency_admin']).optional(), agentsCanViewAllLeads: z.boolean().optional(),
       leaderboardVisible: z.boolean().optional(), autoAssignLeads: z.boolean().optional() }).strict().optional(),
+  }).strict() }),
+
+  branding: z.object({ body: z.object({
+    primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), metaTitle: z.string().trim().max(120).optional(),
+    metaDescription: z.string().trim().max(300).optional(), logo: optionalUrl.optional(), favicon: optionalUrl.optional(),
   }).strict() }),
 
   website: z.object({ body: z.object({

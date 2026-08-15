@@ -1,6 +1,19 @@
 import { Schema, model } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
 
+const propertyMediaLinkSchema = new Schema(
+  {
+    id: { type: String, required: true, trim: true, maxlength: 80 },
+    url: { type: String, required: true, trim: true, maxlength: 2048 },
+    provider: { type: String, enum: ['youtube', 'vimeo', 'matterport', 'kuula', 'other'], required: true },
+    type: { type: String, enum: ['video', 'virtual_tour', '360'], required: true },
+    title: { type: String, default: '', maxlength: 160 },
+    isHero: { type: Boolean, default: false },
+    embedUrl: { type: String, default: '', trim: true, maxlength: 2048 },
+  },
+  { _id: false },
+)
+
 const propertyImageSchema = new Schema(
   {
     url: { type: String, required: true },
@@ -58,7 +71,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
         'OffMarket',
         'ComingSoon',
       ],
-      default: 'Available',
+      default: 'Draft',
       required: true,
     },
     price: {
@@ -157,10 +170,34 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     images: {
       type: [propertyImageSchema],
       default: [],
+      validate: [
+        {
+          validator: (items: Array<{ isFeatured?: boolean }>) => items.length <= 20,
+          message: 'A property can have up to 20 photos',
+        },
+        {
+          validator: (items: Array<{ isFeatured?: boolean }>) => items.filter(item => item.isFeatured).length <= 1,
+          message: 'Only one property photo can be featured',
+        },
+      ],
     },
-    videos: {
-      type: [String],
+    mediaLinks: {
+      type: [propertyMediaLinkSchema],
       default: [],
+      validate: [
+        {
+          validator: (links: Array<{ isHero?: boolean }>) => links.length <= 10,
+          message: 'A property can have up to 10 hosted media links',
+        },
+        {
+          validator: (links: Array<{ isHero?: boolean }>) => links.filter(link => link.isHero).length <= 1,
+          message: 'Only one property media link can be selected as the hero media',
+        },
+        {
+          validator: (links: Array<{ id?: string }>) => new Set(links.map(link => link.id)).size === links.length,
+          message: 'Property media link IDs must be unique',
+        },
+      ],
     },
     amenities: {
       type: [String],
@@ -180,7 +217,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     publishedAt: {
       type: Date,
-      default: Date.now,
+      default: null,
     },
     views: {
       type: Number,
@@ -190,8 +227,6 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       type: Boolean,
       default: false,
     },
-    moderationStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'flagged'], default: 'pending', index: true },
-    moderationReason: { type: String, default: '' }, moderatedBy: { type: String, default: '' }, moderatedAt: { type: Date },
   },
   {
     timestamps: true,
@@ -204,7 +239,6 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
 propertySchema.index({ organizationId: 1, slug: 1 }, { unique: true })
 propertySchema.index({ organizationId: 1, status: 1, price: 1 })
 propertySchema.index({ organizationId: 1, propertyType: 1, listingType: 1 })
-propertySchema.index({ organizationId: 1, moderationStatus: 1, status: 1 })
 propertySchema.index({ organizationId: 1, _id: 1 })
 propertySchema.index({ organizationId: 1, createdAt: -1 })
 propertySchema.index({ organizationId: 1, agentId: 1, status: 1 })

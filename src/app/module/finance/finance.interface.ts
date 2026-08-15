@@ -64,6 +64,12 @@ export interface IFinanceInvoice {
   paidAmount: number
   currency: 'BDT'
   status: 'draft' | 'sent' | 'partial' | 'paid' | 'overdue' | 'cancelled'
+  cancelledAt?: Date
+  cancelledBy?: mongoose.Types.ObjectId | string
+  cancelReason?: string
+  archivedAt?: Date
+  archivedBy?: mongoose.Types.ObjectId | string
+  archiveReason?: string
   notes?: string
   propertyId?: mongoose.Types.ObjectId | string
   leadId?: mongoose.Types.ObjectId | string

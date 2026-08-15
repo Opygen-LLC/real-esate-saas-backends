@@ -1,15 +1,6 @@
 import mongoose from 'mongoose'
 import config from '../../config'
 
-const SLA_HOURS: Record<string, { firstResponse: number; resolution: number }> = {
-  urgent: { firstResponse: 1, resolution: 8 },
-  high: { firstResponse: 4, resolution: 24 },
-  medium: { firstResponse: 8, resolution: 48 },
-  low: { firstResponse: 24, resolution: 96 },
-}
-
-const addHours = (value: Date, hours: number) => new Date(value.getTime() + hours * 60 * 60 * 1000)
-
 const run = async () => {
   await mongoose.connect(config.database_string, { autoIndex: false })
   const db = mongoose.connection.db
@@ -20,7 +11,6 @@ const run = async () => {
   const organizations = db.collection('organizations')
   const billings = db.collection('billings')
   const payments = db.collection('bkashpayments')
-  const support = db.collection('supporttickets')
 
   // Legacy Phase 1/2 catalogs used a unique planId index. Versioned commercial
   // plans require uniqueness on {planId, version} instead.
@@ -97,34 +87,13 @@ const run = async () => {
     if (Object.keys(set).length) await payments.updateOne({ _id: payment._id }, { $set: set })
   }
 
-  const tickets = await support.find({ $or: [{ firstResponseDueAt: { $exists: false } }, { resolutionDueAt: { $exists: false } }] }).toArray()
-  for (const ticket of tickets) {
-    const createdAt = new Date(ticket.createdAt || now)
-    const sla = SLA_HOURS[String(ticket.priority || 'medium')] || SLA_HOURS.medium
-    const set: Record<string, unknown> = {
-      firstResponseDueAt: ticket.firstResponseDueAt || addHours(createdAt, sla.firstResponse),
-      resolutionDueAt: ticket.resolutionDueAt || addHours(createdAt, sla.resolution),
-      firstRespondedAt: ticket.firstRespondedAt ?? null,
-      resolvedAt: ticket.resolvedAt ?? (['resolved', 'closed'].includes(ticket.status) ? ticket.updatedAt || now : null),
-      slaBreachedAt: ticket.slaBreachedAt ?? null,
-      internalNotes: ticket.internalNotes || [],
-      attachments: ticket.attachments || [],
-    }
-    if (!ticket.organizationName && ticket.organizationId) {
-      const org = orgRows.find((row: any) => row.organizationId === ticket.organizationId) as any
-      if (org?.agencyName) set.organizationName = org.agencyName
-    }
-    await support.updateOne({ _id: ticket._id }, { $set: set })
-  }
-  await support.createIndex({ status: 1, priority: 1, firstResponseDueAt: 1 }, { name: 'status_1_priority_1_firstResponseDueAt_1' })
-  await support.createIndex({ ownerId: 1, status: 1, updatedAt: -1 }, { name: 'ownerId_1_status_1_updatedAt_-1' })
 
   await organizations.createIndex({ isBlocked: 1, 'subscription.status': 1, createdAt: -1 }, { name: 'isBlocked_1_subscription.status_1_createdAt_-1' })
   await payments.createIndex({ paymentId: 1 }, { name: 'paymentId_1', background: true }).catch(() => undefined)
   await payments.createIndex({ transactionId: 1 }, { name: 'transactionId_1', sparse: true }).catch(() => undefined)
   await payments.createIndex({ invoiceNumber: 1 }, { name: 'invoiceNumber_1', background: true }).catch(() => undefined)
 
-  console.log(`Phase 5 migration completed: ${existingPlans.length} plan versions normalized, ${orgRows.length} tenant access records migrated, ${tickets.length} support tickets received SLA fields.`)
+  console.log(`Phase 5 migration completed: ${existingPlans.length} plan versions normalized and ${orgRows.length} tenant access records migrated.`)
   await mongoose.disconnect()
 }
 

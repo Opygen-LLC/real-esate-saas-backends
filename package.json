@@ -31,7 +31,14 @@
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts",
     "test:smtp": "node scripts/verify-smtp.mjs",
-    "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts"
+    "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
+    "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",
+    "migrate:phase-0-media": "ts-node --transpile-only src/app/db/migratePhase0PropertyMedia.ts",
+    "migrate:phase-1-manual-subscriptions": "ts-node --transpile-only src/app/db/migratePhase1ManualSubscriptions.ts",
+    "migrate:phase-3-agency-publishing": "ts-node --transpile-only src/app/db/migratePhase3AgencyPublishing.ts",
+    "migrate:phase-4-media": "ts-node --transpile-only src/app/db/migratePhase4PropertyMedia2.ts",
+    "verify:media": "node scripts/verify-media-stack.mjs",
+    "verify:phase5-finance": "node scripts/verify-phase5-finance.mjs"
   },
   "keywords": [
     "real-estate",

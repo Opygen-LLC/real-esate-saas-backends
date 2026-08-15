@@ -128,7 +128,7 @@ const redisEnabled = envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST)
 const redisTls = envBoolean('REDIS_TLS', false)
 const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK', false)
 const redisHost = process.env.REDIS_HOST || '127.0.0.1'
-const bkashEnabled = envBoolean('BKASH_ENABLED', isProduction)
+const bkashEnabled = envBoolean('BKASH_ENABLED', false)
 
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
@@ -167,7 +167,7 @@ if (isProduction) {
 
   // Phase 3 publishing must fail at startup rather than silently accepting
   // uploads/domains that cannot be secured or scanned in production.
-  ;['OBJECT_STORAGE_BUCKET', 'OBJECT_STORAGE_ENDPOINT', 'OBJECT_STORAGE_ACCESS_KEY_ID', 'OBJECT_STORAGE_SECRET_ACCESS_KEY', 'OBJECT_STORAGE_PUBLIC_BASE_URL', 'CLAMAV_HOST', 'DOMAIN_A_TARGET', 'DOMAIN_CNAME_TARGET', 'DOMAIN_TLS_PROVIDER_URL', 'PUBLIC_SITE_ORIGIN'].forEach((name) => requiredInProduction(name))
+  ;['OBJECT_STORAGE_BUCKET', 'OBJECT_STORAGE_ENDPOINT', 'OBJECT_STORAGE_INTERNAL_ENDPOINT', 'OBJECT_STORAGE_ACCESS_KEY_ID', 'OBJECT_STORAGE_SECRET_ACCESS_KEY', 'OBJECT_STORAGE_PUBLIC_BASE_URL', 'CLAMAV_HOST', 'DOMAIN_A_TARGET', 'DOMAIN_CNAME_TARGET', 'DOMAIN_TLS_PROVIDER_URL', 'PUBLIC_SITE_ORIGIN'].forEach((name) => requiredInProduction(name))
 }
 
 for (const origin of allowedOrigins) {
@@ -275,10 +275,13 @@ export default {
     bucket: process.env.OBJECT_STORAGE_BUCKET || '',
     region: process.env.OBJECT_STORAGE_REGION || 'auto',
     endpoint: (process.env.OBJECT_STORAGE_ENDPOINT || '').replace(/\/$/, ''),
+    internal_endpoint: (process.env.OBJECT_STORAGE_INTERNAL_ENDPOINT || process.env.OBJECT_STORAGE_ENDPOINT || '').replace(/\/$/, ''),
     access_key_id: process.env.OBJECT_STORAGE_ACCESS_KEY_ID || '',
     secret_access_key: process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || '',
     public_base_url: (process.env.OBJECT_STORAGE_PUBLIC_BASE_URL || '').replace(/\/$/, ''),
     signed_url_ttl_seconds: Math.max(60, Math.min(3600, Number(process.env.OBJECT_STORAGE_SIGNED_URL_TTL || 600))),
+    health_timeout_ms: Math.max(500, Math.min(15000, Number(process.env.OBJECT_STORAGE_HEALTH_TIMEOUT_MS || 3000))),
+    health_cache_ms: Math.max(1000, Math.min(60000, Number(process.env.OBJECT_STORAGE_HEALTH_CACHE_MS || 10000))),
     clamav_host: process.env.CLAMAV_HOST || '',
     clamav_port: Math.max(1, Number(process.env.CLAMAV_PORT || 3310)),
   },

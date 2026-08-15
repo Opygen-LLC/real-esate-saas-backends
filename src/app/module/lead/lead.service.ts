@@ -1,20 +1,20 @@
-import { createHash } from 'crypto'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
-import { ConsentRecord } from '../compliance/compliance.model'
+import { PrivacyConsentService } from '../privacy/privacyConsent.service'
+import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { Contact } from '../contact/contact.model'
 import { CrmService } from '../crm/crm.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
-import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { Organization } from '../organization/organization.model'
 import { ILead, ILeadFilter } from './lead.interface'
 import { Lead } from './lead.model'
+import type { PublicLeadCaptureInput } from './lead.validation'
 
 const normalizePhone=(value:string)=>{try{return normalizeBangladeshPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
 const normalizeOptionalEmail=(value?:string)=>value?.trim()?normalizeEmail(value):''
@@ -74,17 +74,18 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
   }catch(error:any){if(error?.code===11000){const after:any=(await findDuplicates(organizationId,normalizedPhone,normalizedEmail))[0];if(after)return mergeInto(after,prepared,{source:String(prepared.source||'Unknown'),actorId:creatorAgentId})}throw error}
 }
 
-const publicCaptureLead=async(payload:any,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
+const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
   const {organizationId,name,phone,email,propertyInterest,message,privacyConsent,policyVersion,attribution,...rest}=payload
   if(!organizationId||!name||!phone)throw new ApiError(400,'Organization, client name, and phone are required')
   const organization:any=await Organization.findOne({organizationId}).select('isBlocked websiteStatus').lean()
   if(!organization)throw new ApiError(404,'Agency not found')
   if(organization.isBlocked||organization.websiteStatus==='suspended')throw new ApiError(423,'This agency is currently suspended','', 'TENANT_SUSPENDED')
   if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
-  const settings:any=await PlatformSettings.findOne({key:'platform'}).lean();if(!settings?.privacy||settings.privacy.legalReviewStatus!=='approved'||!settings.privacy.policyVersion)throw new ApiError(503,'Public enquiries are unavailable until the reviewed privacy policy is configured');if(!privacyConsent||policyVersion!==settings.privacy.policyVersion)throw new ApiError(409,'Privacy policy consent is missing or out of date')
+  if(!privacyConsent) throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})
+  await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
   const normalizedPhone=normalizePhone(phone)
   const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined)
-  await ConsentRecord.create({organizationId,userId:`public:${createHash('sha256').update(normalizedPhone).digest('hex')}`,purpose:'privacy_policy',policyVersion,granted:true,capturedAt:new Date(),ip:context.ip||'',requestId:context.requestId||''})
+  await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, normalizedPhone, policyVersion, context)
   return lead
 }
 

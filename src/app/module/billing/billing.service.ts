@@ -8,6 +8,7 @@ import { Billing } from './billing.model'
 import { Lead } from '../lead/lead.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { decryptField } from '../../helpers/fieldEncryption'
+import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 
 const escapeHtml = (value: unknown): string =>
   String(value ?? '')
@@ -25,10 +26,7 @@ const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling
   return result
 }
 
-const getBillingHistory = async (organizationId: string): Promise<IBilling[]> => {
-  const result = await Billing.find({ organizationId }).sort({ createdAt: -1 })
-  return result
-}
+const getBillingHistory = async (organizationId: string) => SubscriptionPaymentService.getTenantPaymentHistory(organizationId)
 
 const getSubscriptionUsage = async (organizationId: string) => {
   const org = await Organization.findOne({ organizationId })
@@ -52,10 +50,14 @@ const getSubscriptionUsage = async (organizationId: string) => {
 
   const isApproachingLimit = propertiesPercent >= 80 || agentsPercent >= 80
 
+  const pendingChangeRequest = await SubscriptionPaymentService.getTenantPendingState(organizationId)
+
   return {
     plan: org.subscription?.plan || 'starter',
+    planVersion: org.subscription?.planVersion || 1,
     status: org.subscription?.status || 'trialing',
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
+    pendingChangeRequest,
     properties: {
       used: currentProperties,
       limit: maxProperties,
@@ -91,8 +93,12 @@ const cancelSubscription = async (organizationId: string) => {
 }
 
 const getInvoiceReceipt = async (organizationId: string, id: string) => {
+  try { return await SubscriptionPaymentService.renderReceipt(organizationId, id) } catch (error) {
+    if (!(error instanceof ApiError) || error.statusCode !== httpStatus.NOT_FOUND) throw error
+  }
   const billing = await Billing.findOne({
     organizationId,
+    status: 'paid',
     $or: [{ invoiceId: id }, ...(id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: id }] : [])],
   }).select('+taxSnapshot.binEncrypted')
 

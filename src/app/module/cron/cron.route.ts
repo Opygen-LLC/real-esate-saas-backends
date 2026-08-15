@@ -14,7 +14,7 @@ router.get(
     const subscriptions = await reconcileSubscriptions()
     const phase3 = await runPhase3Maintenance()
     const result = { subscriptions, phase3 }
-    logger.info('[Cron Job] Subscription and payment reconciliation completed', result)
+    logger.info('[Cron Job] Subscription lifecycle maintenance completed', result)
     sendResponse(res, {
       statusCode: httpStatus.OK,
       success: true,

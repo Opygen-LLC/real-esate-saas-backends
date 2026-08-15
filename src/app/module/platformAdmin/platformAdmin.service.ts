@@ -6,8 +6,6 @@ import ApiError from '../../../errors/ApiError'
 import { jwtHelpers } from '../../helpers/jwtHelpers'
 import { AuditEvent } from '../audit/audit.model'
 import { writeAudit } from '../audit/audit.service'
-import { Billing } from '../billing/billing.model'
-import { BkashPayment } from '../bkashPayment/bkashPayment.model'
 import { DomainRecord } from '../domain/domain.model'
 import { DomainEvent } from '../domainEvent/domainEvent.model'
 import { Lead } from '../lead/lead.model'
@@ -15,13 +13,15 @@ import { MetaEvent } from '../metaIntegration/metaEvent.model'
 import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
-import { SupportTicket } from '../support/support.model'
 import { User } from '../user/user.model'
 import { ImpersonationSession } from './impersonationSession.model'
 import { AuthSession } from '../auth/authSession.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
+import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
+import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
+import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
@@ -36,7 +36,7 @@ const groupCounts = async (model: any, ids: string[], match: Record<string, unkn
 
 const getTenantHealth = async (query: any) => {
   const page = Math.max(1, Number(query.page || 1))
-  const limit = clampLimit(query.limit)
+  const limit = clampLimit(query.limit, 10)
   const filter: any = {}
   if (query.status === 'suspended') filter.isBlocked = true
   if (query.status === 'active') filter.isBlocked = { $ne: true }
@@ -50,34 +50,34 @@ const getTenantHealth = async (query: any) => {
     ]
   }
   const [organizations, total] = await Promise.all([
-    Organization.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Organization.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Organization.countDocuments(filter),
   ])
   const ids = organizations.map((org: any) => org.organizationId)
   if (!ids.length) return { data: [], meta: { page, limit, total } }
 
-  const [properties, agents, leads, domains, latestEvents, latestPayments, failedJobs, deadMeta, openSupport, breachedSupport] = await Promise.all([
+  const [properties, agents, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
     groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, { leadStatus: { $nin: ['Won', 'Lost'] } }),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
-    BkashPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
+    SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
+    SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted'] } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
     groupCounts(OperationsJob, ids, { status: 'failed' }),
     groupCounts(MetaEvent, ids, { status: 'dead' }),
-    groupCounts(SupportTicket, ids, { status: { $in: ['open', 'in_progress'] } }),
-    groupCounts(SupportTicket, ids, { status: { $in: ['open', 'in_progress'] }, slaBreachedAt: { $ne: null } }),
   ])
   const domainMap = new Map(domains.map((row: any) => [row.organizationId, row]))
   const eventMap = new Map(latestEvents.map((row: any) => [String(row._id), row]))
   const paymentMap = new Map(latestPayments.map((row: any) => [String(row._id), row.payment]))
+  const requestMap = new Map(latestRequests.map((row: any) => [String(row._id), row.request]))
 
   const data = organizations.map((org: any) => {
     const domain: any = domainMap.get(org.organizationId)
     const payment: any = paymentMap.get(org.organizationId)
+    const pendingRequest: any = requestMap.get(org.organizationId)
     const errorCount = Number(failedJobs.get(org.organizationId) || 0) + Number(deadMeta.get(org.organizationId) || 0) + (domain?.status === 'failed' || domain?.tlsStatus === 'failed' ? 1 : 0)
-    const slaBreaches = Number(breachedSupport.get(org.organizationId) || 0)
-    const health = org.isBlocked ? 'suspended' : (errorCount > 0 || slaBreaches > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['failed', 'cancelled'].includes(payment?.status)) ? 'attention' : 'healthy'
+    const health = org.isBlocked ? 'suspended' : (errorCount > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['rejected'].includes(payment?.status)) ? 'attention' : 'healthy'
     return {
       _id: org._id,
       organizationId: org.organizationId,
@@ -88,8 +88,9 @@ const getTenantHealth = async (query: any) => {
       createdAt: org.createdAt,
       plan: org.subscription?.plan || 'trial',
       planVersion: org.subscription?.planVersion || 1,
-      paymentState: payment?.status || (org.subscription?.plan === 'trial' ? 'trial' : 'none'),
-      paymentId: payment?.paymentId || '',
+      paymentState: payment?.status || (pendingRequest ? pendingRequest.status : org.subscription?.plan === 'trial' ? 'trial' : 'none'),
+      paymentId: payment?.paymentNumber || '',
+      pendingChangeRequest: pendingRequest ? { _id: pendingRequest._id, requestNumber: pendingRequest.requestNumber, requestedPlan: pendingRequest.requestedPlan, requestedPlanVersion: pendingRequest.requestedPlanVersion, billingCycle: pendingRequest.billingCycle, amount: pendingRequest.amount, status: pendingRequest.status, paymentId: pendingRequest.paymentId, createdAt: pendingRequest.createdAt, rejectionReason: pendingRequest.rejectionReason } : null,
       subscriptionStatus: org.subscription?.status || 'trialing',
       currentPeriodEnd: org.subscription?.currentPeriodEnd,
       trialEndsAt: org.subscription?.trialEndsAt,
@@ -104,7 +105,6 @@ const getTenantHealth = async (query: any) => {
       domain: domain ? { host: domain.domain, status: domain.status, tlsStatus: domain.tlsStatus, lastCheckedAt: domain.lastCheckedAt } : null,
       lastActivity: eventMap.get(org.organizationId) || { at: org.updatedAt, type: 'organization.updated' },
       errors: errorCount,
-      support: { openTickets: openSupport.get(org.organizationId) || 0, slaBreaches },
       isBlocked: Boolean(org.isBlocked),
       platformAccess: org.platformAccess,
       health,
@@ -158,67 +158,15 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
   return org
 }
 
-const getPaymentLedger = async (query: any) => {
-  const page = Math.max(1, Number(query.page || 1))
-  const limit = clampLimit(query.limit, 50)
-  const filter: any = {}
-  if (query.status) filter.status = query.status
-  if (query.organizationId) filter.organizationId = query.organizationId
-  if (query.from || query.to) filter.createdAt = { ...(query.from ? { $gte: new Date(query.from) } : {}), ...(query.to ? { $lte: new Date(`${query.to}T23:59:59.999Z`) } : {}) }
-  if (query.search) {
-    const regex = safeRegex(String(query.search).trim())
-    filter.$or = ['paymentId', 'transactionId', 'invoiceNumber', 'organizationId'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } }))
-  }
-  const [rows, total, statusSummary] = await Promise.all([
-    BkashPayment.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-    BkashPayment.countDocuments(filter),
-    BkashPayment.aggregate([{ $match: filter }, { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
-  ])
-  const orgIds = [...new Set(rows.map((row: any) => row.organizationId))]
-  const orgs = await Organization.find({ organizationId: { $in: orgIds } }).select('organizationId agencyName email').lean()
-  const orgMap = new Map(orgs.map((org: any) => [org.organizationId, org]))
-  return { data: rows.map((row: any) => ({ ...row, organization: orgMap.get(row.organizationId) || null })), meta: { page, limit, total }, summary: statusSummary }
-}
+const getPaymentLedger = async (query: any) => SubscriptionPaymentService.getPaymentLedger(query)
 
-const addPaymentNote = async (paymentId: string, note: string, actor: { id: string; requestId?: string; ip?: string }) => {
-  const payment = await BkashPayment.findOneAndUpdate(
-    { paymentId },
-    { $push: { reconciliationNotes: { $each: [{ authorId: actor.id, note, createdAt: new Date() }], $slice: -20 } } },
-    { new: true },
-  )
-  if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Payment attempt not found')
-  await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'payment.reconciliation_note_added', entityType: 'bkashPayment', entityId: paymentId, reason: note, requestId: actor.requestId, ip: actor.ip })
-  return payment
-}
+const recordManualPayment = async (input: any, actor: { id: string; requestId?: string; ip?: string }) =>
+  SubscriptionPaymentService.recordPayment(input, actor)
 
-const getRevenueDashboard = async () => {
-  const now = new Date()
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-  const sixMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1))
-  const activeSubscriptionFilter = { isBlocked: { $ne: true }, 'subscription.status': { $in: ['active', 'trialing', 'grace', 'cancel_at_period_end'] } }
-  const [totals, currentMonth, latestPaidByOrg, trend, paymentStatus, activeOrganizations] = await Promise.all([
-    Billing.aggregate([{ $match: { status: 'paid' } }, { $group: { _id: null, revenue: { $sum: '$amount' }, invoices: { $sum: 1 } } }]),
-    Billing.aggregate([{ $match: { status: 'paid', createdAt: { $gte: monthStart } } }, { $group: { _id: null, revenue: { $sum: '$amount' }, invoices: { $sum: 1 } } }]),
-    Billing.aggregate([{ $match: { status: 'paid', serviceType: 'subscription' } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', amount: { $first: '$amount' }, billingCycle: { $first: '$billingCycle' }, createdAt: { $first: '$createdAt' } } }]),
-    Billing.aggregate([{ $match: { status: 'paid', createdAt: { $gte: sixMonthsAgo } } }, { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$amount' }, invoices: { $sum: 1 } } }, { $sort: { '_id.year': 1, '_id.month': 1 } }]),
-    BkashPayment.aggregate([{ $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
-    Organization.find(activeSubscriptionFilter).select('organizationId').lean(),
-  ])
-  const activeIds = new Set(activeOrganizations.map((org: any) => org.organizationId))
-  const mrr = latestPaidByOrg.reduce((sum: number, item: any) => activeIds.has(String(item._id)) ? sum + (item.billingCycle === 'yearly' ? Number(item.amount || 0) / 12 : item.billingCycle === 'monthly' ? Number(item.amount || 0) : 0) : sum, 0)
-  const activeSubscriptions = activeOrganizations.length
-  return {
-    totalRevenue: totals[0]?.revenue || 0,
-    paidInvoices: totals[0]?.invoices || 0,
-    monthRevenue: currentMonth[0]?.revenue || 0,
-    monthInvoices: currentMonth[0]?.invoices || 0,
-    mrr: Number(mrr.toFixed(2)),
-    activeSubscriptions,
-    arpu: activeSubscriptions ? Number((mrr / activeSubscriptions).toFixed(2)) : 0,
-    trend: trend.map((row: any) => ({ year: row._id.year, month: row._id.month, revenue: row.revenue, invoices: row.invoices })),
-    paymentStatus,
-  }
-}
+const decideManualPayment = async (paymentId: string, input: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) =>
+  SubscriptionPaymentService.decidePayment(paymentId, input, actor)
+
+const getRevenueDashboard = async () => SubscriptionPaymentService.getRevenueDashboard()
 
 const getAuditLog = async (query: any) => {
   const page = Math.max(1, Number(query.page || 1))
@@ -283,6 +231,7 @@ const changeTenantSubscription = async (
   const org: any = await Organization.findOne({ organizationId })
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before changing its subscription')
+  if (input.plan !== 'trial') throw new ApiError(httpStatus.CONFLICT, 'Paid plans are activated only by confirming a manual subscription payment. Record the payment instead.')
   const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
   const now = new Date()
   let assigned: any
@@ -402,4 +351,4 @@ const endImpersonation = async (token: string, actorId?: string, requestId?: str
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, addPaymentNote, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, verifyImpersonationToken, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, verifyImpersonationToken, endImpersonation }

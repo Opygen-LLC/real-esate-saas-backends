@@ -7,6 +7,9 @@ export type IGenericErrorResponse = {
   statusCode: number
   message: string
   errorMessages: IGenericErrorMessage[]
+  code?: string
+  fieldErrors?: Record<string, string[]>
+  requestId?: string
   stack?: string
 }
 

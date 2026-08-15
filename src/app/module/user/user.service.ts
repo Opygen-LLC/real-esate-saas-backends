@@ -217,55 +217,44 @@ const deleteUserById = async (organizationId: string, id: string): Promise<IUser
   return result
 }
 
-const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IPaginationOptions) => {
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const superAdminUserWhere = (filters: IUserFilter) => {
   const { searchTerm, userRole, status, ...filtersData } = filters
-  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-
   const andConditions: any[] = []
-
   if (searchTerm) {
-    andConditions.push({
-      $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({
-        [field]: {
-          $regex: searchTerm,
-          $options: 'i',
-        },
-      })),
-    })
+    const search = escapeRegex(String(searchTerm).trim())
+    andConditions.push({ $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) })
   }
-
   if (userRole) andConditions.push({ userRole })
   if (status) andConditions.push({ status })
-
-  if (Object.keys(filtersData).length) {
-    andConditions.push({
-      $and: Object.entries(filtersData).map(([field, value]) => ({
-        [field]: value,
-      })),
-    })
-  }
-
-  const sortConditions: { [key: string]: any } = {}
-  if (sortBy && sortOrder) {
-    sortConditions[sortBy] = sortOrder
-  } else {
-    sortConditions.createdAt = -1
-  }
-
-  const whereConditions = andConditions.length > 0 ? { $and: andConditions } : {}
-
-  const result = await User.find(whereConditions).sort(sortConditions).skip(skip).limit(limit)
-  const total = await User.countDocuments(whereConditions)
-
-  return {
-    meta: {
-      page,
-      limit,
-      total,
-    },
-    data: result,
-  }
+  if (Object.keys(filtersData).length) andConditions.push({ $and: Object.entries(filtersData).map(([field, value]) => ({ [field]: value })) })
+  return andConditions.length ? { $and: andConditions } : {}
 }
+
+const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IPaginationOptions) => {
+  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({ ...paginationOptions, limit: paginationOptions.limit || 10 })
+  const whereConditions = superAdminUserWhere(filters)
+  const sortConditions: Record<string, any> = sortBy ? { [sortBy]: sortOrder, ...(sortBy === 'createdAt' ? { _id: sortOrder } : {}) } : { createdAt: -1, _id: -1 }
+  const [result, total] = await Promise.all([
+    User.find(whereConditions).select('-password').sort(sortConditions).skip(skip).limit(limit).lean(),
+    User.countDocuments(whereConditions),
+  ])
+  return { meta: { page, limit, total }, data: result }
+}
+
+const getSuperAdminUserSummary = async () => {
+  const [total, active, blocked, roles] = await Promise.all([
+    User.countDocuments({}),
+    User.countDocuments({ status: 'active' }),
+    User.countDocuments({ status: 'blocked' }),
+    User.aggregate([{ $group: { _id: '$userRole', count: { $sum: 1 } } }]),
+  ])
+  return { total, active, blocked, roles: Object.fromEntries(roles.map((row: any) => [String(row._id || 'unknown'), Number(row.count || 0)])) }
+}
+
+const getAllUsersSuperAdminExportCursor = (filters: IUserFilter) =>
+  User.find(superAdminUserWhere(filters)).select('name email phoneNumber userRole organizationId status createdAt').sort({ createdAt: -1, _id: -1 }).lean().cursor()
 
 const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }, actorId?: string) => {
   const user: any = await User.findById(id)
@@ -368,6 +357,8 @@ export const UserService = {
   updateUserById,
   deleteUserById,
   getAllUsersSuperAdmin,
+  getSuperAdminUserSummary,
+  getAllUsersSuperAdminExportCursor,
   updateUserRoleSuperAdmin,
   getMyAccess,
   updateMemberAccess,

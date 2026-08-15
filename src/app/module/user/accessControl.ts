@@ -1,6 +1,6 @@
 export const permissionValues = [
   'dashboard.read',
-  'properties.read', 'properties.write', 'properties.delete',
+  'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
   'leads.read', 'leads.write', 'leads.assign',
   'contacts.read', 'contacts.write',
   'tasks.read', 'tasks.write',
@@ -8,7 +8,7 @@ export const permissionValues = [
   'users.read', 'users.write', 'organization.manage',
   'billing.manage', 'website.write', 'domains.manage',
   'analytics.read', 'analytics.advanced',
-  'compliance.read', 'compliance.write', 'crm.configure', 'crm.export',
+  'crm.configure', 'crm.export',
   'messaging.manage', 'whatsapp.manage',
   'finance.read', 'finance.write',
 ] as const
@@ -19,7 +19,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
   agency_owner: [...permissionValues],
   agency_admin: [
     'dashboard.read',
-    'properties.read', 'properties.write', 'properties.delete',
+    'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
     'leads.read', 'leads.write', 'leads.assign',
     'contacts.read', 'contacts.write',
     'tasks.read', 'tasks.write',
@@ -27,7 +27,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
     'users.read', 'users.write', 'organization.manage',
     'website.write', 'domains.manage',
     'analytics.read', 'analytics.advanced',
-    'compliance.read', 'crm.configure', 'crm.export',
+    'crm.configure', 'crm.export',
     'messaging.manage', 'whatsapp.manage',
     'finance.read', 'finance.write',
   ],
@@ -51,6 +51,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
 
 const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'properties.write': ['properties.read'],
+  'properties.publish': ['properties.read', 'properties.write'],
   'properties.delete': ['properties.read'],
   'leads.write': ['leads.read'],
   'leads.assign': ['leads.read'],
@@ -60,7 +61,6 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'users.write': ['users.read'],
   'finance.write': ['finance.read'],
   'analytics.advanced': ['analytics.read'],
-  'compliance.write': ['compliance.read'],
   'crm.configure': ['leads.read', 'users.read'],
   'crm.export': ['leads.read'],
   'messaging.manage': ['leads.read'],
@@ -107,6 +107,7 @@ export const permissionCatalog = [
   { group: 'Listings', items: [
     { permission: 'properties.read', label: 'View properties', description: 'View agency listings.' },
     { permission: 'properties.write', label: 'Create & edit properties', description: 'Add listings and update property information.' },
+    { permission: 'properties.publish', label: 'Publish & change listing status', description: 'Make listings public and change inventory visibility/status. Agency owners control who receives this permission.' },
     { permission: 'properties.delete', label: 'Delete properties', description: 'Archive or delete listings.' },
   ] },
   { group: 'CRM', items: [

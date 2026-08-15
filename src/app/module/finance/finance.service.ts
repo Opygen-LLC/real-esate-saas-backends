@@ -1,10 +1,14 @@
 import { randomBytes } from 'crypto'
 import httpStatus from 'http-status'
-import mongoose from 'mongoose'
+import mongoose, { ClientSession } from 'mongoose'
+import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
+import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
 import {
   IFinanceBudget,
@@ -21,6 +25,7 @@ import {
   FinanceTransaction,
   FinanceVendor,
 } from './finance.model'
+import { renderInvoicePdf } from './invoicePdf.service'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -64,6 +69,32 @@ const actorObjectId = (actorId: string) => {
 
 const emitFinanceEvent = async (organizationId: string, actorId: string, aggregateType: string, aggregateId: string, eventType: string, summary: string) => {
   await DomainEventService.emit({ organizationId, aggregateType, aggregateId, eventType, actorId, payload: { summary } }).catch(() => undefined)
+}
+
+export interface FinanceActorContext {
+  id: string
+  role?: string
+  requestId?: string
+  ip?: string
+}
+
+const invoiceActorId = (actor: FinanceActorContext) => actor.id
+const invoiceAudit = async (organizationId: string, actor: FinanceActorContext, action: string, entityId: string, reason: string, metadata: Record<string, unknown> = {}, session?: ClientSession) => {
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType: 'financeInvoice', entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata }, session)
+}
+
+const financeCommercialTransaction = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => { value = await work(session) })
+      if (value === undefined) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Finance transaction did not complete')
+      return value
+    } finally { await session.endSession() }
+  }
+  if (config.env === 'production') throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Invoice payments require a MongoDB replica set or mongos in production')
+  return work()
 }
 
 const normalizeTransactionPayload = (payload: Partial<IFinanceTransaction>) => ({
@@ -164,20 +195,37 @@ const refreshOverdueInvoices = async (organizationId: string) => {
   }, { $set: { status: 'overdue' } })
 }
 
-const createInvoice = async (organizationId: string, actorId: string, payload: Partial<IFinanceInvoice>) => {
+const invoicePopulate = (query: any) => query
+  .populate('propertyId', 'title')
+  .populate('leadId', 'name phone email')
+  .populate('createdBy', 'name email')
+  .populate('updatedBy', 'name email')
+  .populate('cancelledBy', 'name email')
+  .populate('payments.recordedBy', 'name email')
+
+const validateInvoiceDates = (issueDate: Date, dueDate?: Date | null) => {
+  if (dueDate && dueDate.getTime() < issueDate.getTime()) throw new ApiError(httpStatus.BAD_REQUEST, 'Due date cannot be before the issue date')
+}
+
+const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
   const amounts = calculateInvoiceAmounts(payload.lineItems || [], Number(payload.discount || 0))
+  const issueDate = asDate(payload.issueDate)
+  const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
+  validateInvoiceDates(issueDate, dueDate)
   const result = await FinanceInvoice.create({
     ...payload,
     ...amounts,
     propertyId: cleanOptionalId(payload.propertyId), leadId: cleanOptionalId(payload.leadId),
-    dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined,
-    issueDate: asDate(payload.issueDate),
+    dueDate, issueDate,
     invoiceNumber: makeNumber('INV'),
     paidAmount: 0, payments: [], currency: 'BDT',
     status: payload.status || 'draft',
-    organizationId, createdBy: actorObjectId(actorId),
+    organizationId, createdBy: actorObjectId(invoiceActorId(actor)),
   })
-  await emitFinanceEvent(organizationId, actorId, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`)
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`),
+    invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency }),
+  ])
   return result
 }
 
@@ -185,7 +233,7 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   await refreshOverdueInvoices(organizationId)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(pagination)
   const { startDate, endDate } = resolveDateRange(query)
-  const conditions: any[] = [{ organizationId }]
+  const conditions: any[] = [{ organizationId }, { archivedAt: null }]
   const status = asString(query.status); if (status) conditions.push({ status })
   if (startDate || endDate) conditions.push({ issueDate: dateCondition(startDate, endDate) })
   const searchTerm = asString(query.searchTerm)
@@ -194,45 +242,119 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'issueDate'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceInvoice.find(where).populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder, createdAt: -1 }).skip(skip).limit(limit).lean(),
+    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder, createdAt: -1 }).skip(skip).limit(limit).lean(),
     FinanceInvoice.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
 }
 
-const updateInvoice = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceInvoice>) => {
-  const existing: any = await FinanceInvoice.findOne({ _id: id, organizationId })
+const getInvoiceById = async (organizationId: string, id: string) => {
+  const invoice = await invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })).lean()
+  if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+  return invoice
+}
+
+const paidInvoiceMetadataFields = new Set(['clientPhone', 'clientEmail', 'notes'])
+
+const updateInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, payload: Partial<IFinanceInvoice>) => {
+  const existing: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  if (existing.status === 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancelled invoices cannot be edited')
+  if (existing.status === 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Voided invoices cannot be edited')
+
+  const keys = Object.keys(payload)
+  const hasPayment = Number(existing.paidAmount || 0) > 0 || ['partial', 'paid'].includes(existing.status)
+  if (hasPayment) {
+    const forbidden = keys.filter((key) => !paidInvoiceMetadataFields.has(key))
+    if (forbidden.length) throw new ApiError(httpStatus.CONFLICT, `Paid financial records are immutable. Only client phone, client email, and notes may be updated.`)
+  }
+  if (payload.status === 'draft' && existing.status !== 'draft') throw new ApiError(httpStatus.CONFLICT, 'A sent invoice cannot be reverted to draft')
+
+  const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
   const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined
-  if (amountFieldsChanged && existing.paidAmount > 0) throw new ApiError(httpStatus.CONFLICT, 'Invoice amounts cannot be changed after a payment has been recorded')
-  if (payload.status === 'cancelled' && existing.paidAmount > 0) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be cancelled')
-  const update: any = { ...payload, updatedBy: actorObjectId(actorId) }
   if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
   if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
   if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
-  const result = await FinanceInvoice.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true })
-  await emitFinanceEvent(organizationId, actorId, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`)
+  validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
+
+  const result: any = await invoicePopulate(FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }))
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
+    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: keys, financialFieldsChanged: amountFieldsChanged }),
+  ])
   return result
 }
 
-const recordInvoicePayment = async (organizationId: string, actorId: string, id: string, payload: any) => {
-  const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId })
+const voidInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason: string) => {
+  const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
   if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  if (['draft', 'cancelled', 'paid'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
-  const amount = Number(payload.amount); const outstanding = Number((invoice.total - invoice.paidAmount).toFixed(2))
-  if (amount > outstanding + 0.001) throw new ApiError(httpStatus.BAD_REQUEST, `Payment exceeds the outstanding amount of BDT ${outstanding.toFixed(2)}`)
-  const paidAt = asDate(payload.paidAt)
-  const transaction: any = await FinanceTransaction.create({ organizationId, type: 'income', category: 'Invoice payment', amount, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, createdBy: actorObjectId(actorId) })
-  invoice.payments.push({ amount, paidAt, paymentMethod: payload.paymentMethod, reference: payload.reference || '', notes: payload.notes || '', recordedBy: actorObjectId(actorId), transactionId: transaction._id })
-  invoice.paidAmount = Number((invoice.paidAmount + amount).toFixed(2))
-  invoice.status = invoice.paidAmount >= invoice.total ? 'paid' : 'partial'
-  invoice.updatedBy = actorObjectId(actorId)
+  if (invoice.status === 'cancelled') return invoice
+  if (invoice.status === 'draft') throw new ApiError(httpStatus.CONFLICT, 'Draft invoices should be archived instead of voided')
+  if (Number(invoice.paidAmount || 0) > 0 || ['partial', 'paid'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be voided')
+  invoice.status = 'cancelled'
+  invoice.cancelledAt = new Date()
+  invoice.cancelledBy = actorObjectId(actor.id)
+  invoice.cancelReason = reason
+  invoice.updatedBy = actorObjectId(actor.id)
   await invoice.save()
-  await emitFinanceEvent(organizationId, actorId, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment of BDT ${amount.toFixed(2)} recorded for ${invoice.invoiceNumber}`)
-  return invoice.populate('propertyId', 'title')
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`),
+    invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total }),
+  ])
+  return invoicePopulate(FinanceInvoice.findById(id)).lean()
+}
+
+const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Draft removed by agency') => {
+  const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
+  if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+  if (invoice.status !== 'draft' || Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft invoices can be archived')
+  invoice.archivedAt = new Date()
+  invoice.archivedBy = actorObjectId(actor.id)
+  invoice.archiveReason = reason
+  invoice.updatedBy = actorObjectId(actor.id)
+  await invoice.save()
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Draft invoice ${invoice.invoiceNumber} archived`),
+    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber }),
+  ])
+  return { _id: invoice._id, invoiceNumber: invoice.invoiceNumber, archivedAt: invoice.archivedAt }
+}
+
+const recordInvoicePayment = async (organizationId: string, actor: FinanceActorContext, id: string, payload: any) => {
+  const invoiceNumber = await financeCommercialTransaction(async (session) => {
+    const invoiceQuery: any = FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
+    if (session) invoiceQuery.session(session)
+    const invoice: any = await invoiceQuery
+    if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
+    const amountPaid = Number(payload.amount)
+    const outstanding = Number((invoice.total - invoice.paidAmount).toFixed(2))
+    if (amountPaid > outstanding + 0.001) throw new ApiError(httpStatus.BAD_REQUEST, `Payment exceeds the outstanding amount of BDT ${outstanding.toFixed(2)}`)
+    const paidAt = asDate(payload.paidAt)
+    const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
+    const transaction = transactionDocs[0]
+    invoice.payments.push({ amount: amountPaid, paidAt, paymentMethod: payload.paymentMethod, reference: payload.reference || '', notes: payload.notes || '', recordedBy: actorObjectId(actor.id), transactionId: transaction._id })
+    invoice.paidAmount = Number((invoice.paidAmount + amountPaid).toFixed(2))
+    invoice.status = invoice.paidAmount >= invoice.total ? 'paid' : 'partial'
+    invoice.updatedBy = actorObjectId(actor.id)
+    await invoice.save(session ? { session } : undefined)
+    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), status: invoice.status }, session)
+    return invoice.invoiceNumber
+  })
+  await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
+  return getInvoiceById(organizationId, id)
+}
+
+const renderInvoiceDocument = async (organizationId: string, actor: FinanceActorContext, id: string) => {
+  const [invoice, organization]: any[] = await Promise.all([
+    getInvoiceById(organizationId, id),
+    Organization.findOne({ organizationId }).select('agencyName email phone address city state country primaryColor').lean(),
+  ])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  const pdf = await renderInvoicePdf(invoice, organization)
+  await invoiceAudit(organizationId, actor, 'finance.invoice.pdf_downloaded', id, 'Invoice PDF downloaded', { invoiceNumber: invoice.invoiceNumber, status: invoice.status })
+  return { pdf, filename: `${invoice.invoiceNumber}.pdf` }
 }
 
 const ensureAgent = async (organizationId: string, agentId: string) => {
@@ -455,7 +577,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 
 export const FinanceService = {
   createTransaction, listTransactions, updateTransaction, voidTransaction,
-  createInvoice, listInvoices, updateInvoice, recordInvoicePayment,
+  createInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
   createCommission, listCommissions, updateCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,

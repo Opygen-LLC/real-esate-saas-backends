@@ -15,15 +15,12 @@ import { PropertyTypeRoute } from '../module/propertyType/propertyType.route'
 import { SectionRoute } from '../module/section/section.route'
 import { SmsRoute } from '../module/sms/sms.route'
 import { SubscriptionPlanRoute } from '../module/subscriptionPlan/subscriptionPlan.route'
-import { SupportRoute } from '../module/support/support.route'
 import { TaskRoute } from '../module/task/task.route'
 import { UserRoute } from '../module/user/user.route'
 import { ViewingRoute } from '../module/viewing/viewing.route'
 import { VisitorLogsRoute } from '../module/visitorLogs/visitorLogs.route'
 import { WebsiteBuilderRoute } from '../module/websiteBuilder/websiteBuilder.route'
 import { LocalizationRoute } from '../module/localization/localization.route'
-import { ComplianceRoute } from '../module/compliance/compliance.route'
-import { ModerationRoute } from '../module/moderation/moderation.route'
 import { PlatformSettingsRoute } from '../module/platformSettings/platformSettings.route'
 import { MetaIntegrationRoute } from '../module/metaIntegration/metaIntegration.route'
 import { CrmRoute } from '../module/crm/crm.route'
@@ -46,8 +43,6 @@ const moduleRoutes = [
   { path: '/whatsapp', route: WhatsAppRoute },
   { path: '/meta', route: MetaIntegrationRoute },
   { path: '/localization', route: LocalizationRoute },
-  { path: '/compliance', route: ComplianceRoute },
-  { path: '/moderation', route: ModerationRoute },
   { path: '/platform-settings', route: PlatformSettingsRoute },
   {
     path: '/auth',
@@ -136,10 +131,6 @@ const moduleRoutes = [
   {
     path: '/analytics',
     route: VisitorLogsRoute,
-  },
-  {
-    path: '/support',
-    route: SupportRoute,
   },
   {
     path: '/sms',

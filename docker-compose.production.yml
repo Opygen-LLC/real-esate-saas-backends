@@ -41,6 +41,58 @@ services:
       timeout: 3s
       retries: 30
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:?OBJECT_STORAGE_ACCESS_KEY_ID must be set}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:?OBJECT_STORAGE_SECRET_ACCESS_KEY must be set}
+    volumes:
+      - object_storage_data:/data
+    ports:
+      - "127.0.0.1:${MINIO_API_BIND_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
+    networks: [private]
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    restart: "no"
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:?OBJECT_STORAGE_ACCESS_KEY_ID must be set}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:?OBJECT_STORAGE_SECRET_ACCESS_KEY must be set}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:?OBJECT_STORAGE_BUCKET must be set}
+    volumes:
+      - ./ops/minio-cors.xml:/config/minio-cors.xml:ro
+    networks: [private]
+    entrypoint: ["/bin/sh", "-c"]
+    command: >-
+      until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1;
+      do sleep 2; done;
+      mc mb --ignore-existing "local/$$OBJECT_STORAGE_BUCKET";
+      mc anonymous set download "local/$$OBJECT_STORAGE_BUCKET";
+      mc cors set "local/$$OBJECT_STORAGE_BUCKET" /config/minio-cors.xml;
+      mc stat "local/$$OBJECT_STORAGE_BUCKET" >/dev/null
+
+  clamav:
+    image: clamav/clamav:1.4.4
+    restart: unless-stopped
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+      CLAMD_STARTUP_TIMEOUT: ${CLAMD_STARTUP_TIMEOUT:-300}
+      FRESHCLAM_CHECKS: ${FRESHCLAM_CHECKS:-24}
+    volumes:
+      - clamav_db:/var/lib/clamav
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1 --wait=30 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
   api:
     build:
       context: .
@@ -56,10 +108,19 @@ services:
       REDIS_PORT: "6379"
       REDIS_TLS: "false"
       REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
+      OBJECT_STORAGE_INTERNAL_ENDPOINT: http://minio:9000
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
+      INVOICE_PDF_TIMEOUT_MS: "20000"
     depends_on:
       mongo-init:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      clamav:
         condition: service_healthy
     ports:
       - "127.0.0.1:${API_BIND_PORT:-5000}:5000"
@@ -72,3 +133,5 @@ networks:
 volumes:
   mongo_data:
   redis_data:
+  object_storage_data:
+  clamav_db:

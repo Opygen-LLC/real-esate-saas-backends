@@ -6,7 +6,9 @@ import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
-import { ComplianceProfile, ConsentRecord, DataSubjectRequest } from './compliance.model'
+import { ComplianceProfile, DataSubjectRequest } from './compliance.model'
+import { PrivacyConsentRecord } from '../privacy/privacyConsent.model'
+import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import mongoose from 'mongoose'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { writeAudit } from '../audit/audit.service'
@@ -31,8 +33,8 @@ const getProfile = async (organizationId: string, reveal = false) => {
   return { ...profile, identifiers }
 }
 
-const recordConsent = (organizationId: string, userId: string, payload: any, context: { ip?: string; requestId?: string }) =>
-  ConsentRecord.create({ organizationId, userId, ...payload, capturedAt: new Date(), ...context })
+const recordConsent = (organizationId: string, userId: string, payload: { purpose: 'service_terms' | 'privacy_policy' | 'marketing'; policyVersion: string; granted: boolean }, context: { ip?: string; requestId?: string }) =>
+  PrivacyConsentService.record(organizationId, userId, payload, context)
 
 const createRequest = (organizationId: string, requestedBy: string, payload: any) =>
   DataSubjectRequest.create({ organizationId, requestedBy, ...payload })
@@ -44,7 +46,7 @@ const exportTenantData = async (organizationId: string) => {
     Organization.findOne({ organizationId }).lean(),
     User.find({ organizationId }).select('-password -verificationCode -codeGenerationTimestamp').lean(),
     Property.find({ organizationId }).lean(), Lead.find({ organizationId }).lean(),
-    Billing.find({ organizationId }).lean(), ConsentRecord.find({ organizationId }).lean(),
+    Billing.find({ organizationId }).lean(), PrivacyConsentRecord.find({ organizationId }).lean(),
   ])
   return { generatedAt: new Date().toISOString(), organization, users, properties, leads, billing, consents,
     exclusions: ['passwords', 'OTP challenges', 'refresh sessions', 'encrypted compliance identifiers', 'platform audit security metadata'] }

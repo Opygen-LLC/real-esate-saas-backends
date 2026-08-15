@@ -8,15 +8,15 @@ The integration database must be disposable and run as a Mongo replica set becau
 
 ## Staging
 
-Configure the protected `staging` GitHub Environment with `STAGING_DEPLOY_WEBHOOK`, `STAGING_API_URL`, `STAGING_FRONTEND_URL`, `STAGING_TEST_ORGANIZATION_ID`, `STAGING_TEST_USER_EMAIL`, `STAGING_TEST_USER_PASSWORD`, and `STAGING_TEST_BKASH_PAYMENT_ID`. The deployment webhook must deploy the exact immutable commit supplied in the `X-Release-Sha` header rather than rebuilding an arbitrary branch head.
+Configure the protected `staging` GitHub Environment with `STAGING_DEPLOY_WEBHOOK`, `STAGING_API_URL`, `STAGING_FRONTEND_URL`, `STAGING_TEST_ORGANIZATION_ID`, `STAGING_TEST_USER_EMAIL`, `STAGING_TEST_USER_PASSWORD`. The deployment webhook must deploy the exact immutable commit supplied in the `X-Release-Sha` header rather than rebuilding an arbitrary branch head.
 
-Deploy the immutable image produced from the approved commit. Run `SMOKE_API_URL=... SMOKE_FRONTEND_URL=... pnpm test:smoke`. For representative performance checks, set `LOAD_TARGET=staging`, `LOAD_API_URL`, `LOAD_ORGANIZATION_ID`, authenticated test-user credentials (or `LOAD_AUTH_TOKEN` for manual runs), and `LOAD_BKASH_PAYMENT_ID`, then run `pnpm test:load`. Load checks create staging leads; never aim them at production without an explicit approved exercise.
+Deploy the immutable image produced from the approved commit. Run `SMOKE_API_URL=... SMOKE_FRONTEND_URL=... pnpm test:smoke`. For representative performance checks, set `LOAD_TARGET=staging`, `LOAD_API_URL`, `LOAD_ORGANIZATION_ID`, authenticated test-user credentials (or `LOAD_AUTH_TOKEN` for manual runs), then run `pnpm test:load`. Load checks create staging leads; never aim them at production without an explicit approved exercise.
 
-Validate the end-to-end pilot journey: agency signup and OTP verification, onboarding, listing creation, website publish, public lead capture, CRM visibility, bKash checkout/callback idempotency, and paid invoice visibility. Provider sandbox/test-event credentials must be used in staging.
+Validate the end-to-end pilot journey: agency signup and OTP verification, onboarding, listing creation, website publish, public lead capture, CRM visibility, manual plan-change request creation, super-admin payment recording/confirmation, and receipt visibility.
 
 ## Production approval
 
-Production is a protected GitHub Environment. Configure required reviewers plus `PRODUCTION_DEPLOY_WEBHOOK`, `PRODUCTION_API_URL`, and `PRODUCTION_FRONTEND_URL` in environment-scoped secrets/variables. The workflow verifies that the selected commit passed Backend CI and sends that exact commit in `X-Release-Sha`; the deployment endpoint must honor it. Promote the same tested artifact and never rebuild from a different commit. Before approval, confirm bKash production credentials/callback approval, current backup status, on-call ownership, and zero unresolved P0/P1 pilot defects.
+Production is a protected GitHub Environment. Configure required reviewers plus `PRODUCTION_DEPLOY_WEBHOOK`, `PRODUCTION_API_URL`, and `PRODUCTION_FRONTEND_URL` in environment-scoped secrets/variables. The workflow verifies that the selected commit passed Backend CI and sends that exact commit in `X-Release-Sha`; the deployment endpoint must honor it. Promote the same tested artifact and never rebuild from a different commit. Before approval, confirm manual payment instructions, current backup status, on-call ownership, and zero unresolved P0/P1 pilot defects.
 
 ## Backward-compatible migration rule
 
@@ -33,4 +33,4 @@ Deploy additive schema/index changes before code that requires them. Never remov
 
 ## Pilot launch gate
 
-Public launch requires two pilot agencies to complete the full journey without open P0/P1 defects, successful backup restore evidence, clean tenant-isolation/security tests, approved bKash production behavior, and named support/on-call ownership.
+Public launch requires two pilot agencies to complete the full journey without open P0/P1 defects, successful backup restore evidence, clean tenant-isolation/security tests, verified manual subscription-payment behavior, and named support/on-call ownership.

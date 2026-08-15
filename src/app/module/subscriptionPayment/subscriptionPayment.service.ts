@@ -1,0 +1,253 @@
+import crypto from 'crypto'
+import httpStatus from 'http-status'
+import mongoose, { ClientSession } from 'mongoose'
+import config from '../../../config'
+import ApiError from '../../../errors/ApiError'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { writeAudit } from '../audit/audit.service'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { Organization } from '../organization/organization.model'
+import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
+import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { SubscriptionPayment } from './subscriptionPayment.model'
+import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
+
+const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const serial = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomBytes(10).toString('hex').toUpperCase()}`
+const periodEnd = (start: Date, cycle: 'monthly' | 'yearly' | 'one-time') => {
+  const end = new Date(start)
+  if (cycle === 'monthly') end.setUTCMonth(end.getUTCMonth() + 1)
+  else if (cycle === 'yearly') end.setUTCFullYear(end.getUTCFullYear() + 1)
+  return end
+}
+
+const resolvePlan = async (planId: string, version?: number, session?: ClientSession) => {
+  const query: any = { planId, isActive: true }
+  if (version) query.version = version
+  else query.isCurrent = true
+  const finder = SubscriptionPlan.findOne(query)
+  if (session) finder.session(session)
+  const plan: any = await finder.lean()
+  if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
+  return plan
+}
+
+const priceFor = (plan: any, billingCycle: 'monthly' | 'yearly') => Number(billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly)
+
+const commercialTransaction = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => { value = await work(session) })
+      if (value === undefined) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Commercial transaction did not complete')
+      return value
+    } finally { await session.endSession() }
+  }
+  if (config.env === 'production') {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Manual subscription payments require a MongoDB replica set or mongos in production')
+  }
+  return work()
+}
+
+const createChangeRequest = async (organizationId: string, requestedBy: string, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) => {
+  const [org, plan] = await Promise.all([
+    Organization.findOne({ organizationId, isBlocked: { $ne: true } }).lean() as any,
+    resolvePlan(input.planId),
+  ])
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (org.subscription?.plan === plan.planId && Number(org.subscription?.planVersion || 1) === Number(plan.version) && ['active', 'grace', 'cancel_at_period_end'].includes(org.subscription?.status)) {
+    throw new ApiError(httpStatus.CONFLICT, 'This is already your current subscription plan')
+  }
+  const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1 }).lean()
+  if (existing) throw new ApiError(httpStatus.CONFLICT, `A subscription request is already open (${existing.requestNumber}). Complete or cancel it first.`)
+  const request = await SubscriptionChangeRequest.create({
+    requestNumber: serial('REQ'), organizationId,
+    currentPlan: org.subscription?.plan || 'trial', currentPlanVersion: Number(org.subscription?.planVersion || 1),
+    requestedPlan: plan.planId, requestedPlanVersion: plan.version, billingCycle: input.billingCycle,
+    amount: priceFor(plan, input.billingCycle), currency: 'BDT', status: 'pending_payment', requestedBy,
+  })
+  await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount } })
+  return request
+}
+
+const getChangeRequests = async (organizationId: string) => SubscriptionChangeRequest.find({ organizationId }).sort({ createdAt: -1 }).limit(50).lean()
+
+const cancelChangeRequest = async (organizationId: string, requestId: string, actorId: string) => {
+  const request: any = await SubscriptionChangeRequest.findOne({ _id: requestId, organizationId })
+  if (!request) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription request not found')
+  if (request.status !== 'pending_payment') throw new ApiError(httpStatus.CONFLICT, 'Only requests waiting for payment can be cancelled')
+  request.status = 'cancelled'; request.reviewedBy = actorId; request.reviewedAt = new Date(); await request.save()
+  await writeAudit({ organizationId, actorId, actorRole: 'agency_owner', action: 'subscription.change_cancelled', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency cancelled the pending subscription request', metadata: { requestNumber: request.requestNumber } })
+  return request
+}
+
+const getTenantPendingState = async (organizationId: string) => {
+  const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1 }).lean()
+  if (!request) return null
+  const payment: any = request.paymentId ? await SubscriptionPayment.findOne({ paymentNumber: request.paymentId }).lean() : null
+  return { ...request, payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null }
+}
+
+const getTenantPaymentHistory = async (organizationId: string) => SubscriptionPayment.find({ organizationId }).sort({ createdAt: -1 }).limit(100).lean()
+
+const recordPayment = async (input: {
+  organizationId: string; changeRequestId?: string; planId?: string; planVersion?: number; billingCycle?: 'monthly' | 'yearly';
+  method: ManualPaymentMethod; reference?: string; paidAt?: Date; notes?: string; proofAssetId?: string
+}, actor: { id: string; requestId?: string; ip?: string }) => {
+  const created = await commercialTransaction(async (session) => {
+    const orgQuery = Organization.findOne({ organizationId: input.organizationId, isBlocked: { $ne: true } })
+    if (session) orgQuery.session(session)
+    const org: any = await orgQuery
+    if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+
+    let request: any = null
+    let plan: any
+    let billingCycle: 'monthly' | 'yearly'
+    let amount: number
+    if (input.changeRequestId) {
+      const requestQuery = SubscriptionChangeRequest.findOne({ _id: input.changeRequestId, organizationId: input.organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } })
+      if (session) requestQuery.session(session)
+      request = await requestQuery
+      if (!request) throw new ApiError(httpStatus.NOT_FOUND, 'Open subscription change request not found')
+      const existingQuery = SubscriptionPayment.findOne({ changeRequestId: request._id, status: 'pending' })
+      if (session) existingQuery.session(session)
+      if (await existingQuery) throw new ApiError(httpStatus.CONFLICT, 'This subscription request already has a payment waiting for review')
+      plan = await resolvePlan(request.requestedPlan, request.requestedPlanVersion, session)
+      billingCycle = request.billingCycle
+      amount = Number(request.amount)
+    } else {
+      if (!input.planId) throw new ApiError(httpStatus.BAD_REQUEST, 'Plan is required')
+      plan = await resolvePlan(input.planId, input.planVersion, session)
+      billingCycle = input.billingCycle || 'monthly'
+      amount = priceFor(plan, billingCycle)
+    }
+    if (!Number.isFinite(amount) || amount < 0) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid payment amount')
+
+    const docs = await SubscriptionPayment.create([{
+      paymentNumber: serial('PAY'), receiptNumber: serial('RCT'), organizationId: input.organizationId,
+      changeRequestId: request?._id || null, planId: plan.planId, planVersion: plan.version, billingCycle,
+      amount, currency: 'BDT', method: input.method, reference: input.reference || '', paidAt: input.paidAt || new Date(),
+      status: 'pending', notes: input.notes || '', proofAssetId: input.proofAssetId || null, recordedBy: actor.id, source: 'manual_admin',
+    }], session ? { session } : undefined)
+    const payment: any = docs[0]
+    if (request) {
+      request.status = 'payment_submitted'; request.paymentId = payment.paymentNumber; request.rejectionReason = ''
+      await request.save(session ? { session } : undefined)
+    }
+    await writeAudit({ organizationId: input.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_recorded', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: input.notes || 'Manual subscription payment recorded', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber: payment.paymentNumber, requestNumber: request?.requestNumber || null, plan: plan.planId, planVersion: plan.version, billingCycle, amount, method: input.method, reference: input.reference || '' } }, session)
+    return payment.toObject()
+  })
+  return created
+}
+
+const decidePayment = async (paymentNumber: string, decision: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) => {
+  const organizationId = await commercialTransaction(async (session) => {
+    const paymentQuery = SubscriptionPayment.findOne({ paymentNumber })
+    if (session) paymentQuery.session(session)
+    const payment: any = await paymentQuery
+    if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Manual payment not found')
+    if (payment.status !== 'pending') throw new ApiError(httpStatus.CONFLICT, `Payment is already ${payment.status}`)
+
+    const orgQuery = Organization.findOne({ organizationId: payment.organizationId })
+    if (session) orgQuery.session(session)
+    const org: any = await orgQuery
+    if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+    if (org.isBlocked && decision.status === 'confirmed') throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before confirming a subscription payment')
+
+    let request: any = null
+    if (payment.changeRequestId) {
+      const requestQuery = SubscriptionChangeRequest.findById(payment.changeRequestId)
+      if (session) requestQuery.session(session)
+      request = await requestQuery
+    }
+
+    if (decision.status === 'rejected') {
+      payment.status = 'rejected'; payment.rejectedReason = decision.reason || 'Payment rejected'; payment.rejectedBy = actor.id; payment.rejectedAt = new Date()
+      await payment.save(session ? { session } : undefined)
+      if (request && request.status === 'payment_submitted') {
+        request.status = 'pending_payment'; request.paymentId = ''; request.rejectionReason = decision.reason || 'Payment rejected'; request.reviewedBy = actor.id; request.reviewedAt = new Date()
+        await request.save(session ? { session } : undefined)
+      }
+      await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_rejected', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Payment rejected', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber } }, session)
+      return payment.organizationId
+    }
+
+    const plan = await resolvePlan(payment.planId, payment.planVersion, session)
+    const now = new Date()
+    const samePlan = org.subscription?.plan === plan.planId
+    const existingEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
+    const start = samePlan && existingEnd && existingEnd > now ? existingEnd : now
+    const end = periodEnd(start, payment.billingCycle)
+    const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
+    org.subscription = {
+      ...(org.subscription?.toObject?.() || org.subscription || {}), plan: plan.planId, planVersion: plan.version, status: 'active',
+      currentPeriodEnd: end, lastPaymentDate: payment.paidAt || now, trialEndsAt: null, gracePeriodEnd: null,
+      cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_payment', maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
+    }
+    await org.save(session ? { session } : undefined)
+    payment.status = 'confirmed'; payment.confirmedBy = actor.id; payment.confirmedAt = now; payment.rejectedReason = ''; payment.periodStart = start; payment.periodEnd = end
+    await payment.save(session ? { session } : undefined)
+    if (request) {
+      request.status = 'approved'; request.reviewedBy = actor.id; request.reviewedAt = now; request.rejectionReason = ''
+      await request.save(session ? { session } : undefined)
+    }
+    await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_confirmed', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Manual subscription payment confirmed', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber, receiptNumber: payment.receiptNumber, previousSubscription: previous, currentSubscription: org.subscription?.toObject?.() || org.subscription } }, session)
+    return payment.organizationId
+  })
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  return SubscriptionPayment.findOne({ paymentNumber }).lean()
+}
+
+const getPaymentLedger = async (query: any) => {
+  const page = Math.max(1, Number(query.page || 1)); const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
+  const filter: any = {}
+  if (query.status) filter.status = query.status
+  if (query.organizationId) filter.organizationId = String(query.organizationId)
+  if (query.from || query.to) filter.createdAt = { ...(query.from ? { $gte: new Date(String(query.from)) } : {}), ...(query.to ? { $lte: new Date(`${String(query.to)}T23:59:59.999Z`) } : {}) }
+  if (query.search) {
+    const regex = safeRegex(String(query.search).trim())
+    filter.$or = ['paymentNumber', 'receiptNumber', 'reference', 'organizationId'].map(field => ({ [field]: { $regex: regex, $options: 'i' } }))
+  }
+  const [rows, total, summary] = await Promise.all([
+    SubscriptionPayment.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    SubscriptionPayment.countDocuments(filter),
+    SubscriptionPayment.aggregate([{ $match: filter }, { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
+  ])
+  const ids = [...new Set(rows.map((row: any) => row.organizationId))]
+  const orgs = await Organization.find({ organizationId: { $in: ids } }).select('organizationId agencyName email').lean()
+  const orgMap = new Map(orgs.map((org: any) => [org.organizationId, org]))
+  return { data: rows.map((row: any) => ({ ...row, organization: orgMap.get(row.organizationId) || null })), meta: { page, limit, total, summary } }
+}
+
+const getRevenueDashboard = async () => {
+  const now = new Date(); const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); const sixMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1))
+  const [totals, month, latest, trend, status, active] = await Promise.all([
+    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed' } }, { $group: { _id: null, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }]),
+    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed', confirmedAt: { $gte: monthStart } } }, { $group: { _id: null, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }]),
+    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed' } }, { $sort: { confirmedAt: -1 } }, { $group: { _id: '$organizationId', amount: { $first: '$amount' }, billingCycle: { $first: '$billingCycle' } } }]),
+    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed', confirmedAt: { $gte: sixMonthsAgo } } }, { $group: { _id: { year: { $year: '$confirmedAt' }, month: { $month: '$confirmedAt' } }, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }, { $sort: { '_id.year': 1, '_id.month': 1 } }]),
+    SubscriptionPayment.aggregate([{ $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
+    Organization.find({ isBlocked: { $ne: true }, 'subscription.status': { $in: ['active', 'grace', 'cancel_at_period_end'] }, 'subscription.plan': { $ne: 'trial' } }).select('organizationId').lean(),
+  ])
+  const activeIds = new Set(active.map((org: any) => org.organizationId))
+  const mrr = latest.reduce((sum: number, row: any) => activeIds.has(String(row._id)) ? sum + (row.billingCycle === 'yearly' ? Number(row.amount || 0) / 12 : row.billingCycle === 'monthly' ? Number(row.amount || 0) : 0) : sum, 0)
+  return { totalRevenue: totals[0]?.revenue || 0, paidInvoices: totals[0]?.payments || 0, monthRevenue: month[0]?.revenue || 0, monthInvoices: month[0]?.payments || 0, mrr: Number(mrr.toFixed(2)), activeSubscriptions: active.length, arpu: active.length ? Number((mrr / active.length).toFixed(2)) : 0, trend: trend.map((row: any) => ({ year: row._id.year, month: row._id.month, revenue: row.revenue, invoices: row.payments })), paymentStatus: status }
+}
+
+const escapeHtml = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+const renderReceipt = async (organizationId: string, id: string) => {
+  const clauses: any[] = [{ paymentNumber: id }, { receiptNumber: id }]
+  if (/^[0-9a-fA-F]{24}$/.test(id)) clauses.push({ _id: id })
+  const payment: any = await SubscriptionPayment.findOne({ organizationId, status: 'confirmed', $or: clauses }).lean()
+  if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Confirmed subscription payment receipt not found')
+  const [org, storedPlan] = await Promise.all([
+    Organization.findOne({ organizationId }).lean() as any,
+    SubscriptionPlan.findOne({ planId: payment.planId, version: payment.planVersion }).select('name planId version').lean() as any,
+  ])
+  const plan = storedPlan || { name: String(payment.planId).replace(/_/g, ' ').replace(/\b\w/g, (char: string) => char.toUpperCase()) }
+  const amount = new Intl.NumberFormat('en-BD', { style: 'currency', currency: 'BDT', currencyDisplay: 'narrowSymbol' }).format(payment.amount)
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payment.receiptNumber)}</title><style>body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:32px}.card{max-width:680px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:18px;padding:32px}.row{display:flex;justify-content:space-between;gap:16px}.muted{color:#64748b;font-size:13px}.total{font-size:24px;font-weight:800}.badge{display:inline-block;background:#dcfce7;color:#166534;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:24px}td,th{padding:12px;border-bottom:1px solid #e2e8f0;text-align:left}</style></head><body><div class="card"><div class="row"><div><h2>SUBSCRIPTION PAYMENT RECEIPT</h2><div class="muted">Opygen Estate</div></div><span class="badge">CONFIRMED</span></div><hr><p><b>Receipt:</b> ${escapeHtml(payment.receiptNumber)}</p><p><b>Payment:</b> ${escapeHtml(payment.paymentNumber)}</p><p><b>Agency:</b> ${escapeHtml(org?.agencyName || organizationId)} (${escapeHtml(org?.email || '')})</p><p><b>Paid:</b> ${escapeHtml(new Date(payment.paidAt || payment.confirmedAt).toLocaleString('en-BD'))}</p><table><tr><th>Description</th><th>Cycle</th><th>Amount</th></tr><tr><td>${escapeHtml(plan.name)} v${escapeHtml(payment.planVersion)}</td><td>${escapeHtml(payment.billingCycle)}</td><td>${escapeHtml(amount)}</td></tr></table><p class="muted">Method: ${escapeHtml(payment.method)}${payment.reference ? ` · Reference: ${escapeHtml(payment.reference)}` : ''}</p><div class="row"><span></span><span class="total">${escapeHtml(amount)}</span></div></div><script>window.print()</script></body></html>`
+}
+
+export const SubscriptionPaymentService = { createChangeRequest, getChangeRequests, cancelChangeRequest, getTenantPendingState, getTenantPaymentHistory, recordPayment, decidePayment, getPaymentLedger, getRevenueDashboard, renderReceipt }

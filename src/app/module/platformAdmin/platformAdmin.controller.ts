@@ -15,10 +15,11 @@ const suspendTenant = catchAsync(async (req: Request, res: Response) => sendResp
 const reactivateTenant = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Organization reactivated', data: await PlatformAdminService.reactivateTenant(req.params.organizationId, { id: req.user!._id!, reason: req.body.reason, requestId: req.requestId, ip: req.ip }) }))
 const paymentLedger = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getPaymentLedger(req.query)
-  sendResponse(res, { statusCode: 200, success: true, message: 'Payment ledger fetched', data: result.data, meta: { ...result.meta, summary: result.summary } as any })
+  sendResponse(res, { statusCode: 200, success: true, message: 'Manual subscription payment ledger fetched', data: result.data, meta: result.meta as any })
 })
-const addPaymentNote = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Reconciliation note saved', data: await PlatformAdminService.addPaymentNote(req.params.paymentId, req.body.note, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
-const revenue = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Revenue dashboard fetched from paid billing records', data: await PlatformAdminService.getRevenueDashboard() }))
+const recordManualPayment = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 201, success: true, message: 'Manual subscription payment recorded and is waiting for confirmation', data: await PlatformAdminService.recordManualPayment(req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
+const decideManualPayment = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: req.body.status === 'confirmed' ? 'Payment confirmed and subscription activated' : 'Payment rejected', data: await PlatformAdminService.decideManualPayment(req.params.paymentId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
+const revenue = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Revenue dashboard fetched from confirmed manual subscription payments', data: await PlatformAdminService.getRevenueDashboard() }))
 const audit = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getAuditLog(req.query)
   sendResponse(res, { statusCode: 200, success: true, message: 'Platform audit log fetched', data: result.data, meta: result.meta })
@@ -41,4 +42,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, addPaymentNote, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, endImpersonation }

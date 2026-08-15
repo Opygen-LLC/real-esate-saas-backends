@@ -160,7 +160,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       gracePeriodEnd: { type: Date, default: null },
       cancelAtPeriodEnd: { type: Boolean, default: false },
       reminderSentAt: { type: Date, default: null },
-      source: { type: String, enum: ['trial', 'bkash', 'manual_admin', 'migration'], default: 'trial' },
+      source: { type: String, enum: ['trial', 'bkash', 'manual_payment', 'manual_admin', 'migration'], default: 'trial' },
     },
     socialLinks: {
       facebook: { type: String, default: '' },

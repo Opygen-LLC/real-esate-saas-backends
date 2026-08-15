@@ -35,6 +35,29 @@ const assetVariant = z.object({
 
 const image = z.object({ url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
+const propertyImages = z.array(image).max(20).superRefine((items, ctx) => {
+  if (items.filter(item => item.isFeatured).length > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Only one property photo can be featured' })
+  }
+})
+const mediaLink = z.object({
+  id: z.string().trim().min(1).max(80),
+  url: z.string().trim().url().max(2048).refine(value => value.startsWith('https://'), 'Media URL must use HTTPS'),
+  provider: z.enum(['youtube', 'vimeo', 'matterport', 'kuula', 'other']).optional(),
+  type: z.enum(['video', 'virtual_tour', '360']),
+  title: z.string().trim().max(160).optional(),
+  embedUrl: z.string().trim().url().max(2048).optional(),
+  isHero: z.boolean().optional(),
+}).strict()
+const mediaLinks = z.array(mediaLink).max(10).superRefine((items, ctx) => {
+  if (items.filter(item => item.isHero).length > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Only one media item can be selected as hero media' })
+  }
+  const ids = items.map(item => item.id)
+  if (new Set(ids).size !== ids.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Media item IDs must be unique' })
+  }
+})
 const fields = {
   title: z.string().trim().min(3).max(180), description: z.string().max(20000).optional(),
   propertyType: z.enum(propertyTypes), listingType: z.enum(['ForSale', 'ForRent', 'ForLease']), status: z.enum(statuses).optional(),
@@ -53,7 +76,7 @@ const fields = {
     approvalNumber: z.string().max(100).optional(), mutationStatus: z.enum(['not_applicable', 'pending', 'completed']).optional(),
     khatianNumber: z.string().max(100).optional(), holdingTaxPaidThrough: z.string().max(30).optional() }).strict().optional(),
   developerName: z.string().max(160).optional(), handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
-  images: z.array(image).max(50).optional(), videos: z.array(z.string().url()).max(10).optional(),
+  images: propertyImages.optional(), mediaLinks: mediaLinks.optional(),
   amenities: z.array(z.string().max(100)).max(100).optional(), features: z.array(z.string().max(100)).max(100).optional(),
   agentId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), ownerId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), isFeatured: z.boolean().optional(),
 }
@@ -65,5 +88,6 @@ export const PropertyValidation = {
   updatePropertyZodSchema: z.object({ body: z.object(Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()])))
     .strict().refine(value => Object.keys(value).length > 0, 'At least one field is required') }),
   updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(statuses) }).strict() }),
+  reorderImagesZodSchema: z.object({ body: z.object({ images: propertyImages }).strict() }),
   importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional() }).strict() }),
 }

@@ -46,7 +46,7 @@ router.patch(
 
 router.patch(
   '/:id/status',
-  authMiddlewares.requirePermission('properties.write'),
+  authMiddlewares.requirePermission('properties.publish'),
   validateRequest(PropertyValidation.updateStatusZodSchema),
   PropertyController.updatePropertyStatus
 )
@@ -54,6 +54,7 @@ router.patch(
 router.patch(
   '/:id/images/reorder',
   authMiddlewares.requirePermission('properties.write'),
+  validateRequest(PropertyValidation.reorderImagesZodSchema),
   PropertyController.reorderPropertyImages
 )
 

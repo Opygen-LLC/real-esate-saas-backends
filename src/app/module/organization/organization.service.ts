@@ -81,7 +81,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
 
   const [totalProperties, totalAgents] = await Promise.all([
-    Property.countDocuments({ organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }),
+    Property.countDocuments({ organizationId: org.organizationId, status: 'Available' }),
     User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
   ])
   const result = {
@@ -130,8 +130,32 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
   return result
 }
 
+
+const updateBrandingSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization> => {
+  const updateData: Record<string, unknown> = definedEntries({
+    primaryColor: payload.primaryColor,
+    secondaryColor: payload.secondaryColor,
+    font: payload.font,
+    metaTitle: payload.metaTitle,
+    metaDescription: payload.metaDescription ? sanitizeRichText(payload.metaDescription) : payload.metaDescription,
+    logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
+    favicon: payload.favicon ? assertSafeUrl(payload.favicon) : payload.favicon,
+  })
+  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: updateData }, { new: true })
+  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({
+    organizationId,
+    aggregateType: 'organization',
+    aggregateId: result._id.toString(),
+    eventType: 'organization.branding_updated',
+    payload: { fields: Object.keys(updateData) },
+  })
+  return result
+}
+
 const updateMyOrganization = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
-  const allowed = ['agencyName', 'agencyType', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
+  const allowed = ['agencyName', 'agencyType', 'email', 'phone', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
   const safePayload = Object.fromEntries(allowed.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]]))
   const result = await Organization.findOneAndUpdate({ organizationId }, { $set: safePayload }, { new: true })
   if (result) {
@@ -223,6 +247,7 @@ export const OrganizationService = {
   getOrganizationByDomain,
   getPublicSiteInfo,
   updateWebsiteSettings,
+  updateBrandingSettings,
   updateMyOrganization,
   saveOnboarding,
   completeOnboarding: (organizationId: string) => finalizeOnboarding(organizationId, 'completed'),

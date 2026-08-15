@@ -7,6 +7,7 @@ import { requireTenant } from '../../middlewares/auth'
 import { FinanceService } from './finance.service'
 
 const actorId = (req: Request) => req.user?._id || req.user?.id || ''
+const financeActor = (req: Request) => ({ id: actorId(req), role: req.user?.userRole || 'tenant', requestId: req.requestId, ip: req.ip })
 const pagination = (req: Request) => pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
 
 const getOverview = catchAsync(async (req: Request, res: Response) => {
@@ -46,16 +47,35 @@ const listInvoices = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoices fetched successfully', meta: result.meta, data: result.data })
 })
 const createInvoice = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.createInvoice(requireTenant(req), actorId(req), req.body)
+  const data = await FinanceService.createInvoice(requireTenant(req), financeActor(req), req.body)
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Invoice created successfully', data })
 })
+const getInvoice = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.getInvoiceById(requireTenant(req), req.params.id)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice fetched successfully', data })
+})
 const updateInvoice = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.updateInvoice(requireTenant(req), actorId(req), req.params.id, req.body)
+  const data = await FinanceService.updateInvoice(requireTenant(req), financeActor(req), req.params.id, req.body)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice updated successfully', data })
 })
 const recordInvoicePayment = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.recordInvoicePayment(requireTenant(req), actorId(req), req.params.id, req.body)
+  const data = await FinanceService.recordInvoicePayment(requireTenant(req), financeActor(req), req.params.id, req.body)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice payment recorded successfully', data })
+})
+const voidInvoice = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.voidInvoice(requireTenant(req), financeActor(req), req.params.id, req.body.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice voided successfully', data })
+})
+const archiveInvoice = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.archiveDraftInvoice(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Draft invoice archived successfully', data })
+})
+const downloadInvoicePdf = catchAsync(async (req: Request, res: Response) => {
+  const result = await FinanceService.renderInvoiceDocument(requireTenant(req), financeActor(req), req.params.id)
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/[^a-zA-Z0-9._-]/g, '_')}"`)
+  res.setHeader('Cache-Control', 'private, no-store')
+  res.status(httpStatus.OK).send(result.pdf)
 })
 
 const listCommissions = catchAsync(async (req: Request, res: Response) => {
@@ -112,7 +132,7 @@ const archiveBudget = catchAsync(async (req: Request, res: Response) => {
 export const FinanceController = {
   getOverview, getReports, exportTransactions,
   listTransactions, createTransaction, updateTransaction, voidTransaction,
-  listInvoices, createInvoice, updateInvoice, recordInvoicePayment,
+  listInvoices, createInvoice, getInvoice, updateInvoice, voidInvoice, archiveInvoice, recordInvoicePayment, downloadInvoicePdf,
   listCommissions, createCommission, updateCommission, payCommission,
   listVendors, createVendor, updateVendor, archiveVendor,
   listBudgets, createBudget, updateBudget, archiveBudget,

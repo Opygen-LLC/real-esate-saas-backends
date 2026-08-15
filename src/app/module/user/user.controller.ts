@@ -150,6 +150,30 @@ const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => 
   })
 })
 
+
+const getSuperAdminUserSummary = catchAsync(async (_req: Request, res: Response) => {
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Global platform user statistics fetched successfully', data: await UserService.getSuperAdminUserSummary() })
+})
+
+const csvCell = (value: unknown) => {
+  let text = String(value ?? '')
+  if (/^\s*[=+\-@]/.test(text)) text = `'${text}`
+  return `"${text.replaceAll('"', '""')}"`
+}
+
+const exportUsersSuperAdminCsv = catchAsync(async (req: Request, res: Response) => {
+  const filters = pick(req.query, ['searchTerm', 'userRole', 'status', 'organizationId'])
+  res.status(httpStatus.OK)
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="platform-users-${new Date().toISOString().slice(0, 10)}.csv"`)
+  res.write('\uFEFFName,Email,Phone,Role,Organization,Status,Created At\n')
+  const cursor = UserService.getAllUsersSuperAdminExportCursor(filters)
+  for await (const user of cursor as any) {
+    res.write([user.name, user.email, user.phoneNumber, user.userRole, user.organizationId || 'Platform', user.status || 'active', user.createdAt ? new Date(user.createdAt).toISOString() : ''].map(csvCell).join(',') + '\n')
+  }
+  res.end()
+})
+
 const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
   const result = await UserService.updateUserRoleSuperAdmin(id, req.body, req.user!._id!)
@@ -176,6 +200,8 @@ export const UserController = {
   updateUserById,
   deleteUserById,
   getAllUsersSuperAdmin,
+  getSuperAdminUserSummary,
+  exportUsersSuperAdminCsv,
   updateUserRoleSuperAdmin,
   getMyAccess,
   updateMemberAccess,

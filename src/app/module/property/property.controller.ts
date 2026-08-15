@@ -14,6 +14,7 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
   const result = await PropertyService.createProperty(organizationId, req.body, {
     id: req.user?._id || req.user?.id,
     role: req.user?.userRole || req.user?.role || req.tenant?.role,
+    canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
   })
 
   sendResponse(res, {
@@ -158,6 +159,7 @@ const updateProperty = catchAsync(async (req: Request, res: Response) => {
   const result = await PropertyService.updateProperty(organizationId, id, req.body, {
     id: req.user?._id || req.user?.id,
     role: req.user?.userRole || req.user?.role || req.tenant?.role,
+    canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
   })
 
   sendResponse(res, {
@@ -175,6 +177,7 @@ const updatePropertyStatus = catchAsync(async (req: Request, res: Response) => {
   const result = await PropertyService.updatePropertyStatus(organizationId, id, status, {
     id: req.user?._id || req.user?.id,
     role: req.user?.userRole || req.user?.role || req.tenant?.role,
+    canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
   })
 
   sendResponse(res, {

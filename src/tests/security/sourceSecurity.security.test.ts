@@ -50,7 +50,7 @@ describe('release source-security invariants', () => {
   it('does not reintroduce mutable request-body tenant fallbacks', () => {
     const appRoot = path.resolve(process.cwd(), 'src/app/module')
     const offenders = walk(appRoot)
-      .filter((file) => (file.endsWith('.controller.ts') || file.endsWith('.service.ts')) && !file.includes(`${path.sep}platformAdmin${path.sep}`) && !file.includes(`${path.sep}moderation${path.sep}`))
+      .filter((file) => (file.endsWith('.controller.ts') || file.endsWith('.service.ts')) && !file.includes(`${path.sep}platformAdmin${path.sep}`))
       .filter((file) => /req\.body\.organizationId|body\.organizationId\s*\|\|/.test(fs.readFileSync(file, 'utf8')))
       .map((file) => path.relative(process.cwd(), file))
     expect(offenders).toEqual([])

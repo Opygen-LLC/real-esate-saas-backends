@@ -14,15 +14,6 @@ const complianceProfileSchema = new Schema({
   reviewReason: { type: String, default: '' },
 }, { timestamps: true, toJSON: { virtuals: true } })
 
-const consentSchema = new Schema({
-  organizationId: { type: String, required: true, index: true },
-  userId: { type: String, required: true, index: true },
-  purpose: { type: String, enum: ['service_terms', 'privacy_policy', 'marketing'], required: true },
-  policyVersion: { type: String, required: true },
-  granted: { type: Boolean, required: true },
-  capturedAt: { type: Date, default: Date.now },
-  ip: { type: String, default: '' }, requestId: { type: String, default: '' },
-}, { versionKey: false })
 
 const dataRequestSchema = new Schema({
   organizationId: { type: String, required: true, index: true },
@@ -36,5 +27,4 @@ const dataRequestSchema = new Schema({
 }, { timestamps: true })
 
 export const ComplianceProfile = model('ComplianceProfile', complianceProfileSchema)
-export const ConsentRecord = model('ConsentRecord', consentSchema)
 export const DataSubjectRequest = model('DataSubjectRequest', dataRequestSchema)

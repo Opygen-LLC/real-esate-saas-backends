@@ -34,3 +34,13 @@ describe('FinanceValidation', () => {
     expect(parsed.success).toBe(false)
   })
 })
+
+it('requires a reason when voiding an invoice', () => {
+  expect(FinanceValidation.voidInvoice.safeParse({ body: { reason: 'Client cancelled before payment' } }).success).toBe(true)
+  expect(FinanceValidation.voidInvoice.safeParse({ body: { reason: '' } }).success).toBe(false)
+})
+
+it('does not allow cancellation through the generic invoice update contract', () => {
+  expect(FinanceValidation.updateInvoice.safeParse({ body: { status: 'cancelled' } }).success).toBe(false)
+  expect(FinanceValidation.updateInvoice.safeParse({ body: { status: 'sent' } }).success).toBe(true)
+})

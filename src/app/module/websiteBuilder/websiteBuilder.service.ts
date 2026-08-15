@@ -322,8 +322,7 @@ const importAssetFromUrl = async (organizationId: string, payload: { url: string
   const remote = await readRemoteImage(payload.url)
   await EntitlementService.assertStorage(organizationId, remote.size)
   const signed: any = await presignAsset(organizationId, { filename: remote.filename, mimeType: remote.mimeType, size: remote.size })
-  const upload = await fetch(signed.original.uploadUrl, { method: 'PUT', headers: { 'content-type': remote.mimeType }, body: remote.buffer })
-  if (!upload.ok) throw new ApiError(502, 'Imported image could not be saved to object storage')
+  await ObjectStorageService.putBuffer(signed.original.key, remote.buffer, remote.mimeType)
   return completeAsset(organizationId, { key: signed.original.key, originalName: remote.filename, mimeType: remote.mimeType, altText: payload.altText || '', variants: [] }, userId)
 }
 
@@ -334,7 +333,7 @@ const assetIsReferenced = async (organizationId: string, asset: any) => {
   const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
   const [pages, properties] = await Promise.all([
     WebsitePage.find({ organizationId }).select('draftDocument publishedDocument').lean(),
-    Property.find({ organizationId }).select('images videos').lean(),
+    Property.find({ organizationId }).select('images mediaLinks').lean(),
   ])
   const referencesAsset = (value: unknown) => {
     const serialized = JSON.stringify(value)
@@ -410,11 +409,11 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 const getSitemap = async (identifier: string) => {
   const org = assertPublicWebsite(await resolveOrganization(identifier))
   const base = await canonicalBase(org)
-  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }).select('_id updatedAt').lean()])
+  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available' }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }
 
 const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
-const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available', moderationStatus: 'approved' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
+const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
 
 export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

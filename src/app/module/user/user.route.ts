@@ -42,6 +42,8 @@ router.get(
 router.patch('/:id/access', authMiddlewares.auth('agency_owner'), validateRequest(UserValidation.memberAccess), UserController.updateMemberAccess)
 
 // Platform routes must be explicit and declared before tenant `/:id` routes.
+router.get('/super-admin/summary', authMiddlewares.authSuperAdmin, UserController.getSuperAdminUserSummary)
+router.get('/super-admin/export.csv', authMiddlewares.authSuperAdmin, UserController.exportUsersSuperAdminCsv)
 router.get('/super-admin/all', authMiddlewares.authSuperAdmin, UserController.getAllUsersSuperAdmin)
 router.patch('/super-admin/:id/role', authMiddlewares.authSuperAdmin,
   validateRequest(UserValidation.platformRole), UserController.updateUserRoleSuperAdmin)

@@ -14,11 +14,10 @@ const run = async () => {
   await Promise.all([
     Organization.updateMany({}, { $set: { country: 'Bangladesh' }, $setOnInsert: { defaultLanguage: 'en' } }),
     Property.updateMany({}, { $set: { currency: 'BDT', country: 'Bangladesh' } }),
-    Property.updateMany({ moderationStatus: { $exists: false } }, { $set: { moderationStatus: 'pending', moderationReason: 'Requires initial platform review' } }),
     Lead.updateMany({}, { $set: { currency: 'BDT' } }),
   ])
   for (const [legacy, localized] of Object.entries(propertyTypeMap)) await Property.updateMany({ propertyType: legacy }, { $set: { propertyType: localized } })
-  console.log('Phase 2 migration completed: BDT enforced and legacy listings queued for moderation.')
+  console.log('Phase 2 migration completed: Bangladesh localization and BDT defaults enforced.')
   await mongoose.disconnect()
 }
 run().catch(error => { console.error(error); process.exit(1) })

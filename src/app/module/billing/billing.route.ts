@@ -1,40 +1,18 @@
 import express from 'express'
+import { z } from 'zod'
 import { authMiddlewares } from '../../middlewares/auth'
+import validateRequest from '../../middlewares/validateRequest'
 import { BillingController } from './billing.controller'
-import { BkashPaymentRoute } from '../bkashPayment/bkashPayment.route'
+import { agencySubscriptionChangeRequestSchema } from '../subscriptionChangeRequest/subscriptionChangeRequest.validation'
 
 const router = express.Router()
 
-router.use('/bkash', BkashPaymentRoute)
-
-router.get(
-  '/usage',
-  authMiddlewares.auth(),
-  BillingController.getSubscriptionUsage
-)
-
-router.get(
-  '/history',
-  authMiddlewares.requirePermission('billing.manage'),
-  BillingController.getBillingHistory
-)
-
-router.post(
-  '/change-plan',
-  authMiddlewares.requirePermission('billing.manage'),
-  BillingController.changeSubscriptionPlan
-)
-
-router.post(
-  '/cancel',
-  authMiddlewares.requirePermission('billing.manage'),
-  BillingController.cancelSubscription
-)
-
-router.get(
-  '/history/:id/receipt',
-  authMiddlewares.requirePermission('billing.manage'),
-  BillingController.getInvoiceReceipt
-)
+router.get('/usage', authMiddlewares.auth(), BillingController.getSubscriptionUsage)
+router.get('/history', authMiddlewares.requirePermission('billing.manage'), BillingController.getBillingHistory)
+router.get('/change-requests', authMiddlewares.requirePermission('billing.manage'), BillingController.getChangeRequests)
+router.post('/change-plan', authMiddlewares.requirePermission('billing.manage'), validateRequest(z.object({ body: agencySubscriptionChangeRequestSchema })), BillingController.changeSubscriptionPlan)
+router.post('/change-requests/:id/cancel', authMiddlewares.requirePermission('billing.manage'), validateRequest(z.object({ params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/) }) })), BillingController.cancelChangeRequest)
+router.post('/cancel', authMiddlewares.requirePermission('billing.manage'), BillingController.cancelSubscription)
+router.get('/history/:id/receipt', authMiddlewares.requirePermission('billing.manage'), BillingController.getInvoiceReceipt)
 
 export const BillingRoute = router

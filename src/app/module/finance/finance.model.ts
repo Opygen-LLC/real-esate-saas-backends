@@ -77,6 +77,12 @@ const invoiceSchema = new Schema<IFinanceInvoice>(
     paidAmount: { type: Number, default: 0, min: 0 },
     currency: { type: String, enum: ['BDT'], default: 'BDT' },
     status: { type: String, enum: ['draft', 'sent', 'partial', 'paid', 'overdue', 'cancelled'], default: 'draft', index: true },
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    cancelReason: { type: String, trim: true, maxlength: 500, default: '' },
+    archivedAt: { type: Date, default: null, index: true },
+    archivedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    archiveReason: { type: String, trim: true, maxlength: 500, default: '' },
     notes: { type: String, trim: true, maxlength: 3000, default: '' },
     propertyId: { type: Schema.Types.ObjectId, ref: 'Property', index: true },
     leadId: { type: Schema.Types.ObjectId, ref: 'Lead', index: true },
@@ -89,6 +95,7 @@ const invoiceSchema = new Schema<IFinanceInvoice>(
 invoiceSchema.index({ organizationId: 1, invoiceNumber: 1 }, { unique: true })
 invoiceSchema.index({ organizationId: 1, status: 1, dueDate: 1 })
 invoiceSchema.index({ organizationId: 1, issueDate: -1 })
+invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })
 
 const commissionSchema = new Schema<IFinanceCommission>(
   {

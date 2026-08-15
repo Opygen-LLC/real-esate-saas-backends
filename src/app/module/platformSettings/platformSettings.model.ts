@@ -17,6 +17,17 @@ const platformSettingsSchema = new Schema({
     legalReviewStatus: { type: String, enum: ['required', 'approved'], default: 'required' },
     legalReviewedAt: { type: Date, default: null },
   },
+  support: {
+    whatsapp: { type: String, default: '+8801891793354', maxlength: 20 },
+    phone: { type: String, default: '+8801891793354', maxlength: 20 },
+    email: { type: String, default: '', maxlength: 254 },
+    facebook: { type: String, default: '', maxlength: 2048 },
+    messenger: { type: String, default: '', maxlength: 2048 },
+    instagram: { type: String, default: '', maxlength: 2048 },
+    linkedin: { type: String, default: '', maxlength: 2048 },
+    youtube: { type: String, default: '', maxlength: 2048 },
+    website: { type: String, default: '', maxlength: 2048 },
+  },
   trial: {
     enabled: { type: Boolean, default: true },
     defaultTrialDays: { type: Number, default: 14, min: 0, max: 365 },

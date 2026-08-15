@@ -19,8 +19,12 @@ router.post('/transactions/:id/void', ...write, validateRequest(FinanceValidatio
 
 router.get('/invoices', ...read, FinanceController.listInvoices)
 router.post('/invoices', ...write, validateRequest(FinanceValidation.createInvoice), FinanceController.createInvoice)
-router.patch('/invoices/:id', ...write, validateRequest(FinanceValidation.updateInvoice), FinanceController.updateInvoice)
+router.get('/invoices/:id/pdf', ...read, FinanceController.downloadInvoicePdf)
+router.post('/invoices/:id/void', ...write, validateRequest(FinanceValidation.voidInvoice), FinanceController.voidInvoice)
 router.post('/invoices/:id/payments', ...write, validateRequest(FinanceValidation.recordInvoicePayment), FinanceController.recordInvoicePayment)
+router.get('/invoices/:id', ...read, FinanceController.getInvoice)
+router.patch('/invoices/:id', ...write, validateRequest(FinanceValidation.updateInvoice), FinanceController.updateInvoice)
+router.delete('/invoices/:id', ...write, FinanceController.archiveInvoice)
 
 router.get('/commissions', ...read, FinanceController.listCommissions)
 router.post('/commissions', ...write, validateRequest(FinanceValidation.createCommission), FinanceController.createCommission)

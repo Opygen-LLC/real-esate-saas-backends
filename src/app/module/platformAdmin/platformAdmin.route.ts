@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
 import { PlatformAdminController } from './platformAdmin.controller'
+import { subscriptionPaymentDecisionSchema, subscriptionPaymentInputSchema } from '../subscriptionPayment/subscriptionPayment.validation'
 
 const router = express.Router()
 const subscriptionBody = z.object({ body: z.object({
@@ -22,7 +23,8 @@ router.get('/tenants/health', authMiddlewares.authSuperAdmin, PlatformAdminContr
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
 router.get('/payments', authMiddlewares.authSuperAdmin, PlatformAdminController.paymentLedger)
-router.post('/payments/:paymentId/notes', authMiddlewares.authSuperAdmin, validateRequest(z.object({ body: z.object({ note: z.string().trim().min(5).max(1000) }) })), PlatformAdminController.addPaymentNote)
+router.post('/payments', authMiddlewares.authSuperAdmin, validateRequest(z.object({ body: subscriptionPaymentInputSchema })), PlatformAdminController.recordManualPayment)
+router.patch('/payments/:paymentId/decision', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: z.object({ paymentId: z.string().trim().min(8).max(80) }), body: subscriptionPaymentDecisionSchema })), PlatformAdminController.decideManualPayment)
 router.get('/revenue', authMiddlewares.authSuperAdmin, PlatformAdminController.revenue)
 router.get('/audit', authMiddlewares.authSuperAdmin, PlatformAdminController.audit)
 router.post('/impersonation/start', authMiddlewares.authSuperAdmin, validateRequest(z.object({ body: z.object({ organizationId: z.string().trim().min(3).max(100), targetUserId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), reason: z.string().trim().min(10).max(500), durationMinutes: z.number().int().min(5).max(30).optional() }) })), PlatformAdminController.startImpersonation)

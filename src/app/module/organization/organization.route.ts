@@ -12,6 +12,13 @@ router.get('/public/:domain', OrganizationController.getOrganizationByDomain)
 
 // Authenticated agency owner/admin endpoints
 router.patch(
+  '/branding',
+  authMiddlewares.requirePermission('website.write'),
+  validateRequest(OrganizationValidation.branding),
+  OrganizationController.updateBrandingSettings
+)
+
+router.patch(
   '/website-settings',
   authMiddlewares.requirePermission('website.write'),
   validateRequest(OrganizationValidation.website),

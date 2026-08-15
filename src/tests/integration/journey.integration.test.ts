@@ -12,7 +12,6 @@ let User: any
 let Organization: any
 let SubscriptionPlan: any
 let PlatformSettings: any
-let BkashPaymentClient: any
 let readCapturedOtpForTest: (identity: string, purpose: string) => string | null
 
 const request = async (path: string, init: RequestInit = {}) => {
@@ -55,7 +54,7 @@ suite('production journey integration', () => {
     ;({ PlatformSettings } = await import('../../app/module/platformSettings/platformSettings.model'))
     await PlatformSettings.create({ key: 'platform', privacy: { policyUrl: 'https://example.test/privacy', policyVersion: 'phase7-test', retentionDays: 365, legalReviewStatus: 'approved', legalReviewedAt: new Date() } })
     await SubscriptionPlan.create({ planId: 'starter', version: 1, name: 'Starter', priceMonthly: 1490, priceYearly: 14900, currency: 'BDT', features: ['Core CRM'], maxAgents: 3, maxProperties: 100, maxLeads: 500, isActive: true, isCurrent: true, effectiveFrom: new Date(), grandfatherExisting: true })
-    ;({ BkashPaymentClient } = await import('../../app/module/bkashPayment/bkashPayment.client'))
+    await User.create({ name: 'Platform Admin', email: 'admin-phase1@example.com', phoneNumber: '+8801999999999', password: 'unused-test-password', organizationId: 'platform', userRole: 'super-admin', status: 'active', isVerified: true })
     ;({ readCapturedOtpForTest } = await import('../../testSupport/otpCapture'))
     const app = (await import('../../app')).default
     await new Promise<void>((resolve) => {
@@ -75,7 +74,7 @@ suite('production journey integration', () => {
     await mongoose?.disconnect().catch(() => undefined)
   })
 
-  it('covers signup -> OTP -> onboarding -> property -> publish -> public lead -> CRM -> bKash -> invoice', async () => {
+  it('covers signup -> OTP -> onboarding -> property -> publish -> public lead -> CRM -> manual subscription payment -> receipt', async () => {
     const register = await request('/api/v1/auth/register-agency', {
       method: 'POST',
       body: JSON.stringify({ name: 'Phase Seven Owner', email: 'phase7@example.com', phoneNumber: '01712345678', password: 'Production123!', agencyName: 'Phase Seven Realty', agencyType: 'residential' }),
@@ -140,29 +139,46 @@ suite('production journey integration', () => {
     const starter = plans.body?.data?.find((row: any) => row.planId === 'starter')
     expect(starter?.priceMonthly).toBeGreaterThan(0)
 
-    vi.spyOn(BkashPaymentClient, 'createPayment').mockResolvedValue({ paymentID: 'PHASE7PAY', bkashURL: 'https://tokenized.pay.bka.sh/checkout/PHASE7PAY', statusCode: '0000', statusMessage: 'Successful', amount: String(starter.priceMonthly), currency: 'BDT' })
-    vi.spyOn(BkashPaymentClient, 'executePayment').mockResolvedValue({ paymentID: 'PHASE7PAY', statusCode: '0000', statusMessage: 'Successful', amount: String(starter.priceMonthly), currency: 'BDT', trxID: 'TRXPHASE7', payerAccount: '01700000000', transactionStatus: 'Completed' })
-
-    const checkout = await request('/api/v1/billing/bkash/create', {
-      method: 'POST', headers: { ...auth, 'idempotency-key': 'phase7-checkout-key' }, body: JSON.stringify({ planId: 'starter', billingCycle: 'monthly' }),
+    const changeRequest = await request('/api/v1/billing/change-plan', {
+      method: 'POST', headers: auth, body: JSON.stringify({ planId: 'starter', billingCycle: 'monthly' }),
     })
-    expect(checkout.response.status).toBe(201)
-    expect(checkout.body?.data?.paymentId).toBe('PHASE7PAY')
+    expect(changeRequest.response.status).toBe(201)
+    expect(changeRequest.body?.data?.status).toBe('pending_payment')
+    expect(changeRequest.body?.data?.amount).toBe(starter.priceMonthly)
+    const changeRequestId = changeRequest.body?.data?._id
+    expect(changeRequestId).toMatch(/^[a-f0-9]{24}$/)
 
-    const duplicateCheckout = await request('/api/v1/billing/bkash/create', {
-      method: 'POST', headers: { ...auth, 'idempotency-key': 'phase7-checkout-key' }, body: JSON.stringify({ planId: 'starter', billingCycle: 'monthly' }),
+    const adminToken = await bearerFor('+8801999999999')
+    const adminAuth = { authorization: `Bearer ${adminToken}` }
+    const recorded = await request('/api/v1/platform-admin/payments', {
+      method: 'POST', headers: adminAuth, body: JSON.stringify({ organizationId: organization.organizationId, changeRequestId, method: 'bank', reference: 'BANK-PHASE1-001', notes: 'Phase 1 integration payment' }),
     })
-    expect(duplicateCheckout.response.status).toBe(201)
-    expect(duplicateCheckout.body?.data?.paymentId).toBe('PHASE7PAY')
-    expect(BkashPaymentClient.createPayment).toHaveBeenCalledTimes(1)
+    expect(recorded.response.status).toBe(201)
+    expect(recorded.body?.data?.status).toBe('pending')
+    const paymentNumber = recorded.body?.data?.paymentNumber
+    expect(paymentNumber).toMatch(/^PAY-/)
 
-    const callback = await request('/api/v1/billing/bkash/callback?paymentID=PHASE7PAY&status=success')
-    expect(callback.response.status).toBeGreaterThanOrEqual(300)
-    expect(callback.response.status).toBeLessThan(400)
-    expect(callback.response.headers.get('location')).toContain('/payment/bkash/success')
+    const beforeConfirm = await Organization.findOne({ organizationId: organization.organizationId }).lean()
+    expect(beforeConfirm?.subscription?.plan).toBe('trial')
+
+    const confirmed = await request(`/api/v1/platform-admin/payments/${paymentNumber}/decision`, {
+      method: 'PATCH', headers: adminAuth, body: JSON.stringify({ status: 'confirmed', reason: 'Bank reference verified in integration test' }),
+    })
+    expect(confirmed.response.status).toBe(200)
+    expect(confirmed.body?.data?.status).toBe('confirmed')
+    expect(confirmed.body?.data?.receiptNumber).toMatch(/^RCT-/)
+
+    const activated = await Organization.findOne({ organizationId: organization.organizationId }).lean()
+    expect(activated?.subscription?.plan).toBe('starter')
+    expect(activated?.subscription?.status).toBe('active')
+    expect(activated?.subscription?.source).toBe('manual_payment')
 
     const billing = await request('/api/v1/billing/history', { headers: auth })
     expect(billing.response.status).toBe(200)
-    expect(billing.body?.data?.some((row: any) => row.paymentId === 'PHASE7PAY' && row.status === 'paid')).toBe(true)
+    expect(billing.body?.data?.some((row: any) => row.paymentNumber === paymentNumber && row.status === 'confirmed')).toBe(true)
+
+    const receipt = await request(`/api/v1/billing/history/${paymentNumber}/receipt`, { headers: auth })
+    expect(receipt.response.status).toBe(200)
+    expect(receipt.text).toContain('SUBSCRIPTION PAYMENT RECEIPT')
   }, 30_000)
 })

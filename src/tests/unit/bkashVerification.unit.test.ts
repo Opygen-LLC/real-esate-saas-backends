@@ -1,25 +1,24 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashCheckoutUrl } from '../../app/module/bkashPayment/bkashPayment.verification'
 
-const attempt = { paymentId: 'TR001', amount: 3490 }
+const read = (relative: string) => fs.readFileSync(path.resolve(relative), 'utf8')
 
-describe('bKash verification invariants', () => {
-  it('allows only HTTPS bKash checkout hosts', () => {
-    expect(trustedBkashCheckoutUrl('https://tokenized.pay.bka.sh/checkout/abc')).toContain('bka.sh')
-    expect(() => trustedBkashCheckoutUrl('https://evil.example/checkout')).toThrow(/invalid checkout URL/i)
-    expect(() => trustedBkashCheckoutUrl('http://bkash.com/checkout')).toThrow(/invalid checkout URL/i)
+describe('manual subscription invariants', () => {
+  it('does not mount the legacy gateway route', () => {
+    const billingRoute = read('src/app/module/billing/billing.route.ts')
+    expect(billingRoute).not.toContain('/bkash')
+    expect(billingRoute).toContain('/change-plan')
   })
 
-  it('accepts only completed successful gateway states', () => {
-    expect(isCompletedGatewayPayment({ statusCode: '0000', transactionStatus: 'Completed' })).toBe(true)
-    expect(isCompletedGatewayPayment({ statusCode: '9999', transactionStatus: 'Completed' })).toBe(false)
-    expect(isCompletedGatewayPayment({ statusCode: '0000', transactionStatus: 'Initiated' })).toBe(false)
+  it('blocks direct paid-plan activation in platform admin service', () => {
+    const service = read('src/app/module/platformAdmin/platformAdmin.service.ts')
+    expect(service).toMatch(/Paid plans are activated only by confirming a manual subscription payment/)
   })
 
-  it('rejects mismatched payment id, currency, or amount', () => {
-    expect(() => ensurePaymentMatchesAttempt({ paymentID: 'OTHER', statusCode: '0000', amount: '3490', currency: 'BDT' }, attempt as any)).toThrow(/ID mismatch/i)
-    expect(() => ensurePaymentMatchesAttempt({ paymentID: 'TR001', statusCode: '0000', amount: '3490', currency: 'USD' }, attempt as any)).toThrow(/currency mismatch/i)
-    expect(() => ensurePaymentMatchesAttempt({ paymentID: 'TR001', statusCode: '0000', amount: '3000', currency: 'BDT' }, attempt as any)).toThrow(/amount mismatch/i)
-    expect(() => ensurePaymentMatchesAttempt({ paymentID: 'TR001', statusCode: '0000', amount: '3490.00', currency: 'BDT' }, attempt as any)).not.toThrow()
+  it('uses the subscription payment ledger as the revenue source', () => {
+    const service = read('src/app/module/subscriptionPayment/subscriptionPayment.service.ts')
+    expect(service).toContain("$match: { status: 'confirmed' }")
+    expect(service).toContain('SubscriptionPayment.aggregate')
   })
 })

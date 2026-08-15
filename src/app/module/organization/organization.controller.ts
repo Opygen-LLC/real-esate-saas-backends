@@ -67,6 +67,19 @@ const updateWebsiteSettings = catchAsync(async (req: Request, res: Response) => 
 })
 
 
+const updateBrandingSettings = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const result = await OrganizationService.updateBrandingSettings(organizationId, req.body)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Branding settings saved successfully',
+    data: result,
+  })
+})
+
+
 const saveOnboarding = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   await OrganizationService.saveOnboarding(organizationId, req.body)
@@ -141,6 +154,7 @@ export const OrganizationController = {
   getOrganizationByDomain,
   getPublicSiteInfo,
   updateWebsiteSettings,
+  updateBrandingSettings,
   saveOnboarding,
   completeOnboarding,
   skipOnboarding,

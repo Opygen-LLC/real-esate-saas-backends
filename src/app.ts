@@ -16,6 +16,8 @@ import { logger } from './shared/logger'
 import { getWorkerHealth } from './app/module/cron/phase3.worker'
 import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 import { emailProviderStatus, verifyEmailProvider } from './app/helpers/sendEmail'
+import { ObjectStorageService } from './app/module/websiteBuilder/objectStorage.service'
+import { virusScannerHealth } from './app/module/websiteBuilder/virusScan.service'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -77,16 +79,19 @@ app.get('/', (_req: Request, res: Response) => {
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString() }))
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
-  const [transactions, redis, email] = await Promise.all([
+  const [transactions, redis, email, objectStorage, clamav] = await Promise.all([
     mongo ? mongoSupportsTransactions() : Promise.resolve(false),
     RedisClient.ping(),
     verifyEmailProvider(),
+    ObjectStorageService.health(),
+    virusScannerHealth(),
   ])
   const worker = getWorkerHealth()
   const workerReady = !config.runtime.worker_enabled || worker.healthy
   const transactionReady = !config.isProduction || transactions
   const emailReady = !config.isProduction || email
-  const ready = mongo && transactionReady && redis && emailReady && workerReady
+  const mediaReady = !config.isProduction || (objectStorage.healthy && clamav.healthy)
+  const ready = mongo && transactionReady && redis && emailReady && workerReady && mediaReady
   const emailStatus = emailProviderStatus()
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
@@ -96,6 +101,8 @@ app.get('/ready', async (_req, res) => {
       redis: config.redis.enabled ? redis : 'disabled',
       email: { configured: emailStatus.configured, healthy: emailReady, lastCheckedAt: emailStatus.lastCheckedAt },
       worker: config.runtime.worker_enabled ? worker : 'disabled',
+      objectStorage,
+      clamav,
     },
   })
 })
@@ -112,7 +119,15 @@ app.use('/api/cron', verifyCronSignature, CronRoute)
 app.use(globalErrorHandler)
 
 app.all('*', (req: Request, res: Response) => {
-  res.status(httpStatus.NOT_FOUND).json({ success: false, message: `No API endpoint found for ${req.method} ${req.originalUrl}`, errorMessages: [{ path: req.originalUrl, message: `No API endpoint found for ${req.method} ${req.originalUrl}` }] })
+  const message = `No API endpoint found for ${req.method} ${req.originalUrl}`
+  res.status(httpStatus.NOT_FOUND).json({
+    success: false,
+    code: 'NOT_FOUND',
+    message,
+    fieldErrors: {},
+    errorMessages: [{ path: req.originalUrl, message }],
+    requestId: req.requestId,
+  })
 })
 
 export default app

@@ -70,7 +70,7 @@ const updateInvoice = z.object({ body: z.object({
   dueDate: dateInput.optional().or(z.literal('')),
   lineItems: z.array(invoiceLine).min(1).max(100).optional(),
   discount: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
-  status: z.enum(['draft', 'sent', 'cancelled']).optional(),
+  status: z.enum(['draft', 'sent']).optional(),
   notes: z.string().trim().max(3000).optional(),
   propertyId: optionalObjectId,
   leadId: optionalObjectId,
@@ -83,6 +83,9 @@ const recordInvoicePayment = z.object({ body: z.object({
   reference: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(500).optional(),
 }).strict() })
+
+const voidInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() })
+const archiveInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict() })
 
 const createCommission = z.object({ body: z.object({
   agentId: objectId,
@@ -173,6 +176,8 @@ export const FinanceValidation = {
   voidTransaction,
   createInvoice,
   updateInvoice,
+  voidInvoice,
+  archiveInvoice,
   recordInvoicePayment,
   createCommission,
   updateCommission,

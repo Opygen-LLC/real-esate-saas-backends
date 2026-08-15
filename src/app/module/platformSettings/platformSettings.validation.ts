@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
-const safeUrl = z.union([z.literal(''), z.string().url().max(2048)])
+const safeUrl = z.union([z.literal(''), z.string().trim().url().max(2048)])
+const bdPhone = z.union([z.literal(''), z.string().trim().regex(/^\+8801[3-9]\d{8}$/, 'Use Bangladesh format +8801XXXXXXXXX')])
+const safeEmail = z.union([z.literal(''), z.string().trim().email().max(254).transform(value => value.toLowerCase())])
 export const PlatformSettingsValidation = {
   update: z.object({ body: z.object({
     reason: z.string().trim().min(10).max(500),
@@ -18,6 +20,17 @@ export const PlatformSettingsValidation = {
       retentionDays: z.number().int().min(30).max(3650),
       legalReviewStatus: z.enum(['required', 'approved']),
     }).optional(),
+    support: z.object({
+      whatsapp: bdPhone,
+      phone: bdPhone,
+      email: safeEmail,
+      facebook: safeUrl,
+      messenger: safeUrl,
+      instagram: safeUrl,
+      linkedin: safeUrl,
+      youtube: safeUrl,
+      website: safeUrl,
+    }).strict().optional(),
     trial: z.object({
       enabled: z.boolean(),
       defaultTrialDays: z.number().int().min(0).max(365),

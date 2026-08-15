@@ -13,7 +13,6 @@ import { Viewing } from '../viewing/viewing.model'
 import { NotificationService } from '../notification/notification.service'
 import { SmsService } from '../sms/sms.service'
 import { WebsiteAssetProcessor } from '../websiteBuilder/websiteAssetProcessor.service'
-import sendEmail from '../../helpers/sendEmail'
 import { OperationsJob, OperationsJobType } from './operationsJob.model'
 
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
@@ -33,13 +32,6 @@ const cancel = async (organizationId: string, type: OperationsJobType, entityId:
 )
 
 const deliver = async (job: any) => {
-  if (job.type === 'support_email') {
-    const payload = job.payload || {}
-    if (!payload.to || !payload.subject || !payload.html) return
-    const sent = await sendEmail(String(payload.to), String(payload.subject).slice(0, 200), String(payload.html).slice(0, 20000))
-    if (!sent) throw new Error('Support email delivery failed')
-    return
-  }
   if (job.type === 'sms_send') {
     await SmsService.deliverPrepared(job.organizationId, job.payload || {})
     return
@@ -71,7 +63,7 @@ const deliver = async (job: any) => {
 }
 
 const claimOne = async () => OperationsJob.findOneAndUpdate(
-  { runAt: { $lte: new Date() }, $or: [{ status: 'pending' }, { status: 'processing', lockedAt: { $lte: new Date(Date.now() - 10 * 60_000) } }] },
+  { type: { $ne: 'support_email' }, runAt: { $lte: new Date() }, $or: [{ status: 'pending' }, { status: 'processing', lockedAt: { $lte: new Date(Date.now() - 10 * 60_000) } }] },
   { $set: { status: 'processing', lockedAt: new Date(), lockedBy: workerId }, $inc: { attempts: 1 } },
   { new: true, sort: { runAt: 1 } },
 )

@@ -8,9 +8,7 @@ if (target !== 'staging' && !/localhost|127\.0\.0\.1/i.test(baseUrl) && process.
 
 const readIterations = Math.max(1, Number(process.env.LOAD_READ_ITERATIONS || 30))
 const writeIterations = Math.min(8, Math.max(1, Number(process.env.LOAD_WRITE_ITERATIONS || 5)))
-const callbackIterations = Math.max(1, Number(process.env.LOAD_CALLBACK_ITERATIONS || 10))
 const concurrency = Math.max(1, Number(process.env.LOAD_CONCURRENCY || 5))
-const paymentId = process.env.LOAD_BKASH_PAYMENT_ID
 const results = []
 
 const percentile = (values, p) => {
@@ -24,7 +22,7 @@ const request = async (name, url, options = {}) => {
   try {
     const response = await fetch(url, options)
     await response.arrayBuffer()
-    results.push({ name, ms: performance.now() - started, ok: response.ok || (name === 'bkash-callback' && [302, 303, 409].includes(response.status)), status: response.status })
+    results.push({ name, ms: performance.now() - started, ok: response.ok, status: response.status })
   } catch (error) {
     results.push({ name, ms: performance.now() - started, ok: false, status: 0, error: error instanceof Error ? error.message : String(error) })
   }
@@ -63,11 +61,7 @@ for (let index = 0; index < writeIterations; index += 1) {
     })
   })
 }
-if (paymentId) {
-  for (let index = 0; index < callbackIterations; index += 1) {
-    jobs.push(() => request('bkash-callback', `${baseUrl}/api/v1/billing/bkash/callback?paymentID=${encodeURIComponent(paymentId)}&status=success`, { redirect: 'manual' }))
-  }
-}
+
 
 for (let index = 0; index < jobs.length; index += concurrency) {
   await Promise.all(jobs.slice(index, index + concurrency).map((job) => job()))
@@ -77,7 +71,6 @@ const thresholds = {
   'public-property-search': Number(process.env.LOAD_P95_PUBLIC_MS || 100),
   'tenant-dashboard': Number(process.env.LOAD_P95_TENANT_MS || 300),
   'lead-capture': Number(process.env.LOAD_P95_WRITE_MS || 500),
-  'bkash-callback': Number(process.env.LOAD_P95_PROVIDER_MS || 2500),
 }
 const maxErrorRate = Number(process.env.LOAD_MAX_ERROR_RATE || 0.005)
 let failed = false

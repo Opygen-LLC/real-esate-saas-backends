@@ -12,7 +12,7 @@
 - MongoDB must be a replica set or mongos. Transactions are required for tenant provisioning, plan versioning, website publishing, and billing. A standalone MongoDB instance is rejected by production startup.
 - Redis must use a password. Managed/public Redis must also use TLS. The supplied Docker Compose deployment keeps Redis unexposed on an isolated bridge network and therefore uses `REDIS_ALLOW_INSECURE_PRIVATE_NETWORK=true` with TLS disabled only inside that private network.
 - SMTP is a required dependency because account verification is email-first. Production startup verifies SMTP credentials/connectivity before the API becomes ready.
-- Configure object storage, ClamAV, domain/TLS provider, bKash, and any enabled SMS provider using real production credentials. Never place secrets in the repository.
+- Configure object storage, ClamAV, domain/TLS provider, and any enabled SMS provider using real production credentials. Never place secrets in the repository.
 
 ## First deployment
 
@@ -56,7 +56,7 @@
 Some production features require real business/provider values and must not be bypassed in code:
 
 - In Super Admin → Platform Settings, publish a legally reviewed privacy-policy URL/version and mark the legal review approved. Until then public enquiries and public viewing requests intentionally return 503 instead of collecting consent against an unapproved policy.
-- Keep `BKASH_ENABLED=true` only when all bKash production/sandbox credentials and endpoints are present. Production startup now fails fast when bKash is enabled but incomplete; this avoids discovering missing payment credentials only during checkout.
+- Keep legacy gateway integrations disabled. Subscription changes use the manual payment ledger and super-admin confirmation workflow.
 - Set `DOMAIN_A_TARGET` and `DOMAIN_CNAME_TARGET` to the values shown for the actual Vercel project/domain configuration. Do not assume one global DNS target for every Vercel project.
 - Set a reachable `DOMAIN_TLS_PROVIDER_URL`, object-storage endpoint/credentials/public origin, and ClamAV host before enabling those customer-facing workflows.
 
@@ -84,7 +84,7 @@ A registration response with code `EMAIL_DELIVERY_UNAVAILABLE` specifically mean
 2. Run the latest required migration once before routing production traffic to the new release.
 3. Verify `/health`, `/ready`, and authenticated `/metrics` on every API replica.
 4. Warm plan/public-site caches and verify Redis hit counters.
-5. Exercise signup + OTP, login, dashboard, property publishing, public lead capture, bKash callback, enabled SMS, Meta CAPI, object upload/scan, and domain verification.
+5. Exercise signup + OTP, login, dashboard, property publishing, public lead capture, manual subscription payment confirmation, enabled SMS, Meta CAPI, object upload/scan, and domain verification.
 6. Watch p95 latency, 5xx rate, Mongo pool saturation, queue age/dead jobs, Redis errors, SMTP/provider failures, and circuit state during rollout.
 
 ## Backup/restore drill

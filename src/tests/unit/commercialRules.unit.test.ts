@@ -42,11 +42,15 @@ describe('commercial rules', () => {
     expect(featureEnabled({ hasSmsAutomation: false }, 'smsAutomation')).toBe(false)
   })
 
-  it('keeps destructive and commercial permissions out of agent roles', () => {
+  it('keeps publishing owner-controlled while preserving safe role defaults', () => {
     expect(roleHasPermission('agency_owner', 'billing.manage')).toBe(true)
+    expect(roleHasPermission('agency_owner', 'properties.publish')).toBe(true)
+    expect(roleHasPermission('agency_admin', 'properties.publish')).toBe(true)
+    expect(roleHasPermission('agent', 'properties.publish')).toBe(false)
     expect(roleHasPermission('agent', 'billing.manage')).toBe(false)
     expect(roleHasPermission('agent', 'properties.delete')).toBe(false)
     expect(permissionsForRole('viewer')).toEqual(expect.arrayContaining(['properties.read', 'leads.read']))
+    expect(permissionsForRole('agency_owner')).not.toEqual(expect.arrayContaining(['compliance.read', 'compliance.write']))
   })
 
   it('keeps Bangladesh property-area conversions deterministic', () => {

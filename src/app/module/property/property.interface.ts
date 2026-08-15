@@ -16,7 +16,8 @@ export type IPropertyStatus =
   | 'ComingSoon'
 
 export type IAreaUnit = 'sqft' | 'decimal' | 'shotok' | 'katha' | 'bigha' | 'acre'
-export type IModerationStatus = 'pending' | 'approved' | 'rejected' | 'flagged'
+export type IPropertyMediaProvider = 'youtube' | 'vimeo' | 'matterport' | 'kuula' | 'other'
+export type IPropertyMediaType = 'video' | 'virtual_tour' | '360'
 
 export interface IBangladeshAddress {
   divisionId?: string; division?: string; districtId?: string; district?: string
@@ -37,6 +38,17 @@ export interface IPropertyImage {
   caption?: string
   isFeatured?: boolean
   order?: number
+}
+
+
+export interface IPropertyMediaLink {
+  id: string
+  url: string
+  provider: IPropertyMediaProvider
+  type: IPropertyMediaType
+  title?: string
+  isHero?: boolean
+  embedUrl?: string
 }
 
 export interface IProperty {
@@ -77,18 +89,14 @@ export interface IProperty {
   longitude?: number
   mapUrl?: string
   images: IPropertyImage[]
-  videos?: string[]
+  mediaLinks?: IPropertyMediaLink[]
   amenities: string[]
   features?: string[]
   agentId?: mongoose.Types.ObjectId | string
   ownerId?: mongoose.Types.ObjectId | string
-  publishedAt?: Date
+  publishedAt?: Date | null
   views: number
   isFeatured?: boolean
-  moderationStatus: IModerationStatus
-  moderationReason?: string
-  moderatedBy?: string
-  moderatedAt?: Date
   createdAt?: Date
   updatedAt?: Date
 }
@@ -113,7 +121,6 @@ export type IPropertyFilter = {
   furnished?: boolean | string
   isFeatured?: boolean | string
   agentId?: string
-  moderationStatus?: IModerationStatus
 }
 
 export type PropertyModel = Model<IProperty>

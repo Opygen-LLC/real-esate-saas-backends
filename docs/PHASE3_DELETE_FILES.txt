@@ -1,0 +1,15 @@
+# Delete these paths from the full backend repository before building Phase 3.
+src/app/db/migratePhase0ModerationRemoval.ts
+src/app/module/compliance/compliance.model.ts
+src/app/module/compliance/compliance.controller.ts
+src/app/module/compliance/compliance.service.ts
+src/app/module/compliance/compliance.validation.ts
+src/app/module/compliance/compliance.route.ts
+src/app/module/moderation/moderation.validation.ts
+src/app/module/moderation/moderation.route.ts
+src/app/module/moderation/moderation.controller.ts
+src/app/module/moderation/fraudReport.model.ts
+src/app/module/support/support.route.ts
+src/app/module/support/support.service.ts
+src/app/module/support/support.model.ts
+src/app/module/support/support.controller.ts
