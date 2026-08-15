@@ -55,28 +55,34 @@ const customFormat = winston.format.printf(({ level, message, ...meta }) => {
   return `${level}: ${reqId}${msg}`
 })
 
-const fileTransport = new winston.transports.DailyRotateFile({
-  filename: path.join(process.cwd(), 'logs', 'server-%DATE%.log'),
-  datePattern: 'YYYY-MM-DD',
-  zippedArchive: true,
-  maxSize: '20m',
-  maxFiles: '7d',
-  level: 'info',
-  format: customFormat,
-})
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize({ all: process.env.NODE_ENV !== 'production' }),
+      customFormat,
+    ),
+  }),
+]
+
+if (process.env.NODE_ENV !== 'production' || process.env.LOG_TO_FILE === 'true') {
+  transports.push(
+    new winston.transports.DailyRotateFile({
+      filename: path.join(process.cwd(), 'logs', 'server-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      zippedArchive: true,
+      maxSize: '20m',
+      maxFiles: '7d',
+      level: 'info',
+      format: customFormat,
+    }),
+  )
+}
 
 const baseLogger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        customFormat
-      ),
-    }),
-    fileTransport,
-  ],
+  transports,
 })
+
 
 export const logger = baseLogger
 export const errorLogger = baseLogger

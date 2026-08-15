@@ -16,7 +16,8 @@ ENV INVOICE_PDF_CHROMIUM_PATH=/usr/local/bin/invoice-chromium
 WORKDIR /app
 RUN apk add --no-cache chromium font-noto font-noto-bengali \
   && ln -sf "$(command -v chromium-browser || command -v chromium)" /usr/local/bin/invoice-chromium \
-  && addgroup -S app && adduser -S -G app app
+  && addgroup -S app && adduser -S -G app app \
+  && mkdir -p /app/logs && chown -R app:app /app
 COPY --from=build --chown=app:app /app/package.json ./package.json
 COPY --from=build --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/dist ./dist
