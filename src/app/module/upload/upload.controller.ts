@@ -1,8 +1,6 @@
 import { Request, Response } from 'express'
 import { StorageService } from './upload.service'
 import catchAsync from '../../../shared/catchAsync'
-import { sendResponse } from '../../../shared/customResponse'
-
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 
@@ -54,11 +52,8 @@ const uploadSingle = catchAsync(async (req: Request, res: Response) => {
 
   const result = await StorageService.uploadFile(file)
 
-  sendResponse(res, {
-    statusCode: httpStatus.CREATED,
-    success: true,
-    message: 'File uploaded successfully to Google Cloud Storage',
-    data: result,
+  res.status(httpStatus.CREATED).json({
+    publicUrl: result.publicUrl,
   })
 })
 
@@ -70,62 +65,12 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
 
   const results = await StorageService.uploadMultipleFiles(files)
 
-  sendResponse(res, {
-    statusCode: httpStatus.CREATED,
-    success: true,
-    message: `${results.length} files uploaded successfully to Google Cloud Storage`,
-    data: results,
-  })
-})
-
-const deleteFile = catchAsync(async (req: Request, res: Response) => {
-  const { fileName } = req.params
-  const targetFileName = Array.isArray(fileName) ? fileName[0] : fileName
-  const queryFileName = req.query.fileName as string
-  const fileToDelete = targetFileName || queryFileName
-
-  if (!fileToDelete) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Filename parameter is required.')
-  }
-
-  await StorageService.deleteFile(fileToDelete)
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: `File '${fileToDelete}' deleted successfully from Google Cloud Storage`,
-    data: null,
-  })
-})
-
-const getSignedUrl = catchAsync(async (req: Request, res: Response) => {
-  const { fileName } = req.params
-  const targetFileName = Array.isArray(fileName) ? fileName[0] : fileName
-  const queryFileName = req.query.fileName as string
-  const fileToSign = targetFileName || queryFileName
-
-  if (!fileToSign) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Filename parameter is required.')
-  }
-
-  const expires = parseInt(req.query.expires as string, 10) || 15
-  const url = await StorageService.getSignedUrl(fileToSign, expires)
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: 'Signed URL generated successfully',
-    data: {
-      fileName: fileToSign,
-      signedUrl: url,
-      expiresInMinutes: expires,
-    },
+  res.status(httpStatus.CREATED).json({
+    publicUrls: results.map((item) => item.publicUrl),
   })
 })
 
 export const UploadController = {
   uploadSingle,
   uploadMultiple,
-  deleteFile,
-  getSignedUrl,
 }

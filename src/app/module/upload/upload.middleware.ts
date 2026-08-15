@@ -2,7 +2,7 @@ import multer, { FileFilterCallback } from 'multer'
 import { Request } from 'express'
 
 const storage = multer.memoryStorage()
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB limit
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB limit
 
 const fileFilter = (
   _req: Request,
@@ -13,19 +13,14 @@ const fileFilter = (
     'image/jpeg',
     'image/jpg',
     'image/png',
-    'image/webp',
-    'image/gif',
-    'image/svg+xml',
-    'application/pdf',
-    'text/plain',
   ]
 
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  if (allowedMimeTypes.includes(file.mimetype.toLowerCase())) {
     cb(null, true)
   } else {
     cb(
       new Error(
-        `Invalid file type '${file.mimetype}'. Allowed types: JPEG, PNG, WEBP, GIF, SVG, PDF, TXT.`
+        `Invalid file type '${file.mimetype}'. Only JPEG, JPG, and PNG images are allowed.`
       )
     )
   }

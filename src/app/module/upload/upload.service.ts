@@ -1,15 +1,30 @@
 import { bucket, storageConfig } from './upload.config'
 import { randomBytes } from 'crypto'
+import sharp from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import httpStatus from 'http-status'
 
 export interface IUploadResult {
-  fileName: string
-  originalName: string
   publicUrl: string
-  url: string
-  size: number
-  mimetype: string
+}
+
+const compressImage = async (buffer: Buffer, mimetype: string): Promise<Buffer> => {
+  try {
+    const normalizedType = mimetype.toLowerCase()
+    if (normalizedType === 'image/jpeg' || normalizedType === 'image/jpg') {
+      return await sharp(buffer)
+        .jpeg({ quality: 80, mozjpeg: true })
+        .toBuffer()
+    } else if (normalizedType === 'image/png') {
+      return await sharp(buffer)
+        .png({ quality: 80, compressionLevel: 8 })
+        .toBuffer()
+    }
+    return buffer
+  } catch (_err) {
+    // If sharp fails to parse format, fallback to original buffer safely
+    return buffer
+  }
 }
 
 const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => {
@@ -17,7 +32,9 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
     throw new ApiError(httpStatus.BAD_REQUEST, 'No file buffer available for upload')
   }
 
-  const sanitizedOriginalName = file.originalname ? file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_') : 'file'
+  const compressedBuffer = await compressImage(file.buffer, file.mimetype)
+
+  const sanitizedOriginalName = file.originalname ? file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_') : 'image.jpg'
   const uniqueFileName = `uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${sanitizedOriginalName}`
   const blob = bucket.file(uniqueFileName)
 
@@ -36,17 +53,10 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
 
     blobStream.on('finish', () => {
       const publicUrl = `https://storage.googleapis.com/${storageConfig.bucketName}/${blob.name}`
-      resolve({
-        fileName: blob.name,
-        originalName: file.originalname,
-        publicUrl,
-        url: publicUrl,
-        size: file.size,
-        mimetype: file.mimetype,
-      })
+      resolve({ publicUrl })
     })
 
-    blobStream.end(file.buffer)
+    blobStream.end(compressedBuffer)
   })
 }
 
@@ -58,44 +68,7 @@ const uploadMultipleFiles = async (files: Express.Multer.File[]): Promise<IUploa
   return Promise.all(uploadPromises)
 }
 
-const deleteFile = async (fileName: string): Promise<boolean> => {
-  if (!fileName) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Filename parameter is required')
-  }
-  const targetFileName = fileName.startsWith('http')
-    ? fileName.replace(`https://storage.googleapis.com/${storageConfig.bucketName}/`, '')
-    : fileName
-
-  const file = bucket.file(targetFileName)
-  const [exists] = await file.exists()
-  if (!exists) {
-    throw new ApiError(httpStatus.NOT_FOUND, `File '${targetFileName}' not found in storage`)
-  }
-
-  await file.delete()
-  return true
-}
-
-const getSignedUrl = async (fileName: string, expiresMinutes = 15): Promise<string> => {
-  if (!fileName) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Filename parameter is required')
-  }
-  const targetFileName = fileName.startsWith('http')
-    ? fileName.replace(`https://storage.googleapis.com/${storageConfig.bucketName}/`, '')
-    : fileName
-
-  const file = bucket.file(targetFileName)
-  const [url] = await file.getSignedUrl({
-    version: 'v4',
-    action: 'read',
-    expires: Date.now() + expiresMinutes * 60 * 1000,
-  })
-  return url
-}
-
 export const StorageService = {
   uploadFile,
   uploadMultipleFiles,
-  deleteFile,
-  getSignedUrl,
 }
