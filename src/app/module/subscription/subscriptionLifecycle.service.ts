@@ -4,12 +4,13 @@ import { BkashPayment } from '../bkashPayment/bkashPayment.model'
 import { BkashPaymentService } from '../bkashPayment/bkashPayment.service'
 import { Organization } from '../organization/organization.model'
 import { ComplianceService } from '../compliance/compliance.service'
-
-const GRACE_MS = 3 * 24 * 60 * 60 * 1000
-const REMINDER_MS = 3 * 24 * 60 * 60 * 1000
+import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
 
 export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number; stalePayments: number; completedDeletions: number }> => {
   const now = new Date()
+  const trialPolicy = await getTrialPolicy()
+  const graceMs = trialPolicy.gracePeriodDays * 24 * 60 * 60 * 1000
+  const reminderMs = trialPolicy.reminderDaysBeforeExpiry * 24 * 60 * 60 * 1000
   const pendingAttempts = await BkashPayment.find({ paymentId: { $ne: '' }, status: { $in: ['pending', 'failed'] },
     updatedAt: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }).select('paymentId').limit(100)
   for (const attempt of pendingAttempts) {
@@ -25,7 +26,13 @@ export const reconcileSubscriptions = async (): Promise<{ transitioned: number; 
     let nextStatus: typeof subscription.status | null = null
     if (subscription.status === 'grace' && subscription.gracePeriodEnd && subscription.gracePeriodEnd <= now) nextStatus = 'expired'
     else if (['trialing', 'active', 'past_due'].includes(subscription.status) && periodEnd && periodEnd <= now) {
-      nextStatus = 'grace'; subscription.gracePeriodEnd = new Date(now.getTime() + GRACE_MS)
+      if (graceMs <= 0) {
+        nextStatus = 'expired'
+        subscription.gracePeriodEnd = undefined
+      } else {
+        nextStatus = 'grace'
+        subscription.gracePeriodEnd = new Date(now.getTime() + graceMs)
+      }
     } else if (subscription.status === 'cancel_at_period_end' && periodEnd && periodEnd <= now) nextStatus = 'expired'
     if (nextStatus && nextStatus !== subscription.status) {
       const previous = subscription.status; subscription.status = nextStatus; await org.save(); transitioned += 1
@@ -33,7 +40,7 @@ export const reconcileSubscriptions = async (): Promise<{ transitioned: number; 
         entityId: org._id.toString(), metadata: { previous, next: nextStatus } })
       continue
     }
-    if (periodEnd && periodEnd.getTime() - now.getTime() > 0 && periodEnd.getTime() - now.getTime() <= REMINDER_MS &&
+    if (periodEnd && periodEnd.getTime() - now.getTime() > 0 && periodEnd.getTime() - now.getTime() <= reminderMs &&
         (!subscription.reminderSentAt || subscription.reminderSentAt < new Date(periodEnd.getTime() - 30 * 24 * 60 * 60 * 1000))) {
       await sendSms(org.phone, `Your ${org.agencyName} subscription expires on ${periodEnd.toLocaleDateString('en-BD')}. Renew with bKash to avoid interruption.`)
       subscription.reminderSentAt = now; await org.save(); reminders += 1

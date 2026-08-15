@@ -12,7 +12,7 @@ router.post(
 
 router.get(
   '/',
-  authMiddlewares.auth(),
+  authMiddlewares.requirePermission('website.write'),
   BannerController.getBanners
 )
 

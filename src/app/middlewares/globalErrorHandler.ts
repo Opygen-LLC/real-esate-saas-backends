@@ -51,6 +51,7 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     code: error instanceof ApiError ? error.code : undefined,
+    details: error instanceof ApiError ? error.details : undefined,
     message,
     errorMessages,
     stack: config.env !== 'production' ? error?.stack : undefined,

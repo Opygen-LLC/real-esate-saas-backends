@@ -9,7 +9,7 @@ import { writeAudit } from '../audit/audit.service'
 import { TeamInvitationService } from '../teamInvitation/teamInvitation.service'
 
 const createUser = catchAsync(async (req: Request, res: Response) => {
-  const result = await UserService.createUser(requireTenant(req), req.body)
+  const result = await UserService.createUser(requireTenant(req), req.body, req.user!._id!)
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
@@ -120,6 +120,22 @@ const deleteUserById = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const getMyAccess = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.getMyAccess(requireTenant(req), req.user!._id!)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Access policy fetched', data: result })
+})
+
+const updateMemberAccess = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const result = await UserService.updateMemberAccess(organizationId, req.user!._id!, req.params.id, req.body)
+  await writeAudit({ organizationId, actorId: req.user!._id!, actorRole: req.user!.userRole,
+    action: 'team.access_updated', entityType: 'user', entityId: req.params.id,
+    reason: 'Agency owner updated team member role or dashboard access', requestId: req.requestId, ip: req.ip,
+    metadata: { userRole: result.userRole, useRoleDefaults: result.accessControl?.useRoleDefaults, permissions: result.permissions } })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Team member access updated', data: result })
+})
+
 const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const filters = pick(req.query, ['searchTerm', 'userRole', 'status', 'organizationId'])
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
@@ -161,4 +177,6 @@ export const UserController = {
   deleteUserById,
   getAllUsersSuperAdmin,
   updateUserRoleSuperAdmin,
+  getMyAccess,
+  updateMemberAccess,
 }

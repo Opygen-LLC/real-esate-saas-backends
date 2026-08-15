@@ -9,6 +9,7 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
 import { TeamInvitation } from './teamInvitation.model'
+import { effectivePermissionsForUser, normalizeCustomPermissions, permissionsForRole } from '../user/accessControl'
 
 const tokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
 const inviteExpiryMs = 48 * 60 * 60 * 1000
@@ -19,8 +20,20 @@ const escapeHtml = (value: string) => value
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
-const createInvitation = async (organizationId: string, invitedBy: string, payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[] }) => {
+const createInvitation = async (organizationId: string, invitedBy: string, payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[]; accessControl?: { useRoleDefaults?: boolean; permissions?: string[] } }) => {
   await EntitlementService.assertLimit(organizationId, 'agents')
+  const inviter: any = await User.findOne({ _id: invitedBy, organizationId, status: 'active' }).select('userRole accessControl').lean()
+  if (!inviter) throw new ApiError(httpStatus.FORBIDDEN, 'Inviting user is not available')
+  const requestedRole = payload.userRole || 'agent'
+  const requestedPermissions = payload.accessControl?.useRoleDefaults === false
+    ? normalizeCustomPermissions(payload.accessControl.permissions || [])
+    : permissionsForRole(requestedRole)
+  if (inviter.userRole !== 'agency_owner') {
+    const inviterPermissions = new Set(effectivePermissionsForUser(inviter))
+    if (requestedPermissions.some((permission) => !inviterPermissions.has(permission))) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'You cannot grant a role or access level broader than your own')
+    }
+  }
   const email = normalizeEmail(payload.email)
   let phoneNumber: string
   try { phoneNumber = normalizeBangladeshPhone(payload.phoneNumber) } catch (error) { throw new ApiError(400, (error as Error).message) }
@@ -36,6 +49,10 @@ const createInvitation = async (organizationId: string, invitedBy: string, paylo
     phoneNumber,
     userRole: payload.userRole || 'agent',
     specialization: payload.specialization || [],
+    accessControl: {
+      useRoleDefaults: payload.accessControl?.useRoleDefaults !== false,
+      permissions: normalizeCustomPermissions(payload.accessControl?.permissions || []),
+    },
     tokenHash: tokenHash(token),
     invitedBy,
     expiresAt: new Date(Date.now() + inviteExpiryMs),
@@ -77,6 +94,7 @@ const acceptInvitation = async (token: string, password: string) => {
     organizationId: invitation.organizationId,
     userRole: invitation.userRole,
     specialization: invitation.specialization,
+    accessControl: invitation.accessControl || { useRoleDefaults: true, permissions: [] },
     isVerified: true,
     isAddProfile: true,
     status: 'active',

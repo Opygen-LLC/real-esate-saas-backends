@@ -8,7 +8,7 @@ router.post('/log', VisitorLogsController.logVisitor)
 
 router.get(
   '/analytics',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.requirePermission('analytics.advanced'),
   VisitorLogsController.getVisitorAnalytics
 )
 

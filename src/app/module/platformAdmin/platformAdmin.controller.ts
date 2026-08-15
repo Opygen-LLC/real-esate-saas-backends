@@ -23,6 +23,10 @@ const audit = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getAuditLog(req.query)
   sendResponse(res, { statusCode: 200, success: true, message: 'Platform audit log fetched', data: result.data, meta: result.meta })
 })
+
+const subscriptionSummary = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Subscription summary fetched', data: await PlatformAdminService.getSubscriptionSummary() }))
+const changeTenantSubscription = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Tenant subscription updated', data: await PlatformAdminService.changeTenantSubscription(req.params.organizationId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
+const manageTenantTrial = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Tenant trial updated', data: await PlatformAdminService.manageTenantTrial(req.params.organizationId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
 const startImpersonation = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.startImpersonation({ adminUserId: req.user!._id!, organizationId: req.body.organizationId, targetUserId: req.body.targetUserId, reason: req.body.reason, durationMinutes: req.body.durationMinutes, requestId: req.requestId, ip: req.ip, userAgent: req.get('user-agent') || '' })
   const maxAge = Math.max(0, new Date(result.session.expiresAt).getTime() - Date.now())
@@ -37,4 +41,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, addPaymentNote, revenue, audit, startImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, addPaymentNote, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, endImpersonation }

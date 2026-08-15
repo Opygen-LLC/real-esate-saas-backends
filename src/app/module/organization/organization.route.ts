@@ -20,20 +20,20 @@ router.patch(
 
 router.patch(
   '/onboarding',
-  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   validateRequest(OrganizationValidation.onboarding),
   OrganizationController.saveOnboarding
 )
 
 router.post(
   '/onboarding/complete',
-  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   OrganizationController.completeOnboarding
 )
 
 router.post(
   '/onboarding/skip',
-  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   OrganizationController.skipOnboarding
 )
 
@@ -45,14 +45,14 @@ router.get(
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   validateRequest(OrganizationValidation.updateProfile),
   OrganizationController.updateMyOrganization
 )
 
 router.patch(
   '/update',
-  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   validateRequest(OrganizationValidation.updateProfile),
   OrganizationController.updateMyOrganization
 )

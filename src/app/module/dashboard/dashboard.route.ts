@@ -6,13 +6,13 @@ const router = express.Router()
 
 router.get(
   '/overview',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('dashboard.read'),
   DashboardController.getOverviewStats
 )
 
 router.get(
   '/analytics',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('analytics.read'),
   DashboardController.getAnalytics
 )
 

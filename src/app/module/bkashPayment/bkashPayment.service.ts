@@ -189,6 +189,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         'subscription.maxAgents': attempt.maxAgents,
         'subscription.gracePeriodEnd': null,
         'subscription.cancelAtPeriodEnd': false,
+        'subscription.source': 'bkash',
       },
     }
   )

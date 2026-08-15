@@ -5,7 +5,19 @@ import validateRequest from '../../middlewares/validateRequest'
 import { PlatformAdminController } from './platformAdmin.controller'
 
 const router = express.Router()
+const subscriptionBody = z.object({ body: z.object({
+  plan: z.enum(['trial', 'starter', 'professional', 'agency', 'enterprise']),
+  planVersion: z.number().int().positive().optional(), periodDays: z.number().int().min(1).max(3660).optional(),
+  reason: z.string().trim().min(10).max(500),
+}) })
+const trialBody = z.object({ body: z.object({
+  action: z.enum(['extend', 'set_end', 'end', 'restart']), days: z.number().int().min(1).max(3650).optional(),
+  trialEndsAt: z.string().datetime().optional(), reason: z.string().trim().min(10).max(500),
+}) })
 const reasonBody = z.object({ body: z.object({ reason: z.string().trim().min(10).max(500) }) })
+router.get('/subscriptions/summary', authMiddlewares.authSuperAdmin, PlatformAdminController.subscriptionSummary)
+router.patch('/tenants/:organizationId/subscription', authMiddlewares.authSuperAdmin, validateRequest(subscriptionBody), PlatformAdminController.changeTenantSubscription)
+router.patch('/tenants/:organizationId/trial', authMiddlewares.authSuperAdmin, validateRequest(trialBody), PlatformAdminController.manageTenantTrial)
 router.get('/tenants/health', authMiddlewares.authSuperAdmin, PlatformAdminController.tenantHealth)
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)

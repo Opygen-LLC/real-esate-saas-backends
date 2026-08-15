@@ -8,18 +8,7 @@ import { ImpersonationSession } from '../module/platformAdmin/impersonationSessi
 import { User } from '../module/user/user.model'
 import { RequestContext } from '../../shared/requestContext'
 
-export type Permission = 'properties.read' | 'properties.write' | 'properties.delete' | 'leads.read' | 'leads.write' |
-  'leads.assign' | 'users.read' | 'users.write' | 'billing.manage' | 'website.write' | 'domains.manage' | 'analytics.advanced' |
-  'compliance.read' | 'compliance.write' | 'crm.configure' | 'crm.export' | 'messaging.manage' | 'whatsapp.manage' | 'finance.read' | 'finance.write'
-export const permissionMatrix: Record<string, Permission[]> = {
-  agency_owner: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'billing.manage', 'website.write', 'domains.manage', 'analytics.advanced', 'compliance.read', 'compliance.write', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage', 'finance.read', 'finance.write'],
-  agency_admin: ['properties.read', 'properties.write', 'properties.delete', 'leads.read', 'leads.write', 'leads.assign', 'users.read', 'users.write', 'website.write', 'analytics.advanced', 'compliance.read', 'crm.configure', 'crm.export', 'messaging.manage', 'whatsapp.manage', 'finance.read', 'finance.write'],
-  agent: ['properties.read', 'properties.write', 'leads.read', 'leads.write'],
-  viewer: ['properties.read', 'leads.read'], user: ['properties.read'], 'super-admin': [],
-}
-
-export const permissionsForRole = (role: string): Permission[] => [...(permissionMatrix[role] || [])]
-export const roleHasPermission = (role: string, permission: Permission): boolean => permissionMatrix[role]?.includes(permission) || false
+import { effectivePermissionsForUser, Permission, permissionMatrix, permissionsForRole, roleHasPermission } from '../module/user/accessControl'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -32,14 +21,14 @@ const tryImpersonation = async (req: Request): Promise<boolean> => {
     const session: any = await ImpersonationSession.findOne({ _id: payload.impersonationSessionId, endedAt: null, expiresAt: { $gt: new Date() } }).lean()
     if (!session || session.adminUserId.toString() !== String(payload.supportAdminId) || session.targetUserId.toString() !== String(payload._id) || session.organizationId !== String(payload.organizationId)) return false
     const [target, supportAdmin] = await Promise.all([
-      User.findOne({ _id: payload._id, organizationId: payload.organizationId, status: 'active', isVerified: true }).select('_id email phoneNumber userRole organizationId').lean(),
+      User.findOne({ _id: payload._id, organizationId: payload.organizationId, status: 'active', isVerified: true }).select('_id email phoneNumber userRole organizationId accessControl').lean(),
       User.exists({ _id: session.adminUserId, userRole: 'super-admin', status: 'active', isVerified: true }),
     ])
     if (!supportAdmin) throw new ApiError(401, 'Support administrator is no longer authorized')
     if (!target) throw new ApiError(401, 'Impersonated tenant user is unavailable')
     if (!SAFE_METHODS.has(req.method.toUpperCase())) throw new ApiError(403, 'Support impersonation is read-only. End impersonation before making changes.')
     req.user = { _id: target._id.toString(), email: target.email, phoneNumber: target.phoneNumber, userRole: target.userRole, organizationId: target.organizationId }
-    req.tenant = { organizationId: target.organizationId, userId: target._id.toString(), role: target.userRole, permissions: permissionMatrix[target.userRole] || [] }
+    req.tenant = { organizationId: target.organizationId, userId: target._id.toString(), role: target.userRole, permissions: effectivePermissionsForUser(target) }
     RequestContext.setTenant(target.organizationId, target._id.toString())
     req.impersonation = { sessionId: session._id.toString(), adminUserId: session.adminUserId.toString(), organizationId: session.organizationId, readOnly: true, expiresAt: session.expiresAt }
     return true
@@ -55,7 +44,7 @@ const authenticate = async (req: Request): Promise<void> => {
   if (!token) throw new ApiError(401, 'Authentication required')
   let payload: any
   try { payload = jwtHelpers.verifyToken(token, config.jwt.secret as Secret) } catch { throw new ApiError(401, 'Invalid or expired access token') }
-  const user: any = await User.findById(payload._id).select('_id email phoneNumber userRole organizationId status isVerified').lean()
+  const user: any = await User.findById(payload._id).select('_id email phoneNumber userRole organizationId status isVerified accessControl').lean()
   if (!user) throw new ApiError(401, 'Account is unavailable')
   if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
@@ -66,7 +55,7 @@ const authenticate = async (req: Request): Promise<void> => {
   }
   req.user = { _id: user._id.toString(), email: user.email, phoneNumber: user.phoneNumber, userRole: user.userRole, organizationId: user.organizationId }
   if (user.userRole !== 'super-admin') {
-    req.tenant = { organizationId: user.organizationId, userId: user._id.toString(), role: user.userRole, permissions: permissionMatrix[user.userRole] || [] }
+    req.tenant = { organizationId: user.organizationId, userId: user._id.toString(), role: user.userRole, permissions: effectivePermissionsForUser(user) }
     RequestContext.setTenant(user.organizationId, user._id.toString())
   } else RequestContext.setTenant(undefined, user._id.toString())
 }
@@ -86,4 +75,5 @@ export const requireTenant = (req: Request): string => {
   if (!req.tenant?.organizationId) throw new ApiError(403, 'Tenant context required')
   return req.tenant.organizationId
 }
+export { Permission, permissionMatrix, permissionsForRole, roleHasPermission }
 export const authMiddlewares = { auth, authSuperAdmin, requirePermission }

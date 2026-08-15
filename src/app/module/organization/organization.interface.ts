@@ -15,6 +15,7 @@ export interface ISubscription {
   gracePeriodEnd?: Date | null
   cancelAtPeriodEnd?: boolean
   reminderSentAt?: Date | null
+  source?: 'trial' | 'bkash' | 'manual_admin' | 'migration'
 }
 
 export interface IPlatformAccess {

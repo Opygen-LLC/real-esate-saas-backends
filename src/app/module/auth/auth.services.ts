@@ -24,6 +24,8 @@ import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { captureOtpForTest } from '../../../testSupport/otpCapture'
 import { sendAccountVerificationEmail, sendPasswordResetEmail } from './authEmail.service'
+import { effectivePermissionsForUser } from '../user/accessControl'
+import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
@@ -45,6 +47,7 @@ const publicUser = (user: any) => ({
   phoneNumber: user.phoneNumber,
   userRole: user.userRole,
   organizationId: user.organizationId,
+  permissions: effectivePermissionsForUser(user),
 })
 
 const accessTokenFor = (user: any): string => jwtHelpers.createToken({
@@ -199,7 +202,8 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
   const otp = generateOtp()
   await enforceOtpThrottle(email, 'account_verification')
 
-  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+  const trialPolicy = await getTrialPolicy()
+  const trialEnd = trialEndFromPolicy(trialPolicy)
   const passwordHash = await hashPassword(payload.password)
   const websiteUrl = buildTenantWebsiteUrl(subdomain)
   const websiteDocument = buildDefaultWebsiteDocument(payload.agencyName, payload.agencyType || 'residential')
@@ -238,12 +242,13 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       },
       subscription: {
         plan: 'trial',
-        status: 'trialing',
+        status: trialPolicy.enabled && trialPolicy.defaultTrialDays > 0 ? 'trialing' : 'expired',
         currentPeriodEnd: trialEnd,
         trialEndsAt: trialEnd,
         lastPaymentDate: null,
-        maxProperties: 10,
-        maxAgents: 2,
+        maxProperties: trialPolicy.maxProperties,
+        maxAgents: trialPolicy.maxAgents,
+        source: 'trial',
       },
     }], sessionOptions)
     await User.create([{

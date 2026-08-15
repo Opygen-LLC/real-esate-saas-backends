@@ -8,27 +8,27 @@ const router = express.Router()
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('tasks.read'),
   TaskController.getAllTasks
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('tasks.write'),
   validateRequest(TaskValidation.createTaskZodSchema),
   TaskController.createTask
 )
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('tasks.write'),
   validateRequest(TaskValidation.updateTaskZodSchema),
   TaskController.updateTask
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('tasks.write'),
   TaskController.deleteTask
 )
 

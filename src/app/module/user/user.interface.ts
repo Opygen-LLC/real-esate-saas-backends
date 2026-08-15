@@ -5,6 +5,7 @@ export type IUserRole =
   | 'agency_owner'
   | 'agency_admin'
   | 'agent'
+  | 'staff'
   | 'viewer'
   | 'user'
 
@@ -28,6 +29,7 @@ export interface IUser {
   isVerified: boolean
   isAddProfile: boolean
   sidebar_permission?: Record<string, boolean>
+  accessControl?: { useRoleDefaults: boolean; permissions: string[] }
   createdAt?: Date
   updatedAt?: Date
 }

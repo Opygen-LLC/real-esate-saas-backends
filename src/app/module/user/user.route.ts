@@ -11,6 +11,8 @@ router.get('/public/:organizationId', UserController.getPublicAgents)
 router.get('/public-agent/:id', UserController.getPublicAgentDetail)
 
 // Authenticated endpoints
+router.get('/me/access', authMiddlewares.auth(), UserController.getMyAccess)
+
 router.post(
   '/',
   authMiddlewares.requirePermission('users.write'),
@@ -36,6 +38,8 @@ router.get(
   authMiddlewares.requirePermission('users.read'),
   UserController.getAllUsers
 )
+
+router.patch('/:id/access', authMiddlewares.auth('agency_owner'), validateRequest(UserValidation.memberAccess), UserController.updateMemberAccess)
 
 // Platform routes must be explicit and declared before tenant `/:id` routes.
 router.get('/super-admin/all', authMiddlewares.authSuperAdmin, UserController.getAllUsersSuperAdmin)

@@ -16,10 +16,25 @@ import { randomToken } from '../../helpers/crypto'
 import { AuthSession } from '../auth/authSession.model'
 import { Organization } from '../organization/organization.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { effectivePermissionsForUser, normalizeCustomPermissions, permissionCatalog, permissionsForRole } from './accessControl'
 
-const createUser = async (organizationId: string, userData: IUser): Promise<IUser> => {
+const createUser = async (organizationId: string, userData: IUser, actorUserId: string): Promise<IUser> => {
   await EntitlementService.assertLimit(organizationId, 'agents')
+  const actor: any = await User.findOne({ _id: actorUserId, organizationId, status: 'active' }).select('userRole accessControl').lean()
+  if (!actor) throw new ApiError(httpStatus.FORBIDDEN, 'Creating user is not available')
+  const requestedPermissions = userData.accessControl?.useRoleDefaults === false
+    ? normalizeCustomPermissions(userData.accessControl.permissions || [])
+    : permissionsForRole(userData.userRole || 'agent')
+  if (actor.userRole !== 'agency_owner') {
+    const actorPermissions = new Set(effectivePermissionsForUser(actor))
+    if (requestedPermissions.some((permission) => !actorPermissions.has(permission))) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'You cannot grant a role or access level broader than your own')
+    }
+  }
   userData.organizationId = organizationId
+  if (userData.accessControl?.useRoleDefaults === false) {
+    userData.accessControl.permissions = normalizeCustomPermissions(userData.accessControl.permissions || [])
+  }
   userData.email = normalizeEmail(userData.email)
   try { userData.phoneNumber = normalizeBangladeshPhone(userData.phoneNumber) } catch (error) { throw new ApiError(400, (error as Error).message) }
 
@@ -303,6 +318,46 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
   return result
 }
 
+
+const getMyAccess = async (organizationId: string, userId: string) => {
+  const user: any = await User.findOne({ _id: userId, organizationId }).select('_id name userRole accessControl').lean()
+  if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  return {
+    userId: String(user._id),
+    userRole: user.userRole,
+    useRoleDefaults: user.userRole === 'agency_owner' ? true : user.accessControl?.useRoleDefaults !== false,
+    permissions: effectivePermissionsForUser(user),
+    roleDefaults: permissionsForRole(user.userRole),
+    catalog: permissionCatalog,
+  }
+}
+
+const updateMemberAccess = async (
+  organizationId: string,
+  actorUserId: string,
+  targetUserId: string,
+  payload: { userRole?: 'agency_admin' | 'agent' | 'staff' | 'viewer'; useRoleDefaults: boolean; permissions?: string[] },
+) => {
+  if (String(actorUserId) === String(targetUserId)) throw new ApiError(httpStatus.BAD_REQUEST, 'You cannot change your own access policy')
+  const target: any = await User.findOne({ _id: targetUserId, organizationId })
+  if (!target) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+  if (target.userRole === 'agency_owner') throw new ApiError(httpStatus.FORBIDDEN, 'Agency owner access cannot be restricted')
+
+  const role = payload.userRole || target.userRole
+  const allowedRoles = new Set(['agency_admin', 'agent', 'staff', 'viewer'])
+  if (!allowedRoles.has(role)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported team role')
+  const permissions = normalizeCustomPermissions(payload.permissions || [])
+
+  target.userRole = role
+  target.accessControl = { useRoleDefaults: payload.useRoleDefaults, permissions: payload.useRoleDefaults ? [] : permissions }
+  await target.save()
+  await CacheInvalidationService.invalidateTenant(organizationId)
+
+  const result = target.toObject()
+  delete result.password
+  return { ...result, permissions: effectivePermissionsForUser(target) }
+}
+
 export const UserService = {
   createUser,
   getAllUsers,
@@ -314,4 +369,6 @@ export const UserService = {
   deleteUserById,
   getAllUsersSuperAdmin,
   updateUserRoleSuperAdmin,
+  getMyAccess,
+  updateMemberAccess,
 }

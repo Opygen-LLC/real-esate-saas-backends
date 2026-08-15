@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { Schema, model } from 'mongoose'
 import { IUser, UserModel } from './user.interface'
+import { permissionValues } from './accessControl'
 
 const userSchema = new Schema<IUser, UserModel>(
   {
@@ -37,6 +38,7 @@ const userSchema = new Schema<IUser, UserModel>(
         'agency_owner',
         'agency_admin',
         'agent',
+        'staff',
         'viewer',
         'user',
       ],
@@ -94,6 +96,10 @@ const userSchema = new Schema<IUser, UserModel>(
     sidebar_permission: {
       type: Object,
       default: {},
+    },
+    accessControl: {
+      useRoleDefaults: { type: Boolean, default: true },
+      permissions: { type: [String], enum: permissionValues, default: [] },
     },
   },
   {

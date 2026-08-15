@@ -5,6 +5,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import { writeAudit } from '../audit/audit.service'
 import { PlatformSettings } from './platformSettings.model'
 import { encryptField, maskSensitive, decryptField } from '../../helpers/fieldEncryption'
+import { invalidateTrialPolicy } from './trialPolicy.service'
 
 const publicSettings = catchAsync(async (_req: Request, res: Response) => {
   const settings = await PlatformSettings.findOneAndUpdate({ key: 'platform' }, { $setOnInsert: { key: 'platform' } }, { upsert: true, new: true })
@@ -34,6 +35,7 @@ const update = catchAsync(async (req: Request, res: Response) => {
   }
   if (payload.privacy?.legalReviewStatus === 'approved') $set['privacy.legalReviewedAt'] = new Date()
   const settings = await PlatformSettings.findOneAndUpdate({ key: 'platform' }, { $set, $setOnInsert: { key: 'platform' } }, { upsert: true, new: true })
+  if (payload.trial) await invalidateTrialPolicy()
   await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'platform.settings_updated',
     entityType: 'platformSettings', entityId: settings._id.toString(), reason, requestId: req.requestId, ip: req.ip,
     metadata: { fields: Object.keys($set) } })

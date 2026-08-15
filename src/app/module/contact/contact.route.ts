@@ -8,33 +8,33 @@ const router = express.Router()
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('contacts.read'),
   ContactController.getAllContacts
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('contacts.write'),
   validateRequest(ContactValidation.createContactZodSchema),
   ContactController.createContact
 )
 
 router.get(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('contacts.read'),
   ContactController.getContactById
 )
 
 router.patch(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('contacts.write'),
   validateRequest(ContactValidation.updateContactZodSchema),
   ContactController.updateContact
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('contacts.write'),
   ContactController.deleteContact
 )
 

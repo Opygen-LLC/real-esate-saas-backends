@@ -2,6 +2,7 @@ import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
 import { User } from '../user/user.model'
 import { CrmConfig, LeadAssignmentAudit } from './crm.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const DEFAULT_STAGES = [
   ['New', 'New Lead'], ['Contacted', 'Contacted'], ['Qualified', 'Qualified'], ['ViewingScheduled', 'Viewing Booked'],
@@ -44,6 +45,7 @@ const activeEligibleAgents = async (organizationId: string, configuredIds: any[]
 }
 
 const chooseAgent = async (organizationId: string, lead: { locationPreference?: string }, preferredPropertyAgent?: string) => {
+  if (!(await EntitlementService.hasFeature(organizationId, 'leadAutomations'))) return { agentId: undefined, strategy: 'manual' as const, reason: 'Lead automation is not included in the current plan' }
   const config = await getConfig(organizationId)
   const assignment = config?.assignment || { mode: 'manual', eligibleAgentIds: [], territoryRules: [], workloadCap: 100, roundRobinCursor: 0 }
   if (preferredPropertyAgent) return { agentId: preferredPropertyAgent, strategy: 'property_owner' as const, reason: 'Property listing agent' }

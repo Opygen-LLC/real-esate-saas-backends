@@ -6,13 +6,13 @@ const router = express.Router()
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.write'),
   ActivityController.createActivity
 )
 
 router.get(
   '/lead/:leadId',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client'),
+  authMiddlewares.requirePermission('leads.read'),
   ActivityController.getActivitiesByLead
 )
 

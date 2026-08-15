@@ -15,6 +15,15 @@ export interface WebsiteTemplateDefinition {
   tier: TemplateTier
   entitlement: 'included' | 'premiumTemplates'
   description: string
+  capabilities: {
+    hero: { backgroundImage: boolean; eyebrow: boolean; title: boolean; subtitle: boolean }
+    sections: {
+      featuredProperties: { supported: boolean; label: string; required?: boolean }
+      whyChooseUs: { supported: boolean; label: string; required?: boolean }
+      agents: { supported: boolean; label: string; required?: boolean }
+      consultation: { supported: boolean; label: string; required?: boolean }
+    }
+  }
   qa: { accessibility: 'enforced'; responsive: 'enforced' }
   migrate: (document: any) => any
 }
@@ -22,10 +31,10 @@ export interface WebsiteTemplateDefinition {
 const pinTemplate = (id: string, version: string) => (document: any) => ({ ...document, template: { id, version } })
 
 const registry: WebsiteTemplateDefinition[] = [
-  { id: 'template-1', version: '2.0.0', name: 'Modern Residence', thumbnail: '/templates/template-1.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Clean, conversion-focused residential website.', qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-1', '2.0.0') },
-  { id: 'template-2', version: '2.0.0', name: 'Luxury Editorial', thumbnail: '/templates/template-2.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Editorial presentation for premium property portfolios.', qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-2', '2.0.0') },
-  { id: 'template-3', version: '2.0.0', name: 'Corporate Brokerage', thumbnail: '/templates/template-3.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Structured multi-agent brokerage presentation.', qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-3', '2.0.0') },
-  { id: 'template-4', version: '2.0.0', name: 'Urban Developer', thumbnail: '/templates/template-4.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Bold project-led layout for developers and urban agencies.', qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-4', '2.0.0') },
+  { id: 'template-1', version: '2.0.0', name: 'Modern Residence', thumbnail: '/templates/template-1.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Clean, conversion-focused residential website.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Properties' }, whyChooseUs: { supported: true, label: 'Why Choose Us' }, agents: { supported: true, label: 'Meet Our Agents' }, consultation: { supported: true, label: 'Consultation' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-1', '2.0.0') },
+  { id: 'template-2', version: '2.0.0', name: 'Luxury Editorial', thumbnail: '/templates/template-2.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Editorial presentation for premium property portfolios.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Collection' }, whyChooseUs: { supported: false, label: 'Brand Story' }, agents: { supported: false, label: 'Advisors' }, consultation: { supported: false, label: 'Private Consultation' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-2', '2.0.0') },
+  { id: 'template-3', version: '2.0.0', name: 'Corporate Brokerage', thumbnail: '/templates/template-3.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Structured multi-agent brokerage presentation.', capabilities: { hero: { backgroundImage: false, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Listings' }, whyChooseUs: { supported: false, label: 'Services' }, agents: { supported: false, label: 'Brokerage Team' }, consultation: { supported: false, label: 'Contact CTA' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-3', '2.0.0') },
+  { id: 'template-4', version: '2.0.0', name: 'Urban Developer', thumbnail: '/templates/template-4.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Bold project-led layout for developers and urban agencies.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Projects' }, whyChooseUs: { supported: false, label: 'Development Highlights' }, agents: { supported: false, label: 'Project Team' }, consultation: { supported: false, label: 'Inquiry CTA' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-4', '2.0.0') },
 ]
 
 const normalizeSeo = (document: any) => ({

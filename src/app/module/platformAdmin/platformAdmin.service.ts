@@ -20,6 +20,8 @@ import { User } from '../user/user.model'
 import { ImpersonationSession } from './impersonationSession.model'
 import { AuthSession } from '../auth/authSession.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
@@ -56,7 +58,7 @@ const getTenantHealth = async (query: any) => {
 
   const [properties, agents, leads, domains, latestEvents, latestPayments, failedJobs, deadMeta, openSupport, breachedSupport] = await Promise.all([
     groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
-    groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] }, status: { $ne: 'blocked' } }),
+    groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, { leadStatus: { $nin: ['Won', 'Lost'] } }),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
@@ -90,6 +92,8 @@ const getTenantHealth = async (query: any) => {
       paymentId: payment?.paymentId || '',
       subscriptionStatus: org.subscription?.status || 'trialing',
       currentPeriodEnd: org.subscription?.currentPeriodEnd,
+      trialEndsAt: org.subscription?.trialEndsAt,
+      subscriptionSource: org.subscription?.source || 'trial',
       usage: {
         properties: properties.get(org.organizationId) || 0,
         agents: agents.get(org.organizationId) || 0,
@@ -236,6 +240,134 @@ const getAuditLog = async (query: any) => {
   return { data, meta: { page, limit, total } }
 }
 
+
+const getSubscriptionSummary = async () => {
+  const policy = await getTrialPolicy()
+  const now = new Date()
+  const expiringBefore = new Date(now.getTime() + policy.reminderDaysBeforeExpiry * 24 * 60 * 60 * 1000)
+  const [totalAgencies, activeTrials, trialsExpiringSoon, pastDue, paidAgencies, planBreakdown] = await Promise.all([
+    Organization.countDocuments({}),
+    Organization.countDocuments({ isBlocked: { $ne: true }, 'subscription.status': 'trialing' }),
+    Organization.countDocuments({ isBlocked: { $ne: true }, 'subscription.status': 'trialing', 'subscription.trialEndsAt': { $gt: now, $lte: expiringBefore } }),
+    Organization.countDocuments({ isBlocked: { $ne: true }, 'subscription.status': { $in: ['past_due', 'grace', 'expired'] } }),
+    Organization.countDocuments({ isBlocked: { $ne: true }, 'subscription.plan': { $ne: 'trial' }, 'subscription.status': { $in: ['active', 'grace', 'cancel_at_period_end'] } }),
+    Organization.aggregate([{ $group: { _id: '$subscription.plan', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+  ])
+  return { totalAgencies, activeTrials, trialsExpiringSoon, pastDue, paidAgencies, planBreakdown: planBreakdown.map((row: any) => ({ plan: row._id || 'unknown', count: row.count })), trialPolicy: policy }
+}
+
+const planForAdminAssignment = async (planId: string, version?: number) => {
+  if (!['starter', 'professional', 'agency', 'enterprise'].includes(planId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported subscription plan')
+  const query: any = { planId, isActive: true }
+  if (version) query.version = version
+  else query.isCurrent = true
+  const plan: any = await SubscriptionPlan.findOne(query).lean()
+  if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
+  return plan
+}
+
+const tenantUsage = async (organizationId: string) => {
+  const [agents, properties, leads] = await Promise.all([
+    User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } }),
+    Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }),
+    Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } }),
+  ])
+  return { agents, properties, leads }
+}
+
+const changeTenantSubscription = async (
+  organizationId: string,
+  input: { plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'; planVersion?: number; reason: string; periodDays?: number },
+  actor: { id: string; requestId?: string; ip?: string },
+) => {
+  const org: any = await Organization.findOne({ organizationId })
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before changing its subscription')
+  const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
+  const now = new Date()
+  let assigned: any
+  if (input.plan === 'trial') {
+    const policy = await getTrialPolicy()
+    if (!policy.enabled) throw new ApiError(httpStatus.CONFLICT, 'Trials are disabled in platform settings')
+    const end = new Date(now.getTime() + Math.max(1, Number(input.periodDays || policy.defaultTrialDays)) * 24 * 60 * 60 * 1000)
+    assigned = {
+      plan: 'trial', planVersion: 1, status: 'trialing', currentPeriodEnd: end, trialEndsAt: end,
+      gracePeriodEnd: null, cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_admin',
+      maxProperties: policy.maxProperties, maxAgents: policy.maxAgents,
+    }
+  } else {
+    const plan: any = await planForAdminAssignment(input.plan, input.planVersion)
+    const end = new Date(now.getTime() + Math.max(1, Number(input.periodDays || 30)) * 24 * 60 * 60 * 1000)
+    assigned = {
+      plan: plan.planId, planVersion: plan.version, status: 'active', currentPeriodEnd: end, trialEndsAt: null,
+      gracePeriodEnd: null, cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_admin',
+      maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
+    }
+  }
+  org.subscription = { ...(org.subscription?.toObject?.() || org.subscription || {}), ...assigned }
+  await org.save()
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  const usage = await tenantUsage(organizationId)
+  const limits = input.plan === 'trial'
+    ? { maxAgents: assigned.maxAgents, maxProperties: assigned.maxProperties, maxLeads: (await getTrialPolicy()).maxLeads }
+    : await planForAdminAssignment(input.plan, assigned.planVersion)
+  const warnings = [
+    ...(usage.agents > Number(limits.maxAgents || 0) ? [`Team usage (${usage.agents}) is above this plan limit (${limits.maxAgents}). Existing users were preserved.`] : []),
+    ...(usage.properties > Number(limits.maxProperties || 0) ? [`Property usage (${usage.properties}) is above this plan limit (${limits.maxProperties}). Existing listings were preserved.`] : []),
+    ...(usage.leads > Number(limits.maxLeads || 0) ? [`Lead usage (${usage.leads}) is above this plan limit (${limits.maxLeads}). Existing leads were preserved.`] : []),
+  ]
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.plan_changed', entityType: 'organization', entityId: org._id.toString(), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { previous, current: assigned, usage, warnings } })
+  return { organizationId, agencyName: org.agencyName, subscription: org.subscription, usage, warnings }
+}
+
+const manageTenantTrial = async (
+  organizationId: string,
+  input: { action: 'extend' | 'set_end' | 'end' | 'restart'; days?: number; trialEndsAt?: string; reason: string },
+  actor: { id: string; requestId?: string; ip?: string },
+) => {
+  const org: any = await Organization.findOne({ organizationId })
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before changing its trial')
+  if (org.subscription?.plan !== 'trial') throw new ApiError(httpStatus.CONFLICT, 'This agency is on a paid plan. Use Manage plan to switch it to Trial first.')
+  const policy = await getTrialPolicy()
+  const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
+  const now = new Date()
+  let end: Date = now
+  if (input.action === 'extend') {
+    const base = org.subscription?.trialEndsAt && new Date(org.subscription.trialEndsAt).getTime() > now.getTime() ? new Date(org.subscription.trialEndsAt) : now
+    end = new Date(base.getTime() + Math.max(1, Number(input.days || 7)) * 24 * 60 * 60 * 1000)
+  } else if (input.action === 'set_end') {
+    if (!input.trialEndsAt) throw new ApiError(httpStatus.BAD_REQUEST, 'Trial end date is required')
+    end = new Date(input.trialEndsAt)
+    if (Number.isNaN(end.getTime()) || end <= now) throw new ApiError(httpStatus.BAD_REQUEST, 'Trial end date must be in the future')
+  } else if (input.action === 'restart') {
+    if (!policy.enabled) throw new ApiError(httpStatus.CONFLICT, 'Trials are disabled in platform settings')
+    end = input.days ? new Date(now.getTime() + Math.max(1, Number(input.days)) * 24 * 60 * 60 * 1000) : trialEndFromPolicy(policy, now)
+  }
+
+  if (input.action === 'end') {
+    org.subscription.status = 'expired'
+    org.subscription.currentPeriodEnd = now
+    org.subscription.trialEndsAt = now
+  } else {
+    org.subscription.plan = 'trial'
+    org.subscription.planVersion = 1
+    org.subscription.status = 'trialing'
+    org.subscription.currentPeriodEnd = end
+    org.subscription.trialEndsAt = end
+    org.subscription.gracePeriodEnd = null
+    org.subscription.cancelAtPeriodEnd = false
+    org.subscription.reminderSentAt = null
+    org.subscription.maxAgents = policy.maxAgents
+    org.subscription.maxProperties = policy.maxProperties
+    org.subscription.source = 'manual_admin'
+  }
+  await org.save()
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.trial_updated', entityType: 'organization', entityId: org._id.toString(), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { action: input.action, previous, current: org.subscription?.toObject?.() || org.subscription } })
+  return { organizationId, agencyName: org.agencyName, subscription: org.subscription }
+}
+
 const startImpersonation = async (input: { adminUserId: string; organizationId: string; targetUserId?: string; reason: string; durationMinutes?: number; requestId?: string; ip?: string; userAgent?: string }) => {
   const durationMinutes = Math.min(30, Math.max(5, Number(input.durationMinutes || 15)))
   const organization = await Organization.findOne({ organizationId: input.organizationId }).select('organizationId agencyName isBlocked').lean()
@@ -270,4 +402,4 @@ const endImpersonation = async (token: string, actorId?: string, requestId?: str
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, addPaymentNote, getRevenueDashboard, getAuditLog, startImpersonation, verifyImpersonationToken, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, addPaymentNote, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, verifyImpersonationToken, endImpersonation }
