@@ -305,4 +305,17 @@ export default {
     client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
   },
+  bkash: {
+    enabled: envBoolean('BKASH_ENABLED', false),
+    grant_token_url: process.env.BKASH_GRANT_TOKEN_URL?.trim() || '',
+    create_payment_url: process.env.BKASH_CREATE_PAYMENT_URL?.trim() || '',
+    execute_payment_url: process.env.BKASH_EXECUTE_PAYMENT_URL?.trim() || '',
+    query_payment_url: process.env.BKASH_QUERY_PAYMENT_URL?.trim() || '',
+    app_key: process.env.BKASH_APP_KEY?.trim() || '',
+    app_secret: process.env.BKASH_APP_SECRET?.trim() || '',
+    username: process.env.BKASH_USERNAME?.trim() || '',
+    password: process.env.BKASH_PASSWORD?.trim() || '',
+    timeout_ms: Math.max(1000, Number(process.env.BKASH_TIMEOUT_MS || 10000)),
+  },
 }
+

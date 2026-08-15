@@ -6,6 +6,7 @@ export type MigrationCli = {
   apply: boolean
   confirm?: string
   backupDir: string
+  phase3Ready?: boolean
 }
 
 const optionValue = (name: string): string | undefined => {
@@ -17,7 +18,9 @@ export const migrationCli = (): MigrationCli => ({
   apply: process.argv.includes('--apply'),
   confirm: optionValue('confirm'),
   backupDir: optionValue('backup-dir') || process.env.MIGRATION_BACKUP_DIR || path.join(process.cwd(), 'migration-backups'),
+  phase3Ready: process.argv.includes('--phase3-ready'),
 })
+
 
 export const requireConfirmation = (cli: MigrationCli, expected: string): void => {
   if (!cli.apply) return

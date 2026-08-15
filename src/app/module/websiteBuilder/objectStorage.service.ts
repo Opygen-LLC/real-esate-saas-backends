@@ -71,7 +71,8 @@ const putBuffer = async (key: string, body: Buffer, contentType: string) => {
   const response = await Resilience.fetch(
     'object-storage',
     presign('PUT', key, Math.max(120, config.assets.signed_url_ttl_seconds), 'internal'),
-    { method: 'PUT', headers: { 'content-type': contentType }, body },
+    { method: 'PUT', headers: { 'content-type': contentType }, body: body as any },
+
     { timeoutMs: Math.max(15_000, config.assets.health_timeout_ms) },
   )
   if (!response.ok) throw new ApiError(502, `Object storage upload failed (${response.status})`)

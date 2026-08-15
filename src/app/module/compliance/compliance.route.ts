@@ -5,12 +5,13 @@ import { ComplianceController } from './compliance.controller'
 import { ComplianceValidation } from './compliance.validation'
 
 const router = express.Router()
-router.get('/profile', authMiddlewares.requirePermission('compliance.read'), ComplianceController.getProfile)
-router.patch('/profile', authMiddlewares.requirePermission('compliance.write'), validateRequest(ComplianceValidation.profile), ComplianceController.updateProfile)
+router.get('/profile', authMiddlewares.auth('agency_owner', 'agency_admin'), ComplianceController.getProfile)
+router.patch('/profile', authMiddlewares.auth('agency_owner', 'agency_admin'), validateRequest(ComplianceValidation.profile), ComplianceController.updateProfile)
 router.post('/consents', authMiddlewares.auth(), validateRequest(ComplianceValidation.consent), ComplianceController.consent)
-router.get('/data-requests', authMiddlewares.requirePermission('compliance.read'), ComplianceController.requests)
-router.post('/data-requests', authMiddlewares.requirePermission('compliance.write'), validateRequest(ComplianceValidation.request), ComplianceController.createRequest)
-router.get('/data-requests/:id/export', authMiddlewares.requirePermission('compliance.read'), ComplianceController.download)
+router.get('/data-requests', authMiddlewares.auth('agency_owner', 'agency_admin'), ComplianceController.requests)
+router.post('/data-requests', authMiddlewares.auth('agency_owner', 'agency_admin'), validateRequest(ComplianceValidation.request), ComplianceController.createRequest)
+router.get('/data-requests/:id/export', authMiddlewares.auth('agency_owner', 'agency_admin'), ComplianceController.download)
+
 router.get('/admin/profiles', authMiddlewares.authSuperAdmin, ComplianceController.adminProfiles)
 router.get('/admin/data-requests', authMiddlewares.authSuperAdmin, ComplianceController.adminRequests)
 router.patch('/admin/profiles/:organizationId', authMiddlewares.authSuperAdmin, validateRequest(ComplianceValidation.reviewProfile), ComplianceController.reviewProfile)

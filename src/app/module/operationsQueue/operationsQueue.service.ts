@@ -13,6 +13,7 @@ import { Viewing } from '../viewing/viewing.model'
 import { NotificationService } from '../notification/notification.service'
 import { SmsService } from '../sms/sms.service'
 import { WebsiteAssetProcessor } from '../websiteBuilder/websiteAssetProcessor.service'
+import sendEmail from '../../helpers/sendEmail'
 import { OperationsJob, OperationsJobType } from './operationsJob.model'
 
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
@@ -23,7 +24,14 @@ const schedule = async (input: { organizationId: string; type: OperationsJobType
     { $set: { status: 'cancelled' } },
   )
   if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder'].includes(input.type)) return null
-  return OperationsJob.create({ ...input, runAt: input.runAt.getTime() <= Date.now() ? new Date(Date.now() + 250) : input.runAt, payload: input.payload || {}, maxAttempts: input.maxAttempts || 5 })
+  return OperationsJob.create({
+    organizationId: input.organizationId,
+    type: input.type,
+    entityId: input.entityId,
+    runAt: input.runAt,
+    payload: input.payload || {},
+    maxAttempts: Math.max(1, Math.min(10, input.maxAttempts || 5)),
+  })
 }
 
 const cancel = async (organizationId: string, type: OperationsJobType, entityId: string) => OperationsJob.updateMany(
@@ -32,6 +40,13 @@ const cancel = async (organizationId: string, type: OperationsJobType, entityId:
 )
 
 const deliver = async (job: any) => {
+  if (job.type === 'support_email') {
+    const { to, subject, html } = job.payload || {}
+    if (to && subject && html) {
+      await sendEmail(to, subject, html)
+    }
+    return
+  }
   if (job.type === 'sms_send') {
     await SmsService.deliverPrepared(job.organizationId, job.payload || {})
     return

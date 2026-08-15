@@ -2,8 +2,9 @@ import { Schema, model } from 'mongoose'
 
 export const OPERATIONS_JOB_TYPES = [
   'task_reminder', 'viewing_reminder', 'calendar_sync',
-  'sms_send', 'meta_capi', 'domain_verify', 'asset_finalize',
+  'sms_send', 'meta_capi', 'domain_verify', 'asset_finalize', 'support_email',
 ] as const
+
 export type OperationsJobType = typeof OPERATIONS_JOB_TYPES[number]
 
 const operationsJobSchema = new Schema({
