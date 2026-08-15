@@ -11,7 +11,9 @@ export const permissionValues = [
   'crm.configure', 'crm.export',
   'messaging.manage', 'whatsapp.manage',
   'finance.read', 'finance.write',
+  'compliance.read', 'compliance.write',
 ] as const
+
 
 export type Permission = typeof permissionValues[number]
 

@@ -158,7 +158,8 @@ const getSuperAdminUserSummary = catchAsync(async (_req: Request, res: Response)
 const csvCell = (value: unknown) => {
   let text = String(value ?? '')
   if (/^\s*[=+\-@]/.test(text)) text = `'${text}`
-  return `"${text.replaceAll('"', '""')}"`
+  return `"${text.replace(/"/g, '""')}"`
+
 }
 
 const exportUsersSuperAdminCsv = catchAsync(async (req: Request, res: Response) => {

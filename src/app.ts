@@ -114,8 +114,13 @@ app.get('/metrics', (req, res) => {
   return res.status(200).type('text/plain; version=0.0.4; charset=utf-8').send(Metrics.render())
 })
 
+import { UploadRoute } from './app/module/upload/upload.route'
+
 app.use('/api/v1', routes)
+app.use('/api/upload', UploadRoute)
+app.use('/upload', UploadRoute)
 app.use('/api/cron', verifyCronSignature, CronRoute)
+
 app.use(globalErrorHandler)
 
 app.all('*', (req: Request, res: Response) => {

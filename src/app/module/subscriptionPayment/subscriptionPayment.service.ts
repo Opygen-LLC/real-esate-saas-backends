@@ -13,7 +13,8 @@ import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const serial = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomBytes(10).toString('hex').toUpperCase()}`
+const serial = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(10).toString('hex').toUpperCase()}`
+
 const periodEnd = (start: Date, cycle: 'monthly' | 'yearly' | 'one-time') => {
   const end = new Date(start)
   if (cycle === 'monthly') end.setUTCMonth(end.getUTCMonth() + 1)
