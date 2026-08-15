@@ -41,3 +41,18 @@ export const generalApiRateLimiter = rateLimit({
     message: 'Too many requests from this IP. Please try again later.',
   },
 })
+
+// Authenticated image upload limiter. This protects memory-backed multipart parsing
+// and object-storage costs from accidental or abusive repeated uploads.
+export const uploadRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'RATE_LIMITED',
+    message: 'Too many image uploads. Please try again in a few minutes.',
+    fieldErrors: {},
+  },
+})

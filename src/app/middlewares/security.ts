@@ -20,10 +20,20 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   '/api/v1/auth/password-reset/complete',
   '/api/v1/auth/reset_password',
   '/api/v1/lead/public-capture',
+  '/api/v1/viewing/public-request',
+  '/api/v1/moderation/fraud-reports',
   '/api/v1/team-invitations/accept',
 ])
 
-const PUBLIC_CROSS_ORIGIN_POST_PATHS = new Set(['/api/v1/lead/public-capture'])
+const PUBLIC_CROSS_ORIGIN_POST_PATHS = new Set([
+  '/api/v1/lead/public-capture',
+  '/api/v1/viewing/public-request',
+  '/api/v1/moderation/fraud-reports',
+])
+
+const PUBLIC_CROSS_ORIGIN_POST_PATTERNS = [
+  /^\/api\/v1\/meta\/public\/[^/]+\/events$/,
+]
 
 const normalizePath = (value: string): string => {
   const pathname = value.split('?')[0] || '/'
@@ -31,11 +41,17 @@ const normalizePath = (value: string): string => {
   return pathname.replace(/\/+$/, '')
 }
 
-export const isCsrfExemptRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean =>
-  req.method.toUpperCase() === 'POST' && CSRF_EXEMPT_POST_PATHS.has(normalizePath(req.originalUrl))
+export const isCsrfExemptRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean => {
+  if (req.method.toUpperCase() !== 'POST') return false
+  const path = normalizePath(req.originalUrl)
+  return CSRF_EXEMPT_POST_PATHS.has(path) || PUBLIC_CROSS_ORIGIN_POST_PATTERNS.some((pattern) => pattern.test(path))
+}
 
-const isPublicCrossOriginRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean =>
-  req.method.toUpperCase() === 'POST' && PUBLIC_CROSS_ORIGIN_POST_PATHS.has(normalizePath(req.originalUrl))
+const isPublicCrossOriginRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean => {
+  if (req.method.toUpperCase() !== 'POST') return false
+  const path = normalizePath(req.originalUrl)
+  return PUBLIC_CROSS_ORIGIN_POST_PATHS.has(path) || PUBLIC_CROSS_ORIGIN_POST_PATTERNS.some((pattern) => pattern.test(path))
+}
 
 export const requestContext = (req: Request, res: Response, next: NextFunction): void => {
   const supplied = req.get('x-request-id')

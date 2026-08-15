@@ -15,6 +15,9 @@ describe('OTP and reset security', () => {
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/login' })).toBe(true)
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/register-agency' })).toBe(true)
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/verify?source=signup' })).toBe(true)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/lead/public-capture' })).toBe(true)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/viewing/public-request' })).toBe(true)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/meta/public/agency-slug/events' })).toBe(true)
   })
   it('keeps cookie-authenticated session mutations behind CSRF protection', () => {
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/refresh-token' })).toBe(false)
