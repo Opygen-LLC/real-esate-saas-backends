@@ -2,6 +2,6 @@
     email opygen.info@gmail.com
 }
 
-realestate.opygen.com {
+:80 {
     reverse_proxy api:5000
 }
