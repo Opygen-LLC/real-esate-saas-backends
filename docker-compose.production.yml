@@ -1,46 +1,4 @@
 services:
-  mongo:
-    image: mongo:7.0
-    restart: unless-stopped
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
-    volumes:
-      - mongo_data:/data/db
-    networks: [private]
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 }).ok"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-
-  mongo-init:
-    image: mongo:7.0
-    restart: "no"
-    depends_on:
-      mongo:
-        condition: service_healthy
-    networks: [private]
-    entrypoint: ["/bin/bash", "-lc"]
-    command: >-
-      mongosh --host mongo:27017 --quiet --eval
-      'try { rs.status(); } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}); }' &&
-      until mongosh --host mongo:27017 --quiet --eval 'db.hello().isWritablePrimary' | grep -q true;
-      do sleep 2; done
-
-  redis:
-    image: redis:7.4-alpine
-    restart: unless-stopped
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-realestate_redis_secure_password_2026}
-    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
-    volumes:
-      - redis_data:/data
-    networks: [private]
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-
   api:
     build:
       context: .
@@ -50,23 +8,14 @@ services:
       - .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: mongodb://mongo:27017/real-estate-saas?replicaSet=rs0
-      REDIS_ENABLED: "true"
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-realestate_redis_secure_password_2026}
-      REDIS_TLS: "false"
-      REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
+      DATABASE_URL: ${DATABASE_URL}
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
-      INVOICE_PDF_TIMEOUT_MS: "20000"
     volumes:
       - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
-    depends_on:
-      mongo-init:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    networks: [private]
+    ports:
+      - "127.0.0.1:${PORT:-5000}:5000"
+    networks:
+      - app_network
 
   caddy:
     image: caddy:2-alpine
@@ -81,14 +30,13 @@ services:
       - caddy_config:/config
     depends_on:
       - api
-    networks: [private]
+    networks:
+      - app_network
 
 networks:
-  private:
+  app_network:
     driver: bridge
 
 volumes:
-  mongo_data:
-  redis_data:
   caddy_data:
   caddy_config:
