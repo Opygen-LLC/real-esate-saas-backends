@@ -128,7 +128,6 @@ const redisEnabled = envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST)
 const redisTls = envBoolean('REDIS_TLS', false)
 const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK', false)
 const redisHost = process.env.REDIS_HOST || '127.0.0.1'
-const bkashEnabled = envBoolean('BKASH_ENABLED', false)
 
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
@@ -157,9 +156,6 @@ if (isProduction) {
   requiredInProduction('SMTP_USER')
   requiredInProduction('SMTP_PASSWORD', 8)
   requiredInProduction('SMTP_FROM')
-  if (bkashEnabled) {
-    ;['BKASH_GRANT_TOKEN_URL', 'BKASH_CREATE_PAYMENT_URL', 'BKASH_EXECUTE_PAYMENT_URL', 'BKASH_QUERY_PAYMENT_URL', 'BKASH_APP_KEY', 'BKASH_APP_SECRET', 'BKASH_USERNAME', 'BKASH_PASSWORD'].forEach((name) => requiredInProduction(name))
-  }
   if (smsEnabled) {
     const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
     requiredSms.forEach((name) => requiredInProduction(name))
@@ -308,18 +304,5 @@ export default {
     metrics_token: process.env.METRICS_TOKEN || '',
     client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
-  },
-  bkash: {
-    enabled: bkashEnabled,
-    grant_token_url: process.env.BKASH_GRANT_TOKEN_URL,
-    create_payment_url: process.env.BKASH_CREATE_PAYMENT_URL,
-    execute_payment_url: process.env.BKASH_EXECUTE_PAYMENT_URL,
-    query_payment_url: process.env.BKASH_QUERY_PAYMENT_URL,
-    refund_url: process.env.BKASH_REFUND_URL,
-    app_key: process.env.BKASH_APP_KEY,
-    app_secret: process.env.BKASH_APP_SECRET,
-    username: process.env.BKASH_USERNAME,
-    password: process.env.BKASH_PASSWORD,
-    timeout_ms: Number(process.env.BKASH_TIMEOUT_MS || 10000),
   },
 }
