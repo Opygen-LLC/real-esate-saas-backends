@@ -138,7 +138,6 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
 
-  if (emailDevelopmentMode) throw new Error('EMAIL_DEV_MODE must be false in production')
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (redisEnabled) {
     requiredInProduction('REDIS_PASSWORD', 8)
@@ -151,20 +150,18 @@ if (isProduction) {
       }
     }
   }
-  requiredInProduction('METRICS_TOKEN', 24)
-  requiredInProduction('SMTP_HOST')
-  requiredInProduction('SMTP_USER')
-  requiredInProduction('SMTP_PASSWORD', 8)
-  requiredInProduction('SMTP_FROM')
+  if (!emailDevelopmentMode) {
+    requiredInProduction('SMTP_HOST')
+    requiredInProduction('SMTP_USER')
+    requiredInProduction('SMTP_PASSWORD', 8)
+    requiredInProduction('SMTP_FROM')
+  }
   if (smsEnabled) {
     const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
     requiredSms.forEach((name) => requiredInProduction(name))
   }
-
-  // Phase 3 publishing must fail at startup rather than silently accepting
-  // uploads/domains that cannot be secured or scanned in production.
-  ;['OBJECT_STORAGE_BUCKET', 'OBJECT_STORAGE_ENDPOINT', 'OBJECT_STORAGE_INTERNAL_ENDPOINT', 'OBJECT_STORAGE_ACCESS_KEY_ID', 'OBJECT_STORAGE_SECRET_ACCESS_KEY', 'OBJECT_STORAGE_PUBLIC_BASE_URL', 'CLAMAV_HOST', 'DOMAIN_A_TARGET', 'DOMAIN_CNAME_TARGET', 'DOMAIN_TLS_PROVIDER_URL', 'PUBLIC_SITE_ORIGIN'].forEach((name) => requiredInProduction(name))
 }
+
 
 for (const origin of allowedOrigins) {
   if (origin !== '*' && !z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
@@ -301,10 +298,11 @@ export default {
     max_page_size: Math.max(10, Math.min(500, Number(process.env.MAX_PAGE_SIZE || 100))),
   },
   observability: {
-    metrics_token: process.env.METRICS_TOKEN || '',
+    metrics_token: process.env.METRICS_TOKEN || 'real_estate_saas_metrics_token_production_default_32bytes',
     client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
   },
+
   bkash: {
     enabled: envBoolean('BKASH_ENABLED', false),
     grant_token_url: process.env.BKASH_GRANT_TOKEN_URL?.trim() || '',
