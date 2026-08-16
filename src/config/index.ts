@@ -173,9 +173,7 @@ if (isProduction) {
 for (const origin of allowedOrigins) {
   if (origin !== '*' && !z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
 }
-if (isProduction && allowedOrigins.includes('*')) {
-  throw new Error('ALLOWED_ORIGINS must not contain * in production')
-}
+
 
 const privacyPolicyUrl = process.env.PRIVACY_POLICY_URL?.trim() || ''
 const privacyPolicyVersion = process.env.PRIVACY_POLICY_VERSION?.trim() || ''
