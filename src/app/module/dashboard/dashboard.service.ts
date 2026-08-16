@@ -23,7 +23,7 @@ const globalSearch = async (organizationId: string, query: string, permissions: 
   if (can('properties.read')) jobs.push(Property.find({ organizationId, $or: [{ title: regex }, { city: regex }, { address: regex }, { 'bangladeshAddress.area': regex }, { 'bangladeshAddress.district': regex }] }).select('_id title city address status price').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'property', id: String(row._id), title: row.title, subtitle: [row.city || row.address, row.status].filter(Boolean).join(' · '), href: `/dashboard/admin/properties/${row._id}` }))))
   if (can('leads.read')) jobs.push(Lead.find({ organizationId, $or: [{ name: regex }, { email: regex }, { phone: regex }, { locationPreference: regex }] }).select('_id name email phone leadStatus').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'lead', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '), href: `/dashboard/admin/leads?lead=${row._id}` }))))
   if (can('contacts.read')) jobs.push(Contact.find({ organizationId, $or: [{ name: regex }, { email: regex }, { phone: regex }, { company: regex }] }).select('_id name email phone type').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'contact', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.type].filter(Boolean).join(' · '), href: `/dashboard/admin/contacts?contact=${row._id}` }))))
-  if (can('users.read')) jobs.push(User.find({ organizationId, status: { $ne: 'blocked' }, $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] }).select('_id name email phoneNumber userRole').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'team', id: String(row._id), title: row.name, subtitle: [row.email || row.phoneNumber, String(row.userRole || '').replaceAll('_', ' ')].filter(Boolean).join(' · '), href: `/dashboard/admin/team?user=${row._id}` }))))
+  if (can('users.read')) jobs.push(User.find({ organizationId, status: { $ne: 'blocked' }, $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] }).select('_id name email phoneNumber userRole').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'team', id: String(row._id), title: row.name, subtitle: [row.email || row.phoneNumber, String(row.userRole || '').replace(/_/g, ' ')].filter(Boolean).join(' · '), href: `/dashboard/admin/team?user=${row._id}` }))))
 
   const groups = await Promise.all(jobs)
   return groups.flat().slice(0, 16)
@@ -439,4 +439,4 @@ const getSuperAdminOverviewStats = async () => {
   }
 }
 
-export const DashboardService = { getOverviewStats, getAnalytics, getSuperAdminOverviewStats }
+export const DashboardService = { globalSearch, getOverviewStats, getAnalytics, getSuperAdminOverviewStats }

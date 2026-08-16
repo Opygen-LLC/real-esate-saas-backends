@@ -340,7 +340,7 @@ const searchPlatform = async (query: string) => {
   ])
   return [
     ...organizations.map((row:any) => ({ kind: 'organization', id: String(row._id), title: row.agencyName, subtitle: `${row.organizationId} · ${row.subscription?.plan || 'trial'}${row.isBlocked ? ' · suspended' : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}` })),
-    ...users.map((row:any) => ({ kind: 'user', id: String(row._id), title: row.name, subtitle: `${row.email} · ${String(row.userRole || '').replaceAll('_', ' ')}`, href: `/dashboard/super-admin/users?search=${encodeURIComponent(row.email || row.name)}` })),
+    ...users.map((row:any) => ({ kind: 'user', id: String(row._id), title: row.name, subtitle: `${row.email} · ${String(row.userRole || '').replace(/_/g, ' ')}`, href: `/dashboard/super-admin/users?search=${encodeURIComponent(row.email || row.name)}` })),
     ...payments.map((row:any) => ({ kind: 'payment', id: String(row._id), title: row.paymentNumber, subtitle: `${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')} · ${row.status}`, href: `/dashboard/super-admin/subscriptions?payment=${row._id}` })),
   ].slice(0, 16)
 }
@@ -354,7 +354,7 @@ const getPlatformNotifications = async () => {
   ])
   const items = [
     ...pendingPayments.map((row:any) => ({ id: `payment:${row._id}`, type: 'payment_pending', severity: 'warning', title: 'Payment needs review', body: `${row.paymentNumber} · ${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: '/dashboard/super-admin/subscriptions', createdAt: row.createdAt })),
-    ...failedJobs.map((row:any) => ({ id: `job:${row._id}`, type: 'operation_failed', severity: 'danger', title: `${String(row.type).replaceAll('_', ' ')} failed`, body: `${row.organizationId}${row.lastError ? ` · ${String(row.lastError).slice(0, 140)}` : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
+    ...failedJobs.map((row:any) => ({ id: `job:${row._id}`, type: 'operation_failed', severity: 'danger', title: `${String(row.type).replace(/_/g, ' ')} failed`, body: `${row.organizationId}${row.lastError ? ` · ${String(row.lastError).slice(0, 140)}` : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
     ...failedDomains.map((row:any) => ({ id: `domain:${row._id}`, type: 'domain_failed', severity: 'danger', title: 'Domain/TLS needs attention', body: `${row.domain || row.organizationId} · ${row.status}/${row.tlsStatus}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
     ...suspendedTenants.map((row:any) => ({ id: `tenant:${row._id}`, type: 'tenant_suspended', severity: 'info', title: 'Tenant is suspended', body: `${row.agencyName} · ${row.organizationId}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
   ]

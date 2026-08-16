@@ -66,8 +66,8 @@ const attachRedisAdapter = async (server: SocketIOServer) => {
   }
   pubClient = createClient(redisOptions())
   subClient = pubClient.duplicate()
-  pubClient.on('error', (error) => errorLogger.error('realtime_redis_pub_error', { error }))
-  subClient.on('error', (error) => errorLogger.error('realtime_redis_sub_error', { error }))
+  pubClient.on('error', (error: Error) => errorLogger.error('realtime_redis_pub_error', { error }))
+  subClient.on('error', (error: Error) => errorLogger.error('realtime_redis_sub_error', { error }))
   await Promise.all([pubClient.connect(), subClient.connect()])
   server.adapter(createAdapter(pubClient, subClient, { key: `${config.redis.key_prefix}:socket.io` }))
   logger.info('realtime_redis_adapter_ready')
