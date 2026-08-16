@@ -1,19 +1,12 @@
 import mongoose, { Model } from 'mongoose'
+import type { PropertyStatus } from './property.constants'
 
 export type IPropertyTypeEnum = 'Apartment' | 'LandPlot' | 'Commercial' | 'Office' | 'Shop' |
   'Warehouse' | 'ReadyFlat' | 'UnderConstruction' | 'RentalSublet'
 
 export type IListingType = 'ForSale' | 'ForRent' | 'ForLease'
 
-export type IPropertyStatus =
-  | 'Draft'
-  | 'Available'
-  | 'Reserved'
-  | 'UnderOffer'
-  | 'Sold'
-  | 'Rented'
-  | 'OffMarket'
-  | 'ComingSoon'
+export type IPropertyStatus = PropertyStatus
 
 export type IAreaUnit = 'sqft' | 'decimal' | 'shotok' | 'katha' | 'bigha' | 'acre'
 export type IPropertyMediaProvider = 'youtube' | 'vimeo' | 'matterport' | 'kuula' | 'other'
@@ -75,7 +68,6 @@ export interface IProperty {
   districtId?: string
   upazilaId?: string
   country?: string
-  zipCode?: string
   bangladeshAddress?: IBangladeshAddress
   facing?: 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'
   roadWidthFeet?: number

@@ -1,5 +1,6 @@
 import { Schema, model } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
+import { PROPERTY_STATUSES } from './property.constants'
 
 const propertyMediaLinkSchema = new Schema(
   {
@@ -61,23 +62,14 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     status: {
       type: String,
-      enum: [
-        'Draft',
-        'Available',
-        'Reserved',
-        'UnderOffer',
-        'Sold',
-        'Rented',
-        'OffMarket',
-        'ComingSoon',
-      ],
+      enum: PROPERTY_STATUSES,
       default: 'Draft',
       required: true,
     },
     price: {
       type: Number,
       required: true,
-      default: 0,
+      min: 0.01,
     },
     currency: {
       type: String,
@@ -86,15 +78,15 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     bedrooms: {
       type: Number,
-      default: 1,
+      min: 0,
     },
     bathrooms: {
       type: Number,
-      default: 1,
+      min: 0,
     },
     area: {
       type: Number,
-      default: 0,
+      min: 0,
     },
     areaUnit: {
       type: String,
@@ -103,11 +95,12 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     yearBuilt: {
       type: Number,
-      default: () => new Date().getFullYear(),
+      min: 1800,
+      max: 2200,
     },
     parking: {
       type: Number,
-      default: 0,
+      min: 0,
     },
     furnished: {
       type: Boolean,
@@ -131,9 +124,10 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       enum: ['Bangladesh'],
       default: 'Bangladesh',
     },
+    // Legacy compatibility only. New writes use bangladeshAddress.postalCode.
     zipCode: {
       type: String,
-      default: '',
+      select: false,
     },
     bangladeshAddress: {
       divisionId: { type: String, default: '' }, division: { type: String, default: '' },
@@ -155,7 +149,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       mutationStatus: { type: String, enum: ['not_applicable', 'pending', 'completed'], default: 'not_applicable' },
       khatianNumber: { type: String, default: '' }, holdingTaxPaidThrough: { type: String, default: '' },
     },
-    developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0, default: 0 },
+    developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0 },
     latitude: {
       type: Number,
     },

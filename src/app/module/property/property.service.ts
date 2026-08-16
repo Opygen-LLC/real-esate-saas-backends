@@ -9,6 +9,8 @@ import { sanitizeRichText } from '../../helpers/sanitize'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
+import { normalizePropertyPostalCode } from './property.normalization'
+import type { PropertyStatus } from './property.constants'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 
@@ -42,9 +44,10 @@ const createProperty = async (
 
   const slug = await generateSlug(organizationId, payload.title)
   const status: IProperty['status'] = actor?.canPublish ? (payload.status || 'Draft') : 'Draft'
-  const mediaLinks = normalizePropertyMediaLinks(payload.mediaLinks)
+  const normalizedPayload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+  const mediaLinks = normalizePropertyMediaLinks(normalizedPayload.mediaLinks)
   const propertyData: Partial<IProperty> = {
-    ...payload,
+    ...normalizedPayload,
     ...(mediaLinks !== undefined ? { mediaLinks } : {}),
     organizationId,
     slug,
@@ -52,7 +55,7 @@ const createProperty = async (
     views: 0,
     currency: 'BDT',
     country: 'Bangladesh',
-    description: payload.description ? sanitizeRichText(payload.description) : '',
+    description: normalizedPayload.description ? sanitizeRichText(normalizedPayload.description) : '',
     publishedAt: status === 'Available' ? new Date() : undefined,
   }
 
@@ -111,7 +114,7 @@ const getAllProperties = async (
 
   if (searchTerm) {
     andConditions.push({
-      $or: ['title', 'description', 'address', 'city', 'state', 'zipCode'].map((field) => ({
+      $or: ['title', 'description', 'address', 'city', 'state', 'bangladeshAddress.postalCode'].map((field) => ({
         [field]: { $regex: searchTerm, $options: 'i' },
       })),
     })
@@ -180,7 +183,7 @@ const getPublicPropertyDetail = async (
     ? { _id: idOrSlug, ...tenantScope, status: 'Available' }
     : { slug: idOrSlug, ...tenantScope, status: 'Available' }
 
-  const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true })
+  const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
   if (!property) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
@@ -204,6 +207,8 @@ const updateProperty = async (
   const existing = await Property.findOne({ _id: id, organizationId })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
+  payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+
   if (payload.status !== undefined && payload.status !== existing.status && !actor?.canPublish) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
   }
@@ -215,7 +220,7 @@ const updateProperty = async (
   if (payload.description !== undefined) payload.description = sanitizeRichText(payload.description)
   if (payload.status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) payload.publishedAt = new Date()
 
-  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, { new: true })
+  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
   await CacheInvalidationService.invalidateTenant(organizationId)
@@ -225,23 +230,23 @@ const updateProperty = async (
 const updatePropertyStatus = async (
   organizationId: string,
   id: string,
-  status: string,
+  status: PropertyStatus,
   actor?: PropertyActor,
 ): Promise<IProperty | null> => {
   if (!actor?.canPublish) throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
   const existing = await Property.findOne({ _id: id, organizationId }).select('_id status publishedAt')
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
-  const update: Partial<IProperty> = { status: status as IProperty['status'] }
+  const update: Partial<IProperty> = { status }
   if (status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) update.publishedAt = new Date()
 
-  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, update, { new: true })
+  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true, context: 'query' })
   await CacheInvalidationService.invalidateTenant(organizationId)
   return result
 }
 
 const reorderPropertyImages = async (organizationId: string, id: string, images: IPropertyImage[]): Promise<IProperty | null> => {
-  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, { images }, { new: true })
+  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, { images }, { new: true, runValidators: true, context: 'query' })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   await CacheInvalidationService.invalidateTenant(organizationId)
   return result
