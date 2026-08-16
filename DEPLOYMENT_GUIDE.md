@@ -1,14 +1,14 @@
 # 🚀 Google Cloud Platform (GCP) Backend Deployment Guide
 
-This guide provides step-by-step instructions for hosting the **Real Estate SaaS Backend** on **Google Cloud Platform (Compute Engine)** using **Docker**, **Cloud MongoDB**, and **Caddy** (for automatic HTTPS/TLS SSL certificates).
+This guide provides step-by-step instructions for hosting the **Real Estate SaaS Backend** on **Google Cloud Platform (Compute Engine)** using **Docker**, **Cloud MongoDB**, **Socket.IO Realtime Engine**, and **Caddy** via Static IP (`http://34.131.86.177`).
 
 ---
 
 ## 🏗️ Architecture Overview
 
-- **App Container (`api`)**: Node.js 22 runtime serving Express backend on port `5000`.
+- **App Container (`api`)**: Node.js 22 runtime serving Express backend & Socket.IO server on port `5000`.
 - **Cloud Database (`DATABASE_URL`)**: Connects to Cloud MongoDB (e.g. MongoDB Atlas / GCP Managed MongoDB) using `DATABASE_URL` in `.env`.
-- **Reverse Proxy (`caddy`)**: Caddy 2 container routing ports `80` & `443` to the backend with **automatic Let's Encrypt SSL certificates**.
+- **Reverse Proxy (`caddy`)**: Caddy 2 container routing port `80` to `api:5000` for REST API endpoints and Socket.IO WebSockets (`/socket.io/*`).
 
 ---
 
@@ -22,13 +22,7 @@ This guide provides step-by-step instructions for hosting the **Real Estate SaaS
 
 2. **Reserve Static External IP**:
    - Go to **VPC Network** ➔ **IP addresses**.
-   - Convert your VM's External IP from *Ephemeral* to **Static**.
-
-3. **Configure DNS**:
-   - Go to your domain DNS provider (Cloudflare, Namecheap, GoDaddy, etc.).
-   - Create an **`A` Record**:
-     - **Name**: `realestate` (or `@` for apex domain)
-     - **Value**: Your GCP Static IP address (e.g. `34.xxx.xxx.xxx`)
+   - Convert your VM's External IP from *Ephemeral* to **Static** (`34.131.86.177`).
 
 ---
 
@@ -55,30 +49,32 @@ docker compose version
 
 ---
 
-## 📁 Step 3: Clone Code & Configure Cloud MongoDB `.env`
+## 📁 Step 3: Configure Environment `.env`
+
+In your GCP server project folder (`~/real-esate-saas-backends`):
 
 ```bash
-# 1. Clone repository from GitHub
-git clone https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY.git app
-cd app/server
-
-# 2. Configure Environment Variables
-cp .env.example .env
 nano .env
 ```
 
-Set your **Cloud MongoDB connection URL** in `.env`:
+Ensure your `.env` contains:
 
 ```env
 NODE_ENV=production
 PORT=5000
 
-# Cloud MongoDB URL (e.g. MongoDB Atlas / Managed GCP MongoDB)
+# Cloud MongoDB Connection URL
 DATABASE_URL=mongodb+srv://user:password@your-cluster.mongodb.net/real-estate-saas?retryWrites=true&w=majority
 
-PUBLIC_API_URL=https://realestate.opygen.com
-CLIENT_URL=https://realestate.opygen.com
+# URLs for Static IP Access
+PUBLIC_API_URL=http://34.131.86.177
+CLIENT_URL=http://34.131.86.177
 ALLOWED_ORIGINS=*
+
+# Modes
+SMS_DEV_MODE=true
+EMAIL_DEV_MODE=true
+REDIS_ENABLED=false
 
 # Security Keys (must be 32+ characters)
 JWT_SECRET=real_estate_saas_jwt_secret_key_2026_super_secure_production_key_32bytes
@@ -87,41 +83,24 @@ OTP_PEPPER=real_estate_saas_otp_pepper_super_secure_key_32bytes_min
 CRON_SIGNING_SECRET=real_estate_saas_cron_signing_secret_super_secure_32bytes
 DATA_ENCRYPTION_KEY=real_estate_saas_data_encryption_key_super_secure_32bytes
 
-# SMTP Configuration
-EMAIL_DEV_MODE=false
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=opygen.info@gmail.com
-SMTP_PASSWORD=your-16-char-google-app-password
-SMTP_FROM=opygen.info@gmail.com
-
 # GCP Bucket Credentials
 PROJECTS_ID=opy-realestate-505614
 BUCKET_NAME=realestate-saas
 KEYFILENAME=opy-realestate-505614-d4e3b5e9f13d.json
 ```
 
-Ensure your GCP Service Account JSON keyfile is present in the `server/` directory:
-`/home/faysal/Projects/opygen/Real-estate-saas/server/opy-realestate-505614-d4e3b5e9f13d.json`
-
 ---
 
-## 🔒 Step 4: Configure Caddy
-
-`server/Caddyfile`:
+## 🔒 Step 4: Configure Caddy (`server/Caddyfile`)
 
 ```caddy
-{
-    email opygen.info@gmail.com
-}
-
-realestate.opygen.com {
-    reverse_proxy api:5000
-}
-
 :80 {
-    reverse_proxy api:5000
+    reverse_proxy api:5000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
 }
 ```
 
@@ -143,30 +122,34 @@ docker compose ps
 
 ---
 
-## 🔄 Step 6: Future Updates (GitHub Pull & Restart)
+## 🔄 Guidelines on How to Update & Re-deploy Perfectly
 
-Whenever you update your backend code on GitHub, SSH into your GCP VM and run:
+Whenever you push new code changes to GitHub, SSH into your GCP server and execute:
 
 ```bash
-cd ~/app/server
+cd ~/real-esate-saas-backends
+
+# Step 1: Pull the latest code from GitHub
+git pull origin main
+
+# Step 2: Rebuild & restart Docker containers (1 Command)
 ./update.sh
 ```
 
-Or run directly:
-
+*(Or run directly)*:
 ```bash
-git pull origin main
 docker compose up -d --build
 ```
 
 ---
 
-## 📊 Useful Operations Commands
+## 📊 Useful Operations Commands Quick Reference
 
 | Action | Command |
 |---|---|
 | **View Live API Logs** | `docker compose logs -f api` |
-| **View Caddy SSL Logs** | `docker compose logs -f caddy` |
+| **View Caddy Logs** | `docker compose logs -f caddy` |
 | **Check Running Status** | `docker compose ps` |
-| **Restart API Container** | `docker compose restart api` |
-| **Stop All Containers** | `docker compose down` |
+| **1-Command Redeploy** | `./update.sh` |
+| **Restart Backend Container Only** | `docker compose restart api` |
+| **Stop All Containers Cleanly** | `docker compose down` |
