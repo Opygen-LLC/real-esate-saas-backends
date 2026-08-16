@@ -8,6 +8,7 @@ import { Organization } from '../organization/organization.model'
 import { sanitizeRichText } from '../../helpers/sanitize'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
+import { userRefPopulate } from '../user/userProfile.service'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 
@@ -138,7 +139,7 @@ const getAllProperties = async (
 
   const [result, total] = await Promise.all([
     Property.find(whereCondition)
-      .populate('agentId', 'name email phoneNumber profileImgURL licenseNumber')
+      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
       .sort({ [sortBy]: sortOrder })
       .skip(skip)
       .limit(limit),
@@ -158,19 +159,13 @@ const getPublicProperties = async (
 )
 
 const getPropertyById = async (organizationId: string, id: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ _id: id, organizationId }).populate(
-    'agentId',
-    'name email phoneNumber profileImgURL licenseNumber bio',
-  )
+  const result = await Property.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return result
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ slug, organizationId, status: 'Available' }).populate(
-    'agentId',
-    'name email phoneNumber profileImgURL licenseNumber bio',
-  )
+  const result = await Property.findOne({ slug, organizationId, status: 'Available' }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return result
 }
@@ -186,7 +181,7 @@ const getPublicPropertyDetail = async (
     : { slug: idOrSlug, ...tenantScope, status: 'Available' }
 
   const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true })
-    .populate('agentId', 'name email phoneNumber profileImgURL licenseNumber bio specialization')
+    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
   if (!property) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
@@ -195,7 +190,7 @@ const getPublicPropertyDetail = async (
     _id: { $ne: property._id },
     status: 'Available',
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
-  }).limit(3).populate('agentId', 'name email profileImgURL')
+  }).limit(3).populate(userRefPopulate('agentId', 'name email userRole'))
 
   return { property, similarProperties }
 }
@@ -221,7 +216,7 @@ const updateProperty = async (
   if (payload.status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) payload.publishedAt = new Date()
 
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, { new: true })
-    .populate('agentId', 'name email phoneNumber profileImgURL')
+    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
   await CacheInvalidationService.invalidateTenant(organizationId)
   return result

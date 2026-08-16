@@ -9,14 +9,23 @@ export type IUserRole =
   | 'viewer'
   | 'user'
 
+/**
+ * Core identity only. Authentication secrets and profile/role metadata live in
+ * one-to-one companion collections.
+ */
 export interface IUser {
   name: string
   email: string
   phoneNumber: string
-  password?: string
   organizationId: string
   userRole: IUserRole
   status: 'pending' | 'active' | 'blocked'
+  isVerified: boolean
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+export interface IUserProfileInput {
   profileImgURL?: string
   bio?: string
   licenseNumber?: string
@@ -24,15 +33,13 @@ export interface IUser {
   serviceAreas?: string[]
   address?: string
   gender?: string
-  verificationCode?: string
-  codeGenerationTimestamp?: string
-  isVerified: boolean
-  isAddProfile: boolean
+  isAddProfile?: boolean
   sidebar_permission?: Record<string, boolean>
   accessControl?: { useRoleDefaults: boolean; permissions: string[] }
-  createdAt?: Date
-  updatedAt?: Date
 }
+
+export type IUserCreateInput = IUser & IUserProfileInput & { password?: string }
+export type IUserUpdateInput = Partial<Pick<IUser, 'name'>> & IUserProfileInput
 
 export type IUserFilter = {
   searchTerm?: string
@@ -41,9 +48,4 @@ export type IUserFilter = {
   status?: string
 }
 
-export type UserModel = {
-  isUserExist(
-    phoneNumber: string
-  ): Promise<Pick<IUser, 'phoneNumber' | 'password' | 'userRole' | 'isVerified'> | null>
-  isPasswordMatch(givenPassword: string, savedPassword: string): Promise<boolean>
-} & Model<IUser>
+export type UserModel = Model<IUser>

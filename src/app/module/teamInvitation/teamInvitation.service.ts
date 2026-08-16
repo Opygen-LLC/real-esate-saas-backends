@@ -8,6 +8,8 @@ import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
+import { AccountCredential } from '../accountCredential/accountCredential.model'
+import { deleteUserCompanionRecords, ensureUserProfile, getUserAccessControl, syncRoleProfile } from '../user/userProfile.service'
 import { TeamInvitation } from './teamInvitation.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionsForRole } from '../user/accessControl'
 
@@ -22,14 +24,15 @@ const escapeHtml = (value: string) => value
 
 const createInvitation = async (organizationId: string, invitedBy: string, payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[]; accessControl?: { useRoleDefaults?: boolean; permissions?: string[] } }) => {
   await EntitlementService.assertLimit(organizationId, 'agents')
-  const inviter: any = await User.findOne({ _id: invitedBy, organizationId, status: 'active' }).select('userRole accessControl').lean()
+  const inviter: any = await User.findOne({ _id: invitedBy, organizationId, status: 'active' }).select('_id userRole').lean()
   if (!inviter) throw new ApiError(httpStatus.FORBIDDEN, 'Inviting user is not available')
+  const inviterAccess = await getUserAccessControl(inviter._id)
   const requestedRole = payload.userRole || 'agent'
   const requestedPermissions = payload.accessControl?.useRoleDefaults === false
     ? normalizeCustomPermissions(payload.accessControl.permissions || [])
     : permissionsForRole(requestedRole)
   if (inviter.userRole !== 'agency_owner') {
-    const inviterPermissions = new Set(effectivePermissionsForUser(inviter))
+    const inviterPermissions = new Set(effectivePermissionsForUser({ userRole: inviter.userRole, accessControl: inviterAccess }))
     if (requestedPermissions.some((permission) => !inviterPermissions.has(permission))) {
       throw new ApiError(httpStatus.FORBIDDEN, 'You cannot grant a role or access level broader than your own')
     }
@@ -86,19 +89,38 @@ const acceptInvitation = async (token: string, password: string) => {
   }
   await EntitlementService.assertLimit(invitation.organizationId, 'agents')
   if (await User.exists({ $or: [{ email: invitation.email }, { phoneNumber: invitation.phoneNumber }] })) throw new ApiError(409, 'This invitation can no longer be accepted because the account already exists')
+  const passwordHash = await hashPassword(password)
   const user = await User.create({
     name: invitation.name,
     email: invitation.email,
     phoneNumber: invitation.phoneNumber,
-    password: await hashPassword(password),
     organizationId: invitation.organizationId,
     userRole: invitation.userRole,
-    specialization: invitation.specialization,
-    accessControl: invitation.accessControl || { useRoleDefaults: true, permissions: [] },
     isVerified: true,
-    isAddProfile: true,
     status: 'active',
   })
+  try {
+    await AccountCredential.create({
+      userId: user._id,
+      passwordHash,
+      passwordChangedAt: new Date(),
+      emailVerifiedAt: new Date(),
+    })
+    await ensureUserProfile(user._id, {
+      isAddProfile: true,
+      accessControl: invitation.accessControl || { useRoleDefaults: true, permissions: [] },
+    })
+    await syncRoleProfile(user._id, invitation.organizationId, invitation.userRole, {
+      specialization: invitation.specialization || [],
+    })
+  } catch (error) {
+    await Promise.allSettled([
+      AccountCredential.deleteOne({ userId: user._id }),
+      deleteUserCompanionRecords(user._id),
+      User.deleteOne({ _id: user._id }),
+    ])
+    throw error
+  }
   invitation.status = 'accepted'; invitation.acceptedAt = new Date(); await invitation.save()
   return { _id: user._id, name: user.name, email: user.email, userRole: user.userRole, organizationId: user.organizationId }
 }

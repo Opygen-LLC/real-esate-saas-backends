@@ -4,6 +4,7 @@ import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { LeadService } from '../lead/lead.service'
 import { IActivity } from './activity.interface'
 import { Activity } from './activity.model'
+import { userRefPopulate } from '../user/userProfile.service'
 
 const createActivity=async(organizationId:string,payload:Partial<IActivity>):Promise<IActivity>=>{
   if(!payload.leadId) throw new Error('leadId is required for CRM activity')
@@ -14,5 +15,5 @@ const createActivity=async(organizationId:string,payload:Partial<IActivity>):Pro
   if(!activity) throw new Error('CRM activity projection was not created')
   return activity
 }
-const getActivitiesByLead=async(organizationId:string,leadId:string,paginationOptions:IPaginationOptions):Promise<IGenericResponse<IActivity[]>>=>{const{page,limit,skip}=paginationHelper.calculatePagination(paginationOptions);const[result,total]=await Promise.all([Activity.find({organizationId,leadId}).populate('agentId','name email profileImgURL').sort({createdAt:-1}).skip(skip).limit(limit),Activity.countDocuments({organizationId,leadId})]);return{meta:{page,limit,total},data:result}}
+const getActivitiesByLead=async(organizationId:string,leadId:string,paginationOptions:IPaginationOptions):Promise<IGenericResponse<IActivity[]>>=>{const{page,limit,skip}=paginationHelper.calculatePagination(paginationOptions);const[result,total]=await Promise.all([Activity.find({organizationId,leadId}).populate(userRefPopulate('agentId', 'name email userRole')).sort({createdAt:-1}).skip(skip).limit(limit),Activity.countDocuments({organizationId,leadId})]);return{meta:{page,limit,total},data:result}}
 export const ActivityService={createActivity,getActivitiesByLead}

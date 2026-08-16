@@ -10,6 +10,7 @@ import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
+import { userRefPopulate } from '../user/userProfile.service'
 import {
   IFinanceBudget,
   IFinanceCommission,
@@ -384,7 +385,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceCommission.find(where).populate('agentId', 'name email profileImgURL').populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder }).skip(skip).limit(limit).lean(),
+    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder }).skip(skip).limit(limit),
     FinanceCommission.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }

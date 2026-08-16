@@ -227,6 +227,10 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
 )
 
 organizationSchema.index({ sub_domain: 1 }, { unique: true })
+organizationSchema.index(
+  { ownerId: 1 },
+  { unique: true, partialFilterExpression: { ownerId: { $type: 'objectId' } }, name: 'organization_owner_unique' },
+)
 
 export const Organization = model<IOrganization, OrganizationModel>(
   'Organization',

@@ -16,6 +16,12 @@ import { DomainRecord } from '../domain/domain.model'
 import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
+import { AccountCredential } from '../accountCredential/accountCredential.model'
+import { UserProfile } from '../userProfile/userProfile.model'
+import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
+import { AgentProfile } from '../agentProfile/agentProfile.model'
+import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
+import { ensureUserProfile, populateUserProfiles, syncRoleProfile, toAuthUserDto } from '../user/userProfile.service'
 import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDocument'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
 import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RequestMeta } from './auth.interface'
@@ -24,7 +30,6 @@ import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { captureOtpForTest } from '../../../testSupport/otpCapture'
 import { sendAccountVerificationEmail, sendPasswordResetEmail } from './authEmail.service'
-import { effectivePermissionsForUser } from '../user/accessControl'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 
 const OTP_TTL_MS = 5 * 60 * 1000
@@ -40,15 +45,7 @@ export const validateOtpChallengeState = (challenge: OtpState, now = new Date())
   if (challenge.attempts >= challenge.maxAttempts) throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Maximum verification attempts exceeded')
 }
 
-const publicUser = (user: any) => ({
-  _id: user._id,
-  name: user.name,
-  email: user.email,
-  phoneNumber: user.phoneNumber,
-  userRole: user.userRole,
-  organizationId: user.organizationId,
-  permissions: effectivePermissionsForUser(user),
-})
+const publicUser = (user: any) => toAuthUserDto(user)
 
 const accessTokenFor = (user: any): string => jwtHelpers.createToken({
   _id: user._id.toString(),
@@ -73,11 +70,13 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     userId: user._id,
     organizationId: user.organizationId,
     familyId,
-    tokenHash: sha256(refreshToken),
+    refreshTokenHash: sha256(refreshToken),
     expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
     createdIp: meta.ip || '',
+    lastUsedIp: meta.ip || '',
     userAgent: meta.userAgent || '',
   })
+  await populateUserProfiles(user)
   const [organization, verifiedDomain] = await Promise.all([
     Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
     DomainRecord.findOne({ organizationId: user.organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
@@ -142,15 +141,24 @@ const createOtpChallenge = async (
   await enforceOtpThrottle(email, purpose)
   const otp = generateOtp()
   const challengeId = new Types.ObjectId()
+  const now = new Date()
+  // Only the newest challenge may be used. Consuming older unconsumed codes
+  // prevents replay across resend requests without relying on TTL timing.
+  await OtpChallenge.updateMany(
+    { userId: user._id, purpose, channel: 'email', consumedAt: null, expiresAt: { $gt: now } },
+    { $set: { consumedAt: now } },
+  )
   await OtpChallenge.create({
     _id: challengeId,
     email,
     channel: 'email',
     userId: user._id,
+    organizationId: user.organizationId || '',
     purpose,
     codeHash: hashOtp(challengeId.toString(), otp),
     expiresAt: new Date(Date.now() + OTP_TTL_MS),
     requestIp: meta.ip || '',
+    requestUserAgent: meta.userAgent || '',
   })
 
   try {
@@ -170,6 +178,11 @@ const cleanupProvisionedAgency = async (input: { organizationObjectId: Types.Obj
   await Promise.allSettled([
     OtpChallenge.deleteOne({ _id: input.challengeId, userId: input.userId }),
     WebsitePage.deleteOne({ organizationId: input.organizationId, slug: '/' }),
+    AccountCredential.deleteOne({ userId: input.userId }),
+    UserProfile.deleteOne({ userId: input.userId }),
+    AgencyOwnerProfile.deleteOne({ userId: input.userId }),
+    AgentProfile.deleteOne({ userId: input.userId }),
+    SuperAdminProfile.deleteOne({ userId: input.userId }),
     User.deleteOne({ _id: input.userId, organizationId: input.organizationId }),
     Organization.deleteOne({ _id: input.organizationObjectId, organizationId: input.organizationId }),
     AuditEvent.collection.deleteMany({ organizationId: input.organizationId, action: 'tenant.provisioned', entityId: input.organizationObjectId.toString() }),
@@ -256,14 +269,23 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       name: payload.name,
       email,
       phoneNumber,
-      password: passwordHash,
       organizationId,
       userRole: 'agency_owner',
       status: 'pending',
       isVerified: false,
-      isAddProfile: false,
-      licenseNumber: payload.licenseNumber || '',
     }], sessionOptions)
+    await AccountCredential.create([{
+      userId,
+      passwordHash,
+      passwordChangedAt: new Date(),
+    }], sessionOptions)
+    await ensureUserProfile(userId, {
+      isAddProfile: false,
+      accessControl: { useRoleDefaults: true, permissions: [] },
+    }, session)
+    await syncRoleProfile(userId, organizationId, 'agency_owner', {
+      licenseNumber: payload.licenseNumber || '',
+    }, session)
     await WebsitePage.create([{
       organizationId,
       slug: '/',
@@ -278,10 +300,12 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       email,
       channel: 'email',
       userId,
+      organizationId,
       purpose: 'account_verification',
       codeHash: hashOtp(challengeId.toString(), otp),
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
       requestIp: meta.ip || '',
+      requestUserAgent: meta.userAgent || '',
     }], sessionOptions)
     await writeAudit({
       organizationId,
@@ -330,19 +354,38 @@ const loginUser = async (payload: ILoginUser, meta: RequestMeta): Promise<AuthRe
   } catch (error) {
     throw new ApiError(400, (error as Error).message)
   }
-  const user = await User.findOne(query).select('+password')
-  if (!user || !(await bcrypt.compare(payload.password, user.password as string))) throw new ApiError(401, 'Invalid credentials')
+  const user = await User.findOne(query)
+  if (!user) throw new ApiError(401, 'Invalid credentials')
+  const credential: any = await AccountCredential.findOne({ userId: user._id }).select('+passwordHash')
+  if (!credential) throw new ApiError(401, 'Invalid credentials')
+  if (credential.lockedUntil && credential.lockedUntil > new Date()) {
+    throw new ApiError(429, 'Too many failed sign-in attempts. Try again later.', '', 'ACCOUNT_TEMPORARILY_LOCKED')
+  }
+  const passwordMatches = await bcrypt.compare(payload.password, credential.passwordHash as string)
+  if (!passwordMatches) {
+    const nextFailures = Number(credential.failedLoginCount || 0) + 1
+    const lockUntil = nextFailures >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null
+    await AccountCredential.updateOne(
+      { _id: credential._id },
+      { $set: { failedLoginCount: lockUntil ? 0 : nextFailures, lockedUntil: lockUntil } },
+    )
+    throw new ApiError(401, 'Invalid credentials')
+  }
   if (user.status === 'blocked') throw new ApiError(403, 'Account is blocked')
   if (!user.isVerified || user.status !== 'active') throw new ApiError(403, 'Verify your email before signing in', '', 'EMAIL_VERIFICATION_REQUIRED')
+  await AccountCredential.updateOne(
+    { _id: credential._id },
+    { $set: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginIp: meta.ip || '' } },
+  )
   return createSession(user, meta)
 }
 
 const consumeOtp = async (email: string, code: string, purpose: OtpPurpose) => {
-  const challenge = await OtpChallenge.findOne({ email, channel: 'email', purpose, consumedAt: null }).sort({ createdAt: -1 })
+  const challenge = await OtpChallenge.findOne({ email, channel: 'email', purpose, consumedAt: null }).sort({ createdAt: -1 }).select('+codeHash')
   if (!challenge) throw new ApiError(401, 'Invalid or expired verification code')
   validateOtpChallengeState(challenge)
   if (!safeEqual(challenge.codeHash, hashOtp(challenge._id.toString(), code))) {
-    await OtpChallenge.updateOne({ _id: challenge._id, consumedAt: null }, { $inc: { attempts: 1 } })
+    await OtpChallenge.updateOne({ _id: challenge._id, consumedAt: null }, { $inc: { attempts: 1 }, $set: { lastAttemptAt: new Date() } })
     throw new ApiError(401, 'Invalid or expired verification code')
   }
   const consumed = await OtpChallenge.findOneAndUpdate(
@@ -363,6 +406,10 @@ const verifyOtp = async (rawEmail: string, code: string, meta: RequestMeta): Pro
     { new: true },
   )
   if (!user) throw new ApiError(409, 'Account is already verified or unavailable')
+  await AccountCredential.updateOne(
+    { userId: user._id },
+    { $set: { emailVerifiedAt: new Date() } },
+  )
   await writeAudit({
     organizationId: user.organizationId,
     actorId: user._id.toString(),
@@ -396,7 +443,7 @@ const verifyPasswordReset = async (rawEmail: string, code: string): Promise<{ re
   const resetToken = randomToken(32)
   await OtpChallenge.updateOne(
     { _id: challenge._id, resetTokenUsedAt: null },
-    { resetTokenHash: sha256(resetToken), resetTokenExpiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) },
+    { resetTokenHash: sha256(resetToken), resetTokenIssuedAt: new Date(), resetTokenExpiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) },
   )
   return { resetToken }
 }
@@ -411,10 +458,16 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
           resetTokenHash: sha256(resetToken),
           resetTokenUsedAt: null,
           resetTokenExpiresAt: { $gt: new Date() },
-        }, { resetTokenUsedAt: new Date() }, { new: true, session })
+        }, { resetTokenUsedAt: new Date() }, { new: true, session }).select('+resetTokenHash')
         if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
-        const user = await User.findByIdAndUpdate(challenge.userId, { password: await hashPassword(newPassword) }, { new: true, session })
+        const user = await User.findById(challenge.userId).session(session)
         if (!user) throw new ApiError(401, 'Invalid reset request')
+        const updatedCredential = await AccountCredential.findOneAndUpdate(
+          { userId: user._id },
+          { $set: { passwordHash: await hashPassword(newPassword), passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null } },
+          { new: true, session },
+        )
+        if (!updatedCredential) throw new ApiError(401, 'Invalid reset request')
         await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' }, { session })
         await writeAudit({
           organizationId: user.organizationId,
@@ -439,14 +492,18 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
     resetTokenHash: sha256(resetToken),
     resetTokenUsedAt: null,
     resetTokenExpiresAt: { $gt: new Date() },
-  }, { resetTokenUsedAt: new Date() }, { new: true })
+  }, { resetTokenUsedAt: new Date() }, { new: true }).select('+resetTokenHash')
   if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
   const user = await User.findById(challenge.userId)
   if (!user) throw new ApiError(401, 'Invalid reset request')
   const passwordHash = await hashPassword(newPassword)
+  const updatedCredential = await AccountCredential.findOneAndUpdate(
+    { userId: user._id },
+    { $set: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null } },
+    { new: true },
+  )
+  if (!updatedCredential) throw new ApiError(401, 'Invalid reset request')
   await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' })
-  user.password = passwordHash
-  await user.save()
   await writeAudit({
     organizationId: user.organizationId,
     actorId: user._id.toString(),
@@ -466,9 +523,10 @@ const refreshToken = async (token: string): Promise<AuthResult> => {
   } catch {
     throw new ApiError(401, 'Invalid refresh token')
   }
-  const authSession = await AuthSession.findById(verified.sessionId)
+  const authSession: any = await AuthSession.findById(verified.sessionId).select('+refreshTokenHash +tokenHash')
   if (!authSession || authSession.revokedAt || authSession.expiresAt <= new Date()) throw new ApiError(401, 'Session has expired')
-  if (!safeEqual(authSession.tokenHash, sha256(token))) {
+  const storedRefreshHash = authSession.refreshTokenHash || authSession.tokenHash
+  if (!storedRefreshHash || !safeEqual(storedRefreshHash, sha256(token))) {
     await AuthSession.updateMany({ familyId: verified.familyId, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'refresh_token_reuse' })
     throw new ApiError(401, 'Refresh token reuse detected; session family revoked')
   }
@@ -482,10 +540,20 @@ const refreshToken = async (token: string): Promise<AuthResult> => {
     jti,
     organizationId: user.organizationId,
   }, config.jwt.refresh_secret as Secret, config.jwt.refresh_expires_in)
-  authSession.tokenHash = sha256(nextRefresh)
-  authSession.lastUsedAt = new Date()
-  authSession.expiresAt = new Date(Date.now() + REFRESH_TTL_MS)
-  await authSession.save()
+  await AuthSession.updateOne(
+    { _id: authSession._id, revokedAt: null },
+    {
+      $set: {
+        refreshTokenHash: sha256(nextRefresh),
+        lastUsedAt: new Date(),
+        rotatedAt: new Date(),
+        expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+      },
+      $unset: { tokenHash: '' },
+      $inc: { sessionVersion: 1 },
+    },
+  )
+  await populateUserProfiles(user)
   return {
     accessToken: accessTokenFor(user),
     refreshToken: nextRefresh,
@@ -507,11 +575,16 @@ const logout = async (token?: string): Promise<void> => {
 }
 
 const changePassword = async (userId: string, payload: IChangePassword, meta: RequestMeta): Promise<void> => {
-  const user = await User.findById(userId).select('+password')
-  if (!user || !(await bcrypt.compare(payload.oldPassword, user.password as string))) throw new ApiError(401, 'Current password is incorrect')
-  if (await bcrypt.compare(payload.newPassword, user.password as string)) throw new ApiError(400, 'New password must be different from your current password')
-  user.password = await hashPassword(payload.newPassword)
-  await user.save()
+  const user = await User.findById(userId)
+  if (!user) throw new ApiError(401, 'Current password is incorrect')
+  const credential: any = await AccountCredential.findOne({ userId: user._id }).select('+passwordHash')
+  if (!credential || !(await bcrypt.compare(payload.oldPassword, credential.passwordHash as string))) throw new ApiError(401, 'Current password is incorrect')
+  if (await bcrypt.compare(payload.newPassword, credential.passwordHash as string)) throw new ApiError(400, 'New password must be different from your current password')
+  credential.passwordHash = await hashPassword(payload.newPassword)
+  credential.passwordChangedAt = new Date()
+  credential.failedLoginCount = 0
+  credential.lockedUntil = null
+  await credential.save()
   await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_change' })
   await writeAudit({
     organizationId: user.organizationId,

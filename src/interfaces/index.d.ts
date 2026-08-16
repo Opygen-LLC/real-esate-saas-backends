@@ -16,6 +16,9 @@ declare global {
         profileImgURL?: string
         licenseNumber?: string
         specialization?: string[]
+        permissions?: string[]
+        status?: 'pending' | 'active' | 'blocked'
+        isVerified?: boolean
         storeId?: string
       }
       tenant?: { organizationId: string; userId: string; role: string; permissions: string[] }

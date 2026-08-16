@@ -6,6 +6,7 @@ import { Organization } from '../organization/organization.model'
 import { PlatformAdminService } from '../platformAdmin/platformAdmin.service'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
+import { USER_PROFILE_POPULATES } from '../user/userProfile.service'
 import { Viewing } from '../viewing/viewing.model'
 
 const agentRoles = ['agent', 'agency_admin', 'agency_owner']
@@ -295,8 +296,8 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
       },
     ]),
     User.find({ ...orgMatch, userRole: { $in: agentRoles }, status: { $ne: 'blocked' } })
-      .select('name email profileImgURL licenseNumber')
-      .lean(),
+      .select('name email userRole')
+      .populate(USER_PROFILE_POPULATES),
   ])
 
   const leadFacet = leadFacetRaw[0] || {}

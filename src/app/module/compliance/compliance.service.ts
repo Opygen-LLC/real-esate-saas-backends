@@ -6,6 +6,14 @@ import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
+import { USER_PROFILE_POPULATES, toUserDto } from '../user/userProfile.service'
+import { AccountCredential } from '../accountCredential/accountCredential.model'
+import { AuthSession } from '../auth/authSession.model'
+import { OtpChallenge } from '../auth/otpChallenge.model'
+import { UserProfile } from '../userProfile/userProfile.model'
+import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
+import { AgentProfile } from '../agentProfile/agentProfile.model'
+import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
 import { ComplianceProfile, DataSubjectRequest } from './compliance.model'
 import { PrivacyConsentRecord } from '../privacy/privacyConsent.model'
 import { PrivacyConsentService } from '../privacy/privacyConsent.service'
@@ -42,12 +50,13 @@ const createRequest = (organizationId: string, requestedBy: string, payload: any
 const listRequests = (organizationId: string) => DataSubjectRequest.find({ organizationId }).sort({ createdAt: -1 })
 
 const exportTenantData = async (organizationId: string) => {
-  const [organization, users, properties, leads, billing, consents] = await Promise.all([
+  const [organization, userDocuments, properties, leads, billing, consents] = await Promise.all([
     Organization.findOne({ organizationId }).lean(),
-    User.find({ organizationId }).select('-password -verificationCode -codeGenerationTimestamp').lean(),
+    User.find({ organizationId }).populate(USER_PROFILE_POPULATES),
     Property.find({ organizationId }).lean(), Lead.find({ organizationId }).lean(),
     Billing.find({ organizationId }).lean(), PrivacyConsentRecord.find({ organizationId }).lean(),
   ])
+  const users = userDocuments.map((user) => toUserDto(user, { includePrivateProfile: true }))
   return { generatedAt: new Date().toISOString(), organization, users, properties, leads, billing, consents,
     exclusions: ['passwords', 'OTP challenges', 'refresh sessions', 'encrypted compliance identifiers', 'platform audit security metadata'] }
 }
@@ -93,6 +102,19 @@ const executeDueDeletionRequests = async (): Promise<number> => {
     const session = await mongoose.startSession()
     try {
       await session.withTransaction(async () => {
+        const tenantUsers = await User.find({ organizationId: request.organizationId }).select('_id').session(session).lean()
+        const userIds = tenantUsers.map((user) => user._id)
+        if (userIds.length) {
+          await Promise.all([
+            AccountCredential.deleteMany({ userId: { $in: userIds } }, { session }),
+            AuthSession.deleteMany({ userId: { $in: userIds } }, { session }),
+            OtpChallenge.deleteMany({ userId: { $in: userIds } }, { session }),
+            UserProfile.deleteMany({ userId: { $in: userIds } }, { session }),
+            AgencyOwnerProfile.deleteMany({ userId: { $in: userIds } }, { session }),
+            AgentProfile.deleteMany({ userId: { $in: userIds } }, { session }),
+            SuperAdminProfile.deleteMany({ userId: { $in: userIds } }, { session }),
+          ])
+        }
         for (const name of tenantCollections) await mongoose.connection.collection(name).deleteMany({ organizationId: request.organizationId }, { session })
         await Organization.deleteOne({ organizationId: request.organizationId }, { session })
         request.status = 'completed'; request.processedAt = new Date(); request.operatorReason = `${request.operatorReason} Retention worker completed deletion.`.trim()

@@ -1,150 +1,72 @@
-import bcrypt from 'bcryptjs'
 import { Schema, model } from 'mongoose'
 import { IUser, UserModel } from './user.interface'
-import { permissionValues } from './accessControl'
 
 const userSchema = new Schema<IUser, UserModel>(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      trim: true,
-      lowercase: true,
-    },
-    phoneNumber: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: true,
-      select: false,
-    },
-    organizationId: {
-      type: String,
-      required: true,
-      index: true,
-    },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, trim: true, lowercase: true },
+    phoneNumber: { type: String, required: true, trim: true },
+    organizationId: { type: String, required: true, index: true },
     userRole: {
       type: String,
       required: true,
-      enum: [
-        'super-admin',
-        'agency_owner',
-        'agency_admin',
-        'agent',
-        'staff',
-        'viewer',
-        'user',
-      ],
+      enum: ['super-admin', 'agency_owner', 'agency_admin', 'agent', 'staff', 'viewer', 'user'],
       default: 'agent',
+      index: true,
     },
-    status: {
-      type: String,
-      enum: ['pending', 'active', 'blocked'],
-      default: 'pending',
-    },
-    profileImgURL: {
-      type: String,
-      default: '',
-    },
-    bio: {
-      type: String,
-      default: '',
-    },
-    licenseNumber: {
-      type: String,
-      default: '',
-    },
-    specialization: {
-      type: [String],
-      default: [],
-    },
-    serviceAreas: {
-      type: [String],
-      default: [],
-    },
-    address: {
-      type: String,
-      default: '',
-    },
-    gender: {
-      type: String,
-      default: '',
-    },
-    verificationCode: {
-      type: String,
-      default: '',
-      select: false,
-    },
-    codeGenerationTimestamp: {
-      type: String,
-      default: '',
-      select: false,
-    },
-    isVerified: {
-      type: Boolean,
-      default: false,
-    },
-    isAddProfile: {
-      type: Boolean,
-      default: true,
-    },
-    sidebar_permission: {
-      type: Object,
-      default: {},
-    },
-    accessControl: {
-      useRoleDefaults: { type: Boolean, default: true },
-      permissions: { type: [String], enum: permissionValues, default: [] },
-    },
+    status: { type: String, enum: ['pending', 'active', 'blocked'], default: 'pending', index: true },
+    isVerified: { type: Boolean, default: false },
   },
   {
     timestamps: true,
+    versionKey: false,
+    strict: true,
     toJSON: {
       virtuals: true,
       transform: (_doc, ret: Record<string, unknown>) => {
-        delete ret.password
-        delete ret.verificationCode
-        delete ret.codeGenerationTimestamp
+        delete ret.profile
+        delete ret.agentProfile
+        delete ret.agencyOwnerProfile
+        delete ret.superAdminProfile
         return ret
       },
     },
-    toObject: {
-      virtuals: true,
-      transform: (_doc, ret: Record<string, unknown>) => {
-        delete ret.password
-        delete ret.verificationCode
-        delete ret.codeGenerationTimestamp
-        return ret
-      },
-    },
-  }
+    toObject: { virtuals: true },
+  },
 )
 
 // Login identifiers are platform-wide, so uniqueness is intentionally global.
-userSchema.index({ phoneNumber: 1 }, { unique: true })
-userSchema.index({ email: 1 }, { unique: true })
-userSchema.index({ organizationId: 1, _id: 1 })
+userSchema.index({ phoneNumber: 1 }, { unique: true, name: 'user_phone_unique' })
+userSchema.index({ email: 1 }, { unique: true, name: 'user_email_unique' })
+userSchema.index({ organizationId: 1, userRole: 1, status: 1 }, { name: 'user_tenant_role_status' })
 
-userSchema.statics.isUserExist = async function (
-  phoneNumber: string
-): Promise<Pick<IUser, 'phoneNumber' | 'password' | 'userRole' | 'isVerified'> | null> {
-  return await this.findOne({ phoneNumber }).select('+password phoneNumber userRole isVerified')
-}
+// One-to-one companion records. These virtuals intentionally keep the core
+// User collection small while allowing focused queries to populate profiles.
+userSchema.virtual('profile', {
+  ref: 'UserProfile', localField: '_id', foreignField: 'userId', justOne: true,
+})
+userSchema.virtual('agencyOwnerProfile', {
+  ref: 'AgencyOwnerProfile', localField: '_id', foreignField: 'userId', justOne: true,
+})
+userSchema.virtual('agentProfile', {
+  ref: 'AgentProfile', localField: '_id', foreignField: 'userId', justOne: true,
+})
+userSchema.virtual('superAdminProfile', {
+  ref: 'SuperAdminProfile', localField: '_id', foreignField: 'userId', justOne: true,
+})
 
-userSchema.statics.isPasswordMatch = async function (
-  givenPassword: string,
-  savedPassword: string
-): Promise<boolean> {
-  return await bcrypt.compare(givenPassword, savedPassword)
+
+const commonProfileField = (field: string, fallback: unknown) => function (this: any) {
+  return this.profile?.[field] ?? fallback
 }
-userSchema.index({ organizationId: 1, userRole: 1, status: 1 })
+const roleProfileField = (field: string, fallback: unknown) => function (this: any) {
+  const roleProfile = this.userRole === 'agency_owner' ? this.agencyOwnerProfile : this.agentProfile
+  return roleProfile?.[field] ?? fallback
+}
+userSchema.virtual('profileImgURL').get(commonProfileField('profileImgURL', ''))
+userSchema.virtual('bio').get(commonProfileField('bio', ''))
+userSchema.virtual('licenseNumber').get(roleProfileField('licenseNumber', ''))
+userSchema.virtual('specialization').get(roleProfileField('specialization', []))
+userSchema.virtual('serviceAreas').get(roleProfileField('serviceAreas', []))
 
 export const User = model<IUser, UserModel>('User', userSchema)

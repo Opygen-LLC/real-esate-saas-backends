@@ -84,7 +84,7 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
     statusCode: 200,
     success: true,
     message: 'Session is active',
-    data: { authenticated: true, user: { ...req.user, permissions: req.tenant?.permissions || [] } },
+    data: { authenticated: true, user: { ...req.user, permissions: req.tenant?.permissions || (req.user as any)?.permissions || [] } },
   })
 })
 
