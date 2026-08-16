@@ -60,10 +60,10 @@ const redisOptions = (): any => ({
 
 const attachRedisAdapter = async (server: SocketIOServer) => {
   if (!config.redis.enabled) {
-    if (config.isProduction) throw new Error('Realtime requires Redis in production')
-    logger.warn('realtime_redis_adapter_disabled_development_only')
+    logger.warn('realtime_redis_adapter_disabled_standalone_mode')
     return
   }
+
   pubClient = createClient(redisOptions())
   subClient = pubClient.duplicate()
   pubClient.on('error', (error: Error) => errorLogger.error('realtime_redis_pub_error', { error }))
