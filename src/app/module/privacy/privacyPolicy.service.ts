@@ -1,4 +1,5 @@
 import ApiError from '../../../errors/ApiError'
+import config from '../../../config'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 
 export type PublicPrivacyPolicyState = {
@@ -11,9 +12,14 @@ export type PublicPrivacyPolicyState = {
 const getPublicPolicyState = async (): Promise<PublicPrivacyPolicyState> => {
   const settings: any = await PlatformSettings.findOne({ key: 'platform' }).select('privacy').lean()
 
-  const policyVersion = String(settings?.privacy?.policyVersion || '').trim()
-  const policyUrl = String(settings?.privacy?.policyUrl || '').trim()
-  const legalReviewStatus = settings?.privacy?.legalReviewStatus === 'approved' ? 'approved' : 'required'
+  const databasePolicyVersion = String(settings?.privacy?.policyVersion || '').trim()
+  const databasePolicyUrl = String(settings?.privacy?.policyUrl || '').trim()
+  const databaseReviewStatus = settings?.privacy?.legalReviewStatus === 'approved' ? 'approved' : 'required'
+  const databaseConfigured = Boolean(databasePolicyVersion || databasePolicyUrl || databaseReviewStatus === 'approved')
+
+  const policyVersion = databaseConfigured ? databasePolicyVersion : config.privacy.policy_version
+  const policyUrl = databaseConfigured ? databasePolicyUrl : config.privacy.policy_url
+  const legalReviewStatus = databaseConfigured ? databaseReviewStatus : config.privacy.legal_review_status
 
   return {
     ready: legalReviewStatus === 'approved' && Boolean(policyVersion) && Boolean(policyUrl),

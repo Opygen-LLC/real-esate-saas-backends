@@ -7,6 +7,7 @@ import { PropertyService } from './property.service'
 import { requireTenant } from '../../middlewares/auth'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
+import ApiError from '../../../errors/ApiError'
 
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -117,8 +118,11 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
 
 const getPublicPropertyDetail = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId.trim() : undefined
-  const result = await PropertyService.getPublicPropertyDetail(id, organizationId || undefined)
+  const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId.trim() : ''
+  if (!organizationId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Tenant context is required for public property details', '', 'TENANT_CONTEXT_REQUIRED')
+  }
+  const result = await PropertyService.getPublicPropertyDetail(id, organizationId)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

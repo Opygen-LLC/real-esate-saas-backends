@@ -19,6 +19,10 @@ export const PlatformSettingsValidation = {
       policyVersion: z.string().trim().max(80),
       retentionDays: z.number().int().min(30).max(3650),
       legalReviewStatus: z.enum(['required', 'approved']),
+    }).superRefine((privacy, ctx) => {
+      if (privacy.legalReviewStatus !== 'approved') return
+      if (!privacy.policyUrl) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['policyUrl'], message: 'Policy URL is required before privacy can be approved' })
+      if (!privacy.policyVersion) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['policyVersion'], message: 'Policy version is required before privacy can be approved' })
     }).optional(),
     support: z.object({
       whatsapp: bdPhone,

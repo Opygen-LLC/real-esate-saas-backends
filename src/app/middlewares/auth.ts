@@ -21,13 +21,13 @@ const tryImpersonation = async (req: Request): Promise<boolean> => {
     const session: any = await ImpersonationSession.findOne({ _id: payload.impersonationSessionId, endedAt: null, expiresAt: { $gt: new Date() } }).lean()
     if (!session || session.adminUserId.toString() !== String(payload.supportAdminId) || session.targetUserId.toString() !== String(payload._id) || session.organizationId !== String(payload.organizationId)) return false
     const [target, supportAdmin] = await Promise.all([
-      User.findOne({ _id: payload._id, organizationId: payload.organizationId, status: 'active', isVerified: true }).select('_id email phoneNumber userRole organizationId accessControl').lean(),
+      User.findOne({ _id: payload._id, organizationId: payload.organizationId, status: 'active', isVerified: true }).select('_id name email phoneNumber userRole organizationId profileImgURL licenseNumber specialization accessControl').lean(),
       User.exists({ _id: session.adminUserId, userRole: 'super-admin', status: 'active', isVerified: true }),
     ])
     if (!supportAdmin) throw new ApiError(401, 'Support administrator is no longer authorized')
     if (!target) throw new ApiError(401, 'Impersonated tenant user is unavailable')
     if (!SAFE_METHODS.has(req.method.toUpperCase())) throw new ApiError(403, 'Support impersonation is read-only. End impersonation before making changes.')
-    req.user = { _id: target._id.toString(), email: target.email, phoneNumber: target.phoneNumber, userRole: target.userRole, organizationId: target.organizationId }
+    req.user = { _id: target._id.toString(), name: target.name, email: target.email, phoneNumber: target.phoneNumber, userRole: target.userRole, organizationId: target.organizationId, profileImgURL: target.profileImgURL, licenseNumber: target.licenseNumber, specialization: target.specialization }
     req.tenant = { organizationId: target.organizationId, userId: target._id.toString(), role: target.userRole, permissions: effectivePermissionsForUser(target) }
     RequestContext.setTenant(target.organizationId, target._id.toString())
     req.impersonation = { sessionId: session._id.toString(), adminUserId: session.adminUserId.toString(), organizationId: session.organizationId, readOnly: true, expiresAt: session.expiresAt }
@@ -44,7 +44,7 @@ const authenticate = async (req: Request): Promise<void> => {
   if (!token) throw new ApiError(401, 'Authentication required')
   let payload: any
   try { payload = jwtHelpers.verifyToken(token, config.jwt.secret as Secret) } catch { throw new ApiError(401, 'Invalid or expired access token') }
-  const user: any = await User.findById(payload._id).select('_id email phoneNumber userRole organizationId status isVerified accessControl').lean()
+  const user: any = await User.findById(payload._id).select('_id name email phoneNumber userRole organizationId profileImgURL licenseNumber specialization status isVerified accessControl').lean()
   if (!user) throw new ApiError(401, 'Account is unavailable')
   if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
@@ -53,7 +53,7 @@ const authenticate = async (req: Request): Promise<void> => {
     const organizationAvailable = await Organization.exists({ organizationId: user.organizationId, isBlocked: { $ne: true } })
     if (!organizationAvailable) throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
   }
-  req.user = { _id: user._id.toString(), email: user.email, phoneNumber: user.phoneNumber, userRole: user.userRole, organizationId: user.organizationId }
+  req.user = { _id: user._id.toString(), name: user.name, email: user.email, phoneNumber: user.phoneNumber, userRole: user.userRole, organizationId: user.organizationId, profileImgURL: user.profileImgURL, licenseNumber: user.licenseNumber, specialization: user.specialization }
   if (user.userRole !== 'super-admin') {
     req.tenant = { organizationId: user.organizationId, userId: user._id.toString(), role: user.userRole, permissions: effectivePermissionsForUser(user) }
     RequestContext.setTenant(user.organizationId, user._id.toString())

@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from 'express'
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
 import { RequestContext } from '../../shared/requestContext'
+import { isPublicCorsRequest, isTrustedApplicationOrigin } from './corsPolicy'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -25,12 +26,6 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   '/api/v1/team-invitations/accept',
 ])
 
-const PUBLIC_CROSS_ORIGIN_POST_PATHS = new Set([
-  '/api/v1/lead/public-capture',
-  '/api/v1/viewing/public-request',
-  '/api/v1/moderation/fraud-reports',
-])
-
 const PUBLIC_CROSS_ORIGIN_POST_PATTERNS = [
   /^\/api\/v1\/meta\/public\/[^/]+\/events$/,
 ]
@@ -47,12 +42,6 @@ export const isCsrfExemptRequest = (req: Pick<Request, 'method' | 'originalUrl'>
   return CSRF_EXEMPT_POST_PATHS.has(path) || PUBLIC_CROSS_ORIGIN_POST_PATTERNS.some((pattern) => pattern.test(path))
 }
 
-const isPublicCrossOriginRequest = (req: Pick<Request, 'method' | 'originalUrl'>): boolean => {
-  if (req.method.toUpperCase() !== 'POST') return false
-  const path = normalizePath(req.originalUrl)
-  return PUBLIC_CROSS_ORIGIN_POST_PATHS.has(path) || PUBLIC_CROSS_ORIGIN_POST_PATTERNS.some((pattern) => pattern.test(path))
-}
-
 export const requestContext = (req: Request, res: Response, next: NextFunction): void => {
   const supplied = req.get('x-request-id')
   req.requestId = supplied && /^[A-Za-z0-9._-]{8,128}$/.test(supplied) ? supplied : crypto.randomUUID()
@@ -65,15 +54,8 @@ export const requestContext = (req: Request, res: Response, next: NextFunction):
 
 export const csrfProtection = (req: Request, _res: Response, next: NextFunction): void => {
   const origin = req.get('origin')
-  if (origin && !config.allowed_origins.includes('*') && !isPublicCrossOriginRequest(req)) {
-    const normalizedOrigin = origin.replace(/\/$/, '')
-    let tenantOriginAllowed = false
-    try {
-      const originUrl = new URL(normalizedOrigin)
-      const platformUrl = new URL(config.domains.public_site_origin)
-      tenantOriginAllowed = originUrl.protocol === platformUrl.protocol && (originUrl.hostname === platformUrl.hostname || originUrl.hostname.endsWith(`.${platformUrl.hostname}`))
-    } catch { tenantOriginAllowed = false }
-    if (!config.allowed_origins.includes(normalizedOrigin) && !tenantOriginAllowed) return next(new ApiError(403, 'Origin is not allowed'))
+  if (origin && !isPublicCorsRequest(req) && !isTrustedApplicationOrigin(origin)) {
+    return next(new ApiError(403, 'Origin is not allowed'))
   }
 
 

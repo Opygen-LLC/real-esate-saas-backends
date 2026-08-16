@@ -18,6 +18,8 @@ import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 import { emailProviderStatus, verifyEmailProvider } from './app/helpers/sendEmail'
 import { ObjectStorageService } from './app/module/websiteBuilder/objectStorage.service'
 import { virusScannerHealth } from './app/module/websiteBuilder/virusScan.service'
+import { corsOptionsDelegate } from './app/middlewares/corsPolicy'
+import { PrivacyPolicyService } from './app/module/privacy/privacyPolicy.service'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -25,23 +27,8 @@ const startedAt = Date.now()
 app.disable('x-powered-by')
 app.set('trust proxy', 1)
 
-const corsOptions: cors.CorsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true)
-    if (config.allowed_origins.includes('*')) return callback(null, true)
-    const normalizedOrigin = origin.replace(/\/$/, '')
-    if (config.allowed_origins.includes(normalizedOrigin)) return callback(null, true)
-    return callback(null, true)
-  },
-
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-CSRF-Token', 'X-Request-ID', 'Idempotency-Key', 'traceparent'],
-  exposedHeaders: ['X-Request-ID', 'traceparent', 'Server-Timing'],
-  maxAge: 86400,
-}
-app.use(cors(corsOptions))
-app.options('*', cors(corsOptions) as any)
+app.use(cors(corsOptionsDelegate))
+app.options('*', cors(corsOptionsDelegate) as any)
 
 app.use(helmet({
   contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
@@ -79,19 +66,21 @@ app.get('/', (_req: Request, res: Response) => {
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString() }))
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
-  const [transactions, redis, email, objectStorage, clamav] = await Promise.all([
+  const [transactions, redis, email, objectStorage, clamav, privacy] = await Promise.all([
     mongo ? mongoSupportsTransactions() : Promise.resolve(false),
     RedisClient.ping(),
     verifyEmailProvider(),
     ObjectStorageService.health(),
     virusScannerHealth(),
+    mongo ? PrivacyPolicyService.getPublicPolicyState() : Promise.resolve({ ready: false, policyUrl: '', policyVersion: '', legalReviewStatus: 'required' as const }),
   ])
   const worker = getWorkerHealth()
   const workerReady = !config.runtime.worker_enabled || worker.healthy
   const transactionReady = !config.isProduction || transactions
   const emailReady = !config.isProduction || email
   const mediaReady = !config.isProduction || (objectStorage.healthy && clamav.healthy)
-  const ready = mongo && transactionReady && redis && emailReady && workerReady && mediaReady
+  const privacyReady = !config.isProduction || privacy.ready
+  const ready = mongo && transactionReady && redis && emailReady && workerReady && mediaReady && privacyReady
   const emailStatus = emailProviderStatus()
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
@@ -103,6 +92,7 @@ app.get('/ready', async (_req, res) => {
       worker: config.runtime.worker_enabled ? worker : 'disabled',
       objectStorage,
       clamav,
+      privacy: { ...privacy, healthy: privacyReady },
     },
   })
 })

@@ -59,7 +59,7 @@ if (!z.string().url().safeParse(publicSiteOrigin).success) {
 }
 
 const defaultAllowedOrigins = [
-  '*',
+  ...(!isProduction ? ['*'] : []),
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:3001',
@@ -166,6 +166,18 @@ if (isProduction) {
 for (const origin of allowedOrigins) {
   if (origin !== '*' && !z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
 }
+if (isProduction && allowedOrigins.includes('*')) {
+  throw new Error('ALLOWED_ORIGINS must not contain * in production')
+}
+
+const privacyPolicyUrl = process.env.PRIVACY_POLICY_URL?.trim() || ''
+const privacyPolicyVersion = process.env.PRIVACY_POLICY_VERSION?.trim() || ''
+const privacyLegalReviewStatus = process.env.PRIVACY_LEGAL_REVIEW_STATUS?.trim().toLowerCase() || 'required'
+if (privacyPolicyUrl && !z.string().url().safeParse(privacyPolicyUrl).success) throw new Error('PRIVACY_POLICY_URL must be a valid absolute URL')
+if (!['required', 'approved'].includes(privacyLegalReviewStatus)) throw new Error('PRIVACY_LEGAL_REVIEW_STATUS must be required or approved')
+if (privacyLegalReviewStatus === 'approved' && (!privacyPolicyUrl || !privacyPolicyVersion)) {
+  throw new Error('PRIVACY_POLICY_URL and PRIVACY_POLICY_VERSION are required when PRIVACY_LEGAL_REVIEW_STATUS=approved')
+}
 
 
 const smsApiUrl = process.env.SMS_API_URL?.trim() || ''
@@ -180,6 +192,11 @@ export default {
   public_api_url: publicApiUrl,
   client_url: process.env.CLIENT_URL || 'http://localhost:3000',
   allowed_origins: allowedOrigins,
+  privacy: {
+    policy_url: privacyPolicyUrl,
+    policy_version: privacyPolicyVersion,
+    legal_review_status: privacyLegalReviewStatus as 'required' | 'approved',
+  },
   cookie_domain: cookieDomain,
   legacy_cookie_domain: legacyCookieDomain,
   cookie_secure: cookieSecure,

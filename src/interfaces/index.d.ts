@@ -7,11 +7,15 @@ declare global {
         _id?: string
         id?: string
         number?: string
+        name?: string
         phoneNumber?: string
         email?: string
         userRole?: string
         role?: string
         organizationId?: string
+        profileImgURL?: string
+        licenseNumber?: string
+        specialization?: string[]
         storeId?: string
       }
       tenant?: { organizationId: string; userId: string; role: string; permissions: string[] }

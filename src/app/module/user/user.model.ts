@@ -24,6 +24,7 @@ const userSchema = new Schema<IUser, UserModel>(
     password: {
       type: String,
       required: true,
+      select: false,
     },
     organizationId: {
       type: String,
@@ -80,10 +81,12 @@ const userSchema = new Schema<IUser, UserModel>(
     verificationCode: {
       type: String,
       default: '',
+      select: false,
     },
     codeGenerationTimestamp: {
       type: String,
       default: '',
+      select: false,
     },
     isVerified: {
       type: Boolean,
@@ -106,6 +109,21 @@ const userSchema = new Schema<IUser, UserModel>(
     timestamps: true,
     toJSON: {
       virtuals: true,
+      transform: (_doc, ret: Record<string, unknown>) => {
+        delete ret.password
+        delete ret.verificationCode
+        delete ret.codeGenerationTimestamp
+        return ret
+      },
+    },
+    toObject: {
+      virtuals: true,
+      transform: (_doc, ret: Record<string, unknown>) => {
+        delete ret.password
+        delete ret.verificationCode
+        delete ret.codeGenerationTimestamp
+        return ret
+      },
     },
   }
 )
@@ -118,7 +136,7 @@ userSchema.index({ organizationId: 1, _id: 1 })
 userSchema.statics.isUserExist = async function (
   phoneNumber: string
 ): Promise<Pick<IUser, 'phoneNumber' | 'password' | 'userRole' | 'isVerified'> | null> {
-  return await this.findOne({ phoneNumber }, { phoneNumber: 1, password: 1, userRole: 1, isVerified: 1 })
+  return await this.findOne({ phoneNumber }).select('+password phoneNumber userRole isVerified')
 }
 
 userSchema.statics.isPasswordMatch = async function (

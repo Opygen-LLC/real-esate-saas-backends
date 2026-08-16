@@ -330,7 +330,7 @@ const loginUser = async (payload: ILoginUser, meta: RequestMeta): Promise<AuthRe
   } catch (error) {
     throw new ApiError(400, (error as Error).message)
   }
-  const user = await User.findOne(query)
+  const user = await User.findOne(query).select('+password')
   if (!user || !(await bcrypt.compare(payload.password, user.password as string))) throw new ApiError(401, 'Invalid credentials')
   if (user.status === 'blocked') throw new ApiError(403, 'Account is blocked')
   if (!user.isVerified || user.status !== 'active') throw new ApiError(403, 'Verify your email before signing in', '', 'EMAIL_VERIFICATION_REQUIRED')
@@ -507,7 +507,7 @@ const logout = async (token?: string): Promise<void> => {
 }
 
 const changePassword = async (userId: string, payload: IChangePassword, meta: RequestMeta): Promise<void> => {
-  const user = await User.findById(userId)
+  const user = await User.findById(userId).select('+password')
   if (!user || !(await bcrypt.compare(payload.oldPassword, user.password as string))) throw new ApiError(401, 'Current password is incorrect')
   if (await bcrypt.compare(payload.newPassword, user.password as string)) throw new ApiError(400, 'New password must be different from your current password')
   user.password = await hashPassword(payload.newPassword)

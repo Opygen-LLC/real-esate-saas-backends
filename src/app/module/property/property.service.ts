@@ -177,10 +177,10 @@ const getPropertyBySlug = async (organizationId: string, slug: string): Promise<
 
 const getPublicPropertyDetail = async (
   idOrSlug: string,
-  organizationId?: string,
+  organizationId: string,
 ): Promise<{ property: IProperty; similarProperties: IProperty[] }> => {
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
-  const tenantScope = organizationId ? { organizationId } : {}
+  const tenantScope = { organizationId }
   const query = isObjectId
     ? { _id: idOrSlug, ...tenantScope, status: 'Available' }
     : { slug: idOrSlug, ...tenantScope, status: 'Available' }
