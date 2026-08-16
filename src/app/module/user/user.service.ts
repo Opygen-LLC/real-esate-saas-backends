@@ -35,6 +35,15 @@ import {
   USER_PROFILE_POPULATES,
 } from './userProfile.service'
 
+
+const markSessionAuthorizationChanged = async (userId: mongoose.Types.ObjectId | string) => {
+  const changedAt = new Date()
+  await AuthSession.updateMany(
+    { userId, revokedAt: null, expiresAt: { $gt: changedAt } },
+    { $set: { authorizationChangedAt: changedAt }, $inc: { authorizationVersion: 1 } },
+  )
+}
+
 const createUser = async (organizationId: string, userData: IUserCreateInput, actorUserId: string): Promise<UserResponseDto> => {
   await EntitlementService.assertLimit(organizationId, 'agents')
   const actor = await User.findOne({ _id: actorUserId, organizationId, status: 'active' }).select('_id userRole')
@@ -238,6 +247,7 @@ const updateUserById = async (organizationId: string, id: string, userData: IUse
     specialization: userData.specialization ?? currentRoleFields.specialization,
     serviceAreas: userData.serviceAreas ?? currentRoleFields.serviceAreas,
   })
+  if (userData.accessControl !== undefined) await markSessionAuthorizationChanged(user._id)
   await populateUserProfiles(user)
   await CacheInvalidationService.invalidateTenant(organizationId)
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
@@ -326,10 +336,12 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
 
   const previousRole = user.userRole
   const roleFields = await getRoleProfileFields(user._id)
+  const previousStatus = user.status
   user.userRole = resultingRole
   user.status = resultingStatus
   await user.save()
   if (resultingRole !== previousRole) await syncRoleProfile(user._id, user.organizationId, resultingRole, roleFields)
+  if (resultingRole !== previousRole || resultingStatus !== previousStatus) await markSessionAuthorizationChanged(user._id)
 
   if (changes.status === 'blocked') {
     await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'platform_user_suspended' } })
@@ -405,6 +417,7 @@ const updateMemberAccess = async (
     accessControl: { useRoleDefaults: payload.useRoleDefaults, permissions: payload.useRoleDefaults ? [] : permissions },
   })
   await syncRoleProfile(target._id, organizationId, role, roleFields)
+  await markSessionAuthorizationChanged(target._id)
   await CacheInvalidationService.invalidateTenant(organizationId)
   await populateUserProfiles(target)
   return toUserDto(target, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })

@@ -43,6 +43,7 @@ export interface AuthUserResponseDto {
   licenseNumber: string
   specialization: string[]
   permissions: string[]
+  authorizationUpdatedAt?: string
 }
 
 export interface PublicAgentResponseDto {

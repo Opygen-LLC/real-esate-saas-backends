@@ -79,7 +79,9 @@ const getCsrfToken = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getSession = catchAsync(async (req: Request, res: Response) => {
-  res.setHeader('Cache-Control', 'no-store, max-age=0')
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Vary', 'Cookie')
   sendResponse(res, {
     statusCode: 200,
     success: true,

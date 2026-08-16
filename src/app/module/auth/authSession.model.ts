@@ -16,6 +16,8 @@ export interface IAuthSession {
   userAgent?: string
   rotatedAt?: Date | null
   sessionVersion: number
+  authorizationVersion: number
+  authorizationChangedAt?: Date | null
   createdAt?: Date
   updatedAt?: Date
 }
@@ -35,6 +37,8 @@ const authSessionSchema = new Schema<IAuthSession>({
   userAgent: { type: String, default: '', maxlength: 1000 },
   rotatedAt: { type: Date, default: null },
   sessionVersion: { type: Number, min: 1, default: 1 },
+  authorizationVersion: { type: Number, min: 1, default: 1 },
+  authorizationChangedAt: { type: Date, default: null },
 }, {
   timestamps: true,
   versionKey: false,

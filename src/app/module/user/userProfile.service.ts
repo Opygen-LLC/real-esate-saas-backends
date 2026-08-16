@@ -87,6 +87,7 @@ export const toAuthUserDto = (user: any): AuthUserResponseDto => {
     licenseNumber: dto.licenseNumber,
     specialization: dto.specialization,
     permissions: dto.permissions || [],
+    authorizationUpdatedAt: dto.updatedAt ? new Date(dto.updatedAt).toISOString() : undefined,
   }
 }
 

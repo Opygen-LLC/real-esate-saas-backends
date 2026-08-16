@@ -19,6 +19,7 @@ declare global {
         permissions?: string[]
         status?: 'pending' | 'active' | 'blocked'
         isVerified?: boolean
+        authorizationUpdatedAt?: string
         storeId?: string
       }
       tenant?: { organizationId: string; userId: string; role: string; permissions: string[] }
