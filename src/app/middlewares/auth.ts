@@ -6,10 +6,11 @@ import { jwtHelpers } from '../helpers/jwtHelpers'
 import { Organization } from '../module/organization/organization.model'
 import { ImpersonationSession } from '../module/platformAdmin/impersonationSession.model'
 import { User } from '../module/user/user.model'
+import { asUserObjectId, findUserWithProfiles } from '../module/user/userReadModel.service'
 import { RequestContext } from '../../shared/requestContext'
 
 import { effectivePermissionsForUser, Permission, permissionMatrix, permissionsForRole, roleHasPermission } from '../module/user/accessControl'
-import { populateUserProfiles, toAuthUserDto } from '../module/user/userProfile.service'
+import { toAuthUserDto } from '../module/user/userProfile.service'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -21,14 +22,17 @@ const tryImpersonation = async (req: Request): Promise<boolean> => {
     if (payload.typ !== 'support_impersonation' || !payload.impersonationSessionId || !payload.supportAdminId || !payload._id || !payload.organizationId) return false
     const session: any = await ImpersonationSession.findOne({ _id: payload.impersonationSessionId, endedAt: null, expiresAt: { $gt: new Date() } }).lean()
     if (!session || session.adminUserId.toString() !== String(payload.supportAdminId) || session.targetUserId.toString() !== String(payload._id) || session.organizationId !== String(payload.organizationId)) return false
-    const [target, supportAdmin] = await Promise.all([
-      User.findOne({ _id: payload._id, organizationId: payload.organizationId, status: 'active', isVerified: true }),
+    const [target, supportAdmin, organizationAvailable] = await Promise.all([
+      asUserObjectId(String(payload._id))
+        ? findUserWithProfiles({ _id: asUserObjectId(String(payload._id)), organizationId: payload.organizationId, status: 'active', isVerified: true })
+        : Promise.resolve(null),
       User.exists({ _id: session.adminUserId, userRole: 'super-admin', status: 'active', isVerified: true }),
+      Organization.exists({ organizationId: payload.organizationId, isBlocked: { $ne: true }, 'platformAccess.status': { $ne: 'suspended' } }),
     ])
     if (!supportAdmin) throw new ApiError(401, 'Support administrator is no longer authorized')
+    if (!organizationAvailable) throw new ApiError(401, 'Impersonated agency is no longer available')
     if (!target) throw new ApiError(401, 'Impersonated tenant user is unavailable')
     if (!SAFE_METHODS.has(req.method.toUpperCase())) throw new ApiError(403, 'Support impersonation is read-only. End impersonation before making changes.')
-    await populateUserProfiles(target)
     const targetDto: any = toAuthUserDto(target)
     const accessControl = (target as any).profile?.accessControl || { useRoleDefaults: true, permissions: [] }
     req.user = { ...targetDto, _id: target._id.toString() }
@@ -42,13 +46,39 @@ const tryImpersonation = async (req: Request): Promise<boolean> => {
   }
 }
 
+
+const enforceImpersonationReadOnly = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  const method = req.method.toUpperCase()
+  if (SAFE_METHODS.has(method) || req.originalUrl.split('?')[0].endsWith('/platform-admin/impersonation/end')) return next()
+  const token = req.cookies?.[config.security.impersonation_cookie_name]
+  if (typeof token !== 'string' || !token) return next()
+  try {
+    const payload: any = jwtHelpers.verifyToken(token, config.jwt.secret as Secret)
+    if (payload.typ !== 'support_impersonation' || !payload.impersonationSessionId || !payload.supportAdminId) return next()
+    const active = await ImpersonationSession.exists({
+      _id: payload.impersonationSessionId,
+      adminUserId: payload.supportAdminId,
+      targetUserId: payload._id,
+      organizationId: payload.organizationId,
+      endedAt: null,
+      expiresAt: { $gt: new Date() },
+    })
+    if (active) return next(new ApiError(403, 'Support impersonation is read-only. Exit support mode before making changes.'))
+    return next()
+  } catch {
+    // An expired/invalid support cookie must not lock a normal user out of writes.
+    return next()
+  }
+}
+
 const authenticate = async (req: Request): Promise<void> => {
   if (await tryImpersonation(req)) return
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
   if (!token) throw new ApiError(401, 'Authentication required')
   let payload: any
   try { payload = jwtHelpers.verifyToken(token, config.jwt.secret as Secret) } catch { throw new ApiError(401, 'Invalid or expired access token') }
-  const user: any = await User.findById(payload._id)
+  const userId = asUserObjectId(String(payload._id))
+  const user: any = userId ? await findUserWithProfiles({ _id: userId }) : null
   if (!user) throw new ApiError(401, 'Account is unavailable')
   if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
@@ -57,7 +87,6 @@ const authenticate = async (req: Request): Promise<void> => {
     const organizationAvailable = await Organization.exists({ organizationId: user.organizationId, isBlocked: { $ne: true } })
     if (!organizationAvailable) throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
   }
-  await populateUserProfiles(user)
   const authUser: any = toAuthUserDto(user)
   const accessControl = user.profile?.accessControl || { useRoleDefaults: true, permissions: [] }
   req.user = { ...authUser, _id: user._id.toString() }
@@ -83,4 +112,4 @@ export const requireTenant = (req: Request): string => {
   return req.tenant.organizationId
 }
 export { Permission, permissionMatrix, permissionsForRole, roleHasPermission }
-export const authMiddlewares = { auth, authSuperAdmin, requirePermission }
+export const authMiddlewares = { auth, authSuperAdmin, requirePermission, enforceImpersonationReadOnly }

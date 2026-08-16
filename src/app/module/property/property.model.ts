@@ -1,13 +1,13 @@
 import { Schema, model } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
-import { PROPERTY_STATUSES } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES } from './property.constants'
 
 const propertyMediaLinkSchema = new Schema(
   {
     id: { type: String, required: true, trim: true, maxlength: 80 },
     url: { type: String, required: true, trim: true, maxlength: 2048 },
-    provider: { type: String, enum: ['youtube', 'vimeo', 'matterport', 'kuula', 'other'], required: true },
-    type: { type: String, enum: ['video', 'virtual_tour', '360'], required: true },
+    provider: { type: String, enum: PROPERTY_MEDIA_PROVIDERS, required: true },
+    type: { type: String, enum: PROPERTY_MEDIA_TYPES, required: true },
     title: { type: String, default: '', maxlength: 160 },
     isHero: { type: Boolean, default: false },
     embedUrl: { type: String, default: '', trim: true, maxlength: 2048 },
@@ -50,13 +50,13 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     propertyType: {
       type: String,
-      enum: ['Apartment', 'LandPlot', 'Commercial', 'Office', 'Shop', 'Warehouse', 'ReadyFlat', 'UnderConstruction', 'RentalSublet'],
+      enum: PROPERTY_TYPES,
       required: true,
       default: 'Apartment',
     },
     listingType: {
       type: String,
-      enum: ['ForSale', 'ForRent', 'ForLease'],
+      enum: LISTING_TYPES,
       default: 'ForSale',
       required: true,
     },
@@ -73,7 +73,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     currency: {
       type: String,
-      enum: ['BDT'],
+      enum: PROPERTY_CURRENCIES,
       default: 'BDT',
     },
     bedrooms: {
@@ -90,7 +90,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     areaUnit: {
       type: String,
-      enum: ['sqft', 'decimal', 'shotok', 'katha', 'bigha', 'acre'],
+      enum: AREA_UNITS,
       default: 'sqft',
     },
     yearBuilt: {
@@ -121,13 +121,8 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     country: {
       type: String,
-      enum: ['Bangladesh'],
+      enum: PROPERTY_COUNTRIES,
       default: 'Bangladesh',
-    },
-    // Legacy compatibility only. New writes use bangladeshAddress.postalCode.
-    zipCode: {
-      type: String,
-      select: false,
     },
     bangladeshAddress: {
       divisionId: { type: String, default: '' }, division: { type: String, default: '' },
@@ -137,16 +132,16 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       road: { type: String, default: '' }, block: { type: String, default: '' }, sector: { type: String, default: '' },
       mouza: { type: String, default: '' }, postalCode: { type: String, default: '' }, landmark: { type: String, default: '' },
     },
-    facing: { type: String, enum: ['North', 'South', 'East', 'West', 'NorthEast', 'NorthWest', 'SouthEast', 'SouthWest'] },
+    facing: { type: String, enum: PROPERTY_FACINGS },
     roadWidthFeet: { type: Number, min: 0 }, landShare: { type: String, default: '' },
     utilities: {
       electricity: { type: Boolean, default: false }, gas: { type: Boolean, default: false },
       water: { type: Boolean, default: false }, sewerage: { type: Boolean, default: false }, internet: { type: Boolean, default: false },
     },
     regulatory: {
-      approvalAuthority: { type: String, enum: ['none', 'RAJUK', 'CDA', 'RDA', 'KDA', 'other'], default: 'none' },
+      approvalAuthority: { type: String, enum: APPROVAL_AUTHORITIES, default: 'none' },
       approvalNumber: { type: String, default: '' },
-      mutationStatus: { type: String, enum: ['not_applicable', 'pending', 'completed'], default: 'not_applicable' },
+      mutationStatus: { type: String, enum: MUTATION_STATUSES, default: 'not_applicable' },
       khatianNumber: { type: String, default: '' }, holdingTaxPaidThrough: { type: String, default: '' },
     },
     developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0 },

@@ -17,7 +17,6 @@ import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { Viewing } from '../viewing/viewing.model'
-import { UserProfile } from '../userProfile/userProfile.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionCatalog, permissionsForRole } from './accessControl'
 import { UserResponseDto } from './user.dto'
 import { IUserCreateInput, IUserFilter, IUserRole, IUserUpdateInput } from './user.interface'
@@ -27,14 +26,12 @@ import {
   ensureUserProfile,
   getRoleProfileFields,
   getUserAccessControl,
-  populateUserProfiles,
-  profileUserIdsMatching,
   syncRoleProfile,
   toPublicAgentDto,
   toUserDto,
   updateUserProfileFields,
-  USER_PROFILE_POPULATES,
 } from './userProfile.service'
+import { asUserObjectId, findUserWithProfiles, listUsersWithProfiles, paginateUsersWithProfiles, userProfileProjectionStages } from './userReadModel.service'
 
 
 const markSessionAuthorizationChanged = async (
@@ -118,91 +115,127 @@ const createUser = async (organizationId: string, userData: IUserCreateInput, ac
     try { await session.withTransaction(() => provision(session)) } finally { await session.endSession() }
   } else await provision()
 
-  const user = await User.findById(userId)
+  const user = await findUserWithProfiles({ _id: userId })
   if (!user) throw new ApiError(httpStatus.BAD_REQUEST, 'Failed to create user')
-  await populateUserProfiles(user)
   RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'created', entityId: user._id.toString() })
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
-const buildUserWhere = async (filters: IUserFilter) => {
-  const { searchTerm, ...filterFields } = filters
-  const andConditions: Array<Record<string, unknown>> = []
-  if (searchTerm) {
-    const escaped = String(searchTerm).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const profileIds = await profileUserIdsMatching(filters.organizationId, escaped)
-    andConditions.push({
-      $or: [
-        ...['name', 'email', 'phoneNumber'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } })),
-        ...(profileIds.length ? [{ _id: { $in: profileIds } }] : []),
-      ],
-    })
-  }
-  if (Object.keys(filterFields).length) {
-    andConditions.push({ $and: Object.entries(filterFields).map(([key, value]) => ({ [key]: value })) })
-  }
-  return andConditions.length ? { $and: andConditions } : {}
+const buildUserWhere = (filters: IUserFilter) => {
+  const { searchTerm: _searchTerm, ...filterFields } = filters
+  const entries = Object.entries(filterFields).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  return entries.length ? { $and: entries.map(([key, value]) => ({ [key]: value })) } : {}
 }
 
 const getAllUsers = async (
   filters: IUserFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<UserResponseDto[]>> => {
-  const whereCondition = await buildUserWhere(filters)
+  const whereCondition = buildUserWhere(filters)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-  const [result, total] = await Promise.all([
-    User.find(whereCondition).populate(USER_PROFILE_POPULATES).sort({ [sortBy]: sortOrder }).skip(skip).limit(limit),
-    User.countDocuments(whereCondition),
-  ])
+  const { rows, total } = await paginateUsersWithProfiles({
+    match: whereCondition,
+    searchTerm: filters.searchTerm,
+    sort: { [sortBy]: sortOrder === 1 ? 1 : -1 },
+    skip,
+    limit,
+  })
   return {
     meta: { page, limit, total },
-    data: result.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })),
+    data: rows.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })),
   }
 }
 
 const getPublicAgents = async (organizationId: string): Promise<any[]> => {
-  const agents = await User.find({
-    organizationId,
-    status: 'active',
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'staff'] },
-  }).populate(USER_PROFILE_POPULATES)
-  const agentIds = agents.map((agent) => agent._id)
-  const [listingRows, dealRows] = await Promise.all([
-    Property.aggregate([
-      { $match: { organizationId, agentId: { $in: agentIds }, status: 'Available' } },
-      { $group: { _id: '$agentId', count: { $sum: 1 } } },
-    ]),
-    Lead.aggregate([
-      { $match: { organizationId, assignedAgent: { $in: agentIds }, leadStatus: 'Won' } },
-      { $group: { _id: '$assignedAgent', count: { $sum: 1 } } },
-    ]),
+  const agents = await User.aggregate([
+    {
+      $match: {
+        organizationId,
+        status: 'active',
+        userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'staff'] },
+      },
+    },
+    ...userProfileProjectionStages(),
+    {
+      $lookup: {
+        from: Property.collection.name,
+        let: { agentId: '$_id', tenantId: '$organizationId' },
+        pipeline: [
+          { $match: { $expr: { $and: [
+            { $eq: ['$agentId', '$$agentId'] },
+            { $eq: ['$organizationId', '$$tenantId'] },
+            { $eq: ['$status', 'Available'] },
+          ] } } },
+          { $count: 'count' },
+        ],
+        as: '_listingStats',
+      },
+    },
+    {
+      $lookup: {
+        from: Lead.collection.name,
+        let: { agentId: '$_id', tenantId: '$organizationId' },
+        pipeline: [
+          { $match: { $expr: { $and: [
+            { $eq: ['$assignedAgent', '$$agentId'] },
+            { $eq: ['$organizationId', '$$tenantId'] },
+            { $eq: ['$leadStatus', 'Won'] },
+          ] } } },
+          { $count: 'count' },
+        ],
+        as: '_dealStats',
+      },
+    },
+    {
+      $set: {
+        activeListings: { $ifNull: [{ $arrayElemAt: ['$_listingStats.count', 0] }, 0] },
+        closedDeals: { $ifNull: [{ $arrayElemAt: ['$_dealStats.count', 0] }, 0] },
+      },
+    },
+    { $unset: ['_listingStats', '_dealStats'] },
+    { $sort: { name: 1, _id: 1 } },
   ])
-  const listings = new Map(listingRows.map((row: any) => [String(row._id), Number(row.count || 0)]))
-  const deals = new Map(dealRows.map((row: any) => [String(row._id), Number(row.count || 0)]))
+
   return agents.map((agent) => ({
     ...toPublicAgentDto(agent),
-    activeListings: listings.get(String(agent._id)) || 0,
-    closedDeals: deals.get(String(agent._id)) || 0,
+    activeListings: Number(agent.activeListings || 0),
+    closedDeals: Number(agent.closedDeals || 0),
   }))
 }
 
 const getPublicAgentDetail = async (agentId: string): Promise<any> => {
-  const agent = await User.findOne({ _id: agentId, status: 'active', userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } })
-    .populate(USER_PROFILE_POPULATES)
-  if (!agent) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
-  const activeProperties = await Property.find({
-    organizationId: agent.organizationId,
-    agentId: agent._id,
-    status: 'Available',
-  }).select('title price images city propertyType bedrooms bathrooms area areaUnit listingType')
-  return { agent: toPublicAgentDto(agent), activeProperties }
+  const objectId = asUserObjectId(agentId)
+  if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
+
+  const [row] = await User.aggregate([
+    { $match: { _id: objectId, status: 'active', userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } } },
+    ...userProfileProjectionStages(),
+    {
+      $lookup: {
+        from: Property.collection.name,
+        let: { agentId: '$_id', tenantId: '$organizationId' },
+        pipeline: [
+          { $match: { $expr: { $and: [
+            { $eq: ['$agentId', '$$agentId'] },
+            { $eq: ['$organizationId', '$$tenantId'] },
+            { $eq: ['$status', 'Available'] },
+          ] } } },
+          { $project: { title: 1, price: 1, images: 1, city: 1, propertyType: 1, bedrooms: 1, bathrooms: 1, area: 1, areaUnit: 1, listingType: 1 } },
+          { $sort: { updatedAt: -1, _id: -1 } },
+        ],
+        as: 'activeProperties',
+      },
+    },
+    { $limit: 1 },
+  ])
+  if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
+  return { agent: toPublicAgentDto(row), activeProperties: row.activeProperties || [] }
 }
 
 const getAgentLeaderboard = async (organizationId: string, startDate?: string, endDate?: string): Promise<any[]> => {
   const end = endDate ? new Date(`${endDate}T23:59:59.999+06:00`) : new Date()
   const start = startDate ? new Date(`${startDate}T00:00:00+06:00`) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
-  const agents = await User.find({ organizationId, status: 'active', userRole: { $in: ['agent', 'agency_admin', 'agency_owner'] } })
-    .populate(USER_PROFILE_POPULATES)
+  const agents = await listUsersWithProfiles({ organizationId, status: 'active', userRole: { $in: ['agent', 'agency_admin', 'agency_owner'] } })
   const agentIds = agents.map((agent) => agent._id)
   const [leadRows, viewingRows, listingRows] = await Promise.all([
     Lead.aggregate([
@@ -238,7 +271,9 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
 }
 
 const getUserById = async (organizationId: string, id: string) => {
-  const result = await User.findOne({ _id: id, organizationId }).populate(USER_PROFILE_POPULATES)
+  const objectId = asUserObjectId(id)
+  if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  const result = await findUserWithProfiles({ _id: objectId, organizationId })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   return toUserDto(result, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
@@ -256,14 +291,17 @@ const updateUserById = async (organizationId: string, id: string, userData: IUse
     serviceAreas: userData.serviceAreas ?? currentRoleFields.serviceAreas,
   })
   if (userData.accessControl !== undefined) await markSessionAuthorizationChanged(user._id, organizationId, 'access_policy_changed')
-  await populateUserProfiles(user)
+  const readModel = await findUserWithProfiles({ _id: user._id, organizationId })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   await CacheInvalidationService.invalidateTenant(organizationId)
   RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: user._id.toString() })
-  return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
+  return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
 const deleteUserById = async (organizationId: string, id: string) => {
-  const user = await User.findOne({ _id: id, organizationId, userRole: { $ne: 'agency_owner' } }).populate(USER_PROFILE_POPULATES)
+  const objectId = asUserObjectId(id)
+  if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  const user = await findUserWithProfiles({ _id: objectId, organizationId, userRole: { $ne: 'agency_owner' } })
   if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   const dto = toUserDto(user, { includeAccessControl: true, includePrivateProfile: true })
   const remove = async (session?: mongoose.ClientSession) => {
@@ -287,27 +325,37 @@ const deleteUserById = async (organizationId: string, id: string) => {
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const superAdminUserWhere = (filters: IUserFilter) => {
-  const { searchTerm, userRole, status, ...filtersData } = filters
+  const { searchTerm: _searchTerm, userRole, status, ...filtersData } = filters
   const andConditions: any[] = []
-  if (searchTerm) {
-    const search = escapeRegex(String(searchTerm).trim())
-    andConditions.push({ $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) })
-  }
   if (userRole) andConditions.push({ userRole })
   if (status) andConditions.push({ status })
-  if (Object.keys(filtersData).length) andConditions.push({ $and: Object.entries(filtersData).map(([field, value]) => ({ [field]: value })) })
+  const entries = Object.entries(filtersData).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  if (entries.length) andConditions.push({ $and: entries.map(([field, value]) => ({ [field]: value })) })
   return andConditions.length ? { $and: andConditions } : {}
+}
+
+const superAdminExportWhere = (filters: IUserFilter) => {
+  const base = superAdminUserWhere(filters) as Record<string, unknown>
+  if (!filters.searchTerm) return base
+  const search = escapeRegex(String(filters.searchTerm).trim())
+  const searchCondition = { $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) }
+  return Object.keys(base).length ? { $and: [base, searchCondition] } : searchCondition
 }
 
 const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IPaginationOptions) => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({ ...paginationOptions, limit: paginationOptions.limit || 10 })
   const whereConditions = superAdminUserWhere(filters)
-  const sortConditions: Record<string, any> = sortBy ? { [sortBy]: sortOrder, ...(sortBy === 'createdAt' ? { _id: sortOrder } : {}) } : { createdAt: -1, _id: -1 }
-  const [result, total] = await Promise.all([
-    User.find(whereConditions).populate(USER_PROFILE_POPULATES).sort(sortConditions).skip(skip).limit(limit),
-    User.countDocuments(whereConditions),
-  ])
-  return { meta: { page, limit, total }, data: result.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true })) }
+  const sortConditions: Record<string, 1 | -1> = sortBy
+    ? { [sortBy]: sortOrder === 1 ? 1 : -1, ...(sortBy === 'createdAt' ? { _id: sortOrder === 1 ? 1 : -1 } : {}) }
+    : { createdAt: -1, _id: -1 }
+  const { rows, total } = await paginateUsersWithProfiles({
+    match: whereConditions,
+    searchTerm: filters.searchTerm,
+    sort: sortConditions,
+    skip,
+    limit,
+  })
+  return { meta: { page, limit, total }, data: rows.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true })) }
 }
 
 const getSuperAdminUserSummary = async () => {
@@ -321,7 +369,7 @@ const getSuperAdminUserSummary = async () => {
 }
 
 const getAllUsersSuperAdminExportCursor = (filters: IUserFilter) =>
-  User.find(superAdminUserWhere(filters)).select('name email phoneNumber userRole organizationId status createdAt').sort({ createdAt: -1, _id: -1 }).lean().cursor()
+  User.find(superAdminExportWhere(filters)).select('name email phoneNumber userRole organizationId status createdAt').sort({ createdAt: -1, _id: -1 }).lean().cursor()
 
 const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }, actorId?: string) => {
   const user = await User.findById(id)
@@ -389,9 +437,11 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
       await CacheInvalidationService.invalidateTenant(user.organizationId)
     }
   }
-  await populateUserProfiles(user)
+  const readModel = await findUserWithProfiles({ _id: user._id })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
   if (user.organizationId) RealtimeService.emitOrganization(user.organizationId, { type: 'team.changed', action: 'updated', entityId: user._id.toString() })
-  return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true })
+  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: user._id.toString() })
+  return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true })
 }
 
 const getMyAccess = async (organizationId: string, userId: string) => {
@@ -431,9 +481,10 @@ const updateMemberAccess = async (
   await syncRoleProfile(target._id, organizationId, role, roleFields)
   await markSessionAuthorizationChanged(target._id, organizationId, 'access_policy_changed')
   await CacheInvalidationService.invalidateTenant(organizationId)
-  await populateUserProfiles(target)
+  const readModel = await findUserWithProfiles({ _id: target._id, organizationId })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
   RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: target._id.toString() })
-  return toUserDto(target, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
+  return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
 export const UserService = {

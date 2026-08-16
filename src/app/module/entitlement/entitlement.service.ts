@@ -78,6 +78,7 @@ const resolve = async (organizationId: string) => {
       ...(plan || {}),
       maxAgents: organization.subscription.maxAgents ?? plan?.maxAgents ?? baseTrial.maxAgents,
       maxProperties: organization.subscription.maxProperties ?? plan?.maxProperties ?? baseTrial.maxProperties,
+      maxLeads: plan?.maxLeads ?? baseTrial.maxLeads,
     },
   }
 }
@@ -103,13 +104,32 @@ const recommendPlanForLimit = async (resource: LimitedResource, required: number
   return plan?.planId || null
 }
 
+const countLimitedResourceUsage = async (organizationId: string, resource: LimitedResource): Promise<number> => {
+  if (resource === 'properties') return Property.countDocuments({ organizationId, status: { $ne: 'Archived' } })
+  if (resource === 'agents') {
+    return User.countDocuments({
+      organizationId,
+      status: { $ne: 'blocked' },
+      userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] },
+    })
+  }
+  return Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } })
+}
+
+const getUsageSnapshot = async (organizationId: string) => {
+  const resolved = await resolve(organizationId)
+  const [properties, agents, leads] = await Promise.all([
+    countLimitedResourceUsage(organizationId, 'properties'),
+    countLimitedResourceUsage(organizationId, 'agents'),
+    countLimitedResourceUsage(organizationId, 'leads'),
+  ])
+  return { ...resolved, usage: { properties, agents, leads } }
+}
+
 const assertLimit = async (organizationId: string, resource: LimitedResource, increment = 1): Promise<void> => {
   const { organization, limits } = await resolve(organizationId)
-  const [usage, maximum] = resource === 'properties'
-    ? [await Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }), limits.maxProperties]
-    : resource === 'agents'
-      ? [await User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } }), limits.maxAgents]
-      : [await Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } }), limits.maxLeads]
+  const usage = await countLimitedResourceUsage(organizationId, resource)
+  const maximum = resource === 'properties' ? limits.maxProperties : resource === 'agents' ? limits.maxAgents : limits.maxLeads
 
   if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
     const recommendedPlan = await recommendPlanForLimit(resource, usage + increment)
@@ -196,4 +216,4 @@ const consumeVisitor = async (organizationId: string): Promise<void> => {
   }
 }
 
-export const EntitlementService = { resolve, assertLimit, assertFeature, hasFeature, assertStorage, consumeVisitor }
+export const EntitlementService = { resolve, getUsageSnapshot, assertLimit, assertFeature, hasFeature, assertStorage, consumeVisitor }

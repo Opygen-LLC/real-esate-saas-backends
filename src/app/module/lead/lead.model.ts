@@ -15,6 +15,7 @@ leadSchema.index({organizationId:1,leadStatus:1,assignedAgent:1})
 leadSchema.index({organizationId:1,responseDueAt:1,firstResponseAt:1})
 leadSchema.index({organizationId:1,createdAt:-1})
 leadSchema.index({organizationId:1,assignedAgent:1,createdAt:-1})
+leadSchema.index({organizationId:1,assignedAgent:1,leadStatus:1})
 leadSchema.index({organizationId:1,leadStatus:1,updatedAt:-1})
 
 export const Lead=model<ILead,LeadModel>('Lead',leadSchema)

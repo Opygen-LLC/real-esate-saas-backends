@@ -5,6 +5,12 @@ import { DashboardController } from './dashboard.controller'
 const router = express.Router()
 
 router.get(
+  '/search',
+  authMiddlewares.requirePermission('dashboard.read'),
+  DashboardController.globalSearch
+)
+
+router.get(
   '/overview',
   authMiddlewares.requirePermission('dashboard.read'),
   DashboardController.getOverviewStats

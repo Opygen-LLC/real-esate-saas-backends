@@ -26,6 +26,11 @@ const emitOrganization = (organizationId: string, event: Omit<RealtimeEnvelope, 
   runtime.dashboard.to(`org:${organizationId}`).emit('change', nowEnvelope({ ...event, organizationId }))
 }
 
+const emitRole = (role: string, event: Omit<RealtimeEnvelope, 'revision' | 'occurredAt'>) => {
+  if (!runtime.dashboard || !role) return
+  runtime.dashboard.to(`role:${role}`).emit('change', nowEnvelope(event))
+}
+
 const emitUser = (userId: string, event: Omit<RealtimeEnvelope, 'userId' | 'revision' | 'occurredAt'>) => {
   if (!runtime.dashboard || !userId) return
   runtime.dashboard.to(`user:${userId}`).emit('change', nowEnvelope({ ...event, userId }))
@@ -111,6 +116,7 @@ export const RealtimeService = {
   configure,
   fromDomainEvent,
   emitOrganization,
+  emitRole,
   emitUser,
   emitPublicOrganization,
   emitNotification,

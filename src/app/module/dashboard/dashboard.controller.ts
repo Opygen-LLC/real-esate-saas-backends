@@ -29,6 +29,12 @@ const getAnalytics = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const globalSearch = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = req.tenant?.organizationId || (req.user?.organizationId as string)
+  const data = await DashboardService.globalSearch(organizationId, String(req.query.q || ''), req.tenant?.permissions || [])
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Dashboard search results fetched', data })
+})
+
 const getSuperAdminOverviewStats = catchAsync(async (req: Request, res: Response) => {
   const stats = await DashboardService.getSuperAdminOverviewStats()
 
@@ -44,4 +50,5 @@ export const DashboardController = {
   getOverviewStats,
   getAnalytics,
   getSuperAdminOverviewStats,
+  globalSearch,
 }

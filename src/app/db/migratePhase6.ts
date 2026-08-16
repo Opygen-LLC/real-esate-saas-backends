@@ -10,9 +10,20 @@ const run = async () => {
   const db = mongoose.connection.db
   if (!db) throw new Error('MongoDB connection is not available')
 
+  const propertyCollectionExists = (await db.listCollections({ name: 'properties' }).toArray()).length > 0
+  if (propertyCollectionExists) {
+    const legacyPostalRows = await db.collection('properties').countDocuments({ zipCode: { $exists: true } })
+    if (legacyPostalRows > 0) {
+      throw new Error(
+        `Phase 6 requires canonical property postal codes. ${legacyPostalRows} properties still contain legacy zipCode; run migrate:phase2-property-correctness before migrate:phase-6.`,
+      )
+    }
+  }
+
   const specs: Array<[string, Record<string, 1 | -1>, Record<string, unknown>]> = [
     ['leads', { organizationId: 1, createdAt: -1 }, { name: 'phase6_tenant_created' }],
     ['leads', { organizationId: 1, assignedAgent: 1, createdAt: -1 }, { name: 'phase6_tenant_assignee_created' }],
+    ['leads', { organizationId: 1, assignedAgent: 1, leadStatus: 1 }, { name: 'phase6_tenant_assignee_status' }],
     ['leads', { organizationId: 1, leadStatus: 1, updatedAt: -1 }, { name: 'phase6_tenant_status_updated' }],
     ['properties', { organizationId: 1, createdAt: -1 }, { name: 'phase6_tenant_created' }],
     ['properties', { organizationId: 1, agentId: 1, status: 1 }, { name: 'phase6_tenant_agent_status' }],

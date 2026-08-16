@@ -18,7 +18,7 @@ assert.match(validation, /canonicalizePostalCode/)
 assert.match(service, /bangladeshAddress\.postalCode/)
 assert.ok((service.match(/runValidators: true/g) || []).length >= 3, 'property mutations must enable mongoose validators')
 assert.doesNotMatch(model, /yearBuilt:[\s\S]{0,80}new Date\(\)\.getFullYear/)
-assert.match(model, /Legacy compatibility only/)
+assert.doesNotMatch(model, /\bzipCode\s*:/)
 assert.match(migration, /\$unset: \{ zipCode: '' \}/)
 
 console.log('Phase 2 property correctness architecture verification passed.')

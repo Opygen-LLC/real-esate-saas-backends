@@ -1,11 +1,8 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { Organization } from '../organization/organization.model'
-import { Property } from '../property/property.model'
-import { User } from '../user/user.model'
 import { IBilling } from './billing.interface'
 import { Billing } from './billing.model'
-import { Lead } from '../lead/lead.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { decryptField } from '../../helpers/fieldEncryption'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
@@ -28,29 +25,27 @@ const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling
 
 const getBillingHistory = async (organizationId: string) => SubscriptionPaymentService.getTenantPaymentHistory(organizationId)
 
+const usagePercentage = (used: number, limit: number): number => {
+  if (limit <= 0) return used > 0 ? 100 : 0
+  return Math.min(Math.round((used / limit) * 100), 100)
+}
+
 const getSubscriptionUsage = async (organizationId: string) => {
-  const org = await Organization.findOne({ organizationId })
-  if (!org) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  }
+  const [resolved, pendingChangeRequest] = await Promise.all([
+    EntitlementService.getUsageSnapshot(organizationId),
+    SubscriptionPaymentService.getTenantPendingState(organizationId),
+  ])
 
-  const currentProperties = await Property.countDocuments({ organizationId })
-  const currentAgents = await User.countDocuments({
-    organizationId,
-    userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin', 'staff'] },
-  })
-  const currentLeads = await Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } })
-  const { limits } = await EntitlementService.resolve(organizationId)
-
-  const maxProperties = org.subscription?.maxProperties || 100
-  const maxAgents = org.subscription?.maxAgents || 3
-
-  const propertiesPercent = Math.min(Math.round((currentProperties / maxProperties) * 100), 100)
-  const agentsPercent = Math.min(Math.round((currentAgents / maxAgents) * 100), 100)
-
-  const isApproachingLimit = propertiesPercent >= 80 || agentsPercent >= 80
-
-  const pendingChangeRequest = await SubscriptionPaymentService.getTenantPendingState(organizationId)
+  const { organization: org, limits, usage } = resolved
+  const currentProperties = usage.properties
+  const currentAgents = usage.agents
+  const currentLeads = usage.leads
+  const maxProperties = Number(limits.maxProperties || 0)
+  const maxAgents = Number(limits.maxAgents || 0)
+  const maxLeads = Number(limits.maxLeads || 0)
+  const propertiesPercent = usagePercentage(currentProperties, maxProperties)
+  const agentsPercent = usagePercentage(currentAgents, maxAgents)
+  const leadsPercent = usagePercentage(currentLeads, maxLeads)
 
   return {
     plan: org.subscription?.plan || 'starter',
@@ -58,22 +53,19 @@ const getSubscriptionUsage = async (organizationId: string) => {
     status: org.subscription?.status || 'trialing',
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
     pendingChangeRequest,
-    properties: {
-      used: currentProperties,
-      limit: maxProperties,
-      percentage: propertiesPercent,
-    },
-    agents: {
-      used: currentAgents,
-      limit: maxAgents,
-      percentage: agentsPercent,
-    },
-    leads: { used: currentLeads, limit: limits.maxLeads, percentage: Math.min(Math.round((currentLeads / limits.maxLeads) * 100), 100) },
+    properties: { used: currentProperties, limit: maxProperties, percentage: propertiesPercent },
+    agents: { used: currentAgents, limit: maxAgents, percentage: agentsPercent },
+    leads: { used: currentLeads, limit: maxLeads, percentage: leadsPercent },
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
-    features: { customDomain: limits.hasCustomDomain, advancedAnalytics: limits.hasAdvancedAnalytics,
-      whatsAppAutomation: limits.hasWhatsAppIntegration, smsAutomation: limits.hasSmsAutomation, premiumTemplates: limits.hasPremiumTemplates },
-    isApproachingLimit,
+    features: {
+      customDomain: limits.hasCustomDomain,
+      advancedAnalytics: limits.hasAdvancedAnalytics,
+      whatsAppAutomation: limits.hasWhatsAppIntegration,
+      smsAutomation: limits.hasSmsAutomation,
+      premiumTemplates: limits.hasPremiumTemplates,
+    },
+    isApproachingLimit: propertiesPercent >= 80 || agentsPercent >= 80 || leadsPercent >= 80,
   }
 }
 

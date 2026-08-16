@@ -20,6 +20,7 @@ import { ObjectStorageService } from './app/module/websiteBuilder/objectStorage.
 import { virusScannerHealth } from './app/module/websiteBuilder/virusScan.service'
 import { corsOptionsDelegate } from './app/middlewares/corsPolicy'
 import { PrivacyPolicyService } from './app/module/privacy/privacyPolicy.service'
+import { authMiddlewares } from './app/middlewares/auth'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -52,6 +53,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next()
 })
 app.use(cookieParser())
+app.use(authMiddlewares.enforceImpersonationReadOnly)
 app.use('/api/v1/organization/website', express.json({ limit: '5mb' }))
 app.use('/api/v1/lead/import', express.json({ limit: '6mb' }))
 app.use('/api/v1/observability/client-error', express.json({ limit: '32kb' }))

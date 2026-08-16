@@ -19,7 +19,7 @@ assert.match(authController, /Cache-Control.*no-store/)
 assert.match(authController, /Vary.*Cookie/)
 
 const authMiddleware = read('src/app/middlewares/auth.ts')
-assert.match(authMiddleware, /User\.findById\(/)
+assert.match(authMiddleware, /findUserWithProfiles/)
 assert.match(authMiddleware, /toAuthUserDto/)
 
 const userService = read('src/app/module/user/user.service.ts')

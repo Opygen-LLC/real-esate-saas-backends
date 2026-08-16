@@ -14,6 +14,7 @@ import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
+import { RealtimeService } from '../realtime/realtime.service'
 import { ImpersonationSession } from './impersonationSession.model'
 import { AuthSession } from '../auth/authSession.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
@@ -133,6 +134,7 @@ const suspendTenant = async (organizationId: string, actor: { id: string; reason
     CacheInvalidationService.invalidateTenant(organizationId),
   ])
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.suspended', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { previousSubscriptionStatus, previousWebsiteStatus } })
+  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_suspended' })
   return org
 }
 
@@ -155,16 +157,23 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
   await org.save()
   await CacheInvalidationService.invalidateTenant(organizationId)
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.reactivated', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { restoredSubscriptionStatus: restored, restoredWebsiteStatus: org.websiteStatus } })
+  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_reactivated' })
   return org
 }
 
 const getPaymentLedger = async (query: any) => SubscriptionPaymentService.getPaymentLedger(query)
 
-const recordManualPayment = async (input: any, actor: { id: string; requestId?: string; ip?: string }) =>
-  SubscriptionPaymentService.recordPayment(input, actor)
+const recordManualPayment = async (input: any, actor: { id: string; requestId?: string; ip?: string }) => {
+  const result = await SubscriptionPaymentService.recordPayment(input, actor)
+  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'created', entityId: String((result as any)?._id || (result as any)?.paymentNumber || 'payment') })
+  return result
+}
 
-const decideManualPayment = async (paymentId: string, input: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) =>
-  SubscriptionPaymentService.decidePayment(paymentId, input, actor)
+const decideManualPayment = async (paymentId: string, input: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) => {
+  const result = await SubscriptionPaymentService.decidePayment(paymentId, input, actor)
+  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: paymentId })
+  return result
+}
 
 const getRevenueDashboard = async () => SubscriptionPaymentService.getRevenueDashboard()
 
@@ -317,15 +326,53 @@ const manageTenantTrial = async (
   return { organizationId, agencyName: org.agencyName, subscription: org.subscription }
 }
 
+const searchPlatform = async (query: string) => {
+  const q = String(query || '').trim().slice(0, 80)
+  if (q.length < 2) return []
+  const regex = new RegExp(safeRegex(q), 'i')
+  const [organizations, users, payments] = await Promise.all([
+    Organization.find({ $or: [{ agencyName: regex }, { organizationId: regex }, { email: regex }, { phone: regex }, { domain: regex }, { sub_domain: regex }] })
+      .select('_id organizationId agencyName email subscription.plan isBlocked').sort({ updatedAt: -1 }).limit(6).lean(),
+    User.find({ $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] })
+      .select('_id name email phoneNumber userRole organizationId status').sort({ updatedAt: -1 }).limit(6).lean(),
+    SubscriptionPayment.find({ $or: [{ paymentNumber: regex }, { receiptNumber: regex }, { reference: regex }, { organizationId: regex }] })
+      .select('_id paymentNumber organizationId amount status method createdAt').sort({ createdAt: -1 }).limit(4).lean(),
+  ])
+  return [
+    ...organizations.map((row:any) => ({ kind: 'organization', id: String(row._id), title: row.agencyName, subtitle: `${row.organizationId} · ${row.subscription?.plan || 'trial'}${row.isBlocked ? ' · suspended' : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}` })),
+    ...users.map((row:any) => ({ kind: 'user', id: String(row._id), title: row.name, subtitle: `${row.email} · ${String(row.userRole || '').replaceAll('_', ' ')}`, href: `/dashboard/super-admin/users?search=${encodeURIComponent(row.email || row.name)}` })),
+    ...payments.map((row:any) => ({ kind: 'payment', id: String(row._id), title: row.paymentNumber, subtitle: `${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')} · ${row.status}`, href: `/dashboard/super-admin/subscriptions?payment=${row._id}` })),
+  ].slice(0, 16)
+}
+
+const getPlatformNotifications = async () => {
+  const [pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
+    SubscriptionPayment.find({ status: 'pending' }).select('_id paymentNumber organizationId amount method createdAt').sort({ createdAt: -1 }).limit(6).lean(),
+    OperationsJob.find({ status: 'failed' }).select('_id organizationId type entityId lastError updatedAt').sort({ updatedAt: -1 }).limit(6).lean(),
+    Organization.find({ isBlocked: true }).select('_id organizationId agencyName platformAccess.suspensionReason updatedAt').sort({ updatedAt: -1 }).limit(4).lean(),
+    DomainRecord.find({ $or: [{ status: 'failed' }, { tlsStatus: 'failed' }] }).select('_id organizationId domain status tlsStatus updatedAt').sort({ updatedAt: -1 }).limit(4).lean(),
+  ])
+  const items = [
+    ...pendingPayments.map((row:any) => ({ id: `payment:${row._id}`, type: 'payment_pending', severity: 'warning', title: 'Payment needs review', body: `${row.paymentNumber} · ${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: '/dashboard/super-admin/subscriptions', createdAt: row.createdAt })),
+    ...failedJobs.map((row:any) => ({ id: `job:${row._id}`, type: 'operation_failed', severity: 'danger', title: `${String(row.type).replaceAll('_', ' ')} failed`, body: `${row.organizationId}${row.lastError ? ` · ${String(row.lastError).slice(0, 140)}` : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
+    ...failedDomains.map((row:any) => ({ id: `domain:${row._id}`, type: 'domain_failed', severity: 'danger', title: 'Domain/TLS needs attention', body: `${row.domain || row.organizationId} · ${row.status}/${row.tlsStatus}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
+    ...suspendedTenants.map((row:any) => ({ id: `tenant:${row._id}`, type: 'tenant_suspended', severity: 'info', title: 'Tenant is suspended', body: `${row.agencyName} · ${row.organizationId}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
+  ]
+  return items.sort((a:any,b:any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()).slice(0, 20)
+}
+
 const startImpersonation = async (input: { adminUserId: string; organizationId: string; targetUserId?: string; reason: string; durationMinutes?: number; requestId?: string; ip?: string; userAgent?: string }) => {
   const durationMinutes = Math.min(30, Math.max(5, Number(input.durationMinutes || 15)))
-  const organization = await Organization.findOne({ organizationId: input.organizationId }).select('organizationId agencyName isBlocked').lean()
+  const organization = await Organization.findOne({ organizationId: input.organizationId }).select('organizationId agencyName isBlocked platformAccess.status').lean()
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  const userFilter: any = { organizationId: input.organizationId, status: 'active', isVerified: true }
+  if (organization.isBlocked || organization.platformAccess?.status === 'suspended') throw new ApiError(httpStatus.CONFLICT, 'Suspended agencies cannot be opened in support mode. Reactivate the agency first.')
+  const existing = await ImpersonationSession.findOne({ adminUserId: input.adminUserId, endedAt: null, expiresAt: { $gt: new Date() } }).select('_id organizationId expiresAt').lean()
+  if (existing) throw new ApiError(httpStatus.CONFLICT, 'End your current support impersonation session before opening another agency.')
+  const userFilter: any = { organizationId: input.organizationId, status: 'active', isVerified: true, userRole: { $in: ['agency_owner', 'agency_admin'] } }
   if (input.targetUserId) {
     if (!mongoose.isValidObjectId(input.targetUserId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid target user')
     userFilter._id = input.targetUserId
-  } else userFilter.userRole = { $in: ['agency_owner', 'agency_admin'] }
+  }
   const target = await User.findOne(userFilter).sort({ userRole: 1, createdAt: 1 }).select('_id name email phoneNumber userRole organizationId').lean()
   if (!target) throw new ApiError(httpStatus.NOT_FOUND, 'No active verified tenant administrator is available for support impersonation')
   const expiresAt = new Date(Date.now() + durationMinutes * 60_000)
@@ -344,11 +391,25 @@ const verifyImpersonationToken = async (token: string) => {
   return { payload, session }
 }
 
-const endImpersonation = async (token: string, actorId?: string, requestId?: string, ip?: string) => {
+const currentImpersonation = async (token: string) => {
   const { payload, session } = await verifyImpersonationToken(token)
-  await ImpersonationSession.updateOne({ _id: session._id, endedAt: null }, { $set: { endedAt: new Date(), endedBy: actorId || payload.supportAdminId } })
+  const [organization, target] = await Promise.all([
+    Organization.findOne({ organizationId: session.organizationId }).select('organizationId agencyName isBlocked platformAccess.status').lean(),
+    User.findById(session.targetUserId).select('_id name email userRole organizationId status').lean(),
+  ])
+  if (!organization || organization.isBlocked || organization.platformAccess?.status === 'suspended' || !target || target.status !== 'active') throw new ApiError(401, 'Support impersonation target is no longer available')
+  return {
+    id: String(session._id), organizationId: session.organizationId, agencyName: organization.agencyName,
+    targetUser: { _id: target._id, name: target.name, email: target.email, userRole: target.userRole },
+    supportAdminId: String(payload.supportAdminId), readOnly: true, expiresAt: session.expiresAt, reason: session.reason,
+  }
+}
+
+const endImpersonation = async (token: string, _actorId?: string, requestId?: string, ip?: string) => {
+  const { payload, session } = await verifyImpersonationToken(token)
+  await ImpersonationSession.updateOne({ _id: session._id, endedAt: null }, { $set: { endedAt: new Date(), endedBy: payload.supportAdminId } })
   await writeAudit({ organizationId: session.organizationId, actorId: payload.supportAdminId, actorRole: 'super-admin', action: 'impersonation.ended', entityType: 'impersonationSession', entityId: session._id.toString(), reason: 'Support impersonation session ended', requestId, ip, metadata: { targetUserId: session.targetUserId.toString(), readOnly: true } })
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, verifyImpersonationToken, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

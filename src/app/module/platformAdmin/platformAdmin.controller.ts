@@ -28,6 +28,14 @@ const audit = catchAsync(async (req: Request, res: Response) => {
 const subscriptionSummary = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Subscription summary fetched', data: await PlatformAdminService.getSubscriptionSummary() }))
 const changeTenantSubscription = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Tenant subscription updated', data: await PlatformAdminService.changeTenantSubscription(req.params.organizationId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
 const manageTenantTrial = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Tenant trial updated', data: await PlatformAdminService.manageTenantTrial(req.params.organizationId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
+const platformSearch = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Platform search results fetched', data: await PlatformAdminService.searchPlatform(String(req.query.q || '')) }))
+const platformNotifications = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Platform notifications fetched', data: await PlatformAdminService.getPlatformNotifications() }))
+const currentImpersonation = catchAsync(async (req: Request, res: Response) => {
+  const token = req.cookies?.[config.security.impersonation_cookie_name]
+  if (typeof token !== 'string' || !token) throw new ApiError(404, 'No active support impersonation session')
+  sendResponse(res, { statusCode: 200, success: true, message: 'Active support impersonation fetched', data: await PlatformAdminService.currentImpersonation(token) })
+})
+
 const startImpersonation = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.startImpersonation({ adminUserId: req.user!._id!, organizationId: req.body.organizationId, targetUserId: req.body.targetUserId, reason: req.body.reason, durationMinutes: req.body.durationMinutes, requestId: req.requestId, ip: req.ip, userAgent: req.get('user-agent') || '' })
   const maxAge = Math.max(0, new Date(result.session.expiresAt).getTime() - Date.now())
@@ -42,4 +50,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, startImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }

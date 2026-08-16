@@ -21,7 +21,8 @@ import { UserProfile } from '../userProfile/userProfile.model'
 import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
 import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
-import { ensureUserProfile, populateUserProfiles, syncRoleProfile, toAuthUserDto } from '../user/userProfile.service'
+import { ensureUserProfile, syncRoleProfile, toAuthUserDto } from '../user/userProfile.service'
+import { findUserWithProfiles } from '../user/userReadModel.service'
 import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDocument'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
 import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RequestMeta } from './auth.interface'
@@ -77,8 +78,8 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     lastUsedIp: meta.ip || '',
     userAgent: meta.userAgent || '',
   })
-  await populateUserProfiles(user)
-  const [organization, verifiedDomain] = await Promise.all([
+  const [projectedUser, organization, verifiedDomain] = await Promise.all([
+    findUserWithProfiles({ _id: user._id }),
     Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
     DomainRecord.findOne({ organizationId: user.organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
   ])
@@ -88,7 +89,7 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     refreshToken,
     userRole: user.userRole,
     organizationId: user.organizationId,
-    user: publicUser(user),
+    user: publicUser(projectedUser || user),
     isVerified: user.isVerified,
     websiteStatus: organization?.websiteStatus || 'published',
     onboarding,
@@ -569,13 +570,13 @@ const refreshToken = async (token: string): Promise<AuthResult> => {
       $inc: { sessionVersion: 1 },
     },
   )
-  await populateUserProfiles(user)
+  const projectedUser = await findUserWithProfiles({ _id: user._id })
   return {
     accessToken: accessTokenFor(user),
     refreshToken: nextRefresh,
     userRole: user.userRole,
     organizationId: user.organizationId,
-    user: publicUser(user),
+    user: publicUser(projectedUser || user),
     isVerified: user.isVerified,
   }
 }

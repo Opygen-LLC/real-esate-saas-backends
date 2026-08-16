@@ -8,6 +8,7 @@ export type RealtimeChannelEvent =
   | 'auth.changed'
   | 'session.changed'
   | 'organization.changed'
+  | 'platform.notification.changed'
 
 export type RealtimeAction = 'created' | 'updated' | 'deleted' | 'status_changed' | 'assigned' | 'read' | 'resync' | 'authorization_changed' | 'revoked'
 

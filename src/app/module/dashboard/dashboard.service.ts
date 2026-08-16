@@ -1,13 +1,33 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { DomainEvent } from '../domainEvent/domainEvent.model'
+import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
 import { PlatformAdminService } from '../platformAdmin/platformAdmin.service'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
-import { USER_PROFILE_POPULATES } from '../user/userProfile.service'
+import { listUsersWithProfiles } from '../user/userReadModel.service'
 import { Viewing } from '../viewing/viewing.model'
+
+
+const escapeSearch = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const globalSearch = async (organizationId: string, query: string, permissions: string[] = []) => {
+  const q = String(query || '').trim().slice(0, 80)
+  if (q.length < 2) return []
+  const regex = new RegExp(escapeSearch(q), 'i')
+  const can = (permission: string) => permissions.includes(permission)
+  const jobs: Array<Promise<any[]>> = []
+
+  if (can('properties.read')) jobs.push(Property.find({ organizationId, $or: [{ title: regex }, { city: regex }, { address: regex }, { 'bangladeshAddress.area': regex }, { 'bangladeshAddress.district': regex }] }).select('_id title city address status price').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'property', id: String(row._id), title: row.title, subtitle: [row.city || row.address, row.status].filter(Boolean).join(' · '), href: `/dashboard/admin/properties/${row._id}` }))))
+  if (can('leads.read')) jobs.push(Lead.find({ organizationId, $or: [{ name: regex }, { email: regex }, { phone: regex }, { locationPreference: regex }] }).select('_id name email phone leadStatus').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'lead', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '), href: `/dashboard/admin/leads?lead=${row._id}` }))))
+  if (can('contacts.read')) jobs.push(Contact.find({ organizationId, $or: [{ name: regex }, { email: regex }, { phone: regex }, { company: regex }] }).select('_id name email phone type').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'contact', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.type].filter(Boolean).join(' · '), href: `/dashboard/admin/contacts?contact=${row._id}` }))))
+  if (can('users.read')) jobs.push(User.find({ organizationId, status: { $ne: 'blocked' }, $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] }).select('_id name email phoneNumber userRole').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'team', id: String(row._id), title: row.name, subtitle: [row.email || row.phoneNumber, String(row.userRole || '').replaceAll('_', ' ')].filter(Boolean).join(' · '), href: `/dashboard/admin/team?user=${row._id}` }))))
+
+  const groups = await Promise.all(jobs)
+  return groups.flat().slice(0, 16)
+}
 
 const agentRoles = ['agent', 'agency_admin', 'agency_owner']
 
@@ -295,9 +315,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
         },
       },
     ]),
-    User.find({ ...orgMatch, userRole: { $in: agentRoles }, status: { $ne: 'blocked' } })
-      .select('name email userRole')
-      .populate(USER_PROFILE_POPULATES),
+    listUsersWithProfiles({ ...orgMatch, userRole: { $in: agentRoles }, status: { $ne: 'blocked' } }, { sort: { name: 1 } }),
   ])
 
   const leadFacet = leadFacetRaw[0] || {}

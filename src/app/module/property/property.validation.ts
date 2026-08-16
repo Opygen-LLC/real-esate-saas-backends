@@ -1,8 +1,7 @@
 import { z } from 'zod'
-import { PROPERTY_STATUSES } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES } from './property.constants'
 import { normalizeBangladeshDigits } from './property.normalization'
 
-const propertyTypes = ['Apartment', 'LandPlot', 'Commercial', 'Office', 'Shop', 'Warehouse', 'ReadyFlat', 'UnderConstruction', 'RentalSublet'] as const
 
 const postalCode = z.preprocess(
   value => typeof value === 'string' ? normalizeBangladeshDigits(value).trim() : value,
@@ -49,8 +48,8 @@ const propertyImages = z.array(image).max(20).superRefine((items, ctx) => {
 const mediaLink = z.object({
   id: z.string().trim().min(1).max(80),
   url: z.string().trim().url().max(2048).refine(value => value.startsWith('https://'), 'Media URL must use HTTPS'),
-  provider: z.enum(['youtube', 'vimeo', 'matterport', 'kuula', 'other']).optional(),
-  type: z.enum(['video', 'virtual_tour', '360']),
+  provider: z.enum(PROPERTY_MEDIA_PROVIDERS).optional(),
+  type: z.enum(PROPERTY_MEDIA_TYPES),
   title: z.string().trim().max(160).optional(),
   embedUrl: z.string().trim().url().max(2048).optional(),
   isHero: z.boolean().optional(),
@@ -67,22 +66,22 @@ const mediaLinks = z.array(mediaLink).max(10).superRefine((items, ctx) => {
 
 const fields = {
   title: z.string().trim().min(3).max(180), description: z.string().max(20000).optional(),
-  propertyType: z.enum(propertyTypes), listingType: z.enum(['ForSale', 'ForRent', 'ForLease']), status: z.enum(PROPERTY_STATUSES).optional(),
+  propertyType: z.enum(PROPERTY_TYPES), listingType: z.enum(LISTING_TYPES), status: z.enum(PROPERTY_STATUSES).optional(),
   price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000), currency: z.literal('BDT').default('BDT'),
   bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(),
-  area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(['sqft', 'decimal', 'shotok', 'katha', 'bigha', 'acre']).default('sqft'),
+  area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(AREA_UNITS).default('sqft'),
   yearBuilt: z.number().int().min(1800).max(2200).optional(), parking: z.number().int().nonnegative().max(1000).optional(), furnished: z.boolean().optional(),
   address: z.string().max(500).optional(), city: z.string().max(100).optional(), state: z.string().max(100).optional(),
   country: z.literal('Bangladesh').default('Bangladesh'),
   // zipCode is accepted only for rolling-deploy compatibility; validateRequest transforms it into bangladeshAddress.postalCode.
   zipCode: postalCode.optional(),
   bangladeshAddress: address.optional(), latitude: z.number().min(20).max(27).optional(), longitude: z.number().min(88).max(93).optional(), mapUrl: z.union([z.literal(''), googleMapsUrl]).optional(),
-  facing: z.enum(['North', 'South', 'East', 'West', 'NorthEast', 'NorthWest', 'SouthEast', 'SouthWest']).optional(),
+  facing: z.enum(PROPERTY_FACINGS).optional(),
   roadWidthFeet: z.number().nonnegative().max(1000).optional(), landShare: z.string().max(100).optional(),
   utilities: z.object({ electricity: z.boolean().optional(), gas: z.boolean().optional(), water: z.boolean().optional(),
     sewerage: z.boolean().optional(), internet: z.boolean().optional() }).strict().optional(),
-  regulatory: z.object({ approvalAuthority: z.enum(['none', 'RAJUK', 'CDA', 'RDA', 'KDA', 'other']).optional(),
-    approvalNumber: z.string().max(100).optional(), mutationStatus: z.enum(['not_applicable', 'pending', 'completed']).optional(),
+  regulatory: z.object({ approvalAuthority: z.enum(APPROVAL_AUTHORITIES).optional(),
+    approvalNumber: z.string().max(100).optional(), mutationStatus: z.enum(MUTATION_STATUSES).optional(),
     khatianNumber: z.string().max(100).optional(), holdingTaxPaidThrough: z.string().max(30).optional() }).strict().optional(),
   developerName: z.string().max(160).optional(), handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
   images: propertyImages.optional(), mediaLinks: mediaLinks.optional(),

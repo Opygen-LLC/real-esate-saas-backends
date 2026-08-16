@@ -1,16 +1,12 @@
 import mongoose, { Model } from 'mongoose'
-import type { PropertyStatus } from './property.constants'
+import type { ApprovalAuthority, AreaUnit, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType } from './property.constants'
 
-export type IPropertyTypeEnum = 'Apartment' | 'LandPlot' | 'Commercial' | 'Office' | 'Shop' |
-  'Warehouse' | 'ReadyFlat' | 'UnderConstruction' | 'RentalSublet'
-
-export type IListingType = 'ForSale' | 'ForRent' | 'ForLease'
-
+export type IPropertyTypeEnum = PropertyType
+export type IListingType = ListingType
 export type IPropertyStatus = PropertyStatus
-
-export type IAreaUnit = 'sqft' | 'decimal' | 'shotok' | 'katha' | 'bigha' | 'acre'
-export type IPropertyMediaProvider = 'youtube' | 'vimeo' | 'matterport' | 'kuula' | 'other'
-export type IPropertyMediaType = 'video' | 'virtual_tour' | '360'
+export type IAreaUnit = AreaUnit
+export type IPropertyMediaProvider = PropertyMediaProvider
+export type IPropertyMediaType = PropertyMediaType
 
 export interface IBangladeshAddress {
   divisionId?: string; division?: string; districtId?: string; district?: string
@@ -20,8 +16,8 @@ export interface IBangladeshAddress {
 
 export interface IUtilityStatus { electricity?: boolean; gas?: boolean; water?: boolean; sewerage?: boolean; internet?: boolean }
 export interface IRegulatoryDetails {
-  approvalAuthority?: 'none' | 'RAJUK' | 'CDA' | 'RDA' | 'KDA' | 'other'
-  approvalNumber?: string; mutationStatus?: 'not_applicable' | 'pending' | 'completed'
+  approvalAuthority?: ApprovalAuthority
+  approvalNumber?: string; mutationStatus?: MutationStatus
   khatianNumber?: string; holdingTaxPaidThrough?: string
 }
 
@@ -69,7 +65,7 @@ export interface IProperty {
   upazilaId?: string
   country?: string
   bangladeshAddress?: IBangladeshAddress
-  facing?: 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'
+  facing?: PropertyFacing
   roadWidthFeet?: number
   landShare?: string
   utilities?: IUtilityStatus
