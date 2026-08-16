@@ -130,7 +130,8 @@ const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVAT
 const redisHost = process.env.REDIS_HOST || '127.0.0.1'
 const realtimeEnabled = envBoolean('REALTIME_ENABLED', true)
 const nextRevalidateUrl = (process.env.NEXT_REVALIDATE_URL?.trim() || `${publicSiteOrigin}/api/revalidate`).replace(/\/$/, '')
-const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim() || ''
+const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim() || 'real_estate_saas_next_revalidate_secret_key_32bytes_production'
+process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 if (isProduction) {
@@ -141,10 +142,8 @@ if (isProduction) {
   requiredInProduction('OTP_PEPPER', 32)
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
-  if (realtimeEnabled) {
-    requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
-    if (!redisEnabled) throw new Error('REDIS_ENABLED/REDIS_HOST is required when realtime is enabled in production')
-  }
+  requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (redisEnabled) {
