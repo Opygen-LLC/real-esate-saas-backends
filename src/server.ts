@@ -1,4 +1,4 @@
-import { Server } from 'http'
+import { createServer, Server } from 'http'
 import mongoose from 'mongoose'
 import app from './app'
 import config from './config'
@@ -7,6 +7,7 @@ import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 import { startPhase3Worker } from './app/module/cron/phase3.worker'
 import { RedisClient } from './shared/redisClient'
 import { verifyEmailProvider } from './app/helpers/sendEmail'
+import { closeRealtimeServer, initializeRealtimeServer } from './app/module/realtime/realtime.server'
 
 let server: Server | undefined
 let stopWorker: (() => void) | undefined
@@ -25,7 +26,10 @@ const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
   force.unref()
 
   try {
-    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()))
+    // Disconnect Socket.IO transports before closing the shared HTTP server;
+    // otherwise server.close() can wait on long-lived realtime connections.
+    await closeRealtimeServer().catch((error) => errorLogger.error('realtime_shutdown_failed', { error }))
+    if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
     RedisClient.close()
     await mongoose.disconnect()
     clearTimeout(force)
@@ -66,7 +70,9 @@ async function bootstrap() {
       throw new Error('SMTP verification failed during startup. Check SMTP_HOST/PORT/SECURE/USER/PASSWORD/FROM and provider network access.')
     }
     stopWorker = startPhase3Worker()
-    server = app.listen(config.port, () => logger.info('server_listening', { port: config.port, workerEnabled: config.runtime.worker_enabled }))
+    server = createServer(app)
+    if (config.realtime.enabled) await initializeRealtimeServer(server)
+    server.listen(config.port, () => logger.info('server_listening', { port: config.port, workerEnabled: config.runtime.worker_enabled, realtimeEnabled: config.realtime.enabled }))
     server.requestTimeout = 30_000
     server.headersTimeout = 15_000
     server.keepAliveTimeout = 65_000

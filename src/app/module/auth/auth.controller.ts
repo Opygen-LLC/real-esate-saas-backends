@@ -156,6 +156,16 @@ const completePasswordReset = catchAsync(async (req: Request, res: Response) => 
   })
 })
 
+const getRealtimeTicket = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Realtime ticket issued',
+    data: await AuthServices.createRealtimeTicket(req.user!._id!),
+  })
+})
+
 const refreshToken = catchAsync(async (req: Request, res: Response) => {
   const token = req.cookies?.[config.security.refresh_cookie_name]
   authResponse(res, await AuthServices.refreshToken(token), 'Session refreshed')
@@ -188,6 +198,7 @@ export const AuthController = {
   requestPasswordReset,
   verifyPasswordReset,
   completePasswordReset,
+  getRealtimeTicket,
   refreshToken,
   changePassword,
   logoutUser,

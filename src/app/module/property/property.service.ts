@@ -6,7 +6,7 @@ import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface
 import { Property } from './property.model'
 import { Organization } from '../organization/organization.model'
 import { sanitizeRichText } from '../../helpers/sanitize'
-import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
@@ -60,7 +60,14 @@ const createProperty = async (
   }
 
   const result = await Property.create(propertyData)
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({
+    organizationId,
+    aggregateType: 'property',
+    aggregateId: result._id.toString(),
+    eventType: 'property.created',
+    propertyId: result._id.toString(),
+    payload: { status: result.status, publicVisible: result.status === 'Available' },
+  })
   return result
 }
 
@@ -223,7 +230,21 @@ const updateProperty = async (
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  if (result) {
+    await DomainEventService.emit({
+      organizationId,
+      aggregateType: 'property',
+      aggregateId: id,
+      eventType: 'property.updated',
+      propertyId: id,
+      payload: {
+        status: result.status,
+        previousStatus: existing.status,
+        publicVisible: existing.status === 'Available' || result.status === 'Available',
+        changedFields: Object.keys(payload),
+      },
+    })
+  }
   return result
 }
 
@@ -241,21 +262,36 @@ const updatePropertyStatus = async (
   if (status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) update.publishedAt = new Date()
 
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true, context: 'query' })
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  if (result) {
+    await DomainEventService.emit({
+      organizationId,
+      aggregateType: 'property',
+      aggregateId: id,
+      eventType: 'property.status_changed',
+      propertyId: id,
+      payload: { status, previousStatus: existing.status, publicVisible: existing.status === 'Available' || status === 'Available' },
+    })
+  }
   return result
 }
 
 const reorderPropertyImages = async (organizationId: string, id: string, images: IPropertyImage[]): Promise<IProperty | null> => {
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, { images }, { new: true, runValidators: true, context: 'query' })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({
+    organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.updated', propertyId: id,
+    payload: { changedFields: ['images'], status: result.status, publicVisible: result.status === 'Available' },
+  })
   return result
 }
 
 const deleteProperty = async (organizationId: string, id: string): Promise<IProperty | null> => {
   const result = await Property.findOneAndDelete({ _id: id, organizationId })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({
+    organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.deleted', propertyId: id,
+    payload: { status: result.status, publicVisible: result.status === 'Available' },
+  })
   return result
 }
 

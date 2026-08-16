@@ -1,6 +1,8 @@
 import { Activity } from '../activity/activity.model'
 import { DomainEvent } from './domainEvent.model'
 import { CacheInvalidationService } from './cacheInvalidation.service'
+import { RealtimeService } from '../realtime/realtime.service'
+import { NextRevalidationService } from '../realtime/nextRevalidation.service'
 
 type EmitInput = {
   organizationId: string
@@ -65,6 +67,13 @@ const emit = async (input: EmitInput) => {
     })
   }
   await CacheInvalidationService.fromEvent(input).catch(() => undefined)
+  RealtimeService.fromDomainEvent(input)
+  void NextRevalidationService.trigger({
+    organizationId: input.organizationId,
+    eventType: input.eventType,
+    publicVisible: input.payload?.publicVisible === true,
+    tenantIdentifier: typeof input.payload?.tenantIdentifier === 'string' ? input.payload.tenantIdentifier : undefined,
+  })
   return event
 }
 

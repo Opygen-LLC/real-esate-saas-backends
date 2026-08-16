@@ -11,6 +11,7 @@ import { AccountCredential } from '../accountCredential/accountCredential.model'
 import { AuthSession } from '../auth/authSession.model'
 import { OtpChallenge } from '../auth/otpChallenge.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { RealtimeService } from '../realtime/realtime.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { Lead } from '../lead/lead.model'
 import { Organization } from '../organization/organization.model'
@@ -36,12 +37,18 @@ import {
 } from './userProfile.service'
 
 
-const markSessionAuthorizationChanged = async (userId: mongoose.Types.ObjectId | string) => {
+const markSessionAuthorizationChanged = async (
+  userId: mongoose.Types.ObjectId | string,
+  organizationId?: string,
+  reason = 'authorization_changed',
+  forceLogout = false,
+) => {
   const changedAt = new Date()
   await AuthSession.updateMany(
     { userId, revokedAt: null, expiresAt: { $gt: changedAt } },
     { $set: { authorizationChangedAt: changedAt }, $inc: { authorizationVersion: 1 } },
   )
+  RealtimeService.emitAuthorizationChanged({ userId: String(userId), organizationId, forceLogout, reason })
 }
 
 const createUser = async (organizationId: string, userData: IUserCreateInput, actorUserId: string): Promise<UserResponseDto> => {
@@ -114,6 +121,7 @@ const createUser = async (organizationId: string, userData: IUserCreateInput, ac
   const user = await User.findById(userId)
   if (!user) throw new ApiError(httpStatus.BAD_REQUEST, 'Failed to create user')
   await populateUserProfiles(user)
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'created', entityId: user._id.toString() })
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
@@ -247,9 +255,10 @@ const updateUserById = async (organizationId: string, id: string, userData: IUse
     specialization: userData.specialization ?? currentRoleFields.specialization,
     serviceAreas: userData.serviceAreas ?? currentRoleFields.serviceAreas,
   })
-  if (userData.accessControl !== undefined) await markSessionAuthorizationChanged(user._id)
+  if (userData.accessControl !== undefined) await markSessionAuthorizationChanged(user._id, organizationId, 'access_policy_changed')
   await populateUserProfiles(user)
   await CacheInvalidationService.invalidateTenant(organizationId)
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: user._id.toString() })
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
@@ -271,6 +280,7 @@ const deleteUserById = async (organizationId: string, id: string) => {
     try { await session.withTransaction(() => remove(session)) } finally { await session.endSession() }
   } else await remove()
   await CacheInvalidationService.invalidateTenant(organizationId)
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'deleted', entityId: id })
   return dto
 }
 
@@ -341,7 +351,7 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
   user.status = resultingStatus
   await user.save()
   if (resultingRole !== previousRole) await syncRoleProfile(user._id, user.organizationId, resultingRole, roleFields)
-  if (resultingRole !== previousRole || resultingStatus !== previousStatus) await markSessionAuthorizationChanged(user._id)
+  if (resultingRole !== previousRole || resultingStatus !== previousStatus) await markSessionAuthorizationChanged(user._id, user.organizationId, resultingRole !== previousRole ? 'role_changed' : 'status_changed', resultingStatus !== 'active')
 
   if (changes.status === 'blocked') {
     await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'platform_user_suspended' } })
@@ -362,6 +372,7 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
           AuthSession.updateMany({ organizationId: user.organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_owner_suspended' } }),
           CacheInvalidationService.invalidateTenant(user.organizationId),
         ])
+        RealtimeService.emitOrganization(user.organizationId, { type: 'auth.changed', action: 'authorization_changed', forceLogout: true, entityId: 'tenant_suspended' })
       }
     }
   }
@@ -379,6 +390,7 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
     }
   }
   await populateUserProfiles(user)
+  if (user.organizationId) RealtimeService.emitOrganization(user.organizationId, { type: 'team.changed', action: 'updated', entityId: user._id.toString() })
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true })
 }
 
@@ -417,9 +429,10 @@ const updateMemberAccess = async (
     accessControl: { useRoleDefaults: payload.useRoleDefaults, permissions: payload.useRoleDefaults ? [] : permissions },
   })
   await syncRoleProfile(target._id, organizationId, role, roleFields)
-  await markSessionAuthorizationChanged(target._id)
+  await markSessionAuthorizationChanged(target._id, organizationId, 'access_policy_changed')
   await CacheInvalidationService.invalidateTenant(organizationId)
   await populateUserProfiles(target)
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: target._id.toString() })
   return toUserDto(target, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 

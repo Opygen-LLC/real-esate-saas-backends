@@ -31,6 +31,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { captureOtpForTest } from '../../../testSupport/otpCapture'
 import { sendAccountVerificationEmail, sendPasswordResetEmail } from './authEmail.service'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
+import { RealtimeService } from '../realtime/realtime.service'
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
@@ -504,6 +505,7 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
   )
   if (!updatedCredential) throw new ApiError(401, 'Invalid reset request')
   await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_reset' })
+  RealtimeService.emitSessionChanged({ userId: user._id.toString(), organizationId: user.organizationId, forceLogout: true, reason: 'password_reset' })
   await writeAudit({
     organizationId: user.organizationId,
     actorId: user._id.toString(),
@@ -514,6 +516,19 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
     requestId: meta.requestId,
     ip: meta.ip,
   })
+}
+
+const createRealtimeTicket = async (userId: string) => {
+  const user = await User.findById(userId).select('_id organizationId userRole status isVerified').lean()
+  if (!user || user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
+  const ticket = jwtHelpers.createToken({
+    typ: 'realtime_ticket',
+    aud: 'dashboard_socket',
+    _id: user._id.toString(),
+    organizationId: user.organizationId,
+    userRole: user.userRole,
+  }, config.jwt.secret as Secret, config.realtime.ticket_ttl)
+  return { ticket, expiresIn: config.realtime.ticket_ttl }
 }
 
 const refreshToken = async (token: string): Promise<AuthResult> => {
@@ -528,6 +543,7 @@ const refreshToken = async (token: string): Promise<AuthResult> => {
   const storedRefreshHash = authSession.refreshTokenHash || authSession.tokenHash
   if (!storedRefreshHash || !safeEqual(storedRefreshHash, sha256(token))) {
     await AuthSession.updateMany({ familyId: verified.familyId, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'refresh_token_reuse' })
+    RealtimeService.emitSessionChanged({ userId: String(verified._id || ''), organizationId: String(verified.organizationId || ''), forceLogout: true, reason: 'refresh_token_reuse' })
     throw new ApiError(401, 'Refresh token reuse detected; session family revoked')
   }
   const user = await User.findById(verified._id)
@@ -569,6 +585,7 @@ const logout = async (token?: string): Promise<void> => {
   try {
     const payload: any = jwtHelpers.verifyToken(token, config.jwt.refresh_secret as Secret)
     await AuthSession.updateOne({ _id: payload.sessionId }, { revokedAt: new Date(), revokeReason: 'logout' })
+    RealtimeService.emitSessionChanged({ userId: String(payload._id || ''), organizationId: String(payload.organizationId || ''), forceLogout: true, reason: 'logout' })
   } catch {
     return
   }
@@ -586,6 +603,7 @@ const changePassword = async (userId: string, payload: IChangePassword, meta: Re
   credential.lockedUntil = null
   await credential.save()
   await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'password_change' })
+  RealtimeService.emitSessionChanged({ userId: user._id.toString(), organizationId: user.organizationId, forceLogout: true, reason: 'password_change' })
   await writeAudit({
     organizationId: user.organizationId,
     actorId: user._id.toString(),
@@ -613,6 +631,7 @@ export const AuthServices = {
   requestPasswordReset,
   verifyPasswordReset,
   completePasswordReset,
+  createRealtimeTicket,
   refreshToken,
   logout,
   changePassword,
