@@ -1,11 +1,14 @@
+import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
 import { User } from '../user/user.model'
+import { listUsersWithProfiles } from '../user/userReadModel.service'
 import { CrmConfig, LeadAssignmentAudit } from './crm.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { crmReadOwnerFilter, type CrmAccessContext } from './crmAccess'
 import {
   DEFAULT_LEAD_PIPELINE_STAGES,
-  LEAD_CLOSED_STATUSES,
+  activePipelineLeadFilter,
   normalizeLeadStatus,
 } from '../lead/leadStatus.contract'
 
@@ -29,6 +32,24 @@ const canonicalizePipelineStages = (stages: any[] = [], rejectUnknown = false) =
   })
 }
 
+
+
+const getAssignees = async (organizationId: string) => {
+  const rows = await listUsersWithProfiles(
+    {
+      organizationId,
+      status: 'active',
+      userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
+    },
+    { sort: { name: 1, createdAt: 1 }, limit: 1000 },
+  )
+  return rows.map((row: any) => ({
+    _id: String(row._id),
+    name: row.name,
+    userRole: row.userRole,
+    profileImgURL: row.profile?.profileImgURL || '',
+  }))
+}
 
 const getConfig = async (organizationId: string) => {
   let config = await CrmConfig.findOne({ organizationId }).populate('assignment.eligibleAgentIds', 'name email userRole status').populate('assignment.territoryRules.agentIds', 'name email userRole status')
@@ -89,7 +110,7 @@ const chooseAgent = async (organizationId: string, lead: { locationPreference?: 
 
   if (assignment.mode === 'workload' || assignment.mode === 'territory') {
     const counts = await Lead.aggregate([
-      { $match: { organizationId, leadStatus: { $nin: LEAD_CLOSED_STATUSES }, assignedAgent: { $in: agents.map((a: any) => a._id) } } },
+      { $match: { organizationId, ...activePipelineLeadFilter(), assignedAgent: { $in: agents.map((a: any) => a._id) } } },
       { $group: { _id: '$assignedAgent', count: { $sum: 1 } } },
     ])
     const byId = new Map<string, number>(counts.map((row: any) => [String(row._id), Number(row.count || 0)]))
@@ -106,11 +127,16 @@ const chooseAgent = async (organizationId: string, lead: { locationPreference?: 
   return { agentId: selected?._id?.toString(), strategy: 'round_robin' as const, reason: 'Next agent in round-robin rotation' }
 }
 
-const recordAssignment = async (input: { organizationId: string; leadId: string; previousAgentId?: string; assignedAgentId?: string; strategy: string; reason?: string; actorId?: string }) => {
+const recordAssignment = async (input: { organizationId: string; leadId: string; previousAgentId?: string; assignedAgentId?: string; strategy: string; reason?: string; actorId?: string }, session?: ClientSession) => {
+  if (session) return (await LeadAssignmentAudit.create([input], { session }))[0]
   return LeadAssignmentAudit.create(input)
 }
 
-const getAssignmentHistory = async (organizationId: string, leadId: string) => LeadAssignmentAudit.find({ organizationId, leadId })
-  .populate('previousAgentId assignedAgentId actorId', 'name email').sort({ createdAt: -1 }).lean()
+const getAssignmentHistory = async (organizationId: string, leadId: string, access?: CrmAccessContext) => {
+  const visibleLead = await Lead.exists({ _id: leadId, organizationId, ...crmReadOwnerFilter('assignedAgent', access) })
+  if (!visibleLead) throw new ApiError(404, 'Lead not found')
+  return LeadAssignmentAudit.find({ organizationId, leadId })
+    .populate('previousAgentId assignedAgentId actorId', 'name email').sort({ createdAt: -1 }).lean()
+}
 
-export const CrmService = { getConfig, updateConfig, chooseAgent, recordAssignment, getAssignmentHistory }
+export const CrmService = { getConfig, updateConfig, chooseAgent, recordAssignment, getAssignmentHistory, getAssignees }

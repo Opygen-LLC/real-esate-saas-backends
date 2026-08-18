@@ -1,7 +1,7 @@
 export const permissionValues = [
   'dashboard.read',
   'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
-  'leads.read', 'leads.write', 'leads.assign',
+  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
   'contacts.read', 'contacts.write',
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
@@ -22,7 +22,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
   agency_admin: [
     'dashboard.read',
     'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
-    'leads.read', 'leads.write', 'leads.assign',
+    'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
     'contacts.read', 'contacts.write',
     'tasks.read', 'tasks.write',
     'viewings.read', 'viewings.write',
@@ -64,7 +64,7 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'finance.write': ['finance.read'],
   'analytics.advanced': ['analytics.read'],
   'crm.configure': ['leads.read', 'users.read'],
-  'crm.export': ['leads.read'],
+  'crm.export': ['leads.read', 'contacts.read'],
   'messaging.manage': ['leads.read'],
   'whatsapp.manage': ['leads.read'],
 }
@@ -89,6 +89,14 @@ export const normalizeCustomPermissions = (input: string[] = [], options: { allo
   return Array.from(selected)
 }
 
+const mandatoryAgencyAdminCrmPermissions: Permission[] = [
+  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
+  'contacts.read', 'contacts.write',
+  'tasks.read', 'tasks.write',
+  'viewings.read', 'viewings.write',
+  'crm.export',
+]
+
 export const permissionsForRole = (role: string): Permission[] => [...(permissionMatrix[role] || [])]
 export const roleHasPermission = (role: string, permission: Permission): boolean => permissionMatrix[role]?.includes(permission) || false
 
@@ -97,7 +105,11 @@ export const effectivePermissionsForUser = (user: { userRole?: string; accessCon
   const defaults = permissionsForRole(role)
   if (role === 'agency_owner') return defaults
   if (user.accessControl?.useRoleDefaults === false) {
-    return normalizeCustomPermissions(user.accessControl.permissions || [], { allowBilling: false })
+    const custom = normalizeCustomPermissions(user.accessControl.permissions || [], { allowBilling: false })
+    // Agency admins are CRM managers by contract. Custom permissions can restrict
+    // unrelated modules, but cannot remove the CRM authority required by that role.
+    if (role === 'agency_admin') return [...new Set<Permission>([...custom, ...mandatoryAgencyAdminCrmPermissions])]
+    return custom
   }
   return defaults
 }
@@ -116,6 +128,8 @@ export const permissionCatalog = [
     { permission: 'leads.read', label: 'View leads', description: 'View leads and pipeline records.' },
     { permission: 'leads.write', label: 'Manage leads', description: 'Create and update leads.' },
     { permission: 'leads.assign', label: 'Assign leads', description: 'Assign or reassign leads to team members.' },
+    { permission: 'crm.team.read', label: 'View team CRM records', description: 'Switch from assigned-to-me records to team-wide leads, contacts, and tasks.' },
+    { permission: 'crm.export', label: 'Export CRM records', description: 'Download only the lead/contact records this member is allowed to view. Team-wide exports still require View team CRM records.' },
     { permission: 'contacts.read', label: 'View contacts', description: 'View CRM contacts.' },
     { permission: 'contacts.write', label: 'Manage contacts', description: 'Create and update contacts.' },
     { permission: 'tasks.read', label: 'View tasks', description: 'View tasks and reminders.' },

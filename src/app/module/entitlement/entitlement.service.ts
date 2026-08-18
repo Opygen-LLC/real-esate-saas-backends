@@ -1,6 +1,6 @@
 import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
-import { LEAD_CLOSED_STATUSES } from '../lead/leadStatus.contract'
+import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { Property } from '../property/property.model'
@@ -114,7 +114,7 @@ const countLimitedResourceUsage = async (organizationId: string, resource: Limit
       userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] },
     })
   }
-  return Lead.countDocuments({ organizationId, leadStatus: { $nin: LEAD_CLOSED_STATUSES } })
+  return Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() })
 }
 
 const getUsageSnapshot = async (organizationId: string) => {

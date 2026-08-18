@@ -3,6 +3,11 @@ import {
   DEFAULT_LEAD_PIPELINE_STAGES,
   LEAD_CLOSED_STATUSES,
   LEAD_CONVERSION_STATUS,
+  activePipelineLeadFilter,
+  convertedStatusExpression,
+  isActivePipelineStatus,
+  isClosedStatus,
+  isConvertedStatus,
   isLeadConversionStatus,
   LEAD_STATUS,
   LEAD_STATUS_LABELS,
@@ -32,6 +37,22 @@ describe('CRM lead status contract', () => {
     expect(LEAD_CONVERSION_STATUS).toBe('Won')
     expect(isLeadConversionStatus('Won')).toBe(true)
     expect(isLeadConversionStatus('Interested')).toBe(false)
+  })
+
+  it('owns reusable converted/closed/active-pipeline semantics', () => {
+    expect(isConvertedStatus('Won')).toBe(true)
+    expect(isConvertedStatus('Lost')).toBe(false)
+    expect(isClosedStatus('Won')).toBe(true)
+    expect(isClosedStatus('Lost')).toBe(true)
+    expect(isClosedStatus('Interested')).toBe(false)
+    expect(isActivePipelineStatus('Interested')).toBe(true)
+    expect(isActivePipelineStatus('Lost')).toBe(false)
+    expect(isActivePipelineStatus('Interested', true)).toBe(false)
+    expect(activePipelineLeadFilter()).toEqual({
+      isConverted: { $ne: true },
+      leadStatus: { $nin: [LEAD_STATUS.WON, LEAD_STATUS.LOST] },
+    })
+    expect(convertedStatusExpression()).toEqual({ $in: ['$leadStatus', [LEAD_STATUS.WON]] })
   })
 
   it('owns canonical UI labels and closed-status semantics', () => {

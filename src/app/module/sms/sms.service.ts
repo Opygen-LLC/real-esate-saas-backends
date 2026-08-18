@@ -4,6 +4,8 @@ import { Resilience } from '../../../shared/resilience'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { LeadService } from '../lead/lead.service'
+import { LeadLifecycleService } from '../lead/leadLifecycle.service'
+import type { CrmAccessContext } from '../crm/crmAccess'
 import { SmsMessage, SmsOptOut, SmsTemplate } from './sms.model'
 
 const provider = config.sms.provider_name || 'generic-bd-http'
@@ -12,7 +14,12 @@ export const interpolateSmsTemplate = (body: string, variables: Record<string, s
 type SmsInput = { phone: string; message?: string; templateKey?: string; variables?: Record<string, string>; leadId?: string; sentBy?: string }
 type PreparedSms = { phone: string; message: string; templateKey: string; leadId?: string; sentBy?: string }
 
-const prepare = async (organizationId: string, input: SmsInput): Promise<PreparedSms> => {
+const prepare = async (organizationId: string, input: SmsInput, access?: CrmAccessContext): Promise<PreparedSms> => {
+  if (input.leadId && access) {
+    // A team-read grant is deliberately read-only. SMS is an outbound mutation,
+    // so linked Lead ownership is checked using the caller's default mutation scope.
+    await LeadService.getLeadById(organizationId, input.leadId, access)
+  }
   const phone = normalizeBangladeshPhone(input.phone)
   if (await SmsOptOut.exists({ organizationId, phone })) throw new ApiError(409, 'Recipient has opted out of SMS')
   let message = input.message?.trim() || ''
@@ -57,12 +64,12 @@ const deliverPrepared = async (organizationId: string, input: PreparedSms) => {
   const body: any = await response.json().catch(() => ({}))
   const acceptance = parseSmsProviderAcceptance(response.ok, body)
   const record: any = await SmsMessage.create({ organizationId, provider, providerMessageId: acceptance.providerMessageId, phone: input.phone, templateKey: input.templateKey, message: input.message, status: 'accepted', cost: acceptance.cost, leadId: input.leadId, sentBy: input.sentBy })
-  if (input.leadId && input.sentBy) await LeadService.recordFirstResponse(organizationId, input.leadId, input.sentBy)
+  if (input.leadId && input.sentBy) await LeadLifecycleService.recordContact(organizationId, input.leadId, { actorId: input.sentBy, channel: 'sms' })
   await DomainEventService.emit({ organizationId, aggregateType: 'sms', aggregateId: record._id.toString(), eventType: 'sms.sent', leadId: input.leadId, actorId: input.sentBy, payload: { summary: `SMS accepted for ••••${input.phone.slice(-4)}`, templateKey: input.templateKey } })
   return record
 }
 
-const send = async (organizationId: string, input: SmsInput) => deliverPrepared(organizationId, await prepare(organizationId, input))
+const send = async (organizationId: string, input: SmsInput, access?: CrmAccessContext) => deliverPrepared(organizationId, await prepare(organizationId, input, access))
 const upsertTemplate = async (organizationId: string, payload: any) => SmsTemplate.findOneAndUpdate({ organizationId, key: payload.key }, { ...payload, organizationId }, { upsert: true, new: true, runValidators: true })
 const listTemplates = async (organizationId: string) => SmsTemplate.find({ organizationId }).sort({ name: 1 }).lean()
 const optOut = async (organizationId: string, phoneRaw: string, reason?: string) => SmsOptOut.findOneAndUpdate({ organizationId, phone: normalizeBangladeshPhone(phoneRaw) }, { organizationId, phone: normalizeBangladeshPhone(phoneRaw), reason: reason || 'user_request', optedOutAt: new Date() }, { upsert: true, new: true })

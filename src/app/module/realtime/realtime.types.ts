@@ -1,6 +1,9 @@
 export type RealtimeChannelEvent =
   | 'property.changed'
   | 'lead.changed'
+  | 'contact.changed'
+  | 'dashboard.changed'
+  | 'activity.changed'
   | 'notification.changed'
   | 'task.changed'
   | 'viewing.changed'
@@ -17,6 +20,7 @@ export interface RealtimeEnvelope {
   action: RealtimeAction | string
   organizationId?: string
   entityId?: string
+  eventType?: string
   userId?: string
   revision: number
   occurredAt: string

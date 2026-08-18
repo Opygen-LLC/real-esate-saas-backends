@@ -52,11 +52,12 @@ const actionFromEvent = (eventType: string): string => {
 const fromDomainEvent = (input: DomainRealtimeInput) => {
   const prefix = input.eventType.split('.')[0]
   const entityId = input.aggregateId
-  const action = actionFromEvent(input.eventType)
+  const action = input.eventType === 'lead.converted' ? 'converted' : actionFromEvent(input.eventType)
 
   const map: Record<string, RealtimeEnvelope['type']> = {
     property: 'property.changed',
     lead: 'lead.changed',
+    contact: 'contact.changed',
     task: 'task.changed',
     viewing: 'viewing.changed',
     organization: 'organization.changed',
@@ -67,7 +68,43 @@ const fromDomainEvent = (input: DomainRealtimeInput) => {
   const type = map[prefix] || map[input.aggregateType]
   if (!type) return
 
-  emitOrganization(input.organizationId, { type, action, entityId })
+  emitOrganization(input.organizationId, { type, action, entityId, eventType: input.eventType })
+
+  // A conversion creates/activates a Contact while the canonical domain event remains lead.converted.
+  // Publish a second lightweight cache hint so other open CRM sessions refresh Contacts too.
+  if (input.eventType === 'lead.converted' && input.contactId) {
+    // Keep one canonical DomainEvent (lead.converted) while publishing explicit
+    // cache/realtime hints for every CRM read model changed by conversion.
+    emitOrganization(input.organizationId, {
+      type: 'contact.changed',
+      action: 'created_from_lead',
+      entityId: input.contactId,
+      eventType: 'contact.created_from_lead',
+    })
+    const cancelledTaskIds = Array.isArray(input.payload?.cancelledFollowUpTaskIds)
+      ? input.payload.cancelledFollowUpTaskIds.filter((value): value is string => typeof value === 'string')
+      : []
+    for (const taskId of cancelledTaskIds) {
+      emitOrganization(input.organizationId, {
+        type: 'task.changed',
+        action: 'updated',
+        entityId: taskId,
+        eventType: 'lead.converted',
+      })
+    }
+    emitOrganization(input.organizationId, {
+      type: 'dashboard.changed',
+      action: 'updated',
+      entityId: entityId,
+      eventType: 'lead.converted',
+    })
+    emitOrganization(input.organizationId, {
+      type: 'activity.changed',
+      action: 'created',
+      entityId: entityId,
+      eventType: 'lead.converted',
+    })
+  }
 
   const publicVisible = input.payload?.publicVisible === true
   if (type === 'property.changed' && publicVisible) {

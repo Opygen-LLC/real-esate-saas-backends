@@ -55,7 +55,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(cookieParser())
 app.use(authMiddlewares.enforceImpersonationReadOnly)
 app.use('/api/v1/organization/website', express.json({ limit: '5mb' }))
-app.use('/api/v1/lead/import', express.json({ limit: '6mb' }))
 app.use('/api/v1/observability/client-error', express.json({ limit: '32kb' }))
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true, limit: '256kb' }))

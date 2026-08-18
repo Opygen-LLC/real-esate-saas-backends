@@ -3,6 +3,7 @@ import { bangladeshPhoneSchema, optionalEmailSchema } from '../../helpers/inputV
 import { LEAD_STATUS_VALUES, normalizeLeadStatus } from './leadStatus.contract'
 
 const leadStatusSchema = z.preprocess((value: unknown) => normalizeLeadStatus(value) ?? value, z.enum(LEAD_STATUS_VALUES))
+const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid user reference')
 
 const attribution = z.object({
   utmSource: z.string().trim().max(120).optional(),
@@ -27,15 +28,25 @@ const leadFields = {
   propertyType: z.string().trim().max(100).optional(),
   bedrooms: z.number().nonnegative().max(50).optional(),
   leadStatus: leadStatusSchema.optional(),
-  assignedAgent: z.string().optional(),
-  contactId: z.string().optional(),
+  assignedAgent: objectIdSchema.optional(),
+  followUpDate: z.string().datetime().optional(),
+  // Legacy request alias: accepted during rollout and normalized server-side to followUpDate.
   nextFollowUp: z.string().datetime().optional(),
   notes: z.string().trim().max(10000).optional(),
   lostReason: z.string().trim().max(120).optional(),
   attribution,
 }
 
-const createLeadZodSchema = z.object({ body: z.object(leadFields).strict() })
+const createLeadBody = z.object(leadFields).strict().superRefine((value: any, ctx: z.RefinementCtx) => {
+  if (value.leadStatus === 'FollowUpScheduled' && !value.followUpDate && !value.nextFollowUp) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['followUpDate'],
+      message: 'Follow-up Scheduled requires a follow-up date and time',
+    })
+  }
+})
+const createLeadZodSchema = z.object({ body: createLeadBody })
 
 const publicCaptureZodSchema = z.object({
   body: z.object({
@@ -55,9 +66,24 @@ const publicCaptureZodSchema = z.object({
   }).strict(),
 })
 
-const updateLeadZodSchema = z.object({ body: z.object({ ...leadFields, name: leadFields.name.optional(), phone: leadFields.phone.optional() }).partial().strict() })
-const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: leadStatusSchema, lostReason: z.string().trim().max(120).optional() }).strict() })
-const csvSchema = z.object({ body: z.object({ csv: z.string().min(1).max(5_000_000), mapping: z.record(z.string()).optional() }).strict() })
+const { leadStatus: _leadStatus, assignedAgent: _assignedAgent, followUpDate: _followUpDate, nextFollowUp: _nextFollowUp, lostReason: _lostReason, notes: _notes, ...genericEditableLeadFields } = leadFields
+const updateLeadZodSchema = z.object({
+  body: z.object({
+    ...genericEditableLeadFields,
+    name: leadFields.name.optional(),
+    phone: leadFields.phone.optional(),
+  }).partial().strict(),
+})
+const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: leadStatusSchema, lostReason: z.string().trim().max(120).optional(), reason: z.string().trim().max(500).optional() }).strict() })
+const scheduleLeadFollowUpZodSchema = z.object({ body: z.object({ followUpDate: z.string().datetime(), title: z.string().trim().min(1).max(200).optional(), priority: z.enum(['low','medium','high','urgent']).optional(), reason: z.string().trim().max(500).optional() }).strict() })
+const reengageLeadZodSchema = z.object({ body: z.object({ reason: z.string().trim().max(500).optional() }).strict() })
+const assignLeadAgentZodSchema = z.object({
+  body: z.object({
+    assignedAgent: objectIdSchema,
+    agentName: z.string().trim().max(120).optional(),
+  }).strict(),
+})
+const confirmImportZodSchema = z.object({ body: z.object({ importSessionId: z.string().uuid('Invalid import session') }).strict() })
 
-export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, updateLeadStatusZodSchema, csvSchema }
+export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
 export type PublicLeadCaptureInput = z.infer<typeof publicCaptureZodSchema>['body']

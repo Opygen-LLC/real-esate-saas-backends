@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { DashboardService } from './dashboard.service'
+import { crmAccessFromRequest } from '../crm/crmAccess'
 
 const getOverviewStats = catchAsync(async (req: Request, res: Response) => {
   const organizationId = (req.user?.organizationId || req.user?.storeId) as string
@@ -31,7 +32,7 @@ const getAnalytics = catchAsync(async (req: Request, res: Response) => {
 
 const globalSearch = catchAsync(async (req: Request, res: Response) => {
   const organizationId = req.tenant?.organizationId || (req.user?.organizationId as string)
-  const data = await DashboardService.globalSearch(organizationId, String(req.query.q || ''), req.tenant?.permissions || [])
+  const data = await DashboardService.globalSearch(organizationId, String(req.query.q || ''), crmAccessFromRequest(req))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Dashboard search results fetched', data })
 })
 

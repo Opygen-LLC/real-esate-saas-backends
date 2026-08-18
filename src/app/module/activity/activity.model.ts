@@ -20,6 +20,7 @@ const activitySchema = new Schema<IActivity, ActivityModel>(
     contactId: {
       type: Schema.Types.ObjectId,
       ref: 'Contact',
+      index: true,
     },
     type: {
       type: String,
@@ -60,5 +61,14 @@ const activitySchema = new Schema<IActivity, ActivityModel>(
 )
 
 activitySchema.index({ organizationId: 1, leadId: 1, createdAt: -1 })
+activitySchema.index({ organizationId: 1, contactId: 1, createdAt: -1 }, { name: 'activity_tenant_contact_created' })
+activitySchema.index(
+  { organizationId: 1, 'metadata.migrationKey': 1 },
+  {
+    name: 'activity_tenant_migration_key_unique',
+    unique: true,
+    partialFilterExpression: { 'metadata.migrationKey': { $type: 'string' } },
+  },
+)
 
 export const Activity = model<IActivity, ActivityModel>('Activity', activitySchema)

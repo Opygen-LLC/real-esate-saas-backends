@@ -5,6 +5,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ActivityService } from './activity.service'
 import { requireTenant } from '../../middlewares/auth'
+import { crmAccessFromRequest, crmRecordReadAccessFromRequest } from '../crm/crmAccess'
 
 const createActivity = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -12,7 +13,7 @@ const createActivity = catchAsync(async (req: Request, res: Response) => {
   const result = await ActivityService.createActivity(organizationId, {
     ...req.body,
     agentId,
-  })
+  }, crmAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -26,7 +27,7 @@ const getActivitiesByLead = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { leadId } = req.params
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
-  const result = await ActivityService.getActivitiesByLead(organizationId, leadId, paginationOptions)
+  const result = await ActivityService.getActivitiesByLead(organizationId, leadId, paginationOptions, crmRecordReadAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

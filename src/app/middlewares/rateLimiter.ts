@@ -56,3 +56,18 @@ export const uploadRateLimiter = rateLimit({
     fieldErrors: {},
   },
 })
+
+// Authenticated CRM bulk-import limiter. Preview parses memory-backed multipart
+// files and XLSX archives; confirmation can create many records, so keep this
+// materially tighter than ordinary dashboard reads/writes.
+export const leadImportRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'RATE_LIMITED',
+    message: 'Too many lead import requests. Please try again in a few minutes.',
+  },
+})

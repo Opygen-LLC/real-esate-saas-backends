@@ -8,6 +8,10 @@ type IApiResponse<T> = {
     page: number
     limit: number
     total: number
+    timeZone?: string
+    localDate?: string
+    start?: string
+    end?: string
   }
   data?: T | null
 }

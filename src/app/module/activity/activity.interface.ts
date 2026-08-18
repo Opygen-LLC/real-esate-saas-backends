@@ -25,4 +25,46 @@ export interface IActivity {
   updatedAt?: Date
 }
 
+export type CrmHistoryKind =
+  | 'lead_created'
+  | 'assignment'
+  | 'status_change'
+  | 'note'
+  | 'call'
+  | 'whatsapp'
+  | 'email'
+  | 'sms'
+  | 'meeting'
+  | 'follow_up'
+  | 'viewing'
+  | 'task'
+  | 'offer'
+  | 'conversion'
+  | 'contact'
+  | 'system'
+
+export type CrmHistoryAuthor = {
+  _id?: string
+  name: string
+  email?: string
+  userRole?: string
+  profileImgURL?: string
+  type: 'user' | 'system'
+}
+
+export type CrmHistoryEntry = {
+  _id: string
+  kind: CrmHistoryKind
+  eventType: string
+  title: string
+  content: string
+  authorId?: string
+  author: CrmHistoryAuthor
+  leadId?: string
+  contactId?: string
+  propertyId?: string
+  details: Record<string, unknown>
+  createdAt: Date
+}
+
 export type ActivityModel = Model<IActivity>

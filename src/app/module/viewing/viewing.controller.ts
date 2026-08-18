@@ -1,14 +1,20 @@
 import { Request, Response } from 'express'
 import httpStatus from 'http-status'
+import ApiError from '../../../errors/ApiError'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ViewingService } from './viewing.service'
 import { requireTenant } from '../../middlewares/auth'
+import { crmAccessFromRequest } from '../crm/crmAccess'
 
 const checkConflict = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { agentId, propertyId, date, startTime, endTime, excludeViewingId } = req.body
+  const access = crmAccessFromRequest(req)
+  if (!access.isManager && String(agentId) !== access.userId) {
+    throw new ApiError(403, 'Team members can only check their own viewing availability')
+  }
 
   const result = await ViewingService.checkConflict(
     organizationId,
@@ -30,7 +36,7 @@ const checkConflict = catchAsync(async (req: Request, res: Response) => {
 
 const createViewing = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await ViewingService.createViewing(organizationId, req.body, req.user?._id || req.user?.id)
+  const result = await ViewingService.createViewing(organizationId, req.body, req.user?._id || req.user?.id, crmAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -94,7 +100,7 @@ const getViewingById = catchAsync(async (req: Request, res: Response) => {
 const updateViewing = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await ViewingService.updateViewing(organizationId, id, req.body, req.user?._id || req.user?.id)
+  const result = await ViewingService.updateViewing(organizationId, id, req.body, req.user?._id || req.user?.id, crmAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -107,7 +113,7 @@ const updateViewing = catchAsync(async (req: Request, res: Response) => {
 const deleteViewing = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await ViewingService.deleteViewing(organizationId, id)
+  const result = await ViewingService.deleteViewing(organizationId, id, crmAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

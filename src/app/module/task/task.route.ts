@@ -6,6 +6,13 @@ import { TaskValidation } from './task.validation'
 
 const router = express.Router()
 
+
+router.get(
+  '/summary',
+  authMiddlewares.requirePermission('tasks.read'),
+  TaskController.getTaskSummary
+)
+
 router.get(
   '/',
   authMiddlewares.requirePermission('tasks.read'),

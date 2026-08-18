@@ -69,18 +69,57 @@ export const normalizeLeadStatus = (value: unknown): LeadStatus | undefined => {
   return LEGACY_LEAD_STATUS_ALIASES[trimmed as LegacyLeadStatus]
 }
 
+/**
+ * Lifecycle compatibility contract.
+ *
+ * Keep these predicates/query helpers as the single definition consumed by
+ * analytics, assignment, entitlement and integration modules. Do not repeat
+ * string comparisons such as status === 'Won' or status !== 'Lost' elsewhere.
+ */
 export const LEAD_CONVERSION_STATUS: LeadStatus = LEAD_STATUS.WON
-export const isLeadConversionStatus = (value: unknown) => normalizeLeadStatus(value) === LEAD_CONVERSION_STATUS
+export const LEAD_CONVERTED_STATUSES: readonly LeadStatus[] = [LEAD_CONVERSION_STATUS]
+export const LEAD_CLOSED_STATUSES: readonly LeadStatus[] = [LEAD_STATUS.WON, LEAD_STATUS.LOST]
+export const LEAD_TERMINAL_STATUSES: readonly LeadStatus[] = [LEAD_STATUS.WON, LEAD_STATUS.LOST, LEAD_STATUS.NOT_QUALIFIED]
 
-export const LEAD_CLOSED_STATUSES: LeadStatus[] = [LEAD_STATUS.WON, LEAD_STATUS.LOST]
-export const LEAD_TERMINAL_STATUSES: LeadStatus[] = [LEAD_STATUS.WON, LEAD_STATUS.LOST, LEAD_STATUS.NOT_QUALIFIED]
+const convertedStatusSet = new Set<string>(LEAD_CONVERTED_STATUSES)
+const closedStatusSet = new Set<string>(LEAD_CLOSED_STATUSES)
+
+export const isConvertedStatus = (value: unknown): boolean => {
+  const normalized = normalizeLeadStatus(value)
+  return Boolean(normalized && convertedStatusSet.has(normalized))
+}
+
+// Backward-compatible alias used by earlier phases/callers.
+export const isLeadConversionStatus = isConvertedStatus
+
+export const isClosedStatus = (value: unknown): boolean => {
+  const normalized = normalizeLeadStatus(value)
+  return Boolean(normalized && closedStatusSet.has(normalized))
+}
+
+export const isActivePipelineStatus = (value: unknown, isConverted = false): boolean => {
+  if (isConverted) return false
+  const normalized = normalizeLeadStatus(value)
+  return Boolean(normalized && !closedStatusSet.has(normalized))
+}
+
+/** Mongo query fragment for open pipeline/workload/entitlement reads. */
+export const activePipelineLeadFilter = () => ({
+  isConverted: { $ne: true },
+  leadStatus: { $nin: [...LEAD_CLOSED_STATUSES] },
+})
+
+/** Mongo aggregation expression for converted/won status checks. */
+export const convertedStatusExpression = (field: string = '$leadStatus') => ({
+  $in: [field, [...LEAD_CONVERTED_STATUSES]],
+})
 
 export const DEFAULT_LEAD_PIPELINE_STAGES = LEAD_STATUS_VALUES.map((key, order) => ({
   key,
   label: LEAD_STATUS_LABELS[key],
   order,
   terminal: LEAD_TERMINAL_STATUSES.includes(key),
-  won: key === LEAD_CONVERSION_STATUS,
+  won: isConvertedStatus(key),
   lost: key === LEAD_STATUS.LOST,
 }))
 

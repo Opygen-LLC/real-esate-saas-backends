@@ -103,6 +103,13 @@ const requirePermission = (permission: Permission) => async (req: Request, _res:
   try { if (!req.user) await authenticate(req); if (req.tenant?.permissions.includes(permission)) return next()
     throw new ApiError(403, `Missing permission: ${permission}`) } catch (error) { next(error) }
 }
+const requireAnyPermission = (...permissions: Permission[]) => async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) await authenticate(req)
+    if (permissions.some((permission) => req.tenant?.permissions.includes(permission))) return next()
+    throw new ApiError(403, `Missing one of permissions: ${permissions.join(', ')}`)
+  } catch (error) { next(error) }
+}
 const authSuperAdmin = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   try { await authenticate(req); if (req.user!.userRole !== 'super-admin') throw new ApiError(403, 'Platform administrator access required'); next() }
   catch (error) { next(error) }
@@ -112,4 +119,4 @@ export const requireTenant = (req: Request): string => {
   return req.tenant.organizationId
 }
 export { Permission, permissionMatrix, permissionsForRole, roleHasPermission }
-export const authMiddlewares = { auth, authSuperAdmin, requirePermission, enforceImpersonationReadOnly }
+export const authMiddlewares = { auth, authSuperAdmin, requirePermission, requireAnyPermission, enforceImpersonationReadOnly }

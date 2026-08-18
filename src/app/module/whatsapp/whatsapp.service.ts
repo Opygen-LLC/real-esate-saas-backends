@@ -6,6 +6,8 @@ import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { LeadService } from '../lead/lead.service'
+import { LeadLifecycleService } from '../lead/leadLifecycle.service'
+import type { CrmAccessContext } from '../crm/crmAccess'
 import { WhatsAppIntegration } from './whatsapp.model'
 
 const publicShape = (doc: any) => ({ organizationId: doc.organizationId, status: doc.status, businessAccountId: doc.businessAccountId, phoneNumberId: doc.phoneNumberId, displayPhoneNumber: doc.displayPhoneNumber, hasAccessToken: Boolean(doc.encryptedAccessToken), lastTestAt: doc.lastTestAt, lastError: doc.lastError, diagnostics: doc.diagnostics || {}, updatedAt: doc.updatedAt })
@@ -43,7 +45,11 @@ const save = async (organizationId: string, payload: any) => {
 }
 const disable = async (organizationId: string) => { const doc: any = await WhatsAppIntegration.findOneAndUpdate({ organizationId }, { $set: { status: 'disabled', lastError: '', diagnostics: {} }, $unset: { encryptedAccessToken: 1 } }, { new: true }).select('+encryptedAccessToken'); return doc ? publicShape(doc) : { organizationId, status: 'disabled', hasAccessToken: false } }
 const deepLink = (phoneRaw: string, text?: string) => { const phone = normalizeBangladeshPhone(phoneRaw).replace(/^\+/, ''); return `https://wa.me/${phone}${text ? `?text=${encodeURIComponent(text)}` : ''}` }
-const sendTemplate = async (organizationId: string, input: { phone: string; templateName: string; languageCode?: string; components?: any[]; leadId?: string; actorId?: string }) => {
+const sendTemplate = async (organizationId: string, input: { phone: string; templateName: string; languageCode?: string; components?: any[]; leadId?: string; actorId?: string }, access?: CrmAccessContext) => {
+  if (input.leadId && access) {
+    // Team visibility is read-only; outbound WhatsApp for a Lead requires ownership.
+    await LeadService.getLeadById(organizationId, input.leadId, access)
+  }
   await EntitlementService.assertFeature(organizationId, 'whatsAppAutomation')
   const integration: any = await WhatsAppIntegration.findOne({ organizationId }).select('+encryptedAccessToken')
   if (!integration || integration.status !== 'connected' || !integration.phoneNumberId || !integration.encryptedAccessToken) throw new ApiError(409, 'Official WhatsApp Business integration is not connected')
@@ -53,7 +59,7 @@ const sendTemplate = async (organizationId: string, input: { phone: string; temp
   const body: any = await response.json().catch(() => ({}))
   if (!response.ok) { await WhatsAppIntegration.updateOne({ _id: integration._id }, { $set: { status: 'error', lastError: `Graph API ${response.status}`, lastTestAt: new Date() } }); throw new ApiError(502, 'WhatsApp Business provider rejected the message') }
   await WhatsAppIntegration.updateOne({ _id: integration._id }, { $set: { status: 'connected', lastError: '', lastTestAt: new Date() } })
-  if (input.leadId && input.actorId) await LeadService.recordFirstResponse(organizationId, input.leadId, input.actorId)
+  if (input.leadId && input.actorId) await LeadLifecycleService.recordContact(organizationId, input.leadId, { actorId: input.actorId, channel: 'whatsapp', access })
   await DomainEventService.emit({ organizationId, aggregateType: 'whatsapp', aggregateId: String(body.messages?.[0]?.id || Date.now()), eventType: 'activity.whatsapp', leadId: input.leadId, actorId: input.actorId, payload: { summary: `WhatsApp template ${input.templateName} sent`, templateName: input.templateName } })
   return { accepted: true, providerMessageId: body.messages?.[0]?.id || '' }
 }

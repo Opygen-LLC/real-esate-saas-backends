@@ -6,12 +6,13 @@ import { sendResponse } from '../../../shared/customResponse'
 import { requireTenant } from '../../middlewares/auth'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
+import { crmAccessFromRequest } from '../crm/crmAccess'
 import { SmsService } from './sms.service'
 
 const send = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   await EntitlementService.assertFeature(organizationId, 'smsAutomation')
-  const prepared = await SmsService.prepare(organizationId, { ...req.body, sentBy: req.user?._id })
+  const prepared = await SmsService.prepare(organizationId, { ...req.body, sentBy: req.user?._id }, crmAccessFromRequest(req))
   const job = await OperationsQueueService.schedule({ organizationId, type: 'sms_send', entityId: `sms-${randomUUID()}`, runAt: new Date(Date.now() + 250), payload: prepared, maxAttempts: 6 })
   sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'SMS queued for delivery', data: { jobId: job?._id, status: 'queued' } })
 })
