@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import { bangladeshPhoneSchema, optionalEmailSchema } from '../../helpers/inputValidation'
+import { LEAD_STATUS_VALUES, normalizeLeadStatus } from './leadStatus.contract'
+
+const leadStatusSchema = z.preprocess((value: unknown) => normalizeLeadStatus(value) ?? value, z.enum(LEAD_STATUS_VALUES))
 
 const attribution = z.object({
   utmSource: z.string().trim().max(120).optional(),
@@ -23,7 +26,7 @@ const leadFields = {
   locationPreference: z.string().trim().max(300).optional(),
   propertyType: z.string().trim().max(100).optional(),
   bedrooms: z.number().nonnegative().max(50).optional(),
-  leadStatus: z.string().trim().min(1).max(40).optional(),
+  leadStatus: leadStatusSchema.optional(),
   assignedAgent: z.string().optional(),
   contactId: z.string().optional(),
   nextFollowUp: z.string().datetime().optional(),
@@ -53,7 +56,7 @@ const publicCaptureZodSchema = z.object({
 })
 
 const updateLeadZodSchema = z.object({ body: z.object({ ...leadFields, name: leadFields.name.optional(), phone: leadFields.phone.optional() }).partial().strict() })
-const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: z.string().trim().min(1).max(40), lostReason: z.string().trim().max(120).optional() }).strict() })
+const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: leadStatusSchema, lostReason: z.string().trim().max(120).optional() }).strict() })
 const csvSchema = z.object({ body: z.object({ csv: z.string().min(1).max(5_000_000), mapping: z.record(z.string()).optional() }).strict() })
 
 export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, updateLeadStatusZodSchema, csvSchema }

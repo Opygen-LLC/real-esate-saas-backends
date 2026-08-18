@@ -48,7 +48,8 @@
     "verify:phase2-property": "node scripts/verify-phase2-property-correctness.mjs",
     "verify:phase3-auth-routing": "node scripts/verify-phase3-auth-routing.mjs",
     "verify:phase4-realtime": "node scripts/verify-phase4-realtime.mjs",
-    "verify:phase6-performance": "node scripts/verify-phase6-performance-consistency.mjs"
+    "verify:phase6-performance": "node scripts/verify-phase6-performance-consistency.mjs",
+    "migrate:crm-lead-status-contract": "ts-node --transpile-only src/app/db/migrateCrmLeadStatusContract.ts"
   },
   "keywords": [
     "real-estate",

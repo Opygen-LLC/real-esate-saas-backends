@@ -3,6 +3,7 @@ import ApiError from '../../../errors/ApiError'
 import { DomainEvent } from '../domainEvent/domainEvent.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
+import { LEAD_STATUS } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { PlatformAdminService } from '../platformAdmin/platformAdmin.service'
 import { Property } from '../property/property.model'
@@ -81,7 +82,7 @@ const getOverviewStats = async (organizationId: string) => {
         $group: {
           _id: null,
           totalLeads: { $sum: 1 },
-          dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+          dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', LEAD_STATUS.WON] }, 1, 0] } },
         },
       },
     ]),
@@ -161,13 +162,13 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
                 newLeadsInPeriod: {
                   $sum: { $cond: [{ $gte: ['$createdAt', startDate] }, 1, 0] },
                 },
-                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', LEAD_STATUS.WON] }, 1, 0] } },
                 dealsWonInPeriod: {
                   $sum: {
                     $cond: [
                       {
                         $and: [
-                          { $eq: ['$leadStatus', 'Won'] },
+                          { $eq: ['$leadStatus', LEAD_STATUS.WON] },
                           { $gte: [{ $ifNull: ['$updatedAt', '$createdAt'] }, startDate] },
                         ],
                       },
@@ -179,7 +180,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
                 totalClosedVolume: {
                   $sum: {
                     $cond: [
-                      { $eq: ['$leadStatus', 'Won'] },
+                      { $eq: ['$leadStatus', LEAD_STATUS.WON] },
                       {
                         $cond: [
                           { $gt: ['$budgetMax', 0] },
@@ -196,7 +197,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
                     $cond: [
                       {
                         $and: [
-                          { $eq: ['$leadStatus', 'Won'] },
+                          { $eq: ['$leadStatus', LEAD_STATUS.WON] },
                           { $lte: [{ $ifNull: ['$budgetMax', 0] }, 0] },
                           { $lte: [{ $ifNull: ['$budgetMin', 0] }, 0] },
                         ],
@@ -214,7 +215,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
             { $sort: { count: -1, _id: 1 } },
           ],
           byStage: [
-            { $group: { _id: { $ifNull: ['$leadStatus', 'New'] }, count: { $sum: 1 } } },
+            { $group: { _id: { $ifNull: ['$leadStatus', LEAD_STATUS.NEW] }, count: { $sum: 1 } } },
             { $sort: { count: -1, _id: 1 } },
           ],
           byAgent: [
@@ -223,7 +224,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
               $group: {
                 _id: '$assignedAgent',
                 leadsHandled: { $sum: 1 },
-                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } },
+                dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', LEAD_STATUS.WON] }, 1, 0] } },
               },
             },
           ],
@@ -237,7 +238,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
             },
           ],
           monthlyWon: [
-            { $match: { leadStatus: 'Won', updatedAt: { $gte: sixMonthStart } } },
+            { $match: { leadStatus: LEAD_STATUS.WON, updatedAt: { $gte: sixMonthStart } } },
             {
               $group: {
                 _id: { $dateToString: { format: '%Y-%m', date: '$updatedAt', timezone: 'Asia/Dhaka' } },

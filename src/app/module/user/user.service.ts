@@ -14,6 +14,7 @@ import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.servi
 import { RealtimeService } from '../realtime/realtime.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { Lead } from '../lead/lead.model'
+import { LEAD_STATUS } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { Viewing } from '../viewing/viewing.model'
@@ -179,7 +180,7 @@ const getPublicAgents = async (organizationId: string): Promise<any[]> => {
           { $match: { $expr: { $and: [
             { $eq: ['$assignedAgent', '$$agentId'] },
             { $eq: ['$organizationId', '$$tenantId'] },
-            { $eq: ['$leadStatus', 'Won'] },
+            { $eq: ['$leadStatus', LEAD_STATUS.WON] },
           ] } } },
           { $count: 'count' },
         ],
@@ -240,7 +241,7 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
   const [leadRows, viewingRows, listingRows] = await Promise.all([
     Lead.aggregate([
       { $match: { organizationId, assignedAgent: { $in: agentIds }, createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: '$assignedAgent', totalLeads: { $sum: 1 }, dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', 'Won'] }, 1, 0] } }, respondedLeads: { $sum: { $cond: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, 1, 0] } }, slaCompliant: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $lte: ['$firstResponseAt', '$responseDueAt'] }] }, 1, 0] } }, responseMsTotal: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $ne: [{ $type: '$createdAt' }, 'missing'] }] }, { $subtract: ['$firstResponseAt', '$createdAt'] }, 0] } } } },
+      { $group: { _id: '$assignedAgent', totalLeads: { $sum: 1 }, dealsWon: { $sum: { $cond: [{ $eq: ['$leadStatus', LEAD_STATUS.WON] }, 1, 0] } }, respondedLeads: { $sum: { $cond: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, 1, 0] } }, slaCompliant: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $lte: ['$firstResponseAt', '$responseDueAt'] }] }, 1, 0] } }, responseMsTotal: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $ne: [{ $type: '$createdAt' }, 'missing'] }] }, { $subtract: ['$firstResponseAt', '$createdAt'] }, 0] } } } },
     ]),
     Viewing.aggregate([
       { $match: { organizationId, agentId: { $in: agentIds }, date: { $gte: start.toISOString().slice(0, 10), $lte: end.toISOString().slice(0, 10) } } },

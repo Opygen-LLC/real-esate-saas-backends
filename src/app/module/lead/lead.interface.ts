@@ -1,5 +1,7 @@
 import mongoose, { Model } from 'mongoose'
-export type ILeadStatus = 'New'|'Contacted'|'Qualified'|'ViewingScheduled'|'ViewingCompleted'|'OfferMade'|'Negotiation'|'Won'|'Lost'|string
+import type { LeadStatus } from './leadStatus.contract'
+
+export type ILeadStatus = LeadStatus
 export type ILeadSource = 'Website'|'WhatsApp'|'Facebook'|'Instagram'|'Google'|'Referral'|'WalkIn'|'Portal'|'Phone'|'Email'|'Ad'|'Other'
 export interface ILead {
   organizationId:string; name:string; email?:string; normalizedEmail?:string; phone:string; normalizedPhone:string; source:ILeadSource

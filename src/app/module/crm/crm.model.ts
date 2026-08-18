@@ -1,7 +1,8 @@
 import { Schema, model } from 'mongoose'
+import { LEAD_STATUS_VALUES } from '../lead/leadStatus.contract'
 
 const stageSchema = new Schema({
-  key: { type: String, required: true },
+  key: { type: String, enum: LEAD_STATUS_VALUES, required: true },
   label: { type: String, required: true },
   color: { type: String, default: '#64748b' },
   order: { type: Number, required: true },

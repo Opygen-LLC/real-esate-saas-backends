@@ -9,6 +9,7 @@ import { writeAudit } from '../audit/audit.service'
 import { DomainRecord } from '../domain/domain.model'
 import { DomainEvent } from '../domainEvent/domainEvent.model'
 import { Lead } from '../lead/lead.model'
+import { LEAD_CLOSED_STATUSES } from '../lead/leadStatus.contract'
 import { MetaEvent } from '../metaIntegration/metaEvent.model'
 import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { Organization } from '../organization/organization.model'
@@ -60,7 +61,7 @@ const getTenantHealth = async (query: any) => {
   const [properties, agents, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
     groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] }, status: { $ne: 'blocked' } }),
-    groupCounts(Lead, ids, { leadStatus: { $nin: ['Won', 'Lost'] } }),
+    groupCounts(Lead, ids, { leadStatus: { $nin: LEAD_CLOSED_STATUSES } }),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
     SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
@@ -227,7 +228,7 @@ const tenantUsage = async (organizationId: string) => {
   const [agents, properties, leads] = await Promise.all([
     User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } }),
     Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }),
-    Lead.countDocuments({ organizationId, leadStatus: { $nin: ['Won', 'Lost'] } }),
+    Lead.countDocuments({ organizationId, leadStatus: { $nin: LEAD_CLOSED_STATUSES } }),
   ])
   return { agents, properties, leads }
 }
