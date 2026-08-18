@@ -23,6 +23,7 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   '/api/v1/lead/public-capture',
   '/api/v1/viewing/public-request',
   '/api/v1/moderation/fraud-reports',
+  '/api/v1/reviews/public/submit',
   '/api/v1/team-invitations/accept',
 ])
 

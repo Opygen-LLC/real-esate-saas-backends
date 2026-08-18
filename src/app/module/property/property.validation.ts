@@ -38,7 +38,7 @@ const assetVariant = z.object({
   height: z.number().int().positive().optional(),
 }).strict()
 
-const image = z.object({ url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
+const image = z.object({ _id: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
 const propertyImages = z.array(image).max(20).superRefine((items, ctx) => {
   if (items.filter(item => item.isFeatured).length > 1) {
@@ -67,7 +67,9 @@ const mediaLinks = z.array(mediaLink).max(10).superRefine((items, ctx) => {
 const fields = {
   title: z.string().trim().min(3).max(180), description: z.string().max(20000).optional(),
   propertyType: z.enum(PROPERTY_TYPES), listingType: z.enum(LISTING_TYPES), status: z.enum(PROPERTY_STATUSES).optional(),
-  price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000), currency: z.literal('BDT').default('BDT'),
+  price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000),
+  isDiscount: z.boolean().optional(), discountedPrice: z.number().positive('Discounted price must be greater than zero').max(1_000_000_000_000).optional(),
+  currency: z.literal('BDT').default('BDT'),
   bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(),
   area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(AREA_UNITS).default('sqft'),
   yearBuilt: z.number().int().min(1800).max(2200).optional(), parking: z.number().int().nonnegative().max(1000).optional(), furnished: z.boolean().optional(),
@@ -100,10 +102,20 @@ const canonicalizePostalCode = (value: PropertyInput): PropertyInput => {
   }
 }
 
-const createBody = z.object(fields).strict().transform(canonicalizePostalCode)
+const validateDiscount = (value: PropertyInput, ctx: z.RefinementCtx) => {
+  if (value.discountedPrice !== undefined && value.price !== undefined && value.discountedPrice >= value.price) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discountedPrice'], message: 'Discounted price must be lower than the listing price' })
+  }
+  if (value.isDiscount === true && value.discountedPrice === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discountedPrice'], message: 'Discounted price is required when discount is enabled' })
+  }
+}
+
+const createBody = z.object(fields).strict().superRefine(validateDiscount).transform(canonicalizePostalCode)
 const updateBody = z.object(Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()])))
   .strict()
   .refine(value => Object.keys(value).length > 0, 'At least one field is required')
+  .superRefine(validateDiscount)
   .transform(canonicalizePostalCode)
 
 export const PropertyValidation = {

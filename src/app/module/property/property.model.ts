@@ -71,6 +71,14 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       required: true,
       min: 0.01,
     },
+    isDiscount: {
+      type: Boolean,
+      default: false,
+    },
+    discountedPrice: {
+      type: Number,
+      min: 0.01,
+    },
     currency: {
       type: String,
       enum: PROPERTY_CURRENCIES,

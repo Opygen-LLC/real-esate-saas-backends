@@ -121,6 +121,16 @@ const deleteUserById = catchAsync(async (req: Request, res: Response) => {
 })
 
 
+const getMyProfile = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.getUserById(requireTenant(req), req.user!._id!)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Profile fetched successfully', data: result })
+})
+
+const updateMyProfile = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.updateUserById(requireTenant(req), req.user!._id!, req.body)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Profile updated successfully', data: result })
+})
+
 const getMyAccess = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.getMyAccess(requireTenant(req), req.user!._id!)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Access policy fetched', data: result })
@@ -205,5 +215,7 @@ export const UserController = {
   exportUsersSuperAdminCsv,
   updateUserRoleSuperAdmin,
   getMyAccess,
+  getMyProfile,
+  updateMyProfile,
   updateMemberAccess,
 }

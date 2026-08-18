@@ -23,6 +23,7 @@ const PUBLIC_PATH_PREFIXES = [
   '/api/v1/section/public/',
   '/api/v1/landing-page/public/',
   '/api/v1/meta/public/',
+  '/api/v1/reviews/public/',
   '/api/v1/domain/resolve/',
   '/api/v1/domain/resolve-subdomain/',
 ]

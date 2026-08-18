@@ -31,10 +31,12 @@ import { ObservabilityRoute } from '../module/observability/observability.route'
 import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.route'
 import { FinanceRoute } from '../module/finance/finance.route'
 import { UploadRoute } from '../module/upload/upload.route'
+import { ReviewRoute } from '../module/review/review.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/reviews', route: ReviewRoute },
   { path: '/upload', route: UploadRoute },
   { path: '/finance', route: FinanceRoute },
 

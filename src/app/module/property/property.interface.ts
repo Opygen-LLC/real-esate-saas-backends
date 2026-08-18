@@ -22,6 +22,7 @@ export interface IRegulatoryDetails {
 }
 
 export interface IPropertyImage {
+  _id?: mongoose.Types.ObjectId | string
   url: string
   publicId?: string
   caption?: string
@@ -49,6 +50,8 @@ export interface IProperty {
   listingType: IListingType
   status: IPropertyStatus
   price: number
+  isDiscount?: boolean
+  discountedPrice?: number
   currency: 'BDT'
   bedrooms?: number
   bathrooms?: number
@@ -94,7 +97,7 @@ export type IPropertyFilter = {
   organizationId?: string
   propertyType?: string
   listingType?: string
-  status?: string
+  status?: string | string[]
   city?: string
   state?: string
   divisionId?: string

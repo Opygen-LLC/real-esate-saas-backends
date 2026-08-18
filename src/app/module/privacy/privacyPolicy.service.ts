@@ -17,9 +17,15 @@ const getPublicPolicyState = async (): Promise<PublicPrivacyPolicyState> => {
   const databaseReviewStatus = settings?.privacy?.legalReviewStatus === 'approved' ? 'approved' : 'required'
   const databaseConfigured = Boolean(databasePolicyVersion || databasePolicyUrl || databaseReviewStatus === 'approved')
 
-  const policyVersion = databaseConfigured ? databasePolicyVersion : config.privacy.policy_version
-  const policyUrl = databaseConfigured ? databasePolicyUrl : config.privacy.policy_url
-  const legalReviewStatus = databaseConfigured ? databaseReviewStatus : config.privacy.legal_review_status
+  const configuredVersion = databaseConfigured ? databasePolicyVersion : config.privacy.policy_version
+  const configuredUrl = databaseConfigured ? databasePolicyUrl : config.privacy.policy_url
+  const configuredReviewStatus = databaseConfigured ? databaseReviewStatus : config.privacy.legal_review_status
+  // Keep public lead/viewing forms usable out of the box while still presenting a versioned
+  // privacy notice. A reviewed policy configured by the platform always takes precedence.
+  const usePlatformDefault = !databaseConfigured && !configuredVersion && !configuredUrl
+  const policyVersion = usePlatformDefault ? 'platform-default-2026-08' : configuredVersion
+  const policyUrl = usePlatformDefault ? `${config.public_site_origin}/privacy` : configuredUrl
+  const legalReviewStatus = usePlatformDefault ? 'approved' as const : configuredReviewStatus
 
   return {
     ready: legalReviewStatus === 'approved' && Boolean(policyVersion) && Boolean(policyUrl),

@@ -10,9 +10,35 @@ import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
-import type { PropertyStatus } from './property.constants'
+import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
+
+const isPublicPropertyStatus = (status?: string): status is PropertyStatus =>
+  Boolean(status && (PUBLIC_PROPERTY_STATUSES as readonly string[]).includes(status))
+
+const normalizeDiscount = (
+  payload: Partial<IProperty>,
+  current?: Pick<IProperty, 'price' | 'status' | 'isDiscount' | 'discountedPrice'>,
+  canPublish = false,
+): Partial<IProperty> => {
+  const next: Partial<IProperty> = { ...payload }
+  const price = Number(next.price ?? current?.price ?? 0)
+  const explicitDiscountPrice = next.discountedPrice
+  const discountPrice = explicitDiscountPrice ?? current?.discountedPrice
+  const discountEnabled = next.isDiscount ?? (explicitDiscountPrice !== undefined ? explicitDiscountPrice > 0 : current?.isDiscount)
+
+  if (discountEnabled && discountPrice !== undefined) {
+    if (!(discountPrice > 0)) throw new ApiError(httpStatus.BAD_REQUEST, 'Discounted price must be greater than zero')
+    if (price > 0 && discountPrice >= price) throw new ApiError(httpStatus.BAD_REQUEST, 'Discounted price must be lower than the listing price')
+    next.isDiscount = true
+    next.discountedPrice = discountPrice
+    if (canPublish) next.status = 'UnderOffer'
+  } else if (next.isDiscount === false) {
+    next.discountedPrice = undefined
+  }
+  return next
+}
 
 const generateSlug = async (organizationId: string, title: string): Promise<string> => {
   let baseSlug = title
@@ -43,8 +69,9 @@ const createProperty = async (
   if (!payload.title) throw new ApiError(httpStatus.BAD_REQUEST, 'Property title is required')
 
   const slug = await generateSlug(organizationId, payload.title)
-  const status: IProperty['status'] = actor?.canPublish ? (payload.status || 'Draft') : 'Draft'
-  const normalizedPayload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+  const postalNormalized = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+  const normalizedPayload = normalizeDiscount(postalNormalized, undefined, Boolean(actor?.canPublish))
+  const status: IProperty['status'] = actor?.canPublish ? (normalizedPayload.status || 'Draft') : 'Draft'
   const mediaLinks = normalizePropertyMediaLinks(normalizedPayload.mediaLinks)
   const propertyData: Partial<IProperty> = {
     ...normalizedPayload,
@@ -56,7 +83,7 @@ const createProperty = async (
     currency: 'BDT',
     country: 'Bangladesh',
     description: normalizedPayload.description ? sanitizeRichText(normalizedPayload.description) : '',
-    publishedAt: status === 'Available' ? new Date() : undefined,
+    publishedAt: isPublicPropertyStatus(status) ? new Date() : undefined,
   }
 
   const result = await Property.create(propertyData)
@@ -66,7 +93,7 @@ const createProperty = async (
     aggregateId: result._id.toString(),
     eventType: 'property.created',
     propertyId: result._id.toString(),
-    payload: { status: result.status, publicVisible: result.status === 'Available' },
+    payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
   })
   return result
 }
@@ -129,7 +156,7 @@ const getAllProperties = async (
 
   if (propertyType) andConditions.push({ propertyType })
   if (listingType) andConditions.push({ listingType })
-  if (status) andConditions.push({ status })
+  if (status) andConditions.push(Array.isArray(status) ? { status: { $in: status } } : { status })
   if (city) andConditions.push({ city: { $regex: city, $options: 'i' } })
   if (state) andConditions.push({ state: { $regex: state, $options: 'i' } })
   if (divisionId) andConditions.push({ 'bangladeshAddress.divisionId': divisionId })
@@ -164,7 +191,7 @@ const getPublicProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<IProperty[]>> => getAllProperties(
-  { ...filters, organizationId, status: 'Available' },
+  { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES] },
   paginationOptions,
 )
 
@@ -175,7 +202,7 @@ const getPropertyById = async (organizationId: string, id: string): Promise<IPro
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ slug, organizationId, status: 'Available' }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return result
 }
@@ -187,8 +214,8 @@ const getPublicPropertyDetail = async (
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
   const tenantScope = { organizationId }
   const query = isObjectId
-    ? { _id: idOrSlug, ...tenantScope, status: 'Available' }
-    : { slug: idOrSlug, ...tenantScope, status: 'Available' }
+    ? { _id: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }
+    : { slug: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }
 
   const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
@@ -198,7 +225,7 @@ const getPublicPropertyDetail = async (
   const similarProperties = await Property.find({
     organizationId: property.organizationId,
     _id: { $ne: property._id },
-    status: 'Available',
+    status: { $in: [...PUBLIC_PROPERTY_STATUSES] },
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
   }).limit(3).populate(userRefPopulate('agentId', 'name email userRole'))
 
@@ -214,7 +241,9 @@ const updateProperty = async (
   const existing = await Property.findOne({ _id: id, organizationId })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
+  const clearDiscountPrice = payload.isDiscount === false
   payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+  payload = normalizeDiscount(payload, existing, Boolean(actor?.canPublish))
 
   if (payload.status !== undefined && payload.status !== existing.status && !actor?.canPublish) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
@@ -225,9 +254,12 @@ const updateProperty = async (
   payload.currency = 'BDT'
   payload.country = 'Bangladesh'
   if (payload.description !== undefined) payload.description = sanitizeRichText(payload.description)
-  if (payload.status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) payload.publishedAt = new Date()
+  if (payload.status && isPublicPropertyStatus(payload.status) && !isPublicPropertyStatus(existing.status) && !existing.publishedAt) payload.publishedAt = new Date()
 
-  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, payload, { new: true, runValidators: true, context: 'query' })
+  const updateDocument = clearDiscountPrice
+    ? { $set: Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)), $unset: { discountedPrice: 1 } }
+    : payload
+  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, updateDocument, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
 
   if (result) {
@@ -240,8 +272,8 @@ const updateProperty = async (
       payload: {
         status: result.status,
         previousStatus: existing.status,
-        publicVisible: existing.status === 'Available' || result.status === 'Available',
-        changedFields: Object.keys(payload),
+        publicVisible: isPublicPropertyStatus(existing.status) || isPublicPropertyStatus(result.status),
+        changedFields: [...Object.keys(payload), ...(clearDiscountPrice ? ['discountedPrice'] : [])],
       },
     })
   }
@@ -259,7 +291,7 @@ const updatePropertyStatus = async (
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
   const update: Partial<IProperty> = { status }
-  if (status === 'Available' && existing.status !== 'Available' && !existing.publishedAt) update.publishedAt = new Date()
+  if (isPublicPropertyStatus(status) && !isPublicPropertyStatus(existing.status) && !existing.publishedAt) update.publishedAt = new Date()
 
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true, context: 'query' })
   if (result) {
@@ -269,7 +301,7 @@ const updatePropertyStatus = async (
       aggregateId: id,
       eventType: 'property.status_changed',
       propertyId: id,
-      payload: { status, previousStatus: existing.status, publicVisible: existing.status === 'Available' || status === 'Available' },
+      payload: { status, previousStatus: existing.status, publicVisible: isPublicPropertyStatus(existing.status) || isPublicPropertyStatus(status) },
     })
   }
   return result
@@ -280,7 +312,7 @@ const reorderPropertyImages = async (organizationId: string, id: string, images:
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   await DomainEventService.emit({
     organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.updated', propertyId: id,
-    payload: { changedFields: ['images'], status: result.status, publicVisible: result.status === 'Available' },
+    payload: { changedFields: ['images'], status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
   })
   return result
 }
@@ -290,7 +322,7 @@ const deleteProperty = async (organizationId: string, id: string): Promise<IProp
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   await DomainEventService.emit({
     organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.deleted', propertyId: id,
-    payload: { status: result.status, publicVisible: result.status === 'Available' },
+    payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
   })
   return result
 }
