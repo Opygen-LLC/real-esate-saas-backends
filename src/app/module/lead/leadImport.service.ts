@@ -202,7 +202,7 @@ const parseXlsx = async (buffer: Buffer): Promise<ParsedUpload> => {
   assertSafeXlsxArchive(buffer)
   const workbook = new ExcelJS.Workbook()
   try {
-    await workbook.xlsx.load(buffer)
+    await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0])
   } catch {
     throw new ApiError(400, 'Excel file could not be parsed. Upload a valid .xlsx workbook')
   }

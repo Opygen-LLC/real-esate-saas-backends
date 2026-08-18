@@ -1,4 +1,4 @@
-import { Types, type SortOrder } from 'mongoose'
+import { Types, type PipelineStage, type SortOrder } from 'mongoose'
 import { Activity } from '../activity/activity.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
@@ -81,7 +81,7 @@ const sortSpec = (requested: string, direction: SortOrder, allowed: Set<string>,
   return { [field]: order, _id: order }
 }
 
-const userLookupStages = (sourceField: string, targetField = sourceField) => [
+const userLookupStages = (sourceField: string, targetField = sourceField): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: User.collection.name,
@@ -121,7 +121,7 @@ const userLookupStages = (sourceField: string, targetField = sourceField) => [
   { $unset: `__${targetField}` },
 ]
 
-const propertyLookupStages = () => [
+const propertyLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Property.collection.name,
@@ -181,7 +181,7 @@ const interactionMatch = {
   ],
 }
 
-const leadActivityLookupStages = () => [
+const leadActivityLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Activity.collection.name,
@@ -227,7 +227,7 @@ const leadActivityLookupStages = () => [
   { $unset: '__activityReadModel' },
 ]
 
-const leadFollowUpLookupStages = () => [
+const leadFollowUpLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Task.collection.name,
@@ -264,7 +264,7 @@ const leadFollowUpLookupStages = () => [
   { $unset: '__followUpTask' },
 ]
 
-const leadContactLookupStages = () => [
+const leadContactLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Contact.collection.name,
@@ -285,7 +285,7 @@ const leadContactLookupStages = () => [
   { $unset: '__legacyContact' },
 ]
 
-const sourceLeadLookupStages = () => [
+const sourceLeadLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Lead.collection.name,
@@ -332,7 +332,7 @@ const sourceLeadLookupStages = () => [
   { $unset: '__sourceLead' },
 ]
 
-const contactActivityLookupStages = () => [
+const contactActivityLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Activity.collection.name,

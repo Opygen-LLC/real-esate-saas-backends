@@ -400,10 +400,17 @@ const syncLeadFollowUpTask = async (input: {
       approvalStatus: 'pending',
     },
   }
-  const options: any = { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
-  if (session) options.session = session
   try {
-    return (await Task.findOneAndUpdate({ activeLeadFollowUpKey }, update, options)) as ITask
+    let query = Task.findOneAndUpdate(
+      { activeLeadFollowUpKey },
+      update,
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+    )
+    if (session) query = query.session(session)
+
+    const task = await query.exec()
+    if (!task) throw new ApiError(500, 'Failed to create or update the lead follow-up task')
+    return task.toObject()
   } catch (error) {
     return duplicateFollowUpError(error)
   }
