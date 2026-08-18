@@ -15,6 +15,7 @@ export interface IContactLatestInteraction {
   occurredAt: Date
   leadId?: string
   contactId?: string
+  authorId?: string
 }
 
 export interface IContact {
@@ -46,8 +47,21 @@ export interface IContact {
   updatedBy?: mongoose.Types.ObjectId | string
   statusAtConversion?: LeadStatus
 
-  /** Read-only relationship projection populated by the Contact list service. */
+  /** Read-only relationship projections populated by the Contact list presenter. */
   latestInteraction?: IContactLatestInteraction
+  latestNote?: IContactLatestInteraction
+  propertySummary?: {
+    count: number
+    primary?: {
+      _id: mongoose.Types.ObjectId | string
+      title: string
+      price?: number
+      city?: string
+      propertyType?: string
+      bedrooms?: number
+      bathrooms?: number
+    }
+  }
 
   createdAt?: Date
   updatedAt?: Date

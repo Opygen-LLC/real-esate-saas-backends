@@ -4,6 +4,39 @@ import type { LeadStatus } from './leadStatus.contract'
 export type ILeadStatus = LeadStatus
 export type ILeadSource = 'Website'|'WhatsApp'|'Facebook'|'Instagram'|'Google'|'Referral'|'WalkIn'|'Portal'|'Phone'|'Email'|'Ad'|'Other'
 
+export interface ILeadListActivityProjection {
+  id: string
+  type: string
+  title: string
+  content?: string
+  occurredAt: Date
+  authorId?: string
+  leadId?: string
+  contactId?: string
+}
+
+export interface ILeadPropertySummary {
+  count: number
+  primary?: {
+    _id: mongoose.Types.ObjectId | string
+    title: string
+    price?: number
+    city?: string
+    propertyType?: string
+    bedrooms?: number
+    bathrooms?: number
+  }
+}
+
+export interface ILeadFollowUpTaskProjection {
+  _id: mongoose.Types.ObjectId | string
+  title: string
+  dueAt: Date
+  status: string
+  priority?: string
+  assignedAgent?: mongoose.Types.ObjectId | string
+}
+
 export interface ILead {
   organizationId:string
   name:string
@@ -21,6 +54,13 @@ export interface ILead {
   bedrooms?:number
   leadStatus:ILeadStatus
   assignedAgent?:mongoose.Types.ObjectId|string
+
+  /** Read-only list presenter fields. These are not persisted on Lead documents. */
+  propertySummary?: ILeadPropertySummary
+  latestNote?: ILeadListActivityProjection
+  latestInteraction?: ILeadListActivityProjection
+  followUpTask?: ILeadFollowUpTaskProjection
+  followUp?: { date?: Date; task?: ILeadFollowUpTaskProjection }
 
   /** Canonical audit/ownership fields. Always server controlled. */
   createdBy?:mongoose.Types.ObjectId|string

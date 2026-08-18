@@ -60,6 +60,14 @@ contactSchema.index({ organizationId: 1, assignedTo: 1, updatedAt: -1 }, { name:
 contactSchema.index({ organizationId: 1, followUpDate: 1, assignedTo: 1 }, { name: 'contact_tenant_followup_assignee' })
 contactSchema.index({ organizationId: 1, source: 1 }, { name: 'contact_tenant_source' })
 contactSchema.index(
+  { organizationId: 1, relationshipState: 1, assignedTo: 1, followUpDate: 1 },
+  { name: 'contact_tenant_relationship_assignee_followup' },
+)
+contactSchema.index(
+  { organizationId: 1, relationshipState: 1, source: 1, updatedAt: -1 },
+  { name: 'contact_tenant_relationship_source_updated' },
+)
+contactSchema.index(
   { organizationId: 1, relationshipState: 1, assignedTo: 1, convertedAt: -1 },
   { name: 'contact_tenant_relationship_assignee_converted' },
 )

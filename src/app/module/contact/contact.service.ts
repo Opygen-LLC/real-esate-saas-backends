@@ -3,16 +3,16 @@ import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
-import { Activity } from '../activity/activity.model'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { User } from '../user/user.model'
 import { crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
+import { readContactListPage } from '../crm/crmListReadModel.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone, getWeekBoundsInTimeZone } from '../lead/leadFollowUpTime'
 import { LEAD_STATUS_LABELS, leadStatusFilterValues, normalizeLeadStatus } from '../lead/leadStatus.contract'
-import { IContact, IContactFilter, IContactLatestInteraction } from './contact.interface'
+import { IContact, IContactFilter } from './contact.interface'
 import { Contact } from './contact.model'
 import {
   CONTACT_RELATIONSHIP_STATE,
@@ -124,60 +124,6 @@ const buildContactWhere = (filters: IContactFilter, access?: CrmAccessContext) =
   return conditions.length ? { $and: conditions } : {}
 }
 
-const latestInteractionProjection = async (organizationId: string, contacts: any[]): Promise<Map<string, IContactLatestInteraction>> => {
-  const result = new Map<string, IContactLatestInteraction>()
-  if (!contacts.length) return result
-
-  const contactToContact = new Map<string, string>()
-  const leadToContact = new Map<string, string>()
-  const contactIds: any[] = []
-  const leadIds: any[] = []
-  for (const contact of contacts) {
-    const contactId = String(contact._id)
-    contactToContact.set(contactId, contactId)
-    contactIds.push(contact._id)
-    const sourceLeadId = typeof contact.sourceLeadId === 'object' ? contact.sourceLeadId?._id : contact.sourceLeadId
-    if (sourceLeadId) {
-      leadToContact.set(String(sourceLeadId), contactId)
-      leadIds.push(sourceLeadId)
-    }
-  }
-
-  const relationshipMatch: Record<string, unknown>[] = [{ contactId: { $in: contactIds } }]
-  if (leadIds.length) relationshipMatch.push({ leadId: { $in: leadIds } })
-  const activities: any[] = await Activity.find({
-    organizationId,
-    $and: [
-      { $or: relationshipMatch },
-      {
-        $or: [
-          { type: { $in: ['call', 'email', 'whatsapp', 'meeting', 'note', 'viewing', 'offer'] } },
-          { 'metadata.eventType': { $regex: '^sms\\.' } },
-        ],
-      },
-    ],
-  })
-    .select('_id leadId contactId type title content metadata createdAt')
-    .sort({ createdAt: -1, _id: -1 })
-    .lean()
-
-  for (const activity of activities) {
-    const contactId = activity.contactId ? contactToContact.get(String(activity.contactId)) : undefined
-    const mappedContactId = contactId || (activity.leadId ? leadToContact.get(String(activity.leadId)) : undefined)
-    if (!mappedContactId || result.has(mappedContactId)) continue
-    result.set(mappedContactId, {
-      id: String(activity._id),
-      type: String(activity.metadata?.eventType || activity.type || 'interaction'),
-      title: String(activity.title || 'CRM interaction'),
-      ...(activity.content ? { content: String(activity.content) } : {}),
-      occurredAt: activity.createdAt,
-      ...(activity.leadId ? { leadId: String(activity.leadId) } : {}),
-      ...(activity.contactId ? { contactId: String(activity.contactId) } : {}),
-    })
-  }
-  return result
-}
-
 const createContact = async (
   organizationId: string,
   payload: Partial<IContact>,
@@ -218,24 +164,14 @@ const getAllContacts = async (
 ): Promise<IGenericResponse<IContact[]>> => {
   const whereCondition = buildContactWhere(filters, access)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-
-  const [contacts, total] = await Promise.all([
-    Contact.find(whereCondition)
-      .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL'))
-      .populate({ path: 'sourceLeadId', select: 'name phone email leadStatus source budgetMin budgetMax currency locationPreference propertyType propertyInterest createdAt convertedAt isConverted', populate: { path: 'propertyInterest', select: 'title' } })
-      .populate('propertyInterest', 'title price images city propertyType')
-      .sort({ [sortBy]: sortOrder })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    Contact.countDocuments(whereCondition),
-  ])
-
-  const organizationId = String(filters.organizationId || '')
-  const latestByContact = organizationId ? await latestInteractionProjection(organizationId, contacts) : new Map<string, IContactLatestInteraction>()
-  const data = contacts.map((contact: any) => ({ ...contact, latestInteraction: latestByContact.get(String(contact._id)) })) as IContact[]
-
-  return { meta: { page, limit, total }, data }
+  const pageResult = await readContactListPage<IContact>({
+    match: whereCondition,
+    skip,
+    limit,
+    sortBy,
+    sortOrder,
+  })
+  return { meta: { page, limit, total: pageResult.total }, data: pageResult.rows }
 }
 
 const getContactById = async (organizationId: string, id: string, access?: CrmAccessContext): Promise<IContact | null> => {

@@ -54,7 +54,8 @@
     "migrate:crm-existing-data": "ts-node --transpile-only src/app/db/migrateCrmExistingData.ts",
     "migrate:crm-activity-history": "ts-node --transpile-only src/app/db/migrateCrmActivityHistory.ts",
     "migrate:crm-follow-up-engine": "ts-node --transpile-only src/app/db/migrateCrmFollowUpEngine.ts",
-    "migrate:crm-contact-relationships": "ts-node --transpile-only src/app/db/migrateCrmContactRelationships.ts"
+    "migrate:crm-contact-relationships": "ts-node --transpile-only src/app/db/migrateCrmContactRelationships.ts",
+    "migrate:crm-performance-hardening": "ts-node --transpile-only src/app/db/migrateCrmPerformanceHardening.ts"
   },
   "keywords": [
     "real-estate",

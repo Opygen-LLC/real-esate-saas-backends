@@ -42,6 +42,7 @@ taskSchema.index({ organizationId: 1, assignedAgent: 1, status: 1 })
 taskSchema.index({ organizationId: 1, dueAt: 1, status: 1 }, { name: 'task_tenant_dueat_status' })
 taskSchema.index({ organizationId: 1, taskType: 1, assignedAgent: 1, dueAt: 1 }, { name: 'task_tenant_type_assignee_dueat' })
 taskSchema.index({ organizationId: 1, linkedLead: 1, taskType: 1, status: 1 }, { name: 'task_tenant_lead_type_status' })
+taskSchema.index({ organizationId: 1, linkedLead: 1, taskType: 1, status: 1, dueAt: 1 }, { name: 'task_tenant_lead_type_status_dueat' })
 taskSchema.index(
   { activeLeadFollowUpKey: 1 },
   {

@@ -8,6 +8,7 @@ import { ActivityService } from '../activity/activity.service'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { CrmService } from '../crm/crm.service'
+import { readLeadListPage } from '../crm/crmListReadModel.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { canAssignLeadTo, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
@@ -278,19 +279,8 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
 const getAllLeads=async(filters:ILeadFilter,paginationOptions:IPaginationOptions,access?:CrmAccessContext):Promise<IGenericResponse<ILead[]>>=>{
   const where=buildLeadWhere(filters,access)
   const{page,limit,skip,sortBy,sortOrder}=paginationHelper.calculatePagination(paginationOptions)
-  const[result,total]=await Promise.all([
-    Lead.find(where)
-      .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
-      .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
-      .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
-      .populate('propertyInterest','title price images city propertyType')
-      .populate('contactId','name email phone company')
-      .sort({[sortBy]:sortOrder})
-      .skip(skip)
-      .limit(limit),
-    Lead.countDocuments(where),
-  ])
-  return{meta:{page,limit,total},data:result}
+  const pageResult=await readLeadListPage<ILead>({match:where,skip,limit,sortBy,sortOrder})
+  return{meta:{page,limit,total:pageResult.total},data:pageResult.rows}
 }
 
 
@@ -312,18 +302,16 @@ const getTodayFollowUps=async(
     followUpDate:{$gte:bounds.start,$lt:bounds.endExclusive},
     ...crmReadOwnerFilter('assignedAgent',access),
   }
-  const[result,total]=await Promise.all([
-    Lead.find(where)
-      .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole'))
-      .populate('propertyInterest','title price images city')
-      .sort({followUpDate:1,createdAt:1})
-      .skip(skip)
-      .limit(limit),
-    Lead.countDocuments(where),
-  ])
+  const pageResult=await readLeadListPage<ILead>({
+    match:where,
+    skip,
+    limit,
+    sortBy:'followUpDate',
+    sortOrder:1,
+  })
   return{
-    meta:{page,limit,total},
-    data:result,
+    meta:{page,limit,total:pageResult.total},
+    data:pageResult.rows,
     day:{
       timeZone:bounds.timeZone,
       localDate:bounds.localDate,

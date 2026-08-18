@@ -62,6 +62,8 @@ const activitySchema = new Schema<IActivity, ActivityModel>(
 
 activitySchema.index({ organizationId: 1, leadId: 1, createdAt: -1 })
 activitySchema.index({ organizationId: 1, contactId: 1, createdAt: -1 }, { name: 'activity_tenant_contact_created' })
+activitySchema.index({ organizationId: 1, leadId: 1, type: 1, createdAt: -1 }, { name: 'activity_tenant_lead_type_created' })
+activitySchema.index({ organizationId: 1, contactId: 1, type: 1, createdAt: -1 }, { name: 'activity_tenant_contact_type_created' })
 activitySchema.index(
   { organizationId: 1, 'metadata.migrationKey': 1 },
   {
