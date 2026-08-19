@@ -44,3 +44,10 @@ it('does not allow cancellation through the generic invoice update contract', ()
   expect(FinanceValidation.updateInvoice.safeParse({ body: { status: 'cancelled' } }).success).toBe(false)
   expect(FinanceValidation.updateInvoice.safeParse({ body: { status: 'sent' } }).success).toBe(true)
 })
+
+
+it('requires the dedicated cancellation contract and rejects generic cancellation bypasses', () => {
+  expect(FinanceValidation.cancelCommission.safeParse({ body: { reason: 'Deal cancelled before payout' } }).success).toBe(true)
+  expect(FinanceValidation.cancelCommission.safeParse({ body: { reason: '' } }).success).toBe(false)
+  expect(FinanceValidation.updateCommission.safeParse({ body: { status: 'cancelled' } }).success).toBe(false)
+})

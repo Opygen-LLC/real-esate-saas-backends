@@ -90,6 +90,11 @@ const updateCommission = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.updateCommission(requireTenant(req), actorId(req), req.params.id, req.body)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission updated successfully', data })
 })
+const cancelCommission = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.cancelCommission(requireTenant(req), actorId(req), req.params.id, req.body.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission cancelled successfully', data })
+})
+
 const payCommission = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.payCommission(requireTenant(req), actorId(req), req.params.id, req.body)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission marked as paid', data })
@@ -133,7 +138,7 @@ export const FinanceController = {
   getOverview, getReports, exportTransactions,
   listTransactions, createTransaction, updateTransaction, voidTransaction,
   listInvoices, createInvoice, getInvoice, updateInvoice, voidInvoice, archiveInvoice, recordInvoicePayment, downloadInvoicePdf,
-  listCommissions, createCommission, updateCommission, payCommission,
+  listCommissions, createCommission, updateCommission, cancelCommission, payCommission,
   listVendors, createVendor, updateVendor, archiveVendor,
   listBudgets, createBudget, updateBudget, archiveBudget,
 }

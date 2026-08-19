@@ -96,6 +96,9 @@ export interface IFinanceCommission {
   status: 'pending' | 'approved' | 'paid' | 'cancelled'
   dueDate?: Date
   paidAt?: Date
+  cancelledAt?: Date
+  cancelledBy?: mongoose.Types.ObjectId | string
+  cancelReason?: string
   paymentMethod?: FinancePaymentMethod
   paymentReference?: string
   payoutTransactionId?: mongoose.Types.ObjectId | string

@@ -394,7 +394,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
 const updateCommission = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceCommission>) => {
   const existing: any = await FinanceCommission.findOne({ _id: id, organizationId })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (existing.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be edited')
+  if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
   if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
   const nextAmount = Number(payload.commissionAmount ?? existing.commissionAmount), nextAgent = Number(payload.agentShare ?? existing.agentShare), nextCompany = Number(payload.companyShare ?? existing.companyShare)
   if (Math.abs((nextAgent + nextCompany) - nextAmount) > 0.01) throw new ApiError(httpStatus.BAD_REQUEST, 'Agent share and company share must equal the commission amount')
@@ -405,6 +405,22 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
   const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true }).populate('agentId', 'name email').populate('propertyId', 'title')
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.updated', `Commission ${result?.commissionNumber || id} updated`)
   return result
+}
+
+const cancelCommission = async (organizationId: string, actorId: string, id: string, reason: string) => {
+  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId })
+  if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+  if (commission.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
+  if (commission.status === 'cancelled') return commission.populate('agentId', 'name email')
+  if (!['pending', 'approved'].includes(commission.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot cancel a ${commission.status} commission`)
+  commission.status = 'cancelled'
+  commission.cancelledAt = new Date()
+  commission.cancelledBy = actorObjectId(actorId)
+  commission.cancelReason = reason.trim()
+  commission.updatedBy = actorObjectId(actorId)
+  await commission.save()
+  await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.cancelled', `Commission ${commission.commissionNumber} cancelled`)
+  return commission.populate('agentId', 'name email')
 }
 
 const payCommission = async (organizationId: string, actorId: string, id: string, payload: any) => {
@@ -579,7 +595,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 export const FinanceService = {
   createTransaction, listTransactions, updateTransaction, voidTransaction,
   createInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
-  createCommission, listCommissions, updateCommission, payCommission,
+  createCommission, listCommissions, updateCommission, cancelCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,
   getOverview, getReports, exportTransactionsCsv,

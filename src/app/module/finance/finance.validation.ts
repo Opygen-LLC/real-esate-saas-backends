@@ -114,10 +114,12 @@ const updateCommission = z.object({ body: z.object({
   commissionAmount: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
   agentShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
   companyShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
-  status: z.enum(['pending', 'approved', 'cancelled']).optional(),
+  status: z.enum(['pending', 'approved']).optional(),
   dueDate: dateInput.optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, 'At least one field is required') })
+
+const cancelCommission = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() })
 
 const payCommission = z.object({ body: z.object({
   paidAt: dateInput,
@@ -181,6 +183,7 @@ export const FinanceValidation = {
   recordInvoicePayment,
   createCommission,
   updateCommission,
+  cancelCommission,
   payCommission,
   createVendor,
   updateVendor,

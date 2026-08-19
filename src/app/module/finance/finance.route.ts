@@ -29,6 +29,7 @@ router.delete('/invoices/:id', ...write, FinanceController.archiveInvoice)
 router.get('/commissions', ...read, FinanceController.listCommissions)
 router.post('/commissions', ...write, validateRequest(FinanceValidation.createCommission), FinanceController.createCommission)
 router.patch('/commissions/:id', ...write, validateRequest(FinanceValidation.updateCommission), FinanceController.updateCommission)
+router.post('/commissions/:id/cancel', ...write, validateRequest(FinanceValidation.cancelCommission), FinanceController.cancelCommission)
 router.post('/commissions/:id/pay', ...write, validateRequest(FinanceValidation.payCommission), FinanceController.payCommission)
 
 router.get('/vendors', ...read, FinanceController.listVendors)
