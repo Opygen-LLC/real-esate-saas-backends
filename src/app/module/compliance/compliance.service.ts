@@ -20,6 +20,7 @@ import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import mongoose from 'mongoose'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { writeAudit } from '../audit/audit.service'
+import { WebsiteSubmission } from '../websiteSubmission/websiteSubmission.model'
 
 const sensitiveMap = { nid: 'nidEncrypted', tradeLicense: 'tradeLicenseEncrypted', tin: 'tinEncrypted', bin: 'binEncrypted' } as const
 
@@ -50,14 +51,14 @@ const createRequest = (organizationId: string, requestedBy: string, payload: any
 const listRequests = (organizationId: string) => DataSubjectRequest.find({ organizationId }).sort({ createdAt: -1 })
 
 const exportTenantData = async (organizationId: string) => {
-  const [organization, userDocuments, properties, leads, billing, consents] = await Promise.all([
+  const [organization, userDocuments, properties, leads, billing, consents, websiteSubmissions] = await Promise.all([
     Organization.findOne({ organizationId }).lean(),
     User.find({ organizationId }).populate(USER_PROFILE_POPULATES),
     Property.find({ organizationId }).lean(), Lead.find({ organizationId }).lean(),
-    Billing.find({ organizationId }).lean(), PrivacyConsentRecord.find({ organizationId }).lean(),
+    Billing.find({ organizationId }).lean(), PrivacyConsentRecord.find({ organizationId }).lean(), WebsiteSubmission.find({ organizationId }).lean(),
   ])
   const users = userDocuments.map((user) => toUserDto(user, { includePrivateProfile: true }))
-  return { generatedAt: new Date().toISOString(), organization, users, properties, leads, billing, consents,
+  return { generatedAt: new Date().toISOString(), organization, users, properties, leads, billing, consents, websiteSubmissions,
     exclusions: ['passwords', 'OTP challenges', 'refresh sessions', 'encrypted compliance identifiers', 'platform audit security metadata'] }
 }
 
@@ -96,7 +97,7 @@ const executeDueDeletionRequests = async (): Promise<number> => {
   const due = await DataSubjectRequest.find({ type: 'deletion', status: 'approved', retentionUntil: { $lte: new Date() } }).limit(20)
   const tenantCollections = ['users', 'properties', 'leads', 'contacts', 'activities', 'tasks', 'viewings', 'billings',
     'bkashpayments', 'complianceprofiles', 'consentrecords', 'banners', 'sections', 'landingpages', 'websiteassets',
-    'websitepages', 'websiterevisions', 'visitorlogs', 'supporttickets']
+    'websitepages', 'websiterevisions', 'websitesubmissions', 'visitorlogs', 'supporttickets']
   let completed = 0
   for (const request of due) {
     const session = await mongoose.startSession()

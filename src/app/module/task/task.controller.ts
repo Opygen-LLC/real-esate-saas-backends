@@ -15,7 +15,7 @@ const createTask = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getAllTasks = catchAsync(async (req: Request, res: Response) => {
-  const filters = pick(req.query, ['searchTerm', 'status', 'priority', 'taskType', 'assignedAgent', 'linkedLead', 'linkedProperty', 'dueDate', 'scope'])
+  const filters = pick(req.query, ['searchTerm', 'status', 'priority', 'taskType', 'assignedAgent', 'linkedLead', 'linkedProperty', 'dueDate', 'dueFrom', 'dueTo', 'overdue', 'approvalStatus', 'scope'])
   filters.organizationId = requireTenant(req)
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
   const result = await TaskService.getAllTasks(filters, paginationOptions, crmAccessFromRequest(req, req.query.scope))

@@ -154,7 +154,7 @@ const getAllTasks = async (
   paginationOptions: IPaginationOptions,
   access?: CrmAccessContext,
 ): Promise<IGenericResponse<ITask[]>> => {
-  const { searchTerm, organizationId, status, priority, taskType, assignedAgent, linkedLead, linkedProperty, dueDate } = filters
+  const { searchTerm, organizationId, status, priority, taskType, assignedAgent, linkedLead, linkedProperty, dueDate, dueFrom, dueTo, overdue, approvalStatus } = filters
   const conditions: any[] = []
   if (organizationId) conditions.push({ organizationId })
   const ownerScope = crmReadOwnerFilter('assignedAgent', access)
@@ -167,14 +167,23 @@ const getAllTasks = async (
   if (linkedLead) conditions.push({ linkedLead })
   if (linkedProperty) conditions.push({ linkedProperty })
   if (dueDate) conditions.push({ dueDate })
+  if (approvalStatus) conditions.push({ approvalStatus })
+  const dueFromDate = dueFrom ? dueAtFromLegacy(dueFrom, '00:00') : undefined
+  const dueToDate = dueTo ? new Date(dueAtFromLegacy(dueTo, '00:00').getTime() + 24 * 60 * 60 * 1000) : undefined
+  if (dueFromDate && dueToDate && dueFromDate >= dueToDate) throw new ApiError(400, 'dueTo must be on or after dueFrom')
+  if (dueFromDate || dueToDate) conditions.push({ dueAt: { ...(dueFromDate ? { $gte: dueFromDate } : {}), ...(dueToDate ? { $lt: dueToDate } : {}) } })
+  if (overdue === true || overdue === 'true') conditions.push({ dueAt: { $lt: new Date() }, status: { $nin: ['Completed', 'Cancelled'] } })
+  if (overdue === false || overdue === 'false') conditions.push({ $or: [{ dueAt: { $gte: new Date() } }, { status: { $in: ['Completed', 'Cancelled'] } }] })
   const where = conditions.length ? { $and: conditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+  const allowedSort = new Set(['dueAt', 'createdAt', 'updatedAt', 'priority', 'status', 'approvalStatus', 'title'])
+  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'dueAt'
   const [result, total] = await Promise.all([
     Task.find(where)
       .populate(userRefPopulate('assignedAgent', 'name email userRole'))
       .populate('linkedLead', 'name phone email')
       .populate('linkedProperty', 'title price')
-      .sort({ dueAt: 1, [sortBy]: sortOrder })
+      .sort({ [safeSortBy]: sortOrder, _id: sortOrder })
       .skip(skip)
       .limit(limit),
     Task.countDocuments(where),

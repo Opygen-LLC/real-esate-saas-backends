@@ -48,7 +48,7 @@ describe('Phase 0 regression coverage invariants', () => {
     expect(viewingRoutes).toMatch(/public-request/)
     expect(viewingRoutes).toMatch(/validateRequest\(ViewingValidation\.publicRequestZodSchema\)/)
     expect(reviewRoutes).toMatch(/validateRequest\(ReviewValidation\.submit\)/)
-    expect(reviewController).toMatch(/withWebsiteSubmissionReceipt\('review'/)
+    expect(reviewController).toMatch(/WebsiteSubmissionService\.captureReview/)
     expect(domainRoutes).toMatch(/\/resolve\/:host/)
   })
 })

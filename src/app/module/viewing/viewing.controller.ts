@@ -3,11 +3,11 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
-import { withWebsiteSubmissionReceipt } from '../../../contracts/workspaceContracts'
 import pick from '../../../shared/pick'
 import { ViewingService } from './viewing.service'
 import { requireTenant } from '../../middlewares/auth'
 import { crmAccessFromRequest } from '../crm/crmAccess'
+import { WebsiteSubmissionService } from '../websiteSubmission/websiteSubmission.service'
 
 const checkConflict = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -49,12 +49,13 @@ const createViewing = catchAsync(async (req: Request, res: Response) => {
 
 const publicRequestViewing = catchAsync(async (req: Request, res: Response) => {
   const result = await ViewingService.publicRequestViewing(req.body, { ip: req.ip, requestId: req.requestId })
+  const submission = await WebsiteSubmissionService.captureViewing(req.body, result)
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
     message: 'Viewing request submitted successfully. The assigned broker will confirm your showing.',
-    data: withWebsiteSubmissionReceipt('viewing', result),
+    data: WebsiteSubmissionService.withPublicReceipt(result, submission),
   })
 })
 

@@ -127,6 +127,12 @@ const listTransactions = async (organizationId: string, query: Record<string, un
   const category = asString(query.category); if (category) conditions.push({ category })
   const status = asString(query.status); if (status) conditions.push({ status })
   const paymentMethod = asString(query.paymentMethod); if (paymentMethod) conditions.push({ paymentMethod })
+  const minAmountText = asString(query.minAmount), maxAmountText = asString(query.maxAmount)
+  const minAmount = minAmountText ? Number(minAmountText) : undefined, maxAmount = maxAmountText ? Number(maxAmountText) : undefined
+  if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount < 0)) throw new ApiError(httpStatus.BAD_REQUEST, 'Minimum amount must be a non-negative number')
+  if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount < 0)) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum amount must be a non-negative number')
+  if (minAmount !== undefined && maxAmount !== undefined && minAmount > maxAmount) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum amount must be greater than or equal to minimum amount')
+  if (minAmount !== undefined || maxAmount !== undefined) conditions.push({ amount: { ...(minAmount !== undefined ? { $gte: minAmount } : {}), ...(maxAmount !== undefined ? { $lte: maxAmount } : {}) } })
   const vendorId = asString(query.vendorId); if (vendorId && mongoose.isValidObjectId(vendorId)) conditions.push({ vendorId })
   if (startDate || endDate) conditions.push({ transactionDate: dateCondition(startDate, endDate) })
   const searchTerm = asString(query.searchTerm)
@@ -135,7 +141,7 @@ const listTransactions = async (organizationId: string, query: Record<string, un
     conditions.push({ $or: ['description', 'reference', 'category'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } })) })
   }
   const where = { $and: conditions }
-  const allowedSort = new Set(['transactionDate', 'amount', 'createdAt', 'updatedAt', 'category', 'status'])
+  const allowedSort = new Set(['transactionDate', 'amount', 'createdAt', 'updatedAt', 'category', 'status', 'paymentMethod'])
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'transactionDate'
   const [data, total] = await Promise.all([
     FinanceTransaction.find(where)

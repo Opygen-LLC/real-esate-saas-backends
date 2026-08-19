@@ -248,7 +248,7 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
 }
 
 const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
-  const {organizationId,name,phone,email,propertyInterest,message,privacyConsent,policyVersion,attribution,...rest}=payload
+  const {organizationId,submissionContext:_submissionContext,name,phone,email,propertyInterest,message,privacyConsent,policyVersion,attribution,...rest}=payload
   if(!organizationId||!name||!phone)throw new ApiError(400,'Organization, client name, and phone are required')
   const organization:any=await Organization.findOne({organizationId}).select('isBlocked websiteStatus').lean()
   if(!organization)throw new ApiError(404,'Agency not found')
@@ -256,6 +256,10 @@ const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string
   if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
   if(!privacyConsent) throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})
   await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
+  if(propertyInterest){
+    const propertyBelongsToTenant=await Property.exists({_id:propertyInterest,organizationId})
+    if(!propertyBelongsToTenant)throw new ApiError(400,'Property does not belong to this agency','','VALIDATION_ERROR',undefined,{propertyInterest:['Select a property from this agency']})
+  }
   const normalizedPhone=normalizePhone(phone)
   const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined)
   await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, normalizedPhone, policyVersion, context)
@@ -293,9 +297,16 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
   if(source)conditions.push({source})
   if(assignedAgent)conditions.push({assignedAgent})
   if(propertyType)conditions.push({propertyType})
-  if(minBudget!==undefined&&minBudget!=='')conditions.push({budgetMax:{$gte:Number(minBudget)}})
-  if(maxBudget!==undefined&&maxBudget!=='')conditions.push({budgetMin:{$lte:Number(maxBudget)}})
-  if(minScore!==undefined&&minScore!=='')conditions.push({leadScore:{$gte:Number(minScore)}})
+  const minBudgetValue=minBudget!==undefined&&minBudget!==''?Number(minBudget):undefined
+  const maxBudgetValue=maxBudget!==undefined&&maxBudget!==''?Number(maxBudget):undefined
+  const minScoreValue=minScore!==undefined&&minScore!==''?Number(minScore):undefined
+  if(minBudgetValue!==undefined&&(!Number.isFinite(minBudgetValue)||minBudgetValue<0))throw new ApiError(400,'minBudget must be a non-negative number')
+  if(maxBudgetValue!==undefined&&(!Number.isFinite(maxBudgetValue)||maxBudgetValue<0))throw new ApiError(400,'maxBudget must be a non-negative number')
+  if(minBudgetValue!==undefined&&maxBudgetValue!==undefined&&minBudgetValue>maxBudgetValue)throw new ApiError(400,'maxBudget must be greater than or equal to minBudget')
+  if(minScoreValue!==undefined&&(!Number.isFinite(minScoreValue)||minScoreValue<0||minScoreValue>100))throw new ApiError(400,'minScore must be between 0 and 100')
+  if(minBudgetValue!==undefined)conditions.push({budgetMax:{$gte:minBudgetValue}})
+  if(maxBudgetValue!==undefined)conditions.push({budgetMin:{$lte:maxBudgetValue}})
+  if(minScoreValue!==undefined)conditions.push({leadScore:{$gte:minScoreValue}})
   if(sla==='breached')conditions.push({firstResponseAt:{$exists:false},responseDueAt:{$lt:new Date()}})
   if(sla==='due')conditions.push({firstResponseAt:{$exists:false},responseDueAt:{$gte:new Date()}})
 

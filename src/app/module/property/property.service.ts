@@ -98,6 +98,13 @@ const createProperty = async (
   return result
 }
 
+const numericFilter = (value: unknown, label: string): number | undefined => {
+  if (value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new ApiError(httpStatus.BAD_REQUEST, `${label} must be a non-negative number`)
+  return parsed
+}
+
 const getAllProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
@@ -164,20 +171,27 @@ const getAllProperties = async (
   if (upazilaId) andConditions.push({ 'bangladeshAddress.upazilaId': upazilaId })
   if (agentId) andConditions.push({ agentId })
 
-  if (minPrice !== undefined && minPrice !== '') andConditions.push({ price: { $gte: Number(minPrice) } })
-  if (maxPrice !== undefined && maxPrice !== '') andConditions.push({ price: { $lte: Number(maxPrice) } })
-  if (bedrooms !== undefined && bedrooms !== '') andConditions.push({ bedrooms: Number(bedrooms) })
-  if (bathrooms !== undefined && bathrooms !== '') andConditions.push({ bathrooms: Number(bathrooms) })
+  const minPriceValue = numericFilter(minPrice, 'Minimum price')
+  const maxPriceValue = numericFilter(maxPrice, 'Maximum price')
+  const bedroomsValue = numericFilter(bedrooms, 'Bedrooms')
+  const bathroomsValue = numericFilter(bathrooms, 'Bathrooms')
+  if (minPriceValue !== undefined && maxPriceValue !== undefined && minPriceValue > maxPriceValue) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum price must be greater than or equal to minimum price')
+  if (minPriceValue !== undefined) andConditions.push({ price: { $gte: minPriceValue } })
+  if (maxPriceValue !== undefined) andConditions.push({ price: { $lte: maxPriceValue } })
+  if (bedroomsValue !== undefined) andConditions.push({ bedrooms: { $gte: bedroomsValue } })
+  if (bathroomsValue !== undefined) andConditions.push({ bathrooms: { $gte: bathroomsValue } })
   if (furnished !== undefined && furnished !== '') andConditions.push({ furnished: furnished === 'true' || furnished === true })
   if (isFeatured !== undefined && isFeatured !== '') andConditions.push({ isFeatured: isFeatured === 'true' || isFeatured === true })
 
   const whereCondition = andConditions.length > 0 ? { $and: andConditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+  const allowedSort = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
+  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
 
   const [result, total] = await Promise.all([
     Property.find(whereCondition)
       .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
-      .sort({ [sortBy]: sortOrder })
+      .sort({ [safeSortBy]: sortOrder, _id: sortOrder })
       .skip(skip)
       .limit(limit),
     Property.countDocuments(whereCondition),

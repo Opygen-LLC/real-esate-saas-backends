@@ -51,6 +51,7 @@ const createLeadZodSchema = z.object({ body: createLeadBody })
 const publicCaptureZodSchema = z.object({
   body: z.object({
     organizationId: z.string().trim().min(3).max(80),
+    submissionContext: z.enum(['CONTACT', 'PROPERTY_ENQUIRY', 'GENERAL_LEAD']).optional(),
     name: leadFields.name,
     phone: leadFields.phone,
     email: leadFields.email,

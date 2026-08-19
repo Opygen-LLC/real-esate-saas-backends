@@ -12,11 +12,13 @@ let Organization: any
 let Property: any
 let PlatformSettings: any
 let ReviewInvitation: any
+let WebsiteSubmission: any
 let jwtHelpers: any
 let config: any
 let organizationId = ''
 let owner: any
 let property: any
+let foreignProperty: any
 
 const request = async (path: string, init: RequestInit = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -56,6 +58,7 @@ suite('phase 2 public forms and settings contracts', () => {
     ;({ Property } = await import('../../app/module/property/property.model'))
     ;({ PlatformSettings } = await import('../../app/module/platformSettings/platformSettings.model'))
     ;({ ReviewInvitation } = await import('../../app/module/review/review.model'))
+    ;({ WebsiteSubmission } = await import('../../app/module/websiteSubmission/websiteSubmission.model'))
     ;({ jwtHelpers } = await import('../../app/helpers/jwtHelpers'))
     config = (await import('../../config')).default
 
@@ -72,6 +75,10 @@ suite('phase 2 public forms and settings contracts', () => {
     property = await Property.create({
       organizationId, slug: 'phase2-no-agent-property', title: 'Phase Two Apartment', propertyType: 'Apartment', listingType: 'ForSale',
       status: 'Available', price: 9000000, currency: 'BDT', city: 'Dhaka', country: 'Bangladesh',
+    })
+    foreignProperty = await Property.create({
+      organizationId: 'org_phase2_foreign', slug: 'phase2-foreign-property', title: 'Foreign Tenant Apartment', propertyType: 'Apartment', listingType: 'ForSale',
+      status: 'Available', price: 8000000, currency: 'BDT', city: 'Dhaka', country: 'Bangladesh',
     })
     await PlatformSettings.create({
       key: 'platform',
@@ -109,18 +116,20 @@ suite('phase 2 public forms and settings contracts', () => {
   it('accepts the contact form with Bangla phone digits and normalized optional email', async () => {
     const result = await request('/api/v1/lead/public-capture', {
       method: 'POST',
-      body: JSON.stringify({ organizationId, name: 'Contact Buyer', phone: '০১৭১২-৩৪৫৬৭৮', email: 'BUYER@EXAMPLE.COM ', message: 'General contact form', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
+      body: JSON.stringify({ organizationId, submissionContext: 'CONTACT', name: 'Contact Buyer', phone: '০১৭১২-৩৪৫৬৭৮', email: 'BUYER@EXAMPLE.COM ', message: 'General contact form', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(result.response.status).toBe(201)
     expect(result.body?.data?.phone).toBe('+8801712345678')
     expect(result.body?.data?.email).toBe('buyer@example.com')
     expect(result.body?.data?.submission).toMatchObject({ submissionType: 'lead', status: 'received', linkedEntityId: result.body?.data?._id })
+    const inbox = await WebsiteSubmission.findById(result.body?.data?.submission?.submissionId).lean()
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'CONTACT', status: 'NEW', linkedEntityType: 'Lead' })
   })
 
   it('accepts the agent contact form contract and returns field errors for invalid identity input', async () => {
     const valid = await request('/api/v1/lead/public-capture', {
       method: 'POST',
-      body: JSON.stringify({ organizationId, name: 'Agent Prospect', phone: '01812345678', email: 'agent-prospect@example.com', message: 'Inquiry for broker profile', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
+      body: JSON.stringify({ organizationId, submissionContext: 'CONTACT', name: 'Agent Prospect', phone: '01812345678', email: 'agent-prospect@example.com', message: 'Inquiry for broker profile', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(valid.response.status).toBe(201)
 
@@ -137,10 +146,12 @@ suite('phase 2 public forms and settings contracts', () => {
   it('accepts a property enquiry and rejects an outdated privacy version with a field error', async () => {
     const valid = await request('/api/v1/lead/public-capture', {
       method: 'POST',
-      body: JSON.stringify({ organizationId, name: 'Property Buyer', phone: '01912345678', propertyInterest: property._id.toString(), message: 'Interested in this apartment', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
+      body: JSON.stringify({ organizationId, submissionContext: 'PROPERTY_ENQUIRY', name: 'Property Buyer', phone: '01912345678', propertyInterest: property._id.toString(), message: 'Interested in this apartment', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(valid.response.status).toBe(201)
     expect(valid.body?.data?.propertyInterest?.map(String)).toContain(property._id.toString())
+    const inbox = await WebsiteSubmission.findById(valid.body?.data?.submission?.submissionId).lean()
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'PROPERTY_ENQUIRY', status: 'NEW', linkedEntityType: 'Lead' })
 
     const stale = await request('/api/v1/lead/public-capture', {
       method: 'POST',
@@ -149,6 +160,17 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(stale.response.status).toBe(409)
     expect(stale.body?.code).toBe('PRIVACY_POLICY_OUTDATED')
     expect(stale.body?.fieldErrors?.policyVersion?.[0]).toMatch(/policy changed/i)
+  })
+
+  it('rejects a property enquiry that points at another tenant property', async () => {
+    const result = await request('/api/v1/lead/public-capture', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId, submissionContext: 'PROPERTY_ENQUIRY', name: 'Boundary Probe', phone: '01712345678', propertyInterest: foreignProperty._id.toString(), privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
+    })
+    expect(result.response.status).toBe(400)
+    expect(result.body?.code).toBe('VALIDATION_ERROR')
+    expect(result.body?.fieldErrors?.propertyInterest?.[0]).toMatch(/this agency/i)
+    expect(await WebsiteSubmission.countDocuments({ organizationId, name: 'Boundary Probe' })).toBe(0)
   })
 
   it('returns the same website-submission receipt contract for public review submissions', async () => {
@@ -166,6 +188,8 @@ suite('phase 2 public forms and settings contracts', () => {
     })
     expect(result.response.status).toBe(201)
     expect(result.body?.data?.submission).toMatchObject({ submissionType: 'review', status: 'received', linkedEntityId: result.body?.data?._id })
+    const inbox = await WebsiteSubmission.findById(result.body?.data?.submission?.submissionId).lean()
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'REVIEW', status: 'NEW', linkedEntityType: 'AgencyReview' })
   })
 
   it('schedules a public viewing without a property agent by falling back to the agency owner', async () => {
@@ -178,6 +202,8 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(String(result.body?.data?.agentId)).toBe(String(owner._id))
     expect(result.body?.data?.clientPhone).toBe('+8801312345678')
     expect(result.body?.data?.submission).toMatchObject({ submissionType: 'viewing', status: 'received', linkedEntityId: result.body?.data?._id })
+    const inbox = await WebsiteSubmission.findById(result.body?.data?.submission?.submissionId).lean()
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'VIEWING', status: 'NEW', linkedEntityType: 'Viewing' })
   })
 
   it('rejects invalid appointment windows with date/time field errors', async () => {

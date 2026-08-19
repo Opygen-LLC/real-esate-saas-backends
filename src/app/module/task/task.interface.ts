@@ -44,6 +44,10 @@ export type ITaskFilter = {
   linkedLead?: string
   linkedProperty?: string
   dueDate?: string
+  dueFrom?: string
+  dueTo?: string
+  overdue?: boolean | string
+  approvalStatus?: string
   scope?: 'mine' | 'team'
 }
 

@@ -32,10 +32,12 @@ import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.rou
 import { FinanceRoute } from '../module/finance/finance.route'
 import { UploadRoute } from '../module/upload/upload.route'
 import { ReviewRoute } from '../module/review/review.route'
+import { WebsiteSubmissionRoute } from '../module/websiteSubmission/websiteSubmission.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/website-submissions', route: WebsiteSubmissionRoute },
   { path: '/reviews', route: ReviewRoute },
   { path: '/upload', route: UploadRoute },
   { path: '/finance', route: FinanceRoute },

@@ -2,13 +2,13 @@ import { Request, Response } from 'express'
 import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
-import { withWebsiteSubmissionReceipt } from '../../../contracts/workspaceContracts'
 import pick from '../../../shared/pick'
 import { requireTenant } from '../../middlewares/auth'
 import { ActivityService } from '../activity/activity.service'
 import { crmAccessFromRequest, crmRecordReadAccessFromRequest } from '../crm/crmAccess'
 import { LeadService } from './lead.service'
 import { LeadImportService } from './leadImport.service'
+import { WebsiteSubmissionService } from '../websiteSubmission/websiteSubmission.service'
 
 const actor = (req: Request) => req.user?._id || req.user?.id
 
@@ -19,12 +19,16 @@ const createLead = catchAsync(async (req, res) => sendResponse(res, {
   data: await LeadService.createLeadWithOutcome(requireTenant(req), req.body, actor(req), crmAccessFromRequest(req)),
 }))
 
-const publicCaptureLead = catchAsync(async (req, res) => sendResponse(res, {
-  statusCode: 201,
-  success: true,
-  message: 'Inquiry submitted successfully.',
-  data: withWebsiteSubmissionReceipt('lead', await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId })),
-}))
+const publicCaptureLead = catchAsync(async (req, res) => {
+  const lead = await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId })
+  const submission = await WebsiteSubmissionService.captureLead(req.body, lead)
+  sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: 'Inquiry submitted successfully.',
+    data: WebsiteSubmissionService.withPublicReceipt(lead, submission),
+  })
+})
 
 const getAllLeads = catchAsync(async (req, res) => {
   const filters = pick(req.query, ['searchTerm', 'leadStatus', 'source', 'assignedAgent', 'propertyType', 'minBudget', 'maxBudget', 'sla', 'minScore', 'scope', 'isConverted', 'followUpPreset', 'followUpFrom', 'followUpTo'])
