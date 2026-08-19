@@ -171,7 +171,14 @@ const verifyTlsHost = async (host: string): Promise<{ ok: boolean; detail: strin
   socket.setTimeout(config.domains.provider_timeout_ms)
   socket.once('secureConnect', () => {
     const cert = socket.getPeerCertificate()
-    finish(socket.authorized, socket.authorized ? `valid certificate: ${cert.subject?.CN || host}` : (socket.authorizationError || 'certificate not authorized'))
+    const authorizationError = socket.authorizationError
+    const authorizationDetail = authorizationError instanceof Error
+      ? authorizationError.message
+      : authorizationError || 'certificate not authorized'
+    finish(
+      socket.authorized,
+      socket.authorized ? `valid certificate: ${cert.subject?.CN || host}` : authorizationDetail,
+    )
   })
   socket.once('timeout', () => finish(false, 'TLS handshake timed out'))
   socket.once('error', (error) => finish(false, error.message))

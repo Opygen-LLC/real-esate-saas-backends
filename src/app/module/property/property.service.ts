@@ -116,9 +116,9 @@ const numericFilter = (value: unknown, label: string): number | undefined => {
 const PROPERTY_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
 const MAX_PROPERTY_EXPORT_ROWS = 20_000
 
-const safePropertySort = (sortBy?: string, sortOrder?: string): { sortBy: string; sortOrder: 'asc' | 'desc' } => ({
+const safePropertySort = (sortBy?: string, sortOrder?: string | number): { sortBy: string; sortOrder: 'asc' | 'desc' } => ({
   sortBy: sortBy && PROPERTY_SORT_FIELDS.has(sortBy) ? sortBy : 'createdAt',
-  sortOrder: sortOrder === 'asc' ? 'asc' : 'desc',
+  sortOrder: sortOrder === 'asc' || sortOrder === 1 ? 'asc' : 'desc',
 })
 
 const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Record<string, unknown>> => {
