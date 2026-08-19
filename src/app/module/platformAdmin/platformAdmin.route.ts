@@ -29,9 +29,5 @@ router.post('/payments', authMiddlewares.authSuperAdmin, validateRequest(z.objec
 router.patch('/payments/:paymentId/decision', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: z.object({ paymentId: z.string().trim().min(8).max(80) }), body: subscriptionPaymentDecisionSchema })), PlatformAdminController.decideManualPayment)
 router.get('/revenue', authMiddlewares.authSuperAdmin, PlatformAdminController.revenue)
 router.get('/audit', authMiddlewares.authSuperAdmin, PlatformAdminController.audit)
-router.post('/impersonation/start', authMiddlewares.authSuperAdmin, validateRequest(z.object({ body: z.object({ organizationId: z.string().trim().min(3).max(100), targetUserId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), reason: z.string().trim().min(10).max(500), durationMinutes: z.number().int().min(5).max(30).optional() }) })), PlatformAdminController.startImpersonation)
-// Current/end remain callable while the request is authenticated as the impersonated tenant; the signed HttpOnly cookie is verified by the service.
-router.get('/impersonation/current', PlatformAdminController.currentImpersonation)
-router.post('/impersonation/end', PlatformAdminController.endImpersonation)
 
 export const PlatformAdminRoute = router

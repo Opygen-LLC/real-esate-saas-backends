@@ -1,4 +1,5 @@
 import { Types, type PipelineStage, type SortOrder } from 'mongoose'
+import { logger } from '../../../shared/logger'
 import { Activity } from '../activity/activity.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
@@ -6,6 +7,7 @@ import { Property } from '../property/property.model'
 import { Task } from '../task/task.model'
 import { TASK_TYPE } from '../task/taskType.contract'
 import { User } from '../user/user.model'
+import { userRefPopulate } from '../user/userProfile.service'
 import { UserProfile } from '../userProfile/userProfile.model'
 
 export type CrmListReadModelOptions = {
@@ -125,7 +127,7 @@ const propertyLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Property.collection.name,
-      let: { propertyIds: { $ifNull: ['$propertyInterest', []] } },
+      let: { propertyIds: { $cond: [{ $isArray: '$propertyInterest' }, '$propertyInterest', []] } },
       pipeline: [
         { $match: { $expr: { $in: ['$_id', '$$propertyIds'] } } },
         {
@@ -137,7 +139,7 @@ const propertyLookupStages = (): PipelineStage.FacetPipelineStage[] => [
             propertyType: 1,
             bedrooms: 1,
             bathrooms: 1,
-            images: { $slice: [{ $ifNull: ['$images', []] }, 1] },
+            images: { $slice: [{ $cond: [{ $isArray: '$images' }, '$images', []] }, 1] },
           },
         },
       ],
@@ -396,8 +398,54 @@ const unwrapFacet = <T>(result: any[]): ReadModelPage<T> => {
   }
 }
 
+const publicUserRef = (value: any) => {
+  if (!value || typeof value !== 'object') return value
+  return {
+    _id: value._id,
+    name: value.name,
+    email: value.email,
+    phoneNumber: value.phoneNumber,
+    userRole: value.userRole,
+    profileImgURL: value.profile?.profileImgURL || value.profileImgURL || '',
+  }
+}
+
+const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
+  const query = options.match as any
+  const sort = sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') as any
+  const [documents, total] = await Promise.all([
+    Lead.find(query)
+      .sort(sort)
+      .skip(options.skip)
+      .limit(options.limit)
+      .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole'))
+      .populate(userRefPopulate('createdBy', 'name email userRole'))
+      .populate(userRefPopulate('updatedBy', 'name email userRole'))
+      .populate('propertyInterest', 'title price images city propertyType bedrooms bathrooms')
+      .populate('contactId', 'name email phone company')
+      .lean(),
+    Lead.countDocuments(query),
+  ])
+
+  const rows = (documents as any[]).map((row) => {
+    const properties = Array.isArray(row.propertyInterest) ? row.propertyInterest : []
+    return {
+      ...row,
+      assignedAgent: publicUserRef(row.assignedAgent),
+      createdBy: publicUserRef(row.createdBy),
+      updatedBy: publicUserRef(row.updatedBy),
+      propertyInterest: properties,
+      propertySummary: { count: properties.length, primary: properties[0] },
+      followUp: { date: row.followUpDate },
+    } as T
+  })
+
+  return { rows, total }
+}
+
 export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
-  const result = await Lead.aggregate([
+  try {
+    const result = await Lead.aggregate([
     { $match: castAggregationMatch(options.match) as Record<string, unknown> },
     {
       $facet: {
@@ -416,9 +464,13 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
         total: [{ $count: 'count' }],
       },
     },
-  ]).allowDiskUse(true)
+    ]).allowDiskUse(true)
 
-  return unwrapFacet<T>(result)
+    return unwrapFacet<T>(result)
+  } catch (error) {
+    logger.warn('crm_lead_read_model_fallback', { error })
+    return readLeadListPageFallback<T>(options)
+  }
 }
 
 export const readContactListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
