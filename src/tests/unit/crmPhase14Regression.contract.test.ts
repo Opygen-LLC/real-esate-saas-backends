@@ -123,6 +123,7 @@ describe('CRM Phase 14 automated regression contract', () => {
 
   it('keeps secure preview/confirm import and filtered export routes in the public API contract', () => {
     const importService = read('src/app/module/lead/leadImport.service.ts')
+    const importUpload = read('src/app/module/import/spreadsheetImport.middleware.ts')
     const leadRoute = read('src/app/module/lead/lead.route.ts')
     const contactRoute = read('src/app/module/contact/contact.route.ts')
 
@@ -136,6 +137,10 @@ describe('CRM Phase 14 automated regression contract', () => {
     expect(importService).toContain("duplicatePolicy: 'reject'")
     expect(importService).toContain("Duplicate phone appears earlier in this import file")
     expect(importService).toContain("Duplicate phone matches an existing Lead")
+    expect(importUpload).toContain("application/octet-stream")
+    expect(importUpload).toContain("x-import-file-name")
+    expect(importUpload).toContain("contentType === 'multipart/form-data'")
+    expect(importUpload).not.toContain('allowedMimeByExtension')
 
     for (const route of [leadRoute, contactRoute]) {
       expect(route).toContain("'/export/csv'")

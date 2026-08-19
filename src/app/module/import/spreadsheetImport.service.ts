@@ -14,7 +14,10 @@ export type ParsedSpreadsheetUpload = {
 export const csvCell = (value: string): string => /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 
 const parseCsv = (buffer: Buffer, entityLabel: string): ParsedSpreadsheetUpload => {
+  if (!buffer.length) throw new ApiError(400, `${entityLabel} import file is empty`)
+  if (buffer.includes(0)) throw new ApiError(400, 'CSV file must be UTF-8 text, not a binary or UTF-16 file')
   const text = buffer.toString('utf8').replace(/^\uFEFF/, '')
+  if (!text.trim()) throw new ApiError(400, `${entityLabel} import file is empty`)
   const rows: string[][] = []
   let row: string[] = []
   let field = ''
@@ -134,7 +137,9 @@ export const parseSpreadsheetUpload = async (
   file: Express.Multer.File,
   options: { maxRows: number; entityLabel: string },
 ): Promise<ParsedSpreadsheetUpload> => {
-  const extension = file.originalname.toLowerCase().endsWith('.xlsx') ? '.xlsx' : '.csv'
+  const lowerName = file.originalname.toLowerCase()
+  const extension = lowerName.endsWith('.xlsx') ? '.xlsx' : lowerName.endsWith('.csv') ? '.csv' : ''
+  if (!extension) throw new ApiError(400, `${options.entityLabel} import accepts CSV (.csv) or Excel (.xlsx) files only`)
   const parsed = extension === '.xlsx'
     ? await parseXlsx(file.buffer, options.entityLabel)
     : parseCsv(file.buffer, options.entityLabel)
