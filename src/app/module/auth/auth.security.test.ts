@@ -23,6 +23,8 @@ describe('OTP and reset security', () => {
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/refresh-token' })).toBe(false)
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/logout' })).toBe(false)
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/change-password' })).toBe(false)
+    expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/sessions/revoke-others' })).toBe(false)
+    expect(isCsrfExemptRequest({ method: 'DELETE', originalUrl: '/api/v1/auth/sessions/507f1f77bcf86cd799439011' })).toBe(false)
   })
   it('rejects expired OTP challenges', () => {
     expect(() => validateOtpChallengeState({ ...valid(), expiresAt: new Date(Date.now() - 1) })).toThrow(/expired/i)

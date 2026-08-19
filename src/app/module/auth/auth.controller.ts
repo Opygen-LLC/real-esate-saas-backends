@@ -98,6 +98,48 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const getSessions = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Vary', 'Cookie')
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Active sessions retrieved',
+    data: await AuthServices.listSessions(
+      req.cookies?.[config.security.refresh_cookie_name],
+      String(req.user?._id || req.user?.id || ''),
+      String(req.user?.organizationId || ''),
+    ),
+  })
+})
+
+const revokeSession = catchAsync(async (req: Request, res: Response) => {
+  await AuthServices.revokeSession(
+    req.cookies?.[config.security.refresh_cookie_name],
+    String(req.user?._id || req.user?.id || ''),
+    String(req.user?.organizationId || ''),
+    req.params.sessionId,
+    meta(req),
+  )
+  sendResponse(res, { statusCode: 200, success: true, message: 'Session revoked', data: null })
+})
+
+const revokeOtherSessions = catchAsync(async (req: Request, res: Response) => {
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Other sessions revoked',
+    data: await AuthServices.revokeOtherSessions(
+      req.cookies?.[config.security.refresh_cookie_name],
+      String(req.user?._id || req.user?.id || ''),
+      String(req.user?.organizationId || ''),
+      meta(req),
+    ),
+  })
+})
+
 const registerAgency = catchAsync(async (req: Request, res: Response) => {
   const result = await AuthServices.registerAgency(req.body, meta(req))
   sendResponse(res, {
@@ -176,7 +218,7 @@ const getRealtimeTicket = catchAsync(async (req: Request, res: Response) => {
 
 const refreshToken = catchAsync(async (req: Request, res: Response) => {
   const token = req.cookies?.[config.security.refresh_cookie_name]
-  authResponse(res, await AuthServices.refreshToken(token), 'Session refreshed')
+  authResponse(res, await AuthServices.refreshToken(token, meta(req)), 'Session refreshed')
 })
 
 const changePassword = catchAsync(async (req: Request, res: Response) => {
@@ -199,6 +241,9 @@ const logoutUser = catchAsync(async (req: Request, res: Response) => {
 export const AuthController = {
   getCsrfToken,
   getSession,
+  getSessions,
+  revokeSession,
+  revokeOtherSessions,
   registerAgency,
   loginUser,
   verifyOtp,

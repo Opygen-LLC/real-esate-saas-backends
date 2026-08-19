@@ -534,11 +534,13 @@ const createRealtimeTicket = async (userId: string) => {
 }
 
 
-const getCurrentSessionSummary = async (
+type CurrentSessionIdentity = { sessionId: string; familyId: string }
+
+const currentSessionIdentity = (
   token: string | undefined,
   userId: string,
   organizationId: string,
-): Promise<AuthSessionSummary | null> => {
+): CurrentSessionIdentity | null => {
   if (!token) return null
   let payload: any
   try {
@@ -547,17 +549,133 @@ const getCurrentSessionSummary = async (
     return null
   }
   if (!payload?.sessionId || String(payload._id || '') !== userId || String(payload.organizationId || '') !== organizationId) return null
-  const session = await AuthSession.findOne({
-    _id: payload.sessionId,
+  return { sessionId: String(payload.sessionId), familyId: String(payload.familyId || '') }
+}
+
+const requireCurrentSessionIdentity = async (token: string | undefined, userId: string, organizationId: string): Promise<CurrentSessionIdentity> => {
+  const identity = currentSessionIdentity(token, userId, organizationId)
+  if (!identity || !token) {
+    throw new ApiError(401, 'Current browser session could not be verified', '', 'CURRENT_SESSION_UNAVAILABLE')
+  }
+  const session: any = await AuthSession.findOne({
+    _id: identity.sessionId,
     userId,
     organizationId,
     revokedAt: null,
     expiresAt: { $gt: new Date() },
-  }).select('userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt').lean()
+  }).select('+refreshTokenHash +tokenHash')
+  const storedHash = session?.refreshTokenHash || session?.tokenHash
+  if (!storedHash || !safeEqual(storedHash, sha256(token))) {
+    throw new ApiError(401, 'Current browser session could not be verified', '', 'CURRENT_SESSION_UNAVAILABLE')
+  }
+  return identity
+}
+
+const getCurrentSessionSummary = async (
+  token: string | undefined,
+  userId: string,
+  organizationId: string,
+): Promise<AuthSessionSummary | null> => {
+  const identity = currentSessionIdentity(token, userId, organizationId)
+  if (!identity) return null
+  const session = await AuthSession.findOne({
+    _id: identity.sessionId,
+    userId,
+    organizationId,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).select('_id userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt').lean()
   return session ? toAuthSessionSummary(session, true) : null
 }
 
-const refreshToken = async (token: string): Promise<AuthResult> => {
+const listSessions = async (token: string | undefined, userId: string, organizationId: string): Promise<AuthSessionSummary[]> => {
+  const identity = currentSessionIdentity(token, userId, organizationId)
+  const sessions = await AuthSession.find({
+    userId,
+    organizationId,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  })
+    .select('_id userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt')
+    .sort({ lastUsedAt: -1, createdAt: -1 })
+    .lean()
+
+  return sessions.map((session: any) => toAuthSessionSummary(session, String(session._id) === identity?.sessionId))
+}
+
+const revokeSession = async (
+  token: string | undefined,
+  userId: string,
+  organizationId: string,
+  sessionId: string,
+  meta: RequestMeta,
+): Promise<void> => {
+  const identity = await requireCurrentSessionIdentity(token, userId, organizationId)
+  if (!Types.ObjectId.isValid(sessionId)) throw new ApiError(400, 'Invalid session id', '', 'INVALID_SESSION_ID')
+  if (identity.sessionId === sessionId) {
+    throw new ApiError(400, 'Current session cannot be revoked', '', 'CURRENT_SESSION_CANNOT_BE_REVOKED')
+  }
+
+  const revoked = await AuthSession.findOneAndUpdate(
+    {
+      _id: sessionId,
+      userId,
+      organizationId,
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    },
+    { $set: { revokedAt: new Date(), revokeReason: 'user_revoked' } },
+    { new: true },
+  ).select('_id')
+  if (!revoked) throw new ApiError(404, 'Session not found', '', 'SESSION_NOT_FOUND')
+
+  await writeAudit({
+    organizationId,
+    actorId: userId,
+    action: 'identity.session_revoked',
+    entityType: 'auth_session',
+    entityId: sessionId,
+    requestId: meta.requestId,
+    ip: meta.ip,
+  })
+}
+
+const revokeOtherSessions = async (
+  token: string | undefined,
+  userId: string,
+  organizationId: string,
+  meta: RequestMeta,
+): Promise<{ revokedCount: number }> => {
+  const identity = await requireCurrentSessionIdentity(token, userId, organizationId)
+  if (!Types.ObjectId.isValid(identity.sessionId)) {
+    throw new ApiError(401, 'Current browser session could not be verified', '', 'CURRENT_SESSION_UNAVAILABLE')
+  }
+
+  const result = await AuthSession.updateMany(
+    {
+      userId,
+      organizationId,
+      _id: { $ne: new Types.ObjectId(identity.sessionId) },
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    },
+    { $set: { revokedAt: new Date(), revokeReason: 'user_revoked_other_sessions' } },
+  )
+
+  await writeAudit({
+    organizationId,
+    actorId: userId,
+    action: 'identity.other_sessions_revoked',
+    entityType: 'auth_session',
+    entityId: identity.sessionId,
+    requestId: meta.requestId,
+    ip: meta.ip,
+    metadata: { revokedCount: result.modifiedCount },
+  })
+  return { revokedCount: result.modifiedCount }
+}
+
+const refreshToken = async (token: string, meta: RequestMeta = {}): Promise<AuthResult> => {
   let verified: any
   try {
     verified = jwtHelpers.verifyToken(token, config.jwt.refresh_secret as Secret)
@@ -588,6 +706,7 @@ const refreshToken = async (token: string): Promise<AuthResult> => {
       $set: {
         refreshTokenHash: sha256(nextRefresh),
         lastUsedAt: new Date(),
+        lastUsedIp: meta.ip || authSession.lastUsedIp || '',
         rotatedAt: new Date(),
         expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
       },
@@ -660,6 +779,9 @@ export const AuthServices = {
   createRealtimeTicket,
   refreshToken,
   getCurrentSessionSummary,
+  listSessions,
+  revokeSession,
+  revokeOtherSessions,
   logout,
   changePassword,
   getWebsiteUrlForUser,
