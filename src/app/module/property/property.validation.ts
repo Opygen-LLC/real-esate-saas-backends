@@ -126,4 +126,5 @@ export const PropertyValidation = {
   updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(PROPERTY_STATUSES) }).strict() }),
   reorderImagesZodSchema: z.object({ body: z.object({ images: propertyImages }).strict() }),
   importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional() }).strict() }),
+  confirmImportZodSchema: z.object({ body: z.object({ importSessionId: z.string().uuid() }).strict() }),
 }

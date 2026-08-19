@@ -71,3 +71,15 @@ export const leadImportRateLimiter = rateLimit({
     message: 'Too many lead import requests. Please try again in a few minutes.',
   },
 })
+
+export const propertyImportRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'RATE_LIMITED',
+    message: 'Too many property import requests. Please try again in a few minutes.',
+  },
+})

@@ -11,6 +11,7 @@ import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
+import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 
@@ -105,10 +106,15 @@ const numericFilter = (value: unknown, label: string): number | undefined => {
   return parsed
 }
 
-const getAllProperties = async (
-  filters: IPropertyFilter,
-  paginationOptions: IPaginationOptions,
-): Promise<IGenericResponse<IProperty[]>> => {
+const PROPERTY_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
+const MAX_PROPERTY_EXPORT_ROWS = 20_000
+
+const safePropertySort = (sortBy?: string, sortOrder?: string): { sortBy: string; sortOrder: 'asc' | 'desc' } => ({
+  sortBy: sortBy && PROPERTY_SORT_FIELDS.has(sortBy) ? sortBy : 'createdAt',
+  sortOrder: sortOrder === 'asc' ? 'asc' : 'desc',
+})
+
+const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Record<string, unknown>> => {
   const {
     searchTerm,
     organizationId,
@@ -124,6 +130,8 @@ const getAllProperties = async (
     maxPrice,
     bedrooms,
     bathrooms,
+    minArea,
+    maxArea,
     furnished,
     isFeatured,
     agentId,
@@ -175,23 +183,32 @@ const getAllProperties = async (
   const maxPriceValue = numericFilter(maxPrice, 'Maximum price')
   const bedroomsValue = numericFilter(bedrooms, 'Bedrooms')
   const bathroomsValue = numericFilter(bathrooms, 'Bathrooms')
+  const minAreaValue = numericFilter(minArea, 'Minimum area')
+  const maxAreaValue = numericFilter(maxArea, 'Maximum area')
   if (minPriceValue !== undefined && maxPriceValue !== undefined && minPriceValue > maxPriceValue) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum price must be greater than or equal to minimum price')
-  if (minPriceValue !== undefined) andConditions.push({ price: { $gte: minPriceValue } })
-  if (maxPriceValue !== undefined) andConditions.push({ price: { $lte: maxPriceValue } })
+  if (minAreaValue !== undefined && maxAreaValue !== undefined && minAreaValue > maxAreaValue) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum area must be greater than or equal to minimum area')
+  if (minPriceValue !== undefined || maxPriceValue !== undefined) andConditions.push({ price: { ...(minPriceValue !== undefined ? { $gte: minPriceValue } : {}), ...(maxPriceValue !== undefined ? { $lte: maxPriceValue } : {}) } })
   if (bedroomsValue !== undefined) andConditions.push({ bedrooms: { $gte: bedroomsValue } })
   if (bathroomsValue !== undefined) andConditions.push({ bathrooms: { $gte: bathroomsValue } })
+  if (minAreaValue !== undefined || maxAreaValue !== undefined) andConditions.push({ area: { ...(minAreaValue !== undefined ? { $gte: minAreaValue } : {}), ...(maxAreaValue !== undefined ? { $lte: maxAreaValue } : {}) } })
   if (furnished !== undefined && furnished !== '') andConditions.push({ furnished: furnished === 'true' || furnished === true })
   if (isFeatured !== undefined && isFeatured !== '') andConditions.push({ isFeatured: isFeatured === 'true' || isFeatured === true })
 
-  const whereCondition = andConditions.length > 0 ? { $and: andConditions } : {}
+  return andConditions.length > 0 ? { $and: andConditions } : {}
+}
+
+const getAllProperties = async (
+  filters: IPropertyFilter,
+  paginationOptions: IPaginationOptions,
+): Promise<IGenericResponse<IProperty[]>> => {
+  const whereCondition = await buildPropertyWhereCondition(filters)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-  const allowedSort = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
-  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
+  const safeSort = safePropertySort(sortBy, sortOrder)
 
   const [result, total] = await Promise.all([
     Property.find(whereCondition)
       .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
-      .sort({ [safeSortBy]: sortOrder, _id: sortOrder })
+      .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
       .skip(skip)
       .limit(limit),
     Property.countDocuments(whereCondition),
@@ -199,6 +216,73 @@ const getAllProperties = async (
 
   return { meta: { page, limit, total }, data: result }
 }
+
+const PROPERTY_EXPORT_COLUMNS: CrmExportColumn[] = [
+  { header: 'Title', key: 'title', width: 32 },
+  { header: 'Property Type', key: 'propertyType', width: 18 },
+  { header: 'Listing Type', key: 'listingType', width: 16 },
+  { header: 'Status', key: 'status', width: 16 },
+  { header: 'Price', key: 'price', width: 18 },
+  { header: 'Currency', key: 'currency', width: 10 },
+  { header: 'Postal Code', key: 'postalCode', width: 12 },
+  { header: 'City', key: 'city', width: 18 },
+  { header: 'State', key: 'state', width: 18 },
+  { header: 'Address', key: 'address', width: 36 },
+  { header: 'Bedrooms', key: 'bedrooms', width: 12 },
+  { header: 'Bathrooms', key: 'bathrooms', width: 12 },
+  { header: 'Area', key: 'area', width: 14 },
+  { header: 'Area Unit', key: 'areaUnit', width: 12 },
+  { header: 'Agent', key: 'agent', width: 28 },
+  { header: 'Furnished', key: 'furnished', width: 12 },
+  { header: 'Featured', key: 'isFeatured', width: 12 },
+  { header: 'Created', key: 'createdAt', width: 24 },
+  { header: 'Updated', key: 'updatedAt', width: 24 },
+]
+
+const getPropertyExportRows = async (
+  organizationId: string,
+  filters: IPropertyFilter,
+  sortOptions: Pick<IPaginationOptions, 'sortBy' | 'sortOrder'>,
+): Promise<CrmExportRow[]> => {
+  const where = await buildPropertyWhereCondition({ ...filters, organizationId })
+  const total = await Property.countDocuments(where)
+  if (total > MAX_PROPERTY_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_PROPERTY_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
+  const safeSort = safePropertySort(sortOptions.sortBy, sortOptions.sortOrder)
+  const properties: any[] = await Property.find(where)
+    .populate(userRefPopulate('agentId', 'name email userRole'))
+    .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
+    .limit(MAX_PROPERTY_EXPORT_ROWS)
+    .select('title propertyType listingType status price currency bangladeshAddress city state address bedrooms bathrooms area areaUnit agentId furnished isFeatured createdAt updatedAt')
+    .lean()
+
+  return properties.map((property: any) => ({
+    title: property.title,
+    propertyType: property.propertyType,
+    listingType: property.listingType,
+    status: property.status,
+    price: property.price,
+    currency: property.currency || 'BDT',
+    postalCode: property.bangladeshAddress?.postalCode || '',
+    city: property.city || '',
+    state: property.state || '',
+    address: property.address || '',
+    bedrooms: property.bedrooms ?? '',
+    bathrooms: property.bathrooms ?? '',
+    area: property.area ?? '',
+    areaUnit: property.areaUnit || '',
+    agent: property.agentId?.name || property.agentId?.email || '',
+    furnished: Boolean(property.furnished),
+    isFeatured: Boolean(property.isFeatured),
+    createdAt: property.createdAt || '',
+    updatedAt: property.updatedAt || '',
+  }))
+}
+
+const exportCsv = async (organizationId: string, filters: IPropertyFilter, sortOptions: Pick<IPaginationOptions, 'sortBy' | 'sortOrder'>) =>
+  buildCrmCsv(PROPERTY_EXPORT_COLUMNS, await getPropertyExportRows(organizationId, filters, sortOptions))
+
+const exportXlsx = async (organizationId: string, filters: IPropertyFilter, sortOptions: Pick<IPaginationOptions, 'sortBy' | 'sortOrder'>) =>
+  buildCrmXlsx('Properties', PROPERTY_EXPORT_COLUMNS, await getPropertyExportRows(organizationId, filters, sortOptions))
 
 const getPublicProperties = async (
   organizationId: string,
@@ -352,4 +436,6 @@ export const PropertyService = {
   updatePropertyStatus,
   reorderPropertyImages,
   deleteProperty,
+  exportCsv,
+  exportXlsx,
 }

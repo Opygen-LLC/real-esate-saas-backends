@@ -8,6 +8,66 @@ import { requireTenant } from '../../middlewares/auth'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
 import ApiError from '../../../errors/ApiError'
+import { PropertyImportService } from './propertyImport.service'
+
+
+const propertyActor = (req: Request) => ({
+  id: String(req.user?._id || req.user?.id || ''),
+  role: req.user?.userRole || req.user?.role || req.tenant?.role,
+  canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
+})
+
+const propertyExportFilters = (req: Request) => pick(req.query, [
+  'searchTerm', 'propertyType', 'listingType', 'status', 'city', 'state', 'divisionId', 'districtId', 'upazilaId',
+  'minPrice', 'maxPrice', 'bedrooms', 'bathrooms', 'minArea', 'maxArea', 'furnished', 'isFeatured', 'agentId',
+])
+
+const previewImport = catchAsync(async (req: Request, res: Response) => {
+  const actor = propertyActor(req)
+  if (!actor.id) throw new ApiError(httpStatus.UNAUTHORIZED, 'Authentication is required')
+  const data = await PropertyImportService.preview(requireTenant(req), { ...actor, id: actor.id }, req.file)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property import preview generated successfully', data })
+})
+
+const confirmImport = catchAsync(async (req: Request, res: Response) => {
+  const actor = propertyActor(req)
+  if (!actor.id) throw new ApiError(httpStatus.UNAUTHORIZED, 'Authentication is required')
+  const data = await PropertyImportService.confirm(requireTenant(req), { ...actor, id: actor.id }, req.body.importSessionId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property import completed', data })
+})
+
+const downloadImportCsvTemplate = catchAsync(async (_req: Request, res: Response) => {
+  res.status(httpStatus.OK).setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', 'attachment; filename="opygen-property-import-template.csv"')
+  res.send(`\uFEFF${PropertyImportService.csvTemplate()}`)
+})
+
+const downloadImportXlsxTemplate = catchAsync(async (_req: Request, res: Response) => {
+  const buffer = await PropertyImportService.xlsxTemplate()
+  res.status(httpStatus.OK).setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('content-disposition', 'attachment; filename="opygen-property-import-template.xlsx"')
+  res.send(buffer)
+})
+
+const exportCsv = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const filters = propertyExportFilters(req)
+  const sortOptions = pick(req.query, ['sortBy', 'sortOrder'])
+  const csv = await PropertyService.exportCsv(organizationId, filters, sortOptions)
+  res.status(httpStatus.OK).setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', `attachment; filename="properties-${new Date().toISOString().slice(0, 10)}.csv"`)
+  res.send(`\uFEFF${csv}`)
+})
+
+const exportXlsx = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const filters = propertyExportFilters(req)
+  const sortOptions = pick(req.query, ['sortBy', 'sortOrder'])
+  const workbook = await PropertyService.exportXlsx(organizationId, filters, sortOptions)
+  res.status(httpStatus.OK).setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('content-disposition', `attachment; filename="properties-${new Date().toISOString().slice(0, 10)}.xlsx"`)
+  res.send(workbook)
+})
 
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -234,4 +294,10 @@ export const PropertyController = {
   updatePropertyStatus,
   reorderPropertyImages,
   deleteProperty,
+  previewImport,
+  confirmImport,
+  downloadImportCsvTemplate,
+  downloadImportXlsxTemplate,
+  exportCsv,
+  exportXlsx,
 }

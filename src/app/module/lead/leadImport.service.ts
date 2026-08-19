@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { RedisClient } from '../../../shared/redisClient'
+import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.service'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { canAssignLeadTo, type CrmAccessContext } from '../crm/crmAccess'
 import { Contact } from '../contact/contact.model'
@@ -19,9 +20,6 @@ import {
 const IMPORT_SESSION_NAMESPACE = 'crm-lead-import'
 const IMPORT_SESSION_TTL_SECONDS = 30 * 60
 const MAX_IMPORT_ROWS = 2_000
-const MAX_XLSX_ENTRIES = 2_000
-const MAX_XLSX_ENTRY_BYTES = 32 * 1024 * 1024
-const MAX_XLSX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 const MAX_SESSION_BYTES = 8 * 1024 * 1024
 
 const LEAD_SOURCES = ['Website','WhatsApp','Facebook','Instagram','Google','Referral','WalkIn','Portal','Phone','Email','Ad','Other'] as const
@@ -101,135 +99,10 @@ for (const status of LEAD_STATUS_VALUES) {
 }
 statusByToken.set('qualified', LEAD_STATUS.INTERESTED)
 
-const csvCell = (value: string): string => /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
-
-const parseCsv = (buffer: Buffer): ParsedUpload => {
-  const text = buffer.toString('utf8').replace(/^\uFEFF/, '')
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ''
-  let quoted = false
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index]
-    if (char === '"') {
-      if (quoted && text[index + 1] === '"') { field += '"'; index += 1 }
-      else quoted = !quoted
-    } else if (char === ',' && !quoted) {
-      row.push(field); field = ''
-    } else if ((char === '\n' || char === '\r') && !quoted) {
-      if (char === '\r' && text[index + 1] === '\n') index += 1
-      row.push(field); field = ''
-      if (row.some((value) => value.trim())) rows.push(row)
-      row = []
-    } else {
-      field += char
-    }
-  }
-  if (quoted) throw new ApiError(400, 'CSV contains an unterminated quoted field')
-  row.push(field)
-  if (row.some((value) => value.trim())) rows.push(row)
-  if (rows.length < 2) throw new ApiError(400, 'Import file must include a header row and at least one data row')
-
-  return {
-    headers: rows[0].map((value) => value.trim()),
-    rows: rows.slice(1).map((values, index) => ({ row: index + 2, values })),
-  }
-}
-
-const findZipEocd = (buffer: Buffer): number => {
-  const min = Math.max(0, buffer.length - 65_557)
-  for (let offset = buffer.length - 22; offset >= min; offset -= 1) {
-    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset
-  }
-  return -1
-}
-
-// ExcelJS is intentionally used for workbook semantics, but this cheap ZIP central-
-// directory pass runs first so a small compressed upload cannot expand into an
-// unbounded XLSX zip bomb in application memory.
-const assertSafeXlsxArchive = (buffer: Buffer): void => {
-  const eocd = findZipEocd(buffer)
-  if (eocd < 0) throw new ApiError(400, 'Excel file is not a valid XLSX archive')
-  const entries = buffer.readUInt16LE(eocd + 10)
-  const centralSize = buffer.readUInt32LE(eocd + 12)
-  const centralOffset = buffer.readUInt32LE(eocd + 16)
-  if (entries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
-    throw new ApiError(400, 'ZIP64 XLSX files are not supported for lead import')
-  }
-  if (entries < 1 || entries > MAX_XLSX_ENTRIES || centralOffset + centralSize > buffer.length) {
-    throw new ApiError(400, 'Excel file archive structure is invalid or too large')
-  }
-
-  const centralEnd = centralOffset + centralSize
-  let offset = centralOffset
-  let totalUncompressed = 0
-  for (let index = 0; index < entries; index += 1) {
-    if (offset + 46 > centralEnd || offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) {
-      throw new ApiError(400, 'Excel file archive directory is invalid')
-    }
-    const flags = buffer.readUInt16LE(offset + 8)
-    const compression = buffer.readUInt16LE(offset + 10)
-    const uncompressed = buffer.readUInt32LE(offset + 24)
-    const nameLength = buffer.readUInt16LE(offset + 28)
-    const extraLength = buffer.readUInt16LE(offset + 30)
-    const commentLength = buffer.readUInt16LE(offset + 32)
-    if (flags & 0x1) throw new ApiError(400, 'Password-protected Excel files cannot be imported')
-    if (compression !== 0 && compression !== 8) throw new ApiError(400, 'Excel file uses unsupported ZIP compression')
-    if (uncompressed > MAX_XLSX_ENTRY_BYTES) throw new ApiError(413, 'Excel file contains an oversized worksheet entry')
-    totalUncompressed += uncompressed
-    if (totalUncompressed > MAX_XLSX_UNCOMPRESSED_BYTES) throw new ApiError(413, 'Excel file expands beyond the safe import limit')
-    const nextOffset = offset + 46 + nameLength + extraLength + commentLength
-    if (nextOffset > centralEnd || nextOffset > buffer.length) {
-      throw new ApiError(400, 'Excel file archive directory is truncated')
-    }
-    offset = nextOffset
-  }
-  if (offset > centralEnd) throw new ApiError(400, 'Excel file archive directory is invalid')
-}
-
-const excelCellValue = (value: ExcelJS.CellValue): unknown => {
-  if (value == null) return ''
-  if (value instanceof Date) return value
-  if (typeof value !== 'object') return value
-  if ('richText' in value && Array.isArray(value.richText)) return value.richText.map((part) => part.text).join('')
-  if ('text' in value && typeof value.text === 'string') return value.text
-  if ('result' in value) return value.result ?? ''
-  return String(value)
-}
-
-const parseXlsx = async (buffer: Buffer): Promise<ParsedUpload> => {
-  assertSafeXlsxArchive(buffer)
-  const workbook = new ExcelJS.Workbook()
-  try {
-    await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0])
-  } catch {
-    throw new ApiError(400, 'Excel file could not be parsed. Upload a valid .xlsx workbook')
-  }
-  const worksheet = workbook.worksheets[0]
-  if (!worksheet) throw new ApiError(400, 'Excel workbook does not contain a worksheet')
-
-  const nonEmptyRows: Array<{ row: number; values: unknown[] }> = []
-  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    const values: unknown[] = []
-    for (let column = 1; column <= row.cellCount; column += 1) values.push(excelCellValue(row.getCell(column).value))
-    if (values.some((value) => String(value ?? '').trim())) nonEmptyRows.push({ row: rowNumber, values })
-  })
-  if (nonEmptyRows.length < 2) throw new ApiError(400, 'Excel file must include a header row and at least one data row')
-  const [header, ...rows] = nonEmptyRows
-  return {
-    headers: header.values.map((value) => String(value ?? '').trim()),
-    rows,
-    sheetName: worksheet.name,
-  }
-}
-
-const parseUpload = async (file: Express.Multer.File): Promise<ParsedUpload> => {
-  const extension = file.originalname.toLowerCase().endsWith('.xlsx') ? '.xlsx' : '.csv'
-  const parsed = extension === '.xlsx' ? await parseXlsx(file.buffer) : parseCsv(file.buffer)
-  if (parsed.rows.length > MAX_IMPORT_ROWS) throw new ApiError(413, `Lead import supports at most ${MAX_IMPORT_ROWS.toLocaleString()} rows per file`)
-  return parsed
-}
+const parseUpload = async (file: Express.Multer.File): Promise<ParsedUpload> => parseSpreadsheetUpload(file, {
+  maxRows: MAX_IMPORT_ROWS,
+  entityLabel: 'Lead',
+})
 
 const buildColumnMap = (headers: string[]): Map<ImportColumn, number> => {
   const mapped = new Map<ImportColumn, number>()

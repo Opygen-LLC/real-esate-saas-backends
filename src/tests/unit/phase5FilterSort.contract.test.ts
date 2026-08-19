@@ -10,8 +10,8 @@ describe('Phase 5 server-side filter and sort contract', () => {
     const controller = read('src/app/module/property/property.controller.ts')
     const crmRoute = read('src/app/module/crm/crm.route.ts')
 
-    expect(service).toContain("new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])")
-    expect(service).toContain("allowedSort.has(sortBy) ? sortBy : 'createdAt'")
+    expect(service).toContain("PROPERTY_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])")
+    expect(service).toContain('safePropertySort(sortBy, sortOrder)')
     expect(service).toContain('organizationId')
     expect(controller).toContain("'agentId'")
     expect(controller).toContain("'isFeatured'")
