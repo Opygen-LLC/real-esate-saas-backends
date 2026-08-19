@@ -145,7 +145,7 @@ const schedulePendingMeta = async (limit = 100) => {
 }
 
 const schedulePendingDomainChecks = async (limit = 100) => {
-  const candidates: any[] = await DomainRecord.find({ status: { $in: ['pending', 'verified'] }, nextCheckAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextCheckAt: 1 }).limit(limit).lean()
+  const candidates: any[] = await DomainRecord.find({ nextCheckAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextCheckAt: 1 }).limit(limit).lean()
   const ids = candidates.map((item) => item._id.toString())
   const existing = new Set((await OperationsJob.find({ type: 'domain_verify', entityId: { $in: ids }, status: { $in: ['pending', 'processing'] } }).select('entityId').lean()).map((job: any) => job.entityId))
   let scheduled = 0
@@ -167,4 +167,14 @@ const backlog = async () => {
   return { pending, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
-export const OperationsQueueService = { schedule, cancel, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, backlog }
+const domainBacklog = async () => {
+  const [pending, processing, failed, oldest] = await Promise.all([
+    OperationsJob.countDocuments({ type: 'domain_verify', status: 'pending' }),
+    OperationsJob.countDocuments({ type: 'domain_verify', status: 'processing' }),
+    OperationsJob.countDocuments({ type: 'domain_verify', status: 'failed' }),
+    OperationsJob.findOne({ type: 'domain_verify', status: 'pending' }).sort({ runAt: 1 }).select('runAt').lean(),
+  ])
+  return { pending, processing, failed, oldestPendingAt: (oldest as any)?.runAt || null }
+}
+
+export const OperationsQueueService = { schedule, cancel, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, backlog, domainBacklog }

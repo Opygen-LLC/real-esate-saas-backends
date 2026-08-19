@@ -62,7 +62,8 @@
     "test:phase0:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/tenantIsolation.integration.test.ts src/tests/integration/phase2PublicForms.integration.test.ts src/tests/integration/phase0AuthSession.integration.test.ts src/tests/integration/domainLifecycle.integration.test.ts",
     "migrate:team-quota": "ts-node --transpile-only src/app/db/migrateTeamQuota.ts",
     "migrate:website-submissions": "ts-node --transpile-only src/app/db/migrateWebsiteSubmissions.ts",
-    "migrate:property-draft-assets": "ts-node --transpile-only src/app/db/migratePropertyDraftAssets.ts"
+    "migrate:property-draft-assets": "ts-node --transpile-only src/app/db/migratePropertyDraftAssets.ts",
+    "migrate:domain-lifecycle": "ts-node --transpile-only src/app/db/migratePhase9DomainLifecycle.ts"
   },
   "keywords": [
     "real-estate",

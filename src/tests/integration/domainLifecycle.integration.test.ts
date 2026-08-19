@@ -1,13 +1,52 @@
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+const providerState = vi.hoisted(() => ({ providerVerified: false, tlsActive: false, publicActive: false }))
+
 vi.mock('dns/promises', () => ({
   default: {
-    resolveTxt: vi.fn(async () => [['realestate-saas=phase7-domain-token']]),
-    resolve4: vi.fn(async () => ['76.76.21.21']),
-    resolveCname: vi.fn(async () => ['cname.realestate-saas.com']),
+    resolveTxt: vi.fn(async () => [['realestate-saas=phase9-domain-token']]),
   },
 }))
+
+vi.mock('../../app/module/domain/providers', () => {
+  const diagnostic = (check: string, label: string, ok: boolean) => ({
+    check, label, ok, state: ok ? 'pass' : 'pending', expected: 'expected', observed: ok ? 'expected' : 'pending', checkedAt: new Date(),
+  })
+  const provider = {
+    name: 'vercel',
+    getRequiredDns: vi.fn(async ({ domain, ownershipToken }: any) => [
+      { type: 'TXT', name: `_realestate-verification.${domain}`, host: '_realestate-verification', value: `realestate-saas=${ownershipToken}`, purpose: 'ownership' },
+      { type: 'A', name: domain, host: '@', value: '76.76.21.21', purpose: 'routing' },
+      { type: 'CNAME', name: `www.${domain}`, host: 'www', value: 'cname.vercel-dns.com', purpose: 'routing' },
+      { type: 'TXT', name: `_vercel.${domain}`, host: '_vercel', value: 'vc-domain-verify=phase9-provider', purpose: 'provider_verification' },
+    ]),
+    registerDomain: vi.fn(async () => ({ registered: true, providerRequestId: 'project-domain-1' })),
+    verifyRouting: vi.fn(async () => ({
+      apexOk: true,
+      wwwOk: true,
+      registered: true,
+      providerVerified: providerState.providerVerified,
+      diagnostics: [
+        diagnostic('apex_a', 'A / apex routing', true),
+        diagnostic('www_cname', 'www routing', true),
+        diagnostic('hosting_registration', 'Hosting registration', providerState.providerVerified),
+      ],
+    })),
+    provisionTls: vi.fn(async () => ({
+      status: providerState.tlsActive ? 'active' : 'provisioning',
+      diagnostics: [diagnostic('tls_certificate', 'TLS certificate', providerState.tlsActive)],
+    })),
+    getTlsStatus: vi.fn(async () => ({ status: providerState.tlsActive ? 'active' : 'provisioning', diagnostics: [] })),
+    verifyPublicRouting: vi.fn(async () => ({
+      active: providerState.publicActive,
+      diagnostics: [diagnostic('public_routing', 'Public routing', providerState.publicActive)],
+    })),
+    removeDomain: vi.fn(async () => undefined),
+    health: vi.fn(async () => ({ provider: 'vercel', configured: true, healthy: true, latencyMs: 3, checkedAt: new Date().toISOString() })),
+  }
+  return { DomainProviderService: { current: () => provider, health: provider.health } }
+})
 
 const requiredDb = process.env.TEST_DATABASE_URL
 const suite = requiredDb ? describe : describe.skip
@@ -31,9 +70,11 @@ const request = async (path: string, headers: Record<string, string> = {}, init:
   return { response, body }
 }
 
-suite('custom-domain lifecycle integration', () => {
-  const organizationId = 'org_phase7_domain'
-  const domain = 'phase7-domain.example'
+suite('Phase 9 custom-domain lifecycle integration', () => {
+  const organizationId = 'org_phase9_domain'
+  const otherOrganizationId = 'org_phase9_other'
+  const domain = 'phase9-domain.example'
+  const otherDomain = 'other-phase9-domain.example'
   let auth: Record<string, string>
 
   beforeAll(async () => {
@@ -45,7 +86,6 @@ suite('custom-domain lifecycle integration', () => {
     process.env.CLIENT_URL = 'http://localhost:3000'
     process.env.PUBLIC_API_URL = 'http://127.0.0.1:5000'
     process.env.ALLOWED_ORIGINS = 'http://localhost:3000'
-    process.env.DOMAIN_TLS_PROVIDER_URL = ''
 
     mongoose = await import('mongoose')
     await mongoose.connect(requiredDb!, { autoIndex: true, serverSelectionTimeoutMS: 5000 })
@@ -58,10 +98,10 @@ suite('custom-domain lifecycle integration', () => {
 
     await Organization.create({
       organizationId,
-      agencyName: 'Phase Seven Domain Realty',
+      agencyName: 'Phase Nine Domain Realty',
       email: 'domain-owner@example.com',
       phone: '+8801711111111',
-      sub_domain: 'phase7-domain',
+      sub_domain: 'phase9-domain',
       subscription: { plan: 'professional', status: 'active', maxProperties: 100, maxAgents: 10 },
     })
     const user = await User.create({
@@ -75,22 +115,41 @@ suite('custom-domain lifecycle integration', () => {
       isVerified: true,
     })
     const token = jwtHelpers.createToken({
-      _id: user._id.toString(),
-      phoneNumber: user.phoneNumber,
-      email: user.email,
-      userRole: user.userRole,
-      organizationId,
+      _id: user._id.toString(), phoneNumber: user.phoneNumber, email: user.email,
+      userRole: user.userRole, organizationId,
     }, config.jwt.secret, config.jwt.expires_in)
     auth = { authorization: `Bearer ${token}` }
 
     await DomainRecord.create({
       organizationId,
       domain,
-      ownershipToken: 'phase7-domain-token',
+      ownershipToken: 'phase9-domain-token',
+      lifecycleStatus: 'PENDING_DNS',
       status: 'pending',
       tlsStatus: 'not_started',
+      providerRegistrationStatus: 'registered',
       requiredDns: [],
       nextCheckAt: new Date(),
+    })
+    await Organization.create({
+      organizationId: otherOrganizationId,
+      agencyName: 'Other Phase Nine Realty',
+      email: 'other-domain-owner@example.com',
+      phone: '+8801722222222',
+      sub_domain: 'phase9-other',
+      subscription: { plan: 'professional', status: 'active', maxProperties: 100, maxAgents: 10 },
+    })
+    await DomainRecord.create({
+      organizationId: otherOrganizationId,
+      domain: otherDomain,
+      ownershipToken: 'other-phase9-token',
+      lifecycleStatus: 'ACTIVE',
+      publicRoutingStatus: 'active',
+      status: 'verified',
+      tlsStatus: 'active',
+      providerRegistrationStatus: 'registered',
+      requiredDns: [],
+      nextCheckAt: new Date(Date.now() + 60_000),
     })
 
     const app = (await import('../../app')).default
@@ -110,24 +169,71 @@ suite('custom-domain lifecycle integration', () => {
     await mongoose?.disconnect().catch(() => undefined)
   })
 
-  it('moves through pending/verified states and never routes before TLS is active', async () => {
-    const pending = await request('/api/v1/domain/status', auth)
-    expect(pending.response.status).toBe(200)
-    expect(pending.body?.data?.status).toBe('pending')
-    expect(pending.body?.data?.tlsStatus).toBe('not_started')
+  it('stops after Opygen ownership while Vercel project verification is still pending', async () => {
+    providerState.providerVerified = false
+    const pendingProvider = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
+    expect(pendingProvider.response.status).toBe(200)
+    expect(pendingProvider.body?.data?.lifecycleStatus).toBe('OWNERSHIP_VERIFIED')
+    expect(pendingProvider.body?.data?.tlsStatus).toBe('not_started')
+    expect(pendingProvider.body?.data?.requiredDns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ purpose: 'provider_verification', host: '_vercel' }),
+    ]))
+  })
 
+  it('does not route after DNS/routing verification while TLS is still provisioning', async () => {
+    providerState.providerVerified = true
     const verified = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
     expect(verified.response.status).toBe(200)
-    expect(verified.body?.data?.status).toBe('verified')
+    expect(verified.body?.data?.lifecycleStatus).toBe('TLS_PROVISIONING')
     expect(verified.body?.data?.tlsStatus).toBe('provisioning')
+    expect(verified.body?.data?.diagnostics?.map((item: any) => item.check)).toEqual(expect.arrayContaining([
+      'ownership_txt', 'apex_a', 'www_cname', 'hosting_registration', 'tls_certificate', 'public_routing',
+    ]))
 
     const beforeTls = await request(`/api/v1/domain/resolve/${domain}`)
     expect(beforeTls.response.status).toBe(200)
-    expect(beforeTls.body?.data?.organizationId).toBeNull()
+    expect(beforeTls.body?.data).toBeNull()
+  })
 
-    await DomainRecord.updateOne({ organizationId }, { $set: { tlsStatus: 'active' } })
-    const routable = await request(`/api/v1/domain/resolve/${domain}`)
-    expect(routable.response.status).toBe(200)
-    expect(routable.body?.data?.organizationId).toBe(organizationId)
+  it('routes only after TLS and the public Vercel runtime check are active', async () => {
+    providerState.tlsActive = true
+    providerState.publicActive = true
+    const active = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
+    expect(active.response.status).toBe(200)
+    expect(active.body?.data?.lifecycleStatus).toBe('ACTIVE')
+    expect(active.body?.data?.publicRoutingStatus).toBe('active')
+
+    const apex = await request(`/api/v1/domain/resolve/${domain}`)
+    expect(apex.body?.data?.organizationId).toBe(organizationId)
+    expect(apex.body?.data?.redirectTo).toBeNull()
+
+    const www = await request(`/api/v1/domain/resolve/www.${domain}`)
+    expect(www.body?.data?.organizationId).toBe(organizationId)
+    expect(www.body?.data?.redirectTo).toBe(`https://${domain}`)
+
+    const freeSubdomain = await request('/api/v1/domain/resolve-subdomain/phase9-domain')
+    expect(freeSubdomain.body?.data?.organizationId).toBe(organizationId)
+  })
+
+  it('keeps custom hosts tenant-exact and exposes worker/provider queue health', async () => {
+    const other = await request(`/api/v1/domain/resolve/${otherDomain}`)
+    expect(other.body?.data?.organizationId).toBe(otherOrganizationId)
+    expect(other.body?.data?.organizationId).not.toBe(organizationId)
+
+    const health = await request('/api/v1/domain/health', auth)
+    expect(health.response.status).toBe(200)
+    expect(health.body?.data?.provider?.healthy).toBe(true)
+    expect(health.body?.data?.worker).toHaveProperty('healthy')
+    expect(health.body?.data?.queue).toEqual(expect.objectContaining({ pending: expect.any(Number), processing: expect.any(Number), failed: expect.any(Number) }))
+  })
+
+  it('fails closed for an old/wrong custom domain and reports suspension without cross-tenant routing', async () => {
+    const wrong = await request('/api/v1/domain/resolve/old-phase9-domain.example')
+    expect(wrong.body?.data).toBeNull()
+
+    await Organization.updateOne({ organizationId }, { $set: { isBlocked: true } })
+    const suspended = await request(`/api/v1/domain/resolve/${domain}`)
+    expect(suspended.body?.data?.organizationId).toBe(organizationId)
+    expect(suspended.body?.data?.websiteStatus).toBe('suspended')
   })
 })

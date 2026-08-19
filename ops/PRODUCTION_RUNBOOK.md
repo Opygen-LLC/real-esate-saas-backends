@@ -12,7 +12,7 @@
 - MongoDB must be a replica set or mongos. Transactions are required for tenant provisioning, plan versioning, website publishing, and billing. A standalone MongoDB instance is rejected by production startup.
 - Redis must use a password. Managed/public Redis must also use TLS. The supplied Docker Compose deployment keeps Redis unexposed on an isolated bridge network and therefore uses `REDIS_ALLOW_INSECURE_PRIVATE_NETWORK=true` with TLS disabled only inside that private network.
 - SMTP is a required dependency because account verification is email-first. Production startup verifies SMTP credentials/connectivity before the API becomes ready.
-- Configure object storage, ClamAV, domain/TLS provider, and any enabled SMS provider using real production credentials. Never place secrets in the repository.
+- Configure object storage, ClamAV, the Vercel custom-domain provider, and any enabled SMS provider using real production credentials. Never place secrets in the repository.
 
 ## First deployment
 
@@ -57,8 +57,9 @@ Some production features require real business/provider values and must not be b
 
 - In Super Admin → Platform Settings, publish a legally reviewed privacy-policy URL/version and mark the legal review approved. Until then public enquiries and public viewing requests intentionally return 503 instead of collecting consent against an unapproved policy.
 - Keep legacy gateway integrations disabled. Subscription changes use the manual payment ledger and super-admin confirmation workflow.
-- Set `DOMAIN_A_TARGET` and `DOMAIN_CNAME_TARGET` to the values shown for the actual Vercel project/domain configuration. Do not assume one global DNS target for every Vercel project.
-- Set a reachable `DOMAIN_TLS_PROVIDER_URL`, object-storage endpoint/credentials/public origin, and ClamAV host before enabling those customer-facing workflows.
+- Set `DOMAIN_A_TARGET` and `DOMAIN_CNAME_TARGET` to the values shown for the actual Vercel project/domain configuration. Production intentionally has no DNS-target fallback.
+- Set `DOMAIN_PROVIDER=vercel`, `VERCEL_PROJECT_ID_OR_NAME`, `VERCEL_API_TOKEN`, and `VERCEL_TEAM_ID` when applicable. Vercel project-domain registration and certificate verification are handled directly through the Vercel API; `DOMAIN_TLS_PROVIDER_URL` is retired.
+- Set the object-storage endpoint/credentials/public origin and ClamAV host before enabling those customer-facing workflows.
 
 ## Diagnosing 502/503
 
@@ -67,11 +68,13 @@ Use `/health` to determine whether the Node process is alive and `/ready` to det
 ```bash
 curl -i https://api.faysaldev.com/health
 curl -i https://api.faysaldev.com/ready
+# Authenticated tenant check: GET /api/v1/domain/health shows worker, domain queue and Vercel reachability.
 docker compose -f docker-compose.production.yml logs --tail=300 api
 ```
 
 Common startup log messages now identify the failed dependency directly:
 
+- `Missing or insecure production configuration: DOMAIN_A_TARGET` / `DOMAIN_CNAME_TARGET` / `VERCEL_*` → custom-domain control plane is not configured for the actual Vercel project.
 - `Production requires a MongoDB replica set or mongos...` → wrong Mongo topology/URL.
 - `Redis is enabled but unavailable during startup` → host/password/network mismatch.
 - `SMTP verification failed during startup...` → SMTP host, port, TLS mode, credentials, sender, firewall, or provider policy is wrong.

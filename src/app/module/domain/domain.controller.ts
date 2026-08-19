@@ -5,6 +5,9 @@ import { sendResponse } from '../../../shared/customResponse'
 import { requireTenant } from '../../middlewares/auth'
 import { writeAudit } from '../audit/audit.service'
 import { DomainService } from './domain.service'
+import { DomainProviderService } from './providers'
+import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
+import { getWorkerHealth } from '../cron/phase3.worker'
 
 const getCustomDomain = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Custom domain status fetched', data: await DomainService.get(requireTenant(req)) })
@@ -25,6 +28,23 @@ const verifyCustomDomain = catchAsync(async (req: Request, res: Response) => {
 })
 
 
+
+const getDomainHealth = catchAsync(async (_req: Request, res: Response) => {
+  const [provider, queue] = await Promise.all([
+    DomainProviderService.health(),
+    OperationsQueueService.domainBacklog(),
+  ])
+  const worker = getWorkerHealth()
+  const workerOperational = worker.enabled && worker.scheduled && worker.healthy
+  const healthy = workerOperational && provider.healthy && queue.failed === 0
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Custom-domain operations health fetched',
+    data: { healthy, worker, queue, provider },
+  })
+})
+
 const getSubdomainAvailability = catchAsync(async (req: Request, res: Response) => {
   const data = await DomainService.isSubdomainAvailable(req.params.value, requireTenant(req))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Website address availability checked', data })
@@ -44,4 +64,4 @@ const resolveSubdomain = catchAsync(async (req: Request, res: Response) => {
 
 
 const resolveHost = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data: await DomainService.resolveVerifiedHost(req.params.host) }))
-export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, getSubdomainAvailability, changeSubdomain, resolveSubdomain, resolveHost }
+export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, getDomainHealth, getSubdomainAvailability, changeSubdomain, resolveSubdomain, resolveHost }

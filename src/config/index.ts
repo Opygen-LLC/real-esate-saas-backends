@@ -146,6 +146,18 @@ const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim() || 'real
 process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
+const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'vercel')
+const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || (isProduction ? '' : '76.76.21.21')
+const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || (isProduction ? '' : 'cname.vercel-dns.com')).replace(/\.$/, '')
+const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || ''
+const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || ''
+const vercelTeamId = process.env.VERCEL_TEAM_ID?.trim() || ''
+const vercelApiBase = (process.env.VERCEL_API_BASE?.trim() || 'https://api.vercel.com').replace(/\/$/, '')
+if (!['vercel'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must currently be vercel')
+if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
+if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget.includes('/'))) throw new Error('DOMAIN_CNAME_TARGET must be a hostname only')
+if (!z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
+
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
   requiredUrls.forEach((name) => requiredInProduction(name))
@@ -155,6 +167,12 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
   requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+  requiredInProduction('DOMAIN_A_TARGET')
+  requiredInProduction('DOMAIN_CNAME_TARGET')
+  if (domainProvider === 'vercel') {
+    requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
+    requiredInProduction('VERCEL_API_TOKEN', 20)
+  }
 
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
@@ -275,12 +293,17 @@ export default {
     timeout_ms: Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 10000)),
   },
   domains: {
-    a_target: process.env.DOMAIN_A_TARGET || '76.76.21.21',
-    cname_target: (process.env.DOMAIN_CNAME_TARGET || 'cname.realestate-saas.com').replace(/\.$/, ''),
+    provider: domainProvider,
+    a_target: domainATarget,
+    cname_target: domainCnameTarget,
     ownership_prefix: process.env.DOMAIN_OWNERSHIP_PREFIX || '_realestate-verification',
-    tls_provider_url: process.env.DOMAIN_TLS_PROVIDER_URL?.trim() || '',
-    tls_provider_token: process.env.DOMAIN_TLS_PROVIDER_TOKEN?.trim() || '',
     public_site_origin: publicSiteOrigin,
+    provider_timeout_ms: Math.max(1000, Math.min(20000, Number(process.env.DOMAIN_PROVIDER_TIMEOUT_MS || 8000))),
+    provider_health_cache_ms: Math.max(5000, Math.min(300000, Number(process.env.DOMAIN_PROVIDER_HEALTH_CACHE_MS || 30000))),
+    vercel_project: vercelProject,
+    vercel_api_token: vercelApiToken,
+    vercel_team_id: vercelTeamId,
+    vercel_api_base: vercelApiBase,
   },
   realtime: {
     enabled: realtimeEnabled,

@@ -21,6 +21,8 @@ import { virusScannerHealth } from './app/module/websiteBuilder/virusScan.servic
 import { corsOptionsDelegate } from './app/middlewares/corsPolicy'
 import { PrivacyPolicyService } from './app/module/privacy/privacyPolicy.service'
 import { authMiddlewares } from './app/middlewares/auth'
+import { DomainProviderService } from './app/module/domain/providers'
+import { OperationsQueueService } from './app/module/operationsQueue/operationsQueue.service'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -67,13 +69,15 @@ app.get('/', (_req: Request, res: Response) => {
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString() }))
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
-  const [transactions, redis, email, objectStorage, clamav, privacy] = await Promise.all([
+  const [transactions, redis, email, objectStorage, clamav, privacy, domainProvider, domainQueue] = await Promise.all([
     mongo ? mongoSupportsTransactions() : Promise.resolve(false),
     RedisClient.ping(),
     verifyEmailProvider(),
     ObjectStorageService.health(),
     virusScannerHealth(),
     mongo ? PrivacyPolicyService.getPublicPolicyState() : Promise.resolve({ ready: false, policyUrl: '', policyVersion: '', legalReviewStatus: 'required' as const }),
+    DomainProviderService.health(),
+    mongo ? OperationsQueueService.domainBacklog() : Promise.resolve({ pending: 0, processing: 0, failed: 0, oldestPendingAt: null }),
   ])
   const worker = getWorkerHealth()
   const workerReady = !config.runtime.worker_enabled || worker.healthy
@@ -81,6 +85,12 @@ app.get('/ready', async (_req, res) => {
   const emailReady = !config.isProduction || email
   const mediaReady = !config.isProduction || (objectStorage.healthy && clamav.healthy)
   const privacyReady = !config.isProduction || privacy.ready
+  // Provider control-plane outages are reported as domainLifecycle degradation
+  // but do not evict otherwise healthy API replicas from the load balancer.
+  // Worker health remains a readiness gate because stalled durable jobs affect
+  // multiple production workflows, including domain lifecycle progression.
+  const domainWorkerOperational = worker.enabled && worker.scheduled && worker.healthy
+  const domainLifecycleHealthy = domainWorkerOperational && domainProvider.healthy && domainQueue.failed === 0
   const ready = mongo && transactionReady && redis && emailReady && workerReady && mediaReady && privacyReady
   const emailStatus = emailProviderStatus()
   res.status(ready ? 200 : 503).json({
@@ -94,6 +104,11 @@ app.get('/ready', async (_req, res) => {
       objectStorage,
       clamav,
       privacy: { ...privacy, healthy: privacyReady },
+      domainLifecycle: {
+        healthy: domainLifecycleHealthy,
+        provider: domainProvider,
+        queue: domainQueue,
+      },
     },
   })
 })

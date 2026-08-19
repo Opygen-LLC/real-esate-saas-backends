@@ -32,10 +32,14 @@ export const runPhase3Maintenance = async () => {
       SubscriptionPlanService.applyDuePlanVersions(),
       Lead.updateMany({ firstResponseAt: { $exists: false }, responseDueAt: { $lt: new Date() }, slaBreachedAt: { $exists: false } }, { $set: { slaBreachedAt: new Date() } }),
     ])
-    const backlog = await OperationsQueueService.backlog()
+    const [backlog, domainBacklog] = await Promise.all([OperationsQueueService.backlog(), OperationsQueueService.domainBacklog()])
     Metrics.setGauge('operations_queue_pending', backlog.pending)
     Metrics.setGauge('operations_queue_failed', backlog.failed)
     Metrics.setGauge('operations_queue_oldest_age_seconds', backlog.oldestPendingAt ? Math.max(0, (Date.now() - new Date(backlog.oldestPendingAt).getTime()) / 1000) : 0)
+    Metrics.setGauge('domain_queue_pending', domainBacklog.pending)
+    Metrics.setGauge('domain_queue_processing', domainBacklog.processing)
+    Metrics.setGauge('domain_queue_failed', domainBacklog.failed)
+    Metrics.setGauge('domain_queue_oldest_age_seconds', domainBacklog.oldestPendingAt ? Math.max(0, (Date.now() - new Date(domainBacklog.oldestPendingAt).getTime()) / 1000) : 0)
     cleanupTick += 1
     const cleanupEvery = Math.max(1, Math.round(24 * 60 * 60 * 1000 / config.runtime.worker_poll_ms))
     const propertyDraftCleanupEvery = Math.max(1, Math.round(config.assets.property_draft_cleanup_interval_minutes * 60_000 / config.runtime.worker_poll_ms))
@@ -47,7 +51,7 @@ export const runPhase3Maintenance = async () => {
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
     Metrics.setGauge('worker_last_duration_ms', lastDurationMs)
-    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, planVersions, slaMarked: sla.modifiedCount, assets, propertyDraftAssets }
+    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, domainBacklog, planVersions, slaMarked: sla.modifiedCount, assets, propertyDraftAssets }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     lastDurationMs = performance.now() - started
@@ -58,7 +62,7 @@ export const runPhase3Maintenance = async () => {
 export const getWorkerHealth = () => {
   const grace = Math.max(30_000, config.runtime.worker_poll_ms * 4)
   const healthy = !config.runtime.worker_enabled || (lastSuccessAt > 0 ? Date.now() - lastSuccessAt < grace : Date.now() - lastRunAt < grace)
-  return { healthy, running, lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null, lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : null, lastDurationMs: Math.round(lastDurationMs), lastError }
+  return { enabled: config.runtime.worker_enabled, scheduled: Boolean(interval), healthy, running, lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null, lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : null, lastDurationMs: Math.round(lastDurationMs), lastError }
 }
 
 export const startPhase3Worker = () => {
