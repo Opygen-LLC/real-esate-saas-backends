@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { WEBSITE_TEMPLATE_IDS } from './websiteTemplate.constants'
 
 export const nodeAnimationSchema = z.object({
   name: z.enum(['none','fade-in','fade-up','fade-down','fade-left','fade-right','zoom-in','slide-up','blur-in']),
@@ -10,7 +11,7 @@ export const builderPageSchema = z.object({ id: z.string().min(1), slug: z.strin
 const seoSchema = z.object({ canonicalUrl: z.string().max(2048).optional(), title: z.string().max(70).optional(), description: z.string().max(180).optional(), openGraph: z.object({ title: z.string().max(95).optional(), description: z.string().max(200).optional(), image: z.string().max(2048).optional() }).optional(), robots: z.object({ index: z.boolean().optional(), follow: z.boolean().optional() }).optional(), structuredData: z.object({ enabled: z.boolean().optional() }).optional() }).optional()
 export const builderDocumentSchema = z.object({
   schemaVersion: z.literal(2),
-  template: z.object({ id: z.enum(['template-1','template-2','template-3','template-4']), version: z.string().regex(/^\d+\.\d+\.\d+$/) }),
+  template: z.object({ id: z.enum(WEBSITE_TEMPLATE_IDS), version: z.string().regex(/^\d+\.\d+\.\d+$/) }),
   seo: seoSchema,
   pages: z.array(builderPageSchema).min(1),
   theme: z.object({ primaryColor: z.string().default('#0f172a'), secondaryColor: z.string().default('#2563eb'), accentColor: z.string().default('#7c3aed'), fontFamily: z.string().default('Inter') }),

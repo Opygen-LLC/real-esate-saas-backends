@@ -1,4 +1,5 @@
 import mongoose, { Model } from 'mongoose'
+import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
 
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
 export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped'
@@ -91,7 +92,7 @@ export interface IOrganization {
     youtube?: string
     whatsapp?: string
   }
-  templateId?: 'template-1' | 'template-2' | 'template-3' | 'template-4'
+  templateId?: WebsiteTemplateId
   websiteSettings?: {
     heroTitle?: string
     heroSubtitle?: string

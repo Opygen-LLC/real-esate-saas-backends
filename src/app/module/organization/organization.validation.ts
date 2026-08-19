@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
+import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
 const agencyType = z.enum(['residential', 'commercial', 'mixed', 'brokerage', 'developer', 'general'])
@@ -76,7 +77,7 @@ export const OrganizationValidation = {
   }).strict() }),
 
   website: z.object({ body: z.object({
-    templateId: z.enum(['template-1', 'template-2', 'template-3', 'template-4']).optional(),
+    templateId: z.enum(WEBSITE_TEMPLATE_IDS).optional(),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), metaTitle: z.string().max(120).optional(),
     metaDescription: z.string().max(300).optional(), logo: optionalUrl.optional(), defaultLanguage: z.enum(['en', 'bn']).optional(),
@@ -89,7 +90,7 @@ export const OrganizationValidation = {
     address: z.string().max(300).optional(), city: z.string().max(100).optional(), state: z.string().max(100).optional(), country: z.literal('Bangladesh').optional(),
     defaultLanguage: z.enum(['en', 'bn']).optional(), addressDetails: addressDetails.optional(), serviceAreas: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
     logo: optionalUrl.optional(), primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-    font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), templateId: z.enum(['template-1', 'template-2', 'template-3', 'template-4']).optional(),
+    font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), templateId: z.enum(WEBSITE_TEMPLATE_IDS).optional(),
     websiteSettings: websiteSettings.optional(), socialLinks: socialLinks.optional(),
   }).strict() }),
 

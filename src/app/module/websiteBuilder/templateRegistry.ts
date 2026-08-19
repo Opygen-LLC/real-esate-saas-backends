@@ -1,13 +1,14 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import type { WebsiteTemplateId } from './websiteTemplate.constants'
 
 export const CURRENT_BUILDER_SCHEMA_VERSION = 2
 
 export type TemplateTier = 'free' | 'premium'
 
 export interface WebsiteTemplateDefinition {
-  id: string
+  id: WebsiteTemplateId
   version: string
   name: string
   thumbnail: string
@@ -35,6 +36,9 @@ const registry: WebsiteTemplateDefinition[] = [
   { id: 'template-2', version: '2.0.0', name: 'Luxury Editorial', thumbnail: '/templates/template-2.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Editorial presentation for premium property portfolios.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Collection' }, whyChooseUs: { supported: false, label: 'Brand Story' }, agents: { supported: false, label: 'Advisors' }, consultation: { supported: false, label: 'Private Consultation' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-2', '2.0.0') },
   { id: 'template-3', version: '2.0.0', name: 'Corporate Brokerage', thumbnail: '/templates/template-3.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Structured multi-agent brokerage presentation.', capabilities: { hero: { backgroundImage: false, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Listings' }, whyChooseUs: { supported: false, label: 'Services' }, agents: { supported: false, label: 'Brokerage Team' }, consultation: { supported: false, label: 'Contact CTA' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-3', '2.0.0') },
   { id: 'template-4', version: '2.0.0', name: 'Urban Developer', thumbnail: '/templates/template-4.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'Bold project-led layout for developers and urban agencies.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Featured Projects' }, whyChooseUs: { supported: false, label: 'Development Highlights' }, agents: { supported: false, label: 'Project Team' }, consultation: { supported: false, label: 'Inquiry CTA' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-4', '2.0.0') },
+  { id: 'template-5', version: '2.0.0', name: 'Nordic Minimalist', thumbnail: '/templates/template-5.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Clean Scandinavian architectural layout with high whitespace, mortgage estimator and verified badges.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Curated Portfolio' }, whyChooseUs: { supported: true, label: 'Quality Standards' }, agents: { supported: true, label: 'Advisors' }, consultation: { supported: true, label: 'Consultation' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-5', '2.0.0') },
+  { id: 'template-6', version: '2.0.0', name: 'Apex Metropolitan', thumbnail: '/templates/template-6.svg', supportedSchemaVersion: 2, tier: 'premium', entitlement: 'premiumTemplates', description: 'High-tech dark cyber-luxury with live market ticker, glass cards and financial grid mode.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Metropolitan Assets' }, whyChooseUs: { supported: true, label: 'Execution Pillars' }, agents: { supported: true, label: 'Asset Advisors' }, consultation: { supported: true, label: 'Private Acquisition Desk' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-6', '2.0.0') },
+  { id: 'template-7', version: '2.0.0', name: 'Serene Oasis', thumbnail: '/templates/template-7.svg', supportedSchemaVersion: 2, tier: 'free', entitlement: 'included', description: 'Warm organic modern editorial for peaceful waterfront, garden and botanical living.', capabilities: { hero: { backgroundImage: true, eyebrow: true, title: true, subtitle: true }, sections: { featuredProperties: { supported: true, label: 'Peaceful Residences' }, whyChooseUs: { supported: true, label: 'Neighborhood Guides' }, agents: { supported: true, label: 'Living Concierge' }, consultation: { supported: true, label: 'Private Tour Scheduler' } } }, qa: { accessibility: 'enforced', responsive: 'enforced' }, migrate: pinTemplate('template-7', '2.0.0') },
 ]
 
 const normalizeSeo = (document: any) => ({

@@ -1,5 +1,6 @@
 import mongoose, { Schema, model } from 'mongoose'
 import { IOrganization, OrganizationModel } from './organization.interface'
+import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
 
 const organizationSchema = new Schema<IOrganization, OrganizationModel>(
   {
@@ -172,7 +173,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
     templateId: {
       type: String,
-      enum: ['template-1', 'template-2', 'template-3', 'template-4'],
+      enum: [...WEBSITE_TEMPLATE_IDS],
       default: 'template-1',
     },
     websiteSettings: {

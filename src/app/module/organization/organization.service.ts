@@ -10,7 +10,7 @@ import { DomainRecord } from '../domain/domain.model'
 import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
-import { EntitlementService } from '../entitlement/entitlement.service'
+import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
@@ -103,7 +103,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
 }
 
 const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
-  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
+  if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
 
   const websiteSettings = payload.websiteSettings ? definedEntries(payload.websiteSettings as Record<string, unknown>) : undefined
   const updateData: Record<string, unknown> = definedEntries({
@@ -166,7 +166,7 @@ const updateMyOrganization = async (organizationId: string, payload: Partial<IOr
 }
 
 const saveOnboarding = async (organizationId: string, payload: Record<string, any>): Promise<IOrganization> => {
-  if (payload.templateId && ['template-3', 'template-4'].includes(payload.templateId)) await EntitlementService.assertFeature(organizationId, 'premiumTemplates')
+  if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
   const currentStep = Math.max(1, Math.min(5, Number(payload.currentStep || 1)))
   const update: Record<string, unknown> = definedEntries({
     agencyName: payload.agencyName,
