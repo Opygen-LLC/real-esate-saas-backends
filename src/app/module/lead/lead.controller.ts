@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
+import { withWebsiteSubmissionReceipt } from '../../../contracts/workspaceContracts'
 import pick from '../../../shared/pick'
 import { requireTenant } from '../../middlewares/auth'
 import { ActivityService } from '../activity/activity.service'
@@ -22,7 +23,7 @@ const publicCaptureLead = catchAsync(async (req, res) => sendResponse(res, {
   statusCode: 201,
   success: true,
   message: 'Inquiry submitted successfully.',
-  data: await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId }),
+  data: withWebsiteSubmissionReceipt('lead', await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId })),
 }))
 
 const getAllLeads = catchAsync(async (req, res) => {

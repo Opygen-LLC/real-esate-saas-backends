@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -10,6 +11,7 @@ let User: any
 let Organization: any
 let Property: any
 let PlatformSettings: any
+let ReviewInvitation: any
 let jwtHelpers: any
 let config: any
 let organizationId = ''
@@ -53,6 +55,7 @@ suite('phase 2 public forms and settings contracts', () => {
     ;({ Organization } = await import('../../app/module/organization/organization.model'))
     ;({ Property } = await import('../../app/module/property/property.model'))
     ;({ PlatformSettings } = await import('../../app/module/platformSettings/platformSettings.model'))
+    ;({ ReviewInvitation } = await import('../../app/module/review/review.model'))
     ;({ jwtHelpers } = await import('../../app/helpers/jwtHelpers'))
     config = (await import('../../config')).default
 
@@ -111,6 +114,7 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(result.response.status).toBe(201)
     expect(result.body?.data?.phone).toBe('+8801712345678')
     expect(result.body?.data?.email).toBe('buyer@example.com')
+    expect(result.body?.data?.submission).toMatchObject({ submissionType: 'lead', status: 'received', linkedEntityId: result.body?.data?._id })
   })
 
   it('accepts the agent contact form contract and returns field errors for invalid identity input', async () => {
@@ -147,6 +151,23 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(stale.body?.fieldErrors?.policyVersion?.[0]).toMatch(/policy changed/i)
   })
 
+  it('returns the same website-submission receipt contract for public review submissions', async () => {
+    const token = 'phase0-public-review-token-0000000000000001'
+    await ReviewInvitation.create({
+      organizationId,
+      propertyId: property._id,
+      tokenHash: crypto.createHash('sha256').update(token).digest('hex'),
+      createdBy: owner._id,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
+    const result = await request('/api/v1/reviews/public/submit', {
+      method: 'POST',
+      body: JSON.stringify({ token, name: 'Review Buyer', phone: '01712345678', email: 'review@example.com', rating: 5, comment: 'Excellent service.' }),
+    })
+    expect(result.response.status).toBe(201)
+    expect(result.body?.data?.submission).toMatchObject({ submissionType: 'review', status: 'received', linkedEntityId: result.body?.data?._id })
+  })
+
   it('schedules a public viewing without a property agent by falling back to the agency owner', async () => {
     const slot = futureDhakaSlot()
     const result = await request('/api/v1/viewing/public-request', {
@@ -156,6 +177,7 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(result.response.status).toBe(201)
     expect(String(result.body?.data?.agentId)).toBe(String(owner._id))
     expect(result.body?.data?.clientPhone).toBe('+8801312345678')
+    expect(result.body?.data?.submission).toMatchObject({ submissionType: 'viewing', status: 'received', linkedEntityId: result.body?.data?._id })
   })
 
   it('rejects invalid appointment windows with date/time field errors', async () => {

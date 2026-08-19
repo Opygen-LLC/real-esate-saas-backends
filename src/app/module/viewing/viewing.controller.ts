@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
+import { withWebsiteSubmissionReceipt } from '../../../contracts/workspaceContracts'
 import pick from '../../../shared/pick'
 import { ViewingService } from './viewing.service'
 import { requireTenant } from '../../middlewares/auth'
@@ -53,7 +54,7 @@ const publicRequestViewing = catchAsync(async (req: Request, res: Response) => {
     statusCode: httpStatus.CREATED,
     success: true,
     message: 'Viewing request submitted successfully. The assigned broker will confirm your showing.',
-    data: result,
+    data: withWebsiteSubmissionReceipt('viewing', result),
   })
 })
 

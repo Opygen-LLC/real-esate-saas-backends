@@ -27,6 +27,7 @@ import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDoc
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
 import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RequestMeta } from './auth.interface'
 import { AuthSession } from './authSession.model'
+import { toAuthSessionSummary, type AuthSessionSummary } from '../../../contracts/workspaceContracts'
 import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { captureOtpForTest } from '../../../testSupport/otpCapture'
@@ -532,6 +533,30 @@ const createRealtimeTicket = async (userId: string) => {
   return { ticket, expiresIn: config.realtime.ticket_ttl }
 }
 
+
+const getCurrentSessionSummary = async (
+  token: string | undefined,
+  userId: string,
+  organizationId: string,
+): Promise<AuthSessionSummary | null> => {
+  if (!token) return null
+  let payload: any
+  try {
+    payload = jwtHelpers.verifyToken(token, config.jwt.refresh_secret as Secret)
+  } catch {
+    return null
+  }
+  if (!payload?.sessionId || String(payload._id || '') !== userId || String(payload.organizationId || '') !== organizationId) return null
+  const session = await AuthSession.findOne({
+    _id: payload.sessionId,
+    userId,
+    organizationId,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).select('userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt').lean()
+  return session ? toAuthSessionSummary(session, true) : null
+}
+
 const refreshToken = async (token: string): Promise<AuthResult> => {
   let verified: any
   try {
@@ -634,6 +659,7 @@ export const AuthServices = {
   completePasswordReset,
   createRealtimeTicket,
   refreshToken,
+  getCurrentSessionSummary,
   logout,
   changePassword,
   getWebsiteUrlForUser,

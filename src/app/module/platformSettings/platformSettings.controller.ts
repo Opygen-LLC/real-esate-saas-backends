@@ -7,6 +7,13 @@ import { PlatformSettings } from './platformSettings.model'
 import { encryptField, maskSensitive, decryptField } from '../../helpers/fieldEncryption'
 import { invalidateTrialPolicy } from './trialPolicy.service'
 import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
+import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
+
+
+const toPlatformSettingsContract = (settings: any) => {
+  const plain = typeof settings?.toObject === 'function' ? settings.toObject() : settings
+  return plain?.trial ? { ...plain, trial: toTeamMemberLimitContract(plain.trial) } : plain
+}
 
 const publicSettings = catchAsync(async (_req: Request, res: Response) => {
   const settings = await PlatformSettings.findOneAndUpdate({ key: 'platform' }, { $setOnInsert: { key: 'platform' } }, { upsert: true, new: true })
@@ -23,7 +30,7 @@ const get = catchAsync(async (_req: Request, res: Response) => {
   const settings = await PlatformSettings.findOneAndUpdate({ key: 'platform' }, { $setOnInsert: { key: 'platform' } }, { upsert: true, new: true }).select('+tax.binEncrypted').lean()
   const result: any = settings; const encrypted = result?.tax?.binEncrypted
   if (result?.tax) { result.tax.bin = encrypted ? maskSensitive(decryptField(encrypted)) : ''; delete result.tax.binEncrypted }
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Platform settings fetched', data: result })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Platform settings fetched', data: toPlatformSettingsContract(result) })
 })
 
 const update = catchAsync(async (req: Request, res: Response) => {
@@ -41,7 +48,7 @@ const update = catchAsync(async (req: Request, res: Response) => {
   await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'platform.settings_updated',
     entityType: 'platformSettings', entityId: settings._id.toString(), reason, requestId: req.requestId, ip: req.ip,
     metadata: { fields: Object.keys($set) } })
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Platform settings updated', data: settings })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Platform settings updated', data: toPlatformSettingsContract(settings) })
 })
 
 export const PlatformSettingsController = { publicSettings, get, update }

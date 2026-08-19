@@ -10,6 +10,7 @@ let User: any
 let Organization: any
 let Property: any
 let Lead: any
+let Task: any
 let jwtHelpers: any
 let config: any
 
@@ -31,13 +32,14 @@ suite('cross-tenant negative matrix', () => {
   let authA: Record<string, string>
   let propertyB: any
   let leadB: any
+  let taskB: any
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test'; process.env.DATABASE_URL = requiredDb!; process.env.REDIS_ENABLED = 'false'; process.env.WORKER_ENABLED = 'false'; process.env.SMS_DEV_MODE = 'true'
     process.env.CLIENT_URL = 'http://localhost:3000'; process.env.PUBLIC_API_URL = 'http://127.0.0.1:5000'; process.env.ALLOWED_ORIGINS = 'http://localhost:3000'
     mongoose = await import('mongoose'); await mongoose.connect(requiredDb!, { autoIndex: true }); await mongoose.connection.dropDatabase()
     ;({ User } = await import('../../app/module/user/user.model')); ({ Organization } = await import('../../app/module/organization/organization.model'))
-    ;({ Property } = await import('../../app/module/property/property.model')); ({ Lead } = await import('../../app/module/lead/lead.model'))
+    ;({ Property } = await import('../../app/module/property/property.model')); ({ Lead } = await import('../../app/module/lead/lead.model')); ({ Task } = await import('../../app/module/task/task.model'))
     ;({ jwtHelpers } = await import('../../app/helpers/jwtHelpers')); config = (await import('../../config')).default
     const app = (await import('../../app')).default
     await new Promise<void>((resolve) => { server = app.listen(0, '127.0.0.1', () => { const address = server.address(); if (!address || typeof address === 'string') throw new Error('bind failed'); baseUrl = `http://127.0.0.1:${address.port}`; resolve() }) })
@@ -50,6 +52,7 @@ suite('cross-tenant negative matrix', () => {
     authA = await authHeader(tenantA, '11111111')
     propertyB = await Property.create({ organizationId: tenantB, slug: 'tenant-b-property', title: 'Tenant B Property', propertyType: 'Apartment', listingType: 'ForSale', status: 'Available', price: 1000000, currency: 'BDT', country: 'Bangladesh' })
     leadB = await Lead.create({ organizationId: tenantB, name: 'Tenant B Lead', phone: '+8801811111111', normalizedPhone: '+8801811111111', source: 'Website', leadStatus: 'New', currency: 'BDT' })
+    taskB = await Task.create({ organizationId: tenantB, title: 'Tenant B Task', dueAt: new Date(Date.now() + 86400000), dueDate: '2026-08-20', dueTime: '09:00', taskType: 'general', priority: 'medium', status: 'Pending' })
   }, 20_000)
 
   afterAll(async () => {
@@ -65,6 +68,8 @@ suite('cross-tenant negative matrix', () => {
     ['GET lead', () => request(`/api/v1/lead/${leadB._id}`, authA), 404],
     ['PATCH lead', () => request(`/api/v1/lead/${leadB._id}`, authA, { method: 'PATCH', body: JSON.stringify({ notes: 'cross tenant' }) }), 404],
     ['DELETE lead', () => request(`/api/v1/lead/${leadB._id}`, authA, { method: 'DELETE' }), 404],
+    ['PATCH task', () => request(`/api/v1/task/${taskB._id}`, authA, { method: 'PATCH', body: JSON.stringify({ title: 'Cross tenant task' }) }), 404],
+    ['DELETE task', () => request(`/api/v1/task/${taskB._id}`, authA, { method: 'DELETE' }), 404],
   ])('blocks %s even when the victim Mongo id is known', async (_name, run, expected) => {
     const result = await run()
     expect(result.response.status).toBe(expected)

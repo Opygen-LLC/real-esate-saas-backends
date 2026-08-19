@@ -8,7 +8,10 @@ import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { User } from '../user/user.model'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
-type LimitedResource = 'properties' | 'agents' | 'leads'
+type LimitedResource = 'properties' | 'teamMembers' | 'leads' | 'agents'
+
+type CanonicalLimitedResource = Exclude<LimitedResource, 'agents'>
+const canonicalResource = (resource: LimitedResource): CanonicalLimitedResource => resource === 'agents' ? 'teamMembers' : resource
 
 const activePlanFilter = () => ({
   isActive: true,
@@ -100,14 +103,15 @@ const recommendPlanForFeature = async (feature: Feature): Promise<string | null>
 }
 
 const recommendPlanForLimit = async (resource: LimitedResource, required: number): Promise<string | null> => {
-  const field = resource === 'properties' ? 'maxProperties' : resource === 'agents' ? 'maxAgents' : 'maxLeads'
+  const normalized = canonicalResource(resource)
+  const field = normalized === 'properties' ? 'maxProperties' : normalized === 'teamMembers' ? 'maxAgents' : 'maxLeads'
   const plan = await SubscriptionPlan.findOne({ ...activePlanFilter(), [field]: { $gte: required } }).sort({ priceMonthly: 1, version: -1 }).select('planId').lean()
   return plan?.planId || null
 }
 
 const countLimitedResourceUsage = async (organizationId: string, resource: LimitedResource): Promise<number> => {
   if (resource === 'properties') return Property.countDocuments({ organizationId, status: { $ne: 'Archived' } })
-  if (resource === 'agents') {
+  if (canonicalResource(resource) === 'teamMembers') {
     return User.countDocuments({
       organizationId,
       status: { $ne: 'blocked' },
@@ -121,25 +125,26 @@ const getUsageSnapshot = async (organizationId: string) => {
   const resolved = await resolve(organizationId)
   const [properties, agents, leads] = await Promise.all([
     countLimitedResourceUsage(organizationId, 'properties'),
-    countLimitedResourceUsage(organizationId, 'agents'),
+    countLimitedResourceUsage(organizationId, 'teamMembers'),
     countLimitedResourceUsage(organizationId, 'leads'),
   ])
-  return { ...resolved, usage: { properties, agents, leads } }
+  return { ...resolved, usage: { properties, teamMembers: agents, leads } }
 }
 
 const assertLimit = async (organizationId: string, resource: LimitedResource, increment = 1): Promise<void> => {
   const { organization, limits } = await resolve(organizationId)
   const usage = await countLimitedResourceUsage(organizationId, resource)
-  const maximum = resource === 'properties' ? limits.maxProperties : resource === 'agents' ? limits.maxAgents : limits.maxLeads
+  const normalized = canonicalResource(resource)
+  const maximum = normalized === 'properties' ? limits.maxProperties : normalized === 'teamMembers' ? limits.maxAgents : limits.maxLeads
 
   if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
-    const recommendedPlan = await recommendPlanForLimit(resource, usage + increment)
+    const recommendedPlan = await recommendPlanForLimit(normalized, usage + increment)
     throw new ApiError(
       402,
-      `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`,
+      `${normalized} limit reached (${usage}/${maximum}). Existing data was not removed.`,
       '',
       'PLAN_LIMIT_REACHED',
-      { resource, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
+      { resource: normalized, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
     )
   }
 }

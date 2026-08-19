@@ -3,6 +3,37 @@ import { z } from 'zod'
 const safeUrl = z.union([z.literal(''), z.string().trim().url().max(2048)])
 const bdPhone = z.union([z.literal(''), z.string().trim().regex(/^\+8801[3-9]\d{8}$/, 'Use Bangladesh format +8801XXXXXXXXX')])
 const safeEmail = z.union([z.literal(''), z.string().trim().email().max(254).transform(value => value.toLowerCase())])
+const trialPolicyInput = z.object({
+  enabled: z.boolean(),
+  defaultTrialDays: z.number().int().min(0).max(365),
+  gracePeriodDays: z.number().int().min(0).max(60),
+  reminderDaysBeforeExpiry: z.number().int().min(0).max(60),
+  maxTeamMembers: z.number().int().min(1).max(9999).optional(),
+  // Transitional alias accepted for older clients; persistence remains maxAgents until the schema migration phase.
+  maxAgents: z.number().int().min(1).max(9999).optional(),
+  maxProperties: z.number().int().min(1).max(999999),
+  maxLeads: z.number().int().min(1).max(9999999),
+  maxStorageMb: z.number().int().min(1).max(1048576),
+  maxMonthlyVisitors: z.number().int().min(1).max(100000000),
+  hasPremiumTemplates: z.boolean(),
+  hasCustomDomain: z.boolean(),
+  hasAdvancedAnalytics: z.boolean(),
+  hasWhatsAppIntegration: z.boolean(),
+  hasSmsAutomation: z.boolean(),
+  hasLeadAutomations: z.boolean(),
+}).superRefine((value, ctx) => {
+  if (value.maxTeamMembers === undefined && value.maxAgents === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxTeamMembers'], message: 'Team member limit is required' })
+    return
+  }
+  if (value.maxTeamMembers !== undefined && value.maxAgents !== undefined && value.maxTeamMembers !== value.maxAgents) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxTeamMembers'], message: 'Conflicting team member limits were supplied' })
+  }
+}).transform(({ maxTeamMembers, maxAgents, ...rest }) => ({
+  ...rest,
+  maxAgents: maxTeamMembers ?? maxAgents,
+}))
+
 export const PlatformSettingsValidation = {
   update: z.object({ body: z.object({
     reason: z.string().trim().min(10).max(500),
@@ -35,23 +66,7 @@ export const PlatformSettingsValidation = {
       youtube: safeUrl,
       website: safeUrl,
     }).strict().optional(),
-    trial: z.object({
-      enabled: z.boolean(),
-      defaultTrialDays: z.number().int().min(0).max(365),
-      gracePeriodDays: z.number().int().min(0).max(60),
-      reminderDaysBeforeExpiry: z.number().int().min(0).max(60),
-      maxAgents: z.number().int().min(1).max(9999),
-      maxProperties: z.number().int().min(1).max(999999),
-      maxLeads: z.number().int().min(1).max(9999999),
-      maxStorageMb: z.number().int().min(1).max(1048576),
-      maxMonthlyVisitors: z.number().int().min(1).max(100000000),
-      hasPremiumTemplates: z.boolean(),
-      hasCustomDomain: z.boolean(),
-      hasAdvancedAnalytics: z.boolean(),
-      hasWhatsAppIntegration: z.boolean(),
-      hasSmsAutomation: z.boolean(),
-      hasLeadAutomations: z.boolean(),
-    }).optional(),
+    trial: trialPolicyInput.optional(),
     areaConversion: z.object({
       kathaSqft: z.number().positive().max(10000),
       bighaKatha: z.number().positive().max(100),

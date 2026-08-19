@@ -38,13 +38,13 @@ const getSubscriptionUsage = async (organizationId: string) => {
 
   const { organization: org, limits, usage } = resolved
   const currentProperties = usage.properties
-  const currentAgents = usage.agents
+  const currentTeamMembers = usage.teamMembers
   const currentLeads = usage.leads
   const maxProperties = Number(limits.maxProperties || 0)
   const maxAgents = Number(limits.maxAgents || 0)
   const maxLeads = Number(limits.maxLeads || 0)
   const propertiesPercent = usagePercentage(currentProperties, maxProperties)
-  const agentsPercent = usagePercentage(currentAgents, maxAgents)
+  const teamMembersPercent = usagePercentage(currentTeamMembers, maxAgents)
   const leadsPercent = usagePercentage(currentLeads, maxLeads)
 
   return {
@@ -54,7 +54,9 @@ const getSubscriptionUsage = async (organizationId: string) => {
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
     pendingChangeRequest,
     properties: { used: currentProperties, limit: maxProperties, percentage: propertiesPercent },
-    agents: { used: currentAgents, limit: maxAgents, percentage: agentsPercent },
+    teamMembers: { used: currentTeamMembers, limit: maxAgents, percentage: teamMembersPercent },
+    // Deprecated compatibility alias. New clients must use teamMembers.
+    agents: { used: currentTeamMembers, limit: maxAgents, percentage: teamMembersPercent },
     leads: { used: currentLeads, limit: maxLeads, percentage: leadsPercent },
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
@@ -65,7 +67,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
       smsAutomation: limits.hasSmsAutomation,
       premiumTemplates: limits.hasPremiumTemplates,
     },
-    isApproachingLimit: propertiesPercent >= 80 || agentsPercent >= 80 || leadsPercent >= 80,
+    isApproachingLimit: propertiesPercent >= 80 || teamMembersPercent >= 80 || leadsPercent >= 80,
   }
 }
 

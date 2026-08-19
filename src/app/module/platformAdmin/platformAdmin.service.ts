@@ -24,6 +24,7 @@ import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPol
 import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
+import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
@@ -58,7 +59,7 @@ const getTenantHealth = async (query: any) => {
   const ids = organizations.map((org: any) => org.organizationId)
   if (!ids.length) return { data: [], meta: { page, limit, total } }
 
-  const [properties, agents, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
+  const [properties, teamMembers, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
     groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, activePipelineLeadFilter()),
@@ -99,7 +100,8 @@ const getTenantHealth = async (query: any) => {
       subscriptionSource: org.subscription?.source || 'trial',
       usage: {
         properties: properties.get(org.organizationId) || 0,
-        agents: agents.get(org.organizationId) || 0,
+        teamMembers: teamMembers.get(org.organizationId) || 0,
+        agents: teamMembers.get(org.organizationId) || 0,
         leads: leads.get(org.organizationId) || 0,
         storageUsedBytes: org.storageUsedBytes || 0,
         monthlyVisitors: org.monthlyVisitorCount || 0,
@@ -211,7 +213,7 @@ const getSubscriptionSummary = async () => {
     Organization.countDocuments({ isBlocked: { $ne: true }, 'subscription.plan': { $ne: 'trial' }, 'subscription.status': { $in: ['active', 'grace', 'cancel_at_period_end'] } }),
     Organization.aggregate([{ $group: { _id: '$subscription.plan', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
   ])
-  return { totalAgencies, activeTrials, trialsExpiringSoon, pastDue, paidAgencies, planBreakdown: planBreakdown.map((row: any) => ({ plan: row._id || 'unknown', count: row.count })), trialPolicy: policy }
+  return { totalAgencies, activeTrials, trialsExpiringSoon, pastDue, paidAgencies, planBreakdown: planBreakdown.map((row: any) => ({ plan: row._id || 'unknown', count: row.count })), trialPolicy: toTeamMemberLimitContract(policy as any) }
 }
 
 const planForAdminAssignment = async (planId: string, version?: number) => {
@@ -225,12 +227,12 @@ const planForAdminAssignment = async (planId: string, version?: number) => {
 }
 
 const tenantUsage = async (organizationId: string) => {
-  const [agents, properties, leads] = await Promise.all([
+  const [teamMembers, properties, leads] = await Promise.all([
     User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } }),
     Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }),
     Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }),
   ])
-  return { agents, properties, leads }
+  return { teamMembers, properties, leads }
 }
 
 const changeTenantSubscription = async (
@@ -271,7 +273,7 @@ const changeTenantSubscription = async (
     ? { maxAgents: assigned.maxAgents, maxProperties: assigned.maxProperties, maxLeads: (await getTrialPolicy()).maxLeads }
     : await planForAdminAssignment(input.plan, assigned.planVersion)
   const warnings = [
-    ...(usage.agents > Number(limits.maxAgents || 0) ? [`Team usage (${usage.agents}) is above this plan limit (${limits.maxAgents}). Existing users were preserved.`] : []),
+    ...(usage.teamMembers > Number(limits.maxAgents || 0) ? [`Team usage (${usage.teamMembers}) is above this plan limit (${limits.maxAgents}). Existing users were preserved.`] : []),
     ...(usage.properties > Number(limits.maxProperties || 0) ? [`Property usage (${usage.properties}) is above this plan limit (${limits.maxProperties}). Existing listings were preserved.`] : []),
     ...(usage.leads > Number(limits.maxLeads || 0) ? [`Lead usage (${usage.leads}) is above this plan limit (${limits.maxLeads}). Existing leads were preserved.`] : []),
   ]

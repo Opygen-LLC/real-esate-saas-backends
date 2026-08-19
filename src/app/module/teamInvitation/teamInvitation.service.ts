@@ -23,7 +23,7 @@ const escapeHtml = (value: string) => value
   .replace(/'/g, '&#39;')
 
 const createInvitation = async (organizationId: string, invitedBy: string, payload: { name: string; email: string; phoneNumber: string; userRole?: string; specialization?: string[]; accessControl?: { useRoleDefaults?: boolean; permissions?: string[] } }) => {
-  await EntitlementService.assertLimit(organizationId, 'agents')
+  await EntitlementService.assertLimit(organizationId, 'teamMembers')
   const inviter: any = await User.findOne({ _id: invitedBy, organizationId, status: 'active' }).select('_id userRole').lean()
   if (!inviter) throw new ApiError(httpStatus.FORBIDDEN, 'Inviting user is not available')
   const inviterAccess = await getUserAccessControl(inviter._id)
@@ -87,7 +87,7 @@ const acceptInvitation = async (token: string, password: string) => {
     invitation.status = 'expired'; await invitation.save()
     throw new ApiError(410, 'This invitation has expired')
   }
-  await EntitlementService.assertLimit(invitation.organizationId, 'agents')
+  await EntitlementService.assertLimit(invitation.organizationId, 'teamMembers')
   if (await User.exists({ $or: [{ email: invitation.email }, { phoneNumber: invitation.phoneNumber }] })) throw new ApiError(409, 'This invitation can no longer be accepted because the account already exists')
   const passwordHash = await hashPassword(password)
   const user = await User.create({
