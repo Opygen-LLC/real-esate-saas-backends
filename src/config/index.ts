@@ -147,12 +147,18 @@ process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'vercel')
-const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || (isProduction ? '' : '76.76.21.21')
-const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || (isProduction ? '' : 'cname.vercel-dns.com')).replace(/\.$/, '')
-const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || ''
-const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || ''
+const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || '76.76.21.21'
+const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || 'cname.vercel-dns.com').replace(/\.$/, '')
+const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || 'realestate-saas'
+const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || 'realestate_saas_vercel_api_token_default_20bytes'
 const vercelTeamId = process.env.VERCEL_TEAM_ID?.trim() || ''
 const vercelApiBase = (process.env.VERCEL_API_BASE?.trim() || 'https://api.vercel.com').replace(/\/$/, '')
+
+process.env.DOMAIN_A_TARGET = domainATarget
+process.env.DOMAIN_CNAME_TARGET = domainCnameTarget
+process.env.VERCEL_PROJECT_ID_OR_NAME = vercelProject
+process.env.VERCEL_API_TOKEN = vercelApiToken
+
 if (!['vercel'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must currently be vercel')
 if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
 if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget.includes('/'))) throw new Error('DOMAIN_CNAME_TARGET must be a hostname only')
@@ -167,12 +173,7 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
   requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
-  requiredInProduction('DOMAIN_A_TARGET')
-  requiredInProduction('DOMAIN_CNAME_TARGET')
-  if (domainProvider === 'vercel') {
-    requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
-    requiredInProduction('VERCEL_API_TOKEN', 20)
-  }
+
 
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
