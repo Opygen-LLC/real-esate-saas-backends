@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 import ApiError from '../../../errors/ApiError'
 
 const MAX_XLSX_ENTRIES = 2_000
@@ -97,6 +98,68 @@ const assertSafeXlsxArchive = (buffer: Buffer, entityLabel: string): void => {
   if (offset > centralEnd) throw new ApiError(400, 'Excel file archive directory is invalid')
 }
 
+// Some third-party tools (other CRMs, spreadsheet generators, export scripts) produce
+// technically-parseable OOXML that still trips up ExcelJS's non-namespace-aware reader:
+// every element wrapped in a custom XML namespace prefix (e.g. <x:workbook>, <x:sheet>)
+// instead of the unprefixed elements Excel/LibreOffice normally emit, and/or relationship
+// Targets written as absolute part paths ("/xl/styles.xml") instead of relative ones
+// ("styles.xml"). Both are valid per the OOXML/OPC spec, but ExcelJS matches tag names and
+// resolves relationships literally, so it silently ends up with an empty workbook model and
+// throws "Cannot read properties of undefined (reading 'sheets')". Normalizing the archive
+// before handing it to ExcelJS keeps those files importable without weakening the archive
+// safety checks above, which still run first against the original untrusted bytes.
+const normalizeXlsxArchive = async (buffer: Buffer): Promise<Buffer> => {
+  let zip: JSZip
+  try {
+    zip = await JSZip.loadAsync(buffer)
+  } catch {
+    return buffer
+  }
+
+  let changed = false
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir || !name.toLowerCase().endsWith('.xml')) continue
+    let text: string
+    try {
+      text = await entry.async('string')
+    } catch {
+      continue
+    }
+    let updated = text
+
+    // Strip any declared namespace prefix bound to a spreadsheetml/package/relationships
+    // namespace so tags like <x:workbook> read as the plain <workbook> ExcelJS expects.
+    const prefixMatches = [...text.matchAll(/xmlns:([A-Za-z0-9]+)="[^"]*(?:spreadsheetml|package\/2006\/relationships)[^"]*"/g)]
+    for (const match of prefixMatches) {
+      const prefix = match[1]
+      if (!new RegExp(`</?${prefix}:`).test(updated)) continue
+      updated = updated
+        .replace(new RegExp(`<${prefix}:`, 'g'), '<')
+        .replace(new RegExp(`</${prefix}:`, 'g'), '</')
+        .replace(new RegExp(`\\sxmlns:${prefix}="[^"]*"`, 'g'), '')
+    }
+
+    // Normalize absolute relationship targets ("/xl/worksheets/sheet1.xml") to the
+    // relative form ExcelJS expects when resolving parts within the archive. (Note:
+    // [Content_Types].xml's PartName is required by spec to stay absolute, so it's left alone.)
+    if (name.endsWith('.rels')) {
+      updated = updated.replace(/Target="\/([^"]+)"/g, 'Target="$1"')
+    }
+
+    if (updated !== text) {
+      zip.file(name, updated)
+      changed = true
+    }
+  }
+
+  if (!changed) return buffer
+  try {
+    return await zip.generateAsync({ type: 'nodebuffer' })
+  } catch {
+    return buffer
+  }
+}
+
 const excelCellValue = (value: ExcelJS.CellValue): unknown => {
   if (value == null) return ''
   if (value instanceof Date) return value
@@ -109,9 +172,10 @@ const excelCellValue = (value: ExcelJS.CellValue): unknown => {
 
 const parseXlsx = async (buffer: Buffer, entityLabel: string): Promise<ParsedSpreadsheetUpload> => {
   assertSafeXlsxArchive(buffer, entityLabel)
+  const normalizedBuffer = await normalizeXlsxArchive(buffer)
   const workbook = new ExcelJS.Workbook()
   try {
-    await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0])
+    await workbook.xlsx.load(normalizedBuffer as unknown as Parameters<typeof workbook.xlsx.load>[0])
   } catch {
     throw new ApiError(400, 'Excel file could not be parsed. Upload a valid .xlsx workbook')
   }
