@@ -27,10 +27,13 @@ export const crmAccessFromRequest = (req: Request, requestedScope?: unknown): Cr
 
   const isManager = isCrmManagerRole(role)
   const canReadTeam = isManager || permissions.includes('crm.team.read')
-  const requested = String(requestedScope || '').trim().toLowerCase()
+  let requested = String(requestedScope || '').trim().toLowerCase()
+  if (requested.startsWith('team')) requested = 'team'
+  else if (requested.startsWith('mine')) requested = 'mine'
   if (requested && requested !== 'mine' && requested !== 'team') {
     throw new ApiError(400, 'CRM scope must be either mine or team')
   }
+
   if (requested === 'team' && !canReadTeam) {
     throw new ApiError(403, 'Team-wide CRM visibility requires crm.team.read')
   }

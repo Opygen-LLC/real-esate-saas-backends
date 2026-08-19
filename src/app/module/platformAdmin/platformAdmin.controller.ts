@@ -32,9 +32,12 @@ const platformSearch = catchAsync(async (req: Request, res: Response) => sendRes
 const platformNotifications = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Platform notifications fetched', data: await PlatformAdminService.getPlatformNotifications() }))
 const currentImpersonation = catchAsync(async (req: Request, res: Response) => {
   const token = req.cookies?.[config.security.impersonation_cookie_name]
-  if (typeof token !== 'string' || !token) throw new ApiError(404, 'No active support impersonation session')
+  if (typeof token !== 'string' || !token) {
+    return sendResponse(res, { statusCode: 200, success: true, message: 'No active support impersonation session', data: { active: false, session: null } })
+  }
   sendResponse(res, { statusCode: 200, success: true, message: 'Active support impersonation fetched', data: await PlatformAdminService.currentImpersonation(token) })
 })
+
 
 const startImpersonation = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.startImpersonation({ adminUserId: req.user!._id!, organizationId: req.body.organizationId, targetUserId: req.body.targetUserId, reason: req.body.reason, durationMinutes: req.body.durationMinutes, requestId: req.requestId, ip: req.ip, userAgent: req.get('user-agent') || '' })

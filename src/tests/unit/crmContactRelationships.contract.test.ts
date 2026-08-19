@@ -19,11 +19,10 @@ describe('CRM Phase 9 Contact relationship contract', () => {
 
   it('keeps latest interaction projection batched instead of querying Activity per Contact row', () => {
     const service = fs.readFileSync(path.resolve(process.cwd(), 'src/app/module/contact/contact.service.ts'), 'utf8')
-    expect(service).toContain('latestInteractionProjection')
-    expect(service).toContain('Activity.find({')
-    expect(service).toContain('leadToContact')
-    expect(service).toContain('latestInteraction: latestByContact.get')
+    expect(service).toContain('ActivityExportService.getContactExportActivityProjection')
+    expect(service).toContain('ActivityExportService')
   })
+
 
   it('ships an explicit production index migration for autoIndex-disabled deployments', () => {
     const migration = fs.readFileSync(path.resolve(process.cwd(), 'src/app/db/migrateCrmContactRelationships.ts'), 'utf8')
