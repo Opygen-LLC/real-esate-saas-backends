@@ -50,7 +50,6 @@ const markSessionAuthorizationChanged = async (
 }
 
 const createUser = async (organizationId: string, userData: IUserCreateInput, actorUserId: string): Promise<UserResponseDto> => {
-  await EntitlementService.assertLimit(organizationId, 'teamMembers')
   const actor = await User.findOne({ _id: actorUserId, organizationId, status: 'active' }).select('_id userRole')
   if (!actor) throw new ApiError(httpStatus.FORBIDDEN, 'Creating user is not available')
   const actorAccess = await getUserAccessControl(actor._id)
@@ -111,10 +110,10 @@ const createUser = async (organizationId: string, userData: IUserCreateInput, ac
     }, session)
   }
 
-  if (await mongoSupportsTransactions()) {
-    const session = await mongoose.startSession()
-    try { await session.withTransaction(() => provision(session)) } finally { await session.endSession() }
-  } else await provision()
+  await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
+    await EntitlementService.assertTeamMemberCapacity(organizationId, { additionalCommitments: 1, session })
+    await provision(session)
+  })
 
   const user = await findUserWithProfiles({ _id: userId })
   if (!user) throw new ApiError(httpStatus.BAD_REQUEST, 'Failed to create user')

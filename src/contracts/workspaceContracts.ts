@@ -13,6 +13,33 @@ export type TeamMemberLimitContract = {
   maxTeamMembers: number
 }
 
+export type TeamMemberQuotaContract = TeamMemberLimitContract & {
+  teamMembersUsed: number
+  teamMembersReserved: number
+  teamMembersCommitted: number
+  teamMembersAvailable: number
+  teamMembersOverCapacityBy: number
+}
+
+export const buildTeamMemberQuotaContract = (
+  maxTeamMembers: number,
+  teamMembersUsed: number,
+  teamMembersReserved = 0,
+): TeamMemberQuotaContract => {
+  const limit = Math.max(0, Number(maxTeamMembers || 0))
+  const used = Math.max(0, Number(teamMembersUsed || 0))
+  const reserved = Math.max(0, Number(teamMembersReserved || 0))
+  const committed = used + reserved
+  return {
+    maxTeamMembers: limit,
+    teamMembersUsed: used,
+    teamMembersReserved: reserved,
+    teamMembersCommitted: committed,
+    teamMembersAvailable: Math.max(0, limit - committed),
+    teamMembersOverCapacityBy: Math.max(0, committed - limit),
+  }
+}
+
 const toPlainObject = <T extends Record<string, any>>(entity: T): Record<string, any> =>
   typeof entity?.toObject === 'function' ? entity.toObject() : entity
 

@@ -36,15 +36,14 @@ const getSubscriptionUsage = async (organizationId: string) => {
     SubscriptionPaymentService.getTenantPendingState(organizationId),
   ])
 
-  const { organization: org, limits, usage } = resolved
+  const { organization: org, limits, usage, teamMemberQuota } = resolved
   const currentProperties = usage.properties
-  const currentTeamMembers = usage.teamMembers
   const currentLeads = usage.leads
   const maxProperties = Number(limits.maxProperties || 0)
-  const maxAgents = Number(limits.maxAgents || 0)
+  const maxTeamMembers = Number(teamMemberQuota.maxTeamMembers || 0)
   const maxLeads = Number(limits.maxLeads || 0)
   const propertiesPercent = usagePercentage(currentProperties, maxProperties)
-  const teamMembersPercent = usagePercentage(currentTeamMembers, maxAgents)
+  const teamMembersPercent = usagePercentage(teamMemberQuota.teamMembersCommitted, maxTeamMembers)
   const leadsPercent = usagePercentage(currentLeads, maxLeads)
 
   return {
@@ -54,9 +53,21 @@ const getSubscriptionUsage = async (organizationId: string) => {
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
     pendingChangeRequest,
     properties: { used: currentProperties, limit: maxProperties, percentage: propertiesPercent },
-    teamMembers: { used: currentTeamMembers, limit: maxAgents, percentage: teamMembersPercent },
-    // Deprecated compatibility alias. New clients must use teamMembers.
-    agents: { used: currentTeamMembers, limit: maxAgents, percentage: teamMembersPercent },
+    maxTeamMembers,
+    teamMembersUsed: teamMemberQuota.teamMembersUsed,
+    teamMembersReserved: teamMemberQuota.teamMembersReserved,
+    teamMembersCommitted: teamMemberQuota.teamMembersCommitted,
+    teamMembersAvailable: teamMemberQuota.teamMembersAvailable,
+    teamMembersOverCapacityBy: teamMemberQuota.teamMembersOverCapacityBy,
+    teamMembers: {
+      used: teamMemberQuota.teamMembersUsed,
+      reserved: teamMemberQuota.teamMembersReserved,
+      committed: teamMemberQuota.teamMembersCommitted,
+      available: teamMemberQuota.teamMembersAvailable,
+      overCapacityBy: teamMemberQuota.teamMembersOverCapacityBy,
+      limit: maxTeamMembers,
+      percentage: teamMembersPercent,
+    },
     leads: { used: currentLeads, limit: maxLeads, percentage: leadsPercent },
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },

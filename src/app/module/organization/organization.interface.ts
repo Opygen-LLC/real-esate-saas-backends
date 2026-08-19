@@ -114,6 +114,7 @@ export interface IOrganization {
   storageUsedBytes?: number
   monthlyVisitorCount?: number
   visitorUsageMonth?: string
+  teamQuotaRevision?: number
   createdAt?: Date
   updatedAt?: Date
 }

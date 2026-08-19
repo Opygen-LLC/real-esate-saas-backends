@@ -71,7 +71,44 @@ const findDuplicates=async(organizationId:string,phone:string,email:string)=>Lea
 
 export type CreateLeadOptions = { duplicatePolicy?: 'merge' | 'reject' }
 
-const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgentId?:string,access?:CrmAccessContext,options:CreateLeadOptions={}):Promise<ILead>=>{
+export type LeadCreateOutcome = 'created' | 'merged'
+export type LeadAssignedAgentSummary = {
+  _id: string
+  name: string
+  email?: string
+  userRole?: string
+  phoneNumber?: string
+}
+export type CreateLeadResult = {
+  lead: ILead
+  outcome: LeadCreateOutcome
+  assignedAgent: LeadAssignedAgentSummary | null
+}
+
+const assignedAgentSummary = async (organizationId: string, lead: any): Promise<LeadAssignedAgentSummary | null> => {
+  const assignedAgentId = lead?.assignedAgent?._id || lead?.assignedAgent
+  if (!assignedAgentId) return null
+  if (lead?.assignedAgent && typeof lead.assignedAgent === 'object' && lead.assignedAgent.name) {
+    return {
+      _id: String(lead.assignedAgent._id),
+      name: String(lead.assignedAgent.name),
+      email: lead.assignedAgent.email ? String(lead.assignedAgent.email) : undefined,
+      userRole: lead.assignedAgent.userRole ? String(lead.assignedAgent.userRole) : undefined,
+      phoneNumber: lead.assignedAgent.phoneNumber ? String(lead.assignedAgent.phoneNumber) : undefined,
+    }
+  }
+  const user: any = await User.findOne({ _id: assignedAgentId, organizationId }).select('name email userRole phoneNumber').lean()
+  if (!user) return null
+  return {
+    _id: String(user._id),
+    name: String(user.name || 'Team member'),
+    email: user.email ? String(user.email) : undefined,
+    userRole: user.userRole ? String(user.userRole) : undefined,
+    phoneNumber: user.phoneNumber ? String(user.phoneNumber) : undefined,
+  }
+}
+
+const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,creatorAgentId?:string,access?:CrmAccessContext,options:CreateLeadOptions={}):Promise<CreateLeadResult>=>{
   if(!payload.name||!payload.phone)throw new ApiError(400,'Lead name and phone are required')
   const initialNote=typeof payload.notes==='string'?payload.notes.trim():''
   const normalizedPhone=normalizePhone(payload.phone)
@@ -155,7 +192,8 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
     }
     const merged=await mergeInto(target,prepared,{source:String(prepared.source||'Unknown'),actorId:creatorAgentId})
     await appendInitialNote(merged)
-    return finalizeLifecycle(merged,false)
+    const lead = await finalizeLifecycle(merged,false)
+    return { lead, outcome: 'merged', assignedAgent: await assignedAgentSummary(organizationId, lead) }
   }
 
   await EntitlementService.assertLimit(organizationId,'leads')
@@ -187,7 +225,8 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
     await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:result._id.toString(),eventType:'lead.created',leadId:result._id.toString(),actorId:creatorAgentId,payload:{summary:`New lead created from ${result.source}`,leadScore:result.leadScore,responseDueAt:result.responseDueAt?.toISOString(),assignmentStrategy:assignment.strategy}})
     if(result.assignedAgent)await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:result._id.toString(),eventType:'lead.assigned',leadId:result._id.toString(),actorId:creatorAgentId,payload:{summary:`Lead assigned during capture (${assignment.strategy})`,previousAgentId:'',assignedAgentId:result.assignedAgent.toString(),strategy:assignment.strategy,reason:assignment.reason}})
     await appendInitialNote(result)
-    return finalizeLifecycle(result,true)
+    const lead = await finalizeLifecycle(result,true)
+    return { lead, outcome: 'created', assignedAgent: await assignedAgentSummary(organizationId, lead) }
   }catch(error:any){
     if(error?.code===11000){
       if(options.duplicatePolicy==='reject')throw new ApiError(409,'A lead with the same phone or email already exists in this agency')
@@ -195,11 +234,17 @@ const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgent
       if(after){
         const merged=await mergeInto(after,prepared,{source:String(prepared.source||'Unknown'),actorId:creatorAgentId})
         await appendInitialNote(merged)
-        return finalizeLifecycle(merged,false)
+        const lead = await finalizeLifecycle(merged,false)
+        return { lead, outcome: 'merged', assignedAgent: await assignedAgentSummary(organizationId, lead) }
       }
     }
     throw error
   }
+}
+
+const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgentId?:string,access?:CrmAccessContext,options:CreateLeadOptions={}):Promise<ILead>=>{
+  const result = await createLeadWithOutcome(organizationId, payload, creatorAgentId, access, options)
+  return result.lead
 }
 
 const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
@@ -418,4 +463,4 @@ const exportCsv = async (organizationId: string, filters: ILeadFilter, access?: 
 const exportXlsx = async (organizationId: string, filters: ILeadFilter, access?: CrmAccessContext) =>
   buildCrmXlsx('Leads', LEAD_EXPORT_COLUMNS, await getLeadExportRows(organizationId, filters, access))
 
-export const LeadService={createLead,publicCaptureLead,getAllLeads,getTodayFollowUps,getLeadById,updateLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}
+export const LeadService={createLead,createLeadWithOutcome,publicCaptureLead,getAllLeads,getTodayFollowUps,getLeadById,updateLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}

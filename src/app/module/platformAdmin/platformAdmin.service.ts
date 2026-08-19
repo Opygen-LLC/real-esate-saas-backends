@@ -24,6 +24,7 @@ import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPol
 import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
+import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -61,7 +62,7 @@ const getTenantHealth = async (query: any) => {
 
   const [properties, teamMembers, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
     groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
-    groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] }, status: { $ne: 'blocked' } }),
+    groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, activePipelineLeadFilter()),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
@@ -101,7 +102,6 @@ const getTenantHealth = async (query: any) => {
       usage: {
         properties: properties.get(org.organizationId) || 0,
         teamMembers: teamMembers.get(org.organizationId) || 0,
-        agents: teamMembers.get(org.organizationId) || 0,
         leads: leads.get(org.organizationId) || 0,
         storageUsedBytes: org.storageUsedBytes || 0,
         monthlyVisitors: org.monthlyVisitorCount || 0,
@@ -227,12 +227,13 @@ const planForAdminAssignment = async (planId: string, version?: number) => {
 }
 
 const tenantUsage = async (organizationId: string) => {
-  const [teamMembers, properties, leads] = await Promise.all([
-    User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } }),
+  const [teamMembers, teamMembersReserved, properties, leads] = await Promise.all([
+    User.countDocuments({ organizationId, status: { $ne: 'blocked' }, userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] } }),
+    TeamInvitation.countDocuments({ organizationId, status: 'pending', expiresAt: { $gt: new Date() } }),
     Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }),
     Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }),
   ])
-  return { teamMembers, properties, leads }
+  return { teamMembers, teamMembersReserved, teamMembersCommitted: teamMembers + teamMembersReserved, properties, leads }
 }
 
 const changeTenantSubscription = async (
@@ -273,12 +274,12 @@ const changeTenantSubscription = async (
     ? { maxAgents: assigned.maxAgents, maxProperties: assigned.maxProperties, maxLeads: (await getTrialPolicy()).maxLeads }
     : await planForAdminAssignment(input.plan, assigned.planVersion)
   const warnings = [
-    ...(usage.teamMembers > Number(limits.maxAgents || 0) ? [`Team usage (${usage.teamMembers}) is above this plan limit (${limits.maxAgents}). Existing users were preserved.`] : []),
+    ...(usage.teamMembersCommitted > Number(limits.maxAgents || 0) ? [`Team capacity (${usage.teamMembers} active + ${usage.teamMembersReserved} pending) is above this plan limit (${limits.maxAgents}). Existing users were preserved; new invitations are blocked.`] : []),
     ...(usage.properties > Number(limits.maxProperties || 0) ? [`Property usage (${usage.properties}) is above this plan limit (${limits.maxProperties}). Existing listings were preserved.`] : []),
     ...(usage.leads > Number(limits.maxLeads || 0) ? [`Lead usage (${usage.leads}) is above this plan limit (${limits.maxLeads}). Existing leads were preserved.`] : []),
   ]
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.plan_changed', entityType: 'organization', entityId: org._id.toString(), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { previous, current: assigned, usage, warnings } })
-  return { organizationId, agencyName: org.agencyName, subscription: org.subscription, usage, warnings }
+  return { organizationId, agencyName: org.agencyName, subscription: toTeamMemberLimitContract(org.subscription as any), usage, warnings }
 }
 
 const manageTenantTrial = async (
@@ -326,7 +327,7 @@ const manageTenantTrial = async (
   await org.save()
   await CacheInvalidationService.invalidateTenant(organizationId)
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.trial_updated', entityType: 'organization', entityId: org._id.toString(), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { action: input.action, previous, current: org.subscription?.toObject?.() || org.subscription } })
-  return { organizationId, agencyName: org.agencyName, subscription: org.subscription }
+  return { organizationId, agencyName: org.agencyName, subscription: toTeamMemberLimitContract(org.subscription as any) }
 }
 
 const searchPlatform = async (query: string) => {

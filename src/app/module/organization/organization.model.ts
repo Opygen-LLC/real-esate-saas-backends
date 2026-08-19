@@ -217,6 +217,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     storageUsedBytes: { type: Number, default: 0, min: 0 },
     monthlyVisitorCount: { type: Number, default: 0, min: 0 },
     visitorUsageMonth: { type: String, default: '' },
+    teamQuotaRevision: { type: Number, default: 0, min: 0, select: false },
   },
   {
     timestamps: true,

@@ -1,17 +1,21 @@
+import mongoose, { type ClientSession } from 'mongoose'
+import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
+import { buildTeamMemberQuotaContract } from '../../../contracts/workspaceContracts'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { Lead } from '../lead/lead.model'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { Property } from '../property/property.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
-type LimitedResource = 'properties' | 'teamMembers' | 'leads' | 'agents'
+export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
 
-type CanonicalLimitedResource = Exclude<LimitedResource, 'agents'>
-const canonicalResource = (resource: LimitedResource): CanonicalLimitedResource => resource === 'agents' ? 'teamMembers' : resource
+export const TEAM_MEMBER_SEAT_ROLES = ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] as const
 
 const activePlanFilter = () => ({
   isActive: true,
@@ -19,10 +23,15 @@ const activePlanFilter = () => ({
   $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gt: new Date() } }],
 })
 
+const withSession = <T extends { session: (session: ClientSession) => T }>(query: T, session?: ClientSession): T => {
+  if (session) query.session(session)
+  return query
+}
+
 const trialLimits = async () => {
   const policy = await getTrialPolicy()
   return {
-    maxAgents: policy.maxAgents,
+    maxTeamMembers: Number(policy.maxAgents || 0),
     maxProperties: policy.maxProperties,
     maxLeads: policy.maxLeads,
     maxStorageMb: policy.maxStorageMb,
@@ -37,7 +46,7 @@ const trialLimits = async () => {
 }
 
 export const trialEntitlements = {
-  maxAgents: 2,
+  maxTeamMembers: 2,
   maxProperties: 10,
   maxLeads: 100,
   maxStorageMb: 512,
@@ -50,8 +59,8 @@ export const trialEntitlements = {
   hasLeadAutomations: false,
 }
 
-const resolve = async (organizationId: string) => {
-  const organization = await Organization.findOne({ organizationId })
+const resolve = async (organizationId: string, session?: ClientSession) => {
+  const organization = await withSession(Organization.findOne({ organizationId }), session)
   if (!organization || organization.isBlocked) throw new ApiError(403, 'Organization is unavailable')
   if (!['trialing', 'active', 'grace', 'cancel_at_period_end'].includes(organization.subscription.status)) {
     throw new ApiError(
@@ -66,23 +75,30 @@ const resolve = async (organizationId: string) => {
   const baseTrial = await trialLimits()
   let plan = null as any
   if (organization.subscription.plan !== 'trial') {
-    const exactVersion = organization.subscription.planVersion
-      ? await SubscriptionPlan.findOne({ planId: organization.subscription.plan, version: organization.subscription.planVersion }).lean()
-      : null
-    plan = exactVersion || await SubscriptionPlan.findOne({
-      planId: organization.subscription.plan,
-      ...activePlanFilter(),
-    }).sort({ version: -1 }).lean()
+    let exactVersion = null as any
+    if (organization.subscription.planVersion) {
+      const exactQuery = SubscriptionPlan.findOne({ planId: organization.subscription.plan, version: organization.subscription.planVersion })
+      exactVersion = await withSession(exactQuery, session).lean()
+    }
+    if (exactVersion) plan = exactVersion
+    else {
+      const currentPlanQuery = SubscriptionPlan.findOne({
+        planId: organization.subscription.plan,
+        ...activePlanFilter(),
+      }).sort({ version: -1 })
+      plan = await withSession(currentPlanQuery, session).lean()
+    }
   }
 
+  const { maxAgents: persistedPlanTeamLimit, ...canonicalPlan } = plan || {}
   return {
     organization,
     limits: {
       ...baseTrial,
-      ...(plan || {}),
-      maxAgents: organization.subscription.maxAgents ?? plan?.maxAgents ?? baseTrial.maxAgents,
-      maxProperties: organization.subscription.maxProperties ?? plan?.maxProperties ?? baseTrial.maxProperties,
-      maxLeads: plan?.maxLeads ?? baseTrial.maxLeads,
+      ...canonicalPlan,
+      maxTeamMembers: Number(organization.subscription.maxAgents ?? persistedPlanTeamLimit ?? baseTrial.maxTeamMembers),
+      maxProperties: Number(organization.subscription.maxProperties ?? plan?.maxProperties ?? baseTrial.maxProperties),
+      maxLeads: Number(plan?.maxLeads ?? baseTrial.maxLeads),
     },
   }
 }
@@ -103,50 +119,155 @@ const recommendPlanForFeature = async (feature: Feature): Promise<string | null>
 }
 
 const recommendPlanForLimit = async (resource: LimitedResource, required: number): Promise<string | null> => {
-  const normalized = canonicalResource(resource)
-  const field = normalized === 'properties' ? 'maxProperties' : normalized === 'teamMembers' ? 'maxAgents' : 'maxLeads'
+  // maxAgents remains the persistence field until the dedicated plan migration runs.
+  const field = resource === 'properties' ? 'maxProperties' : resource === 'teamMembers' ? 'maxAgents' : 'maxLeads'
   const plan = await SubscriptionPlan.findOne({ ...activePlanFilter(), [field]: { $gte: required } }).sort({ priceMonthly: 1, version: -1 }).select('planId').lean()
   return plan?.planId || null
 }
 
-const countLimitedResourceUsage = async (organizationId: string, resource: LimitedResource): Promise<number> => {
-  if (resource === 'properties') return Property.countDocuments({ organizationId, status: { $ne: 'Archived' } })
-  if (canonicalResource(resource) === 'teamMembers') {
-    return User.countDocuments({
+const countLimitedResourceUsage = async (organizationId: string, resource: LimitedResource, session?: ClientSession): Promise<number> => {
+  if (resource === 'properties') {
+    return withSession(Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }), session)
+  }
+  if (resource === 'teamMembers') {
+    return withSession(User.countDocuments({
       organizationId,
       status: { $ne: 'blocked' },
-      userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] },
-    })
+      userRole: { $in: TEAM_MEMBER_SEAT_ROLES },
+    }), session)
   }
-  return Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() })
+  return withSession(Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }), session)
+}
+
+const countReservedTeamMembers = async (organizationId: string, session?: ClientSession): Promise<number> => withSession(
+  TeamInvitation.countDocuments({ organizationId, status: 'pending', expiresAt: { $gt: new Date() } }),
+  session,
+)
+
+const getTeamMemberQuotaSnapshot = async (organizationId: string, session?: ClientSession, resolvedInput?: Awaited<ReturnType<typeof resolve>>) => {
+  const resolved = resolvedInput || await resolve(organizationId, session)
+  const [teamMembersUsed, teamMembersReserved] = await Promise.all([
+    countLimitedResourceUsage(organizationId, 'teamMembers', session),
+    countReservedTeamMembers(organizationId, session),
+  ])
+  return buildTeamMemberQuotaContract(Number(resolved.limits.maxTeamMembers || 0), teamMembersUsed, teamMembersReserved)
 }
 
 const getUsageSnapshot = async (organizationId: string) => {
   const resolved = await resolve(organizationId)
-  const [properties, agents, leads] = await Promise.all([
+  const [properties, teamMembersUsed, teamMembersReserved, leads] = await Promise.all([
     countLimitedResourceUsage(organizationId, 'properties'),
     countLimitedResourceUsage(organizationId, 'teamMembers'),
+    countReservedTeamMembers(organizationId),
     countLimitedResourceUsage(organizationId, 'leads'),
   ])
-  return { ...resolved, usage: { properties, teamMembers: agents, leads } }
+  const teamMemberQuota = buildTeamMemberQuotaContract(
+    Number(resolved.limits.maxTeamMembers || 0),
+    teamMembersUsed,
+    teamMembersReserved,
+  )
+  return { ...resolved, usage: { properties, teamMembers: teamMembersUsed, leads }, teamMemberQuota }
 }
 
-const assertLimit = async (organizationId: string, resource: LimitedResource, increment = 1): Promise<void> => {
-  const { organization, limits } = await resolve(organizationId)
-  const usage = await countLimitedResourceUsage(organizationId, resource)
-  const normalized = canonicalResource(resource)
-  const maximum = normalized === 'properties' ? limits.maxProperties : normalized === 'teamMembers' ? limits.maxAgents : limits.maxLeads
+const assertTeamMemberCapacity = async (
+  organizationId: string,
+  options: { additionalCommitments?: number; session?: ClientSession } = {},
+): Promise<void> => {
+  const additionalCommitments = Math.max(0, Number(options.additionalCommitments || 0))
+  const resolved = await resolve(organizationId, options.session)
+  const quota = await getTeamMemberQuotaSnapshot(organizationId, options.session, resolved)
+  const requiredCommitted = quota.teamMembersCommitted + additionalCommitments
 
-  if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
-    const recommendedPlan = await recommendPlanForLimit(normalized, usage + increment)
+  if (requiredCommitted > quota.maxTeamMembers) {
+    const recommendedPlan = await recommendPlanForLimit('teamMembers', requiredCommitted)
     throw new ApiError(
       402,
-      `${normalized} limit reached (${usage}/${maximum}). Existing data was not removed.`,
+      `Team member limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}). Existing members were preserved.`,
       '',
       'PLAN_LIMIT_REACHED',
-      { resource: normalized, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
+      {
+        resource: 'teamMembers',
+        maxTeamMembers: quota.maxTeamMembers,
+        teamMembersUsed: quota.teamMembersUsed,
+        teamMembersReserved: quota.teamMembersReserved,
+        teamMembersCommitted: quota.teamMembersCommitted,
+        teamMembersAvailable: quota.teamMembersAvailable,
+        teamMembersOverCapacityBy: quota.teamMembersOverCapacityBy,
+        requestedIncrement: additionalCommitments,
+        currentPlan: resolved.organization.subscription.plan,
+        recommendedPlan,
+      },
     )
   }
+}
+
+const assertLimit = async (organizationId: string, resource: LimitedResource, increment = 1, session?: ClientSession): Promise<void> => {
+  if (resource === 'teamMembers') {
+    await assertTeamMemberCapacity(organizationId, { additionalCommitments: increment, session })
+    return
+  }
+
+  const { organization, limits } = await resolve(organizationId, session)
+  const usage = await countLimitedResourceUsage(organizationId, resource, session)
+  const maximum = resource === 'properties' ? limits.maxProperties : limits.maxLeads
+
+  if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
+    const recommendedPlan = await recommendPlanForLimit(resource, usage + increment)
+    throw new ApiError(
+      402,
+      `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`,
+      '',
+      'PLAN_LIMIT_REACHED',
+      { resource, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
+    )
+  }
+}
+
+const localTeamQuotaLocks = new Map<string, Promise<void>>()
+
+const withLocalTeamQuotaLock = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  const previous = localTeamQuotaLocks.get(organizationId) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolveGate) => { release = resolveGate })
+  const chain = previous.then(() => gate)
+  localTeamQuotaLocks.set(organizationId, chain)
+  await previous
+  try {
+    return await work(undefined)
+  } finally {
+    release()
+    if (localTeamQuotaLocks.get(organizationId) === chain) localTeamQuotaLocks.delete(organizationId)
+  }
+}
+
+const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => {
+        // All quota-sensitive writes touch the same tenant document first. This
+        // deliberately creates a transaction write-conflict so concurrent invite
+        // and direct-user requests are retried against a fresh quota snapshot.
+        const lock = await Organization.updateOne(
+          { organizationId },
+          { $inc: { teamQuotaRevision: 1 } },
+          { session },
+        )
+        if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
+        value = await work(session)
+      })
+      if (value === undefined) throw new ApiError(500, 'Team quota transaction did not complete')
+      return value
+    } finally {
+      await session.endSession()
+    }
+  }
+
+  if (config.env === 'production') {
+    throw new ApiError(503, 'Team member quota changes require a MongoDB replica set or mongos in production')
+  }
+  return withLocalTeamQuotaLock(organizationId, work)
 }
 
 export const featureEnabled = (limits: Record<string, any>, feature: Feature): boolean => {
@@ -222,4 +343,15 @@ const consumeVisitor = async (organizationId: string): Promise<void> => {
   }
 }
 
-export const EntitlementService = { resolve, getUsageSnapshot, assertLimit, assertFeature, hasFeature, assertStorage, consumeVisitor }
+export const EntitlementService = {
+  resolve,
+  getUsageSnapshot,
+  getTeamMemberQuotaSnapshot,
+  assertLimit,
+  assertTeamMemberCapacity,
+  withTeamMemberQuotaGuard,
+  assertFeature,
+  hasFeature,
+  assertStorage,
+  consumeVisitor,
+}

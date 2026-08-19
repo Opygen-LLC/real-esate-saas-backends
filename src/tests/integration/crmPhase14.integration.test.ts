@@ -238,6 +238,35 @@ suite('CRM Phase 14 production integration matrix', () => {
     expect(ActivityValidation.appendNoteZodSchema.safeParse({ body: { content: 'note', authorId: String(agentA2._id) } }).success).toBe(false)
   })
 
+  it('returns an explicit create outcome and immediately lists a unique lead in the creator mine scope', async () => {
+    const access = memberAccess(agentA1)
+    const uniquePhone = nextPhone()
+    const created = await LeadService.createLeadWithOutcome(orgA, {
+      name: 'Table First Visible Lead',
+      phone: uniquePhone,
+      source: 'Phone',
+    }, String(agentA1._id), access)
+
+    expect(created.outcome).toBe('created')
+    expect(String(created.lead._id)).toBeTruthy()
+    expect(created.assignedAgent?._id).toBe(String(agentA1._id))
+
+    const listed = await LeadService.getAllLeads(
+      { organizationId: orgA, isConverted: false },
+      { page: 1, limit: 100, sortBy: 'createdAt', sortOrder: 'desc' },
+      access,
+    )
+    expect(listed.data.some((lead: any) => String(lead._id) === String(created.lead._id))).toBe(true)
+
+    const duplicate = await LeadService.createLeadWithOutcome(orgA, {
+      name: 'Table First Visible Lead Updated',
+      phone: uniquePhone,
+      source: 'Phone',
+    }, String(agentA1._id), access)
+    expect(duplicate.outcome).toBe('merged')
+    expect(String(duplicate.lead._id)).toBe(String(created.lead._id))
+  })
+
   it('supports all fourteen statuses and performs idempotent Won conversion with archived history', async () => {
     expect(LEAD_STATUS_VALUES).toHaveLength(14)
     const access = managerAccess(ownerA)

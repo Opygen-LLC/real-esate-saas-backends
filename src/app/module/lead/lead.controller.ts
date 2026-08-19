@@ -15,8 +15,8 @@ const actor = (req: Request) => req.user?._id || req.user?.id
 const createLead = catchAsync(async (req, res) => sendResponse(res, {
   statusCode: 201,
   success: true,
-  message: 'Lead created or merged successfully',
-  data: await LeadService.createLead(requireTenant(req), req.body, actor(req), crmAccessFromRequest(req)),
+  message: 'Lead capture completed successfully',
+  data: await LeadService.createLeadWithOutcome(requireTenant(req), req.body, actor(req), crmAccessFromRequest(req)),
 }))
 
 const publicCaptureLead = catchAsync(async (req, res) => sendResponse(res, {

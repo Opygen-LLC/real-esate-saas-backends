@@ -16,4 +16,8 @@ const pending = catchAsync(async (req: Request, res: Response) => {
   const data = await TeamInvitationService.listPending(requireTenant(req))
   sendResponse(res, { statusCode: 200, success: true, message: 'Pending invitations fetched successfully', data })
 })
-export const TeamInvitationController = { invite, accept, pending }
+const revoke = catchAsync(async (req: Request, res: Response) => {
+  const data = await TeamInvitationService.revokePending(requireTenant(req), req.params.id)
+  sendResponse(res, { statusCode: 200, success: true, message: 'Pending invitation revoked successfully', data })
+})
+export const TeamInvitationController = { invite, accept, pending, revoke }

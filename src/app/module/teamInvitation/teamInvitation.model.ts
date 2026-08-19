@@ -20,4 +20,6 @@ const teamInvitationSchema = new Schema({
 }, { timestamps: true })
 
 teamInvitationSchema.index({ organizationId: 1, email: 1, status: 1 })
+teamInvitationSchema.index({ organizationId: 1, phoneNumber: 1, status: 1 }, { name: 'tenant_phone_status' })
+teamInvitationSchema.index({ organizationId: 1, status: 1, expiresAt: 1 }, { name: 'tenant_status_expires' })
 export const TeamInvitation = model('TeamInvitation', teamInvitationSchema)
