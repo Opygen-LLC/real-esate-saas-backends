@@ -548,9 +548,25 @@ const currentSessionIdentity = (
   } catch {
     return null
   }
-  if (!payload?.sessionId || String(payload._id || '') !== userId || String(payload.organizationId || '') !== organizationId) return null
+  if (!payload?.sessionId || String(payload._id || '') !== userId) return null
+  // Phase-1 sessions always carry organizationId. Pre-migration refresh tokens may not;
+  // an explicit tenant mismatch is still rejected, while an absent legacy claim is
+  // validated against the owned AuthSession record below.
+  if (payload.organizationId && String(payload.organizationId) !== organizationId) return null
   return { sessionId: String(payload.sessionId), familyId: String(payload.familyId || '') }
 }
+
+const ownedActiveSessionFilter = (userId: string, organizationId: string) => ({
+  userId,
+  revokedAt: null,
+  expiresAt: { $gt: new Date() },
+  $or: [
+    { organizationId },
+    { organizationId: { $exists: false } },
+    { organizationId: '' },
+    { organizationId: null },
+  ],
+})
 
 const requireCurrentSessionIdentity = async (token: string | undefined, userId: string, organizationId: string): Promise<CurrentSessionIdentity> => {
   const identity = currentSessionIdentity(token, userId, organizationId)
@@ -559,10 +575,7 @@ const requireCurrentSessionIdentity = async (token: string | undefined, userId: 
   }
   const session: any = await AuthSession.findOne({
     _id: identity.sessionId,
-    userId,
-    organizationId,
-    revokedAt: null,
-    expiresAt: { $gt: new Date() },
+    ...ownedActiveSessionFilter(userId, organizationId),
   }).select('+refreshTokenHash +tokenHash')
   const storedHash = session?.refreshTokenHash || session?.tokenHash
   if (!storedHash || !safeEqual(storedHash, sha256(token))) {
@@ -580,22 +593,14 @@ const getCurrentSessionSummary = async (
   if (!identity) return null
   const session = await AuthSession.findOne({
     _id: identity.sessionId,
-    userId,
-    organizationId,
-    revokedAt: null,
-    expiresAt: { $gt: new Date() },
+    ...ownedActiveSessionFilter(userId, organizationId),
   }).select('_id userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt').lean()
   return session ? toAuthSessionSummary(session, true) : null
 }
 
 const listSessions = async (token: string | undefined, userId: string, organizationId: string): Promise<AuthSessionSummary[]> => {
   const identity = currentSessionIdentity(token, userId, organizationId)
-  const sessions = await AuthSession.find({
-    userId,
-    organizationId,
-    revokedAt: null,
-    expiresAt: { $gt: new Date() },
-  })
+  const sessions = await AuthSession.find(ownedActiveSessionFilter(userId, organizationId))
     .select('_id userAgent createdIp lastUsedIp lastUsedAt expiresAt createdAt')
     .sort({ lastUsedAt: -1, createdAt: -1 })
     .lean()
@@ -619,10 +624,7 @@ const revokeSession = async (
   const revoked = await AuthSession.findOneAndUpdate(
     {
       _id: sessionId,
-      userId,
-      organizationId,
-      revokedAt: null,
-      expiresAt: { $gt: new Date() },
+      ...ownedActiveSessionFilter(userId, organizationId),
     },
     { $set: { revokedAt: new Date(), revokeReason: 'user_revoked' } },
     { new: true },
@@ -653,11 +655,8 @@ const revokeOtherSessions = async (
 
   const result = await AuthSession.updateMany(
     {
-      userId,
-      organizationId,
+      ...ownedActiveSessionFilter(userId, organizationId),
       _id: { $ne: new Types.ObjectId(identity.sessionId) },
-      revokedAt: null,
-      expiresAt: { $gt: new Date() },
     },
     { $set: { revokedAt: new Date(), revokeReason: 'user_revoked_other_sessions' } },
   )
