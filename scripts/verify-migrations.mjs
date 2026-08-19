@@ -17,6 +17,10 @@ const specs = [
   { file: 'migratePhase1ManualSubscriptions.js', args: ['--apply', '--confirm=PHASE1-MANUAL-SUBSCRIPTIONS'] },
   { file: 'migratePhase3AgencyPublishing.js', args: ['--apply', '--confirm=PHASE3_REMOVE_LEGACY_OPERATIONS'] },
   { file: 'migratePhase4PropertyMedia2.js', args: ['--apply', '--confirm=APPLY_PROPERTY_MEDIA_2'] },
+  { file: 'migrateTeamQuota.js', args: ['--apply'] },
+  { file: 'migrateWebsiteSubmissions.js', args: ['--apply'] },
+  { file: 'migratePropertyDraftAssets.js', args: ['--apply', '--confirm=PHASE7-PROPERTY-DRAFT-ASSETS'] },
+  { file: 'migratePhase9DomainLifecycle.js', args: ['--apply', '--confirm=PHASE9-DOMAIN-LIFECYCLE'] },
 ].map((spec) => ({ ...spec, file: path.resolve('dist/app/db', spec.file) }))
 
 const runMigration = (spec) => {
@@ -55,6 +59,18 @@ const seedLegacyFixtures = async (db) => {
   for (const name of ['supporttickets', 'fraudreports', 'complianceprofiles', 'datasubjectrequests']) {
     await db.collection(name).insertOne({ organizationId: 'phase7-migration-org', legacy: true })
   }
+  await db.collection('websiteassets').insertOne({
+    organizationId: 'phase7-migration-org', key: 'legacy/asset.jpg', url: 'https://media.example.test/legacy-asset.jpg',
+    size: 1200, mimeType: 'image/jpeg', status: 'ready', createdAt: new Date(), updatedAt: new Date(),
+  })
+  await db.collection('websiteuploadintents').insertOne({
+    organizationId: 'phase7-migration-org', key: 'legacy/intent.jpg', objectKeys: ['legacy/intent.jpg'],
+    status: 'pending', expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), updatedAt: new Date(),
+  })
+  await db.collection('domainrecords').insertOne({
+    organizationId: 'phase7-migration-org', domain: 'legacy-domain.example', ownershipToken: 'legacy-token',
+    status: 'verified', tlsStatus: 'active', createdAt: new Date(), updatedAt: new Date(),
+  })
   await db.collection('platformsettings').insertOne({ key: 'platform' })
 }
 
@@ -83,6 +99,23 @@ const assertPostMigration = async (db) => {
     if (exists) throw new Error(`Legacy collection was not removed: ${name}`)
   }
   if (await db.collection('operationsjobs').countDocuments({ type: 'support_email' })) throw new Error('Legacy support-email jobs were not removed')
+
+  const draftAsset = await db.collection('websiteassets').findOne({ organizationId: 'phase7-migration-org', key: 'legacy/asset.jpg' })
+  if (draftAsset?.context !== 'website' || draftAsset?.claimed !== true) throw new Error('Legacy website asset lifecycle defaults were not backfilled')
+  const uploadIntent = await db.collection('websiteuploadintents').findOne({ organizationId: 'phase7-migration-org', key: 'legacy/intent.jpg' })
+  if (uploadIntent?.context !== 'website' || uploadIntent?.uploadSessionId !== '') throw new Error('Legacy upload intent lifecycle defaults were not backfilled')
+  const domain = await db.collection('domainrecords').findOne({ organizationId: 'phase7-migration-org', domain: 'legacy-domain.example' })
+  if (domain?.lifecycleStatus !== 'ACTIVE' || domain?.publicRoutingStatus !== 'active' || domain?.providerRegistrationStatus !== 'registered') {
+    throw new Error('Legacy custom domain lifecycle was not backfilled to ACTIVE')
+  }
+
+  const submissionIndexes = await db.collection('websitesubmissions').indexes()
+  if (!submissionIndexes.some((index) => index.name === 'submission_tenant_status_submitted')) throw new Error('Website submission inbox indexes were not installed')
+  const invitationIndexes = await db.collection('teaminvitations').indexes()
+  if (!invitationIndexes.some((index) => index.name === 'tenant_status_expires')) throw new Error('Team quota invitation indexes were not installed')
+  const assetIndexes = await db.collection('websiteassets').indexes()
+  if (!assetIndexes.some((index) => index.name === 'property_draft_lifecycle')) throw new Error('Property draft lifecycle indexes were not installed')
+
   const settings = await db.collection('platformsettings').findOne({ key: 'platform' })
   if (settings?.support?.whatsapp !== '+8801891793354') throw new Error('Platform support contact defaults were not installed')
 }

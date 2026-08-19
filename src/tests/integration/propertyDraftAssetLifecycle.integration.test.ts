@@ -1,0 +1,115 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+
+const removedKeys: string[] = []
+vi.mock('../../app/module/websiteBuilder/objectStorage.service', () => ({
+  ObjectStorageService: {
+    remove: vi.fn(async (key: string) => { removedKeys.push(key) }),
+    exists: vi.fn(async () => true),
+    publicUrl: vi.fn((key: string) => `https://media.example.test/${key}`),
+  },
+}))
+vi.mock('../../app/module/operationsQueue/operationsQueue.service', () => ({
+  OperationsQueueService: {
+    cancel: vi.fn(async () => undefined),
+    enqueue: vi.fn(async () => undefined),
+  },
+}))
+
+const requiredDb = process.env.TEST_DATABASE_URL
+const suite = requiredDb ? describe : describe.skip
+let mongoose: typeof import('mongoose')
+let Organization: any
+let WebsiteAsset: any
+let WebsiteBuilderService: any
+const organizationId = 'phase10-draft-assets'
+
+const createDraftAsset = async (sessionId: string, suffix: string, createdAt = new Date(), size = 1500) => {
+  const now = new Date()
+  const result = await WebsiteAsset.collection.insertOne({
+    organizationId,
+    context: 'property-draft',
+    uploadSessionId: sessionId,
+    claimed: false,
+    key: `tenants/${organizationId}/properties/drafts/${sessionId}/${suffix}.jpg`,
+    url: `https://media.example.test/${suffix}.jpg`,
+    mimeType: 'image/jpeg',
+    size,
+    status: 'ready',
+    variants: [],
+    createdAt,
+    updatedAt: now,
+  })
+  return String(result.insertedId)
+}
+
+suite('Phase 10 property draft asset lifecycle integration', () => {
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test'
+    process.env.DATABASE_URL = requiredDb!
+    process.env.REDIS_ENABLED = 'false'
+    process.env.WORKER_ENABLED = 'false'
+    process.env.PROPERTY_DRAFT_ASSET_TTL_MINUTES = '60'
+    process.env.PROPERTY_DRAFT_CLEANUP_INTERVAL_MINUTES = '15'
+    process.env.CLIENT_URL = 'http://localhost:3000'
+    process.env.PUBLIC_API_URL = 'http://127.0.0.1:5000'
+    process.env.ALLOWED_ORIGINS = 'http://localhost:3000'
+
+    mongoose = await import('mongoose')
+    await mongoose.connect(requiredDb!, { autoIndex: true, serverSelectionTimeoutMS: 5000 })
+    await mongoose.connection.dropDatabase()
+    ;({ Organization } = await import('../../app/module/organization/organization.model'))
+    ;({ WebsiteAsset } = await import('../../app/module/websiteBuilder/websiteAsset.model'))
+    ;({ WebsiteBuilderService } = await import('../../app/module/websiteBuilder/websiteBuilder.service'))
+    await Organization.create({
+      organizationId,
+      agencyName: 'Phase 10 Draft Asset Realty',
+      email: 'draft-assets@example.test',
+      phone: '+8801755555555',
+      sub_domain: 'phase10-draft-assets',
+      storageUsedBytes: 5000,
+      subscription: { plan: 'trial', status: 'trialing', maxProperties: 100, maxAgents: 5 },
+    })
+  }, 20_000)
+
+  afterAll(async () => {
+    if (mongoose?.connection?.readyState) await mongoose.connection.dropDatabase().catch(() => undefined)
+    await mongoose?.disconnect().catch(() => undefined)
+  })
+
+  it('normal cancel deletes only unclaimed session assets and decrements storage usage', async () => {
+    removedKeys.length = 0
+    const sessionId = '11111111-1111-4111-8111-111111111111'
+    const assetId = await createDraftAsset(sessionId, 'cancelled', new Date(), 1500)
+    await WebsiteAsset.collection.insertOne({
+      organizationId,
+      context: 'property',
+      uploadSessionId: sessionId,
+      claimed: true,
+      claimedByPropertyId: new mongoose.Types.ObjectId(),
+      key: `tenants/${organizationId}/properties/claimed.jpg`,
+      url: 'https://media.example.test/claimed.jpg',
+      mimeType: 'image/jpeg', size: 700, status: 'ready', variants: [], createdAt: new Date(), updatedAt: new Date(),
+    })
+
+    const result = await WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, sessionId)
+    expect(result).toMatchObject({ deleted: 1, bytesReleased: 1500 })
+    expect(await WebsiteAsset.exists({ _id: assetId })).toBeNull()
+    expect(await WebsiteAsset.exists({ organizationId, context: 'property', claimed: true })).toBeTruthy()
+    expect(removedKeys.some((key) => key.includes('cancelled.jpg'))).toBe(true)
+    const org = await Organization.findOne({ organizationId }).lean()
+    expect(org.storageUsedBytes).toBe(3500)
+  })
+
+  it('TTL cleanup removes abandoned draft sessions after the configured crash-protection window', async () => {
+    removedKeys.length = 0
+    const sessionId = '22222222-2222-4222-8222-222222222222'
+    const assetId = await createDraftAsset(sessionId, 'abandoned', new Date(Date.now() - 2 * 60 * 60_000), 1000)
+    const result = await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
+    expect(result.sessions).toBeGreaterThanOrEqual(1)
+    expect(result.deleted).toBeGreaterThanOrEqual(1)
+    expect(await WebsiteAsset.exists({ _id: assetId })).toBeNull()
+    expect(removedKeys.some((key) => key.includes('abandoned.jpg'))).toBe(true)
+    const org = await Organization.findOne({ organizationId }).lean()
+    expect(org.storageUsedBytes).toBe(2500)
+  })
+})

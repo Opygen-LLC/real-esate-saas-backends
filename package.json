@@ -27,7 +27,7 @@
     "test:migrations": "node scripts/verify-migrations.mjs",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:load": "node scripts/load-test.mjs",
-    "verify:ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:ci && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance",
+    "verify:ci": "pnpm verify:release",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts",
     "test:smtp": "node scripts/verify-smtp.mjs",
@@ -41,7 +41,7 @@
     "verify:phase5-finance": "node scripts/verify-phase5-finance.mjs",
     "verify:phase7-architecture": "node scripts/verify-phase7-architecture.mjs",
     "test:journey": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase7ReleaseJourney.integration.test.ts",
-    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:integration && pnpm test:migrations && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance",
+    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase10 && pnpm test:integration && pnpm test:migrations && pnpm verify:phase10 && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance",
     "migrate:user-auth-architecture": "ts-node --transpile-only src/app/db/migratePhase1UserAuthArchitecture.ts",
     "verify:phase1-user-auth": "node scripts/verify-phase1-user-auth-architecture.mjs",
     "migrate:phase2-property-correctness": "ts-node --transpile-only src/app/db/migratePhase2PropertyCorrectness.ts",
@@ -63,7 +63,9 @@
     "migrate:team-quota": "ts-node --transpile-only src/app/db/migrateTeamQuota.ts",
     "migrate:website-submissions": "ts-node --transpile-only src/app/db/migrateWebsiteSubmissions.ts",
     "migrate:property-draft-assets": "ts-node --transpile-only src/app/db/migratePropertyDraftAssets.ts",
-    "migrate:domain-lifecycle": "ts-node --transpile-only src/app/db/migratePhase9DomainLifecycle.ts"
+    "migrate:domain-lifecycle": "ts-node --transpile-only src/app/db/migratePhase9DomainLifecycle.ts",
+    "test:phase10": "vitest run src/tests/contract/phase10ProductionRelease.contract.test.ts src/tests/contract/teamQuota.contract.test.ts src/tests/unit/phase5FilterSort.contract.test.ts src/tests/unit/propertyImportExport.contract.test.ts src/tests/unit/propertyDraftAssetLifecycle.contract.test.ts src/tests/contract/phase8AuthSessions.contract.test.ts src/tests/contract/phase9CustomDomainLifecycle.contract.test.ts",
+    "verify:phase10": "node scripts/verify-phase10-release.mjs"
   },
   "keywords": [
     "real-estate",
