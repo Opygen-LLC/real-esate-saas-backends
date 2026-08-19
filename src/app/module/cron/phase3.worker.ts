@@ -38,12 +38,16 @@ export const runPhase3Maintenance = async () => {
     Metrics.setGauge('operations_queue_oldest_age_seconds', backlog.oldestPendingAt ? Math.max(0, (Date.now() - new Date(backlog.oldestPendingAt).getTime()) / 1000) : 0)
     cleanupTick += 1
     const cleanupEvery = Math.max(1, Math.round(24 * 60 * 60 * 1000 / config.runtime.worker_poll_ms))
+    const propertyDraftCleanupEvery = Math.max(1, Math.round(config.assets.property_draft_cleanup_interval_minutes * 60_000 / config.runtime.worker_poll_ms))
     const assets = cleanupTick % cleanupEvery === 0 ? await WebsiteBuilderService.cleanupOrphanAssets(100) : { checked: 0, deleted: 0 }
+    const propertyDraftAssets = cleanupTick % propertyDraftCleanupEvery === 0
+      ? await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
+      : { sessions: 0, checked: 0, deleted: 0, reconciled: 0, bytesReleased: 0, incompleteUploadsDeleted: 0 }
     lastSuccessAt = Date.now(); lastError = ''
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
     Metrics.setGauge('worker_last_duration_ms', lastDurationMs)
-    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, planVersions, slaMarked: sla.modifiedCount, assets }
+    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, planVersions, slaMarked: sla.modifiedCount, assets, propertyDraftAssets }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     lastDurationMs = performance.now() - started

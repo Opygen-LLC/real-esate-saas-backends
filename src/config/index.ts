@@ -317,6 +317,8 @@ export default {
     signed_url_ttl_seconds: Math.max(60, Math.min(3600, Number(process.env.OBJECT_STORAGE_SIGNED_URL_TTL || 600))),
     health_timeout_ms: Math.max(500, Math.min(15000, Number(process.env.OBJECT_STORAGE_HEALTH_TIMEOUT_MS || 3000))),
     health_cache_ms: Math.max(1000, Math.min(60000, Number(process.env.OBJECT_STORAGE_HEALTH_CACHE_MS || 10000))),
+    property_draft_ttl_minutes: Math.max(30, Math.min(1440, Number(process.env.PROPERTY_DRAFT_ASSET_TTL_MINUTES || 120))),
+    property_draft_cleanup_interval_minutes: Math.max(5, Math.min(120, Number(process.env.PROPERTY_DRAFT_CLEANUP_INTERVAL_MINUTES || 15))),
     clamav_host: process.env.CLAMAV_HOST || '',
     clamav_port: Math.max(1, Number(process.env.CLAMAV_PORT || 3310)),
   },

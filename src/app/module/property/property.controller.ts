@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import mongoose from 'mongoose'
 import httpStatus from 'http-status'
 import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
@@ -9,6 +10,9 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
 import ApiError from '../../../errors/ApiError'
 import { PropertyImportService } from './propertyImport.service'
+import config from '../../../config'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { logger } from '../../../shared/logger'
 
 
 const propertyActor = (req: Request) => ({
@@ -72,11 +76,36 @@ const exportXlsx = catchAsync(async (req: Request, res: Response) => {
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   await EntitlementService.assertLimit(organizationId, 'properties')
-  const result = await PropertyService.createProperty(organizationId, req.body, {
+  const { propertyDraftSessionId, ...propertyPayload } = req.body
+  const actor = {
     id: req.user?._id || req.user?.id,
     role: req.user?.userRole || req.user?.role || req.tenant?.role,
     canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
-  })
+  }
+
+  let result: any
+  if (propertyDraftSessionId) {
+    const canTransact = await mongoSupportsTransactions()
+    if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property media claiming requires MongoDB transactions in production')
+    const session = canTransact ? await mongoose.startSession() : null
+    const execute = async () => {
+      await WebsiteBuilderService.validatePropertyDraftAssets(organizationId, propertyDraftSessionId, propertyPayload.images || [], session)
+      result = await PropertyService.createProperty(organizationId, propertyPayload, actor, { session, emitEvent: false })
+      await WebsiteBuilderService.claimPropertyDraftAssets(organizationId, propertyDraftSessionId, result._id.toString(), propertyPayload.images || [], session)
+    }
+    try {
+      if (session) await session.withTransaction(execute)
+      else await execute()
+    } finally {
+      if (session) await session.endSession()
+    }
+    await PropertyService.emitPropertyCreated(organizationId, result)
+    void WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId).catch((error) => {
+      logger.warn('[property-media] post-create draft cleanup deferred to worker', { organizationId, propertyId: result?._id?.toString(), error })
+    })
+  } else {
+    result = await PropertyService.createProperty(organizationId, propertyPayload, actor)
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -89,7 +118,8 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
 
 
 const presignPropertyImage = catchAsync(async (req: Request, res: Response) => {
-  const data = await WebsiteBuilderService.presignAsset(requireTenant(req), req.body)
+  const { uploadSessionId, ...assetPayload } = req.body
+  const data = await WebsiteBuilderService.presignAsset(requireTenant(req), assetPayload, uploadSessionId ? { context: 'property-draft', uploadSessionId } : {})
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Property image upload prepared', data })
 })
 const completePropertyImage = catchAsync(async (req: Request, res: Response) => {
@@ -102,8 +132,19 @@ const getPropertyImageAsset = catchAsync(async (req: Request, res: Response) => 
 })
 
 const importPropertyImageUrl = catchAsync(async (req: Request, res: Response) => {
-  const data = await WebsiteBuilderService.importAssetFromUrl(requireTenant(req), req.body, req.user?._id)
+  const { uploadSessionId, ...assetPayload } = req.body
+  const data = await WebsiteBuilderService.importAssetFromUrl(requireTenant(req), assetPayload, req.user?._id, uploadSessionId ? { context: 'property-draft', uploadSessionId } : {})
   sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image imported and queued for verification', data })
+})
+
+const deletePropertyDraftAsset = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.deletePropertyDraftAsset(requireTenant(req), req.params.sessionId, req.params.assetId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: data.deleted ? 'Draft property image deleted' : 'Draft property image already removed', data })
+})
+
+const cleanupPropertyDraftSession = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.cleanupPropertyDraftSession(requireTenant(req), req.params.sessionId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft media cleaned up', data })
 })
 
 const getAllProperties = catchAsync(async (req: Request, res: Response) => {
@@ -285,6 +326,8 @@ export const PropertyController = {
   presignPropertyImage,
   completePropertyImage,
   getPropertyImageAsset,
+  deletePropertyDraftAsset,
+  cleanupPropertyDraftSession,
   getAllProperties,
   getPublicProperties,
   getPublicPropertyDetail,

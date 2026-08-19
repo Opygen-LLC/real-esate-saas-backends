@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
-import mongoose from 'mongoose'
+import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
 import { isIP } from 'net'
 import ApiError from '../../../errors/ApiError'
@@ -16,6 +16,7 @@ import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { WebsitePage } from './websitePage.model'
 import { WebsiteRevision } from './websiteRevision.model'
 import { WebsiteAsset } from './websiteAsset.model'
+import type { WebsiteAssetContext } from './websiteAsset.interface'
 import { WebsitePreviewToken } from './websitePreviewToken.model'
 import { WebsiteUploadIntent } from './websiteUploadIntent.model'
 import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.validation'
@@ -205,27 +206,46 @@ const getPreview = async (token: string) => {
   return { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain }, page: { title: page.title, slug: page.slug, draftDocument: page.draftDocument, seo: page.seo }, expiresAt: preview.expiresAt }
 }
 
-const assetKey = (organizationId: string, filename: string, suffix = '') => {
+type AssetLifecycleOptions = { context?: Extract<WebsiteAssetContext, 'website' | 'property-draft'>; uploadSessionId?: string }
+
+const assertDraftSessionId = (value?: string) => {
+  if (!value || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new ApiError(400, 'A valid property draft upload session is required')
+  }
+  return value
+}
+
+const assetKey = (organizationId: string, filename: string, suffix = '', options: AssetLifecycleOptions = {}) => {
   const safe = filename.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').slice(-100)
+  if (options.context === 'property-draft') {
+    const sessionId = assertDraftSessionId(options.uploadSessionId)
+    return `tenants/${organizationId}/properties/drafts/${sessionId}/${new Date().toISOString().slice(0,10)}/${randomUUID()}${suffix}-${safe}`
+  }
   return `tenants/${organizationId}/website/${new Date().toISOString().slice(0,10)}/${randomUUID()}${suffix}-${safe}`
 }
 
-const presignAsset = async (organizationId: string, payload: any) => {
+const presignAsset = async (organizationId: string, payload: any, options: AssetLifecycleOptions = {}) => {
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
   const size = Number(payload.size)
   if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
   await EntitlementService.assertStorage(organizationId, size)
-  const key = assetKey(organizationId, payload.filename)
+  const context = options.context || 'website'
+  const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
+  const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
   const original = ObjectStorageService.presignUpload(key)
   const requiredVariants = payload.mimeType.startsWith('image/') ? [640, 1280].flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, ...ObjectStorageService.presignUpload(`${key}.${width}.${format}`) }))) : []
-  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...requiredVariants.map((variant) => variant.key)], declaredSize: size, mimeType: payload.mimeType, expiresAt: new Date(Date.now() + 60 * 60_000) })
+  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...requiredVariants.map((variant) => variant.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, expiresAt: new Date(Date.now() + 60 * 60_000) })
   return { original, requiredVariants }
 }
 
 const completeAsset = async (organizationId: string, payload: any, userId?: string) => {
-  if (!String(payload.key).startsWith(`tenants/${organizationId}/website/`)) throw new ApiError(403, 'Asset key does not belong to this tenant')
+  if (!String(payload.key).startsWith(`tenants/${organizationId}/`)) throw new ApiError(403, 'Asset key does not belong to this tenant')
   const intent: any = await WebsiteUploadIntent.findOne({ organizationId, key: payload.key })
   if (!intent) throw new ApiError(409, 'Upload intent expired or was not created by this tenant')
+  if (intent.status !== 'pending') {
+    await Promise.allSettled((intent.objectKeys || []).map((key: string) => ObjectStorageService.remove(key)))
+    throw new ApiError(409, 'Upload session was cancelled before the asset was completed')
+  }
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
   if (intent.mimeType !== payload.mimeType) throw new ApiError(400, 'Uploaded asset type does not match its signed upload intent')
   for (const variant of payload.variants || []) {
@@ -233,7 +253,7 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
   }
   const asset: any = await WebsiteAsset.findOneAndUpdate(
     { organizationId, key: payload.key },
-    { $set: { url: ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, lastReferencedAt: new Date() } },
+    { $set: { url: ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, context: intent.context || 'website', uploadSessionId: intent.uploadSessionId || '', claimed: intent.context === 'property-draft' ? false : true, claimedByPropertyId: null, claimedAt: intent.context === 'property-draft' ? null : new Date(), lastReferencedAt: new Date() } },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   )
   await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
@@ -318,14 +338,187 @@ const readRemoteImage = async (input: string) => {
   return { buffer, mimeType, filename, size: buffer.length }
 }
 
-const importAssetFromUrl = async (organizationId: string, payload: { url: string; altText?: string }, userId?: string) => {
+const importAssetFromUrl = async (organizationId: string, payload: { url: string; altText?: string }, userId?: string, options: AssetLifecycleOptions = {}) => {
   const remote = await readRemoteImage(payload.url)
   await EntitlementService.assertStorage(organizationId, remote.size)
-  const signed: any = await presignAsset(organizationId, { filename: remote.filename, mimeType: remote.mimeType, size: remote.size })
+  const signed: any = await presignAsset(organizationId, { filename: remote.filename, mimeType: remote.mimeType, size: remote.size }, options)
   await ObjectStorageService.putBuffer(signed.original.key, remote.buffer, remote.mimeType)
   return completeAsset(organizationId, { key: signed.original.key, originalName: remote.filename, mimeType: remote.mimeType, altText: payload.altText || '', variants: [] }, userId)
 }
 
+
+const decrementStorageUsage = async (organizationId: string, bytes: number) => {
+  const amount = Math.max(0, Number(bytes || 0))
+  if (!amount) return
+  await Organization.collection.updateOne(
+    { organizationId },
+    [{ $set: { storageUsedBytes: { $max: [0, { $subtract: [{ $ifNull: ['$storageUsedBytes', 0] }, amount] }] } } }],
+  )
+}
+
+const propertyReferenceForAsset = async (organizationId: string, asset: any, session?: ClientSession | null) => {
+  const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
+  const or: Record<string, unknown>[] = [
+    { 'images.assetId': String(asset._id) },
+    { 'images.publicId': asset.key },
+    ...needles.map((needle) => ({ 'images.url': needle })),
+  ]
+  const query = Property.findOne({ organizationId, $or: or }).select('_id')
+  if (session) query.session(session)
+  return query.lean()
+}
+
+type PropertyDraftImageRef = { assetId?: string; publicId?: string; url?: string }
+
+const validatePropertyDraftAssets = async (
+  organizationId: string,
+  uploadSessionId: string,
+  images: PropertyDraftImageRef[] = [],
+  session?: ClientSession | null,
+) => {
+  assertDraftSessionId(uploadSessionId)
+  const managedRefs = images.filter((image) => image.assetId || (image.publicId && image.publicId.startsWith(`tenants/${organizationId}/properties/drafts/`)))
+  if (!managedRefs.length) return []
+
+  const assetIds = managedRefs.map((image) => image.assetId).filter((value): value is string => Boolean(value))
+  if (assetIds.some((id) => !Types.ObjectId.isValid(id))) throw new ApiError(400, 'Property draft image reference is invalid')
+  const keys = managedRefs.map((image) => image.publicId).filter((value): value is string => Boolean(value))
+  const query = WebsiteAsset.find({
+    organizationId,
+    context: 'property-draft',
+    uploadSessionId,
+    claimed: false,
+    $or: [
+      ...(assetIds.length ? [{ _id: { $in: assetIds } }] : []),
+      ...(keys.length ? [{ key: { $in: keys } }] : []),
+    ],
+  })
+  if (session) query.session(session)
+  const assets = await query
+  const matchedIds = new Set(assets.map((asset: any) => String(asset._id)))
+  const matchedKeys = new Set(assets.map((asset: any) => String(asset.key)))
+  for (const ref of managedRefs) {
+    if ((ref.assetId && matchedIds.has(ref.assetId)) || (ref.publicId && matchedKeys.has(ref.publicId))) continue
+    throw new ApiError(409, 'A property image is not part of this draft session or has already been claimed')
+  }
+  if (assets.some((asset: any) => asset.status !== 'ready')) throw new ApiError(409, 'All property images must finish processing before the listing can be saved')
+  return assets
+}
+
+const claimPropertyDraftAssets = async (
+  organizationId: string,
+  uploadSessionId: string,
+  propertyId: string,
+  images: PropertyDraftImageRef[] = [],
+  session?: ClientSession | null,
+) => {
+  if (!Types.ObjectId.isValid(propertyId)) throw new ApiError(400, 'Property ID is invalid')
+  const assets = await validatePropertyDraftAssets(organizationId, uploadSessionId, images, session)
+  if (!assets.length) return { claimed: 0 }
+  const ids = assets.map((asset: any) => asset._id)
+  const update = WebsiteAsset.updateMany(
+    { _id: { $in: ids }, organizationId, context: 'property-draft', uploadSessionId, claimed: false },
+    { $set: { context: 'property', claimed: true, claimedByPropertyId: propertyId, claimedAt: new Date(), lastReferencedAt: new Date() } },
+  )
+  if (session) update.session(session)
+  const result = await update
+  if (result.modifiedCount !== ids.length) throw new ApiError(409, 'Property image ownership changed while the listing was being saved')
+  return { claimed: result.modifiedCount }
+}
+
+const deletePropertyDraftAsset = async (organizationId: string, uploadSessionId: string, assetId: string) => {
+  assertDraftSessionId(uploadSessionId)
+  if (!Types.ObjectId.isValid(assetId)) throw new ApiError(400, 'Property draft asset ID is invalid')
+  const asset: any = await WebsiteAsset.findOne({ _id: assetId, organizationId, context: 'property-draft', uploadSessionId, claimed: false })
+  if (!asset) return { id: assetId, deleted: false }
+  const property = await propertyReferenceForAsset(organizationId, asset)
+  if (property) throw new ApiError(409, 'This image is already referenced by a saved property')
+  await OperationsQueueService.cancel(organizationId, 'asset_finalize', assetId)
+  const intent: any = await WebsiteUploadIntent.findOne({ organizationId, key: asset.key, context: 'property-draft', uploadSessionId })
+  const objectKeys = Array.from(new Set([
+    asset.key,
+    ...(asset.variants || []).map((variant: any) => variant.key),
+    ...((intent?.objectKeys || []) as string[]),
+  ].filter(Boolean).map(String)))
+  const removals = await Promise.allSettled(objectKeys.map((key) => ObjectStorageService.remove(key)))
+  if (removals.some((result) => result.status === 'rejected')) throw new ApiError(502, 'Property draft media could not be fully removed from object storage')
+  if (intent) {
+    intent.status = 'cancelled'
+    intent.expiresAt = new Date(Date.now() + 2 * 60 * 60_000)
+    await intent.save()
+  }
+  const size = Math.max(0, Number(asset.size || 0))
+  await asset.deleteOne()
+  await decrementStorageUsage(organizationId, size)
+  return { id: assetId, deleted: true, bytesReleased: size }
+}
+
+const cleanupPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
+  assertDraftSessionId(uploadSessionId)
+  const assets: any[] = await WebsiteAsset.find({ organizationId, context: 'property-draft', uploadSessionId, claimed: false }).sort({ createdAt: 1 })
+  let deleted = 0
+  let reconciled = 0
+  let bytesReleased = 0
+  for (const asset of assets) {
+    const property: any = await propertyReferenceForAsset(organizationId, asset)
+    if (property?._id) {
+      await WebsiteAsset.updateOne(
+        { _id: asset._id, organizationId, context: 'property-draft', uploadSessionId, claimed: false },
+        { $set: { context: 'property', claimed: true, claimedByPropertyId: property._id, claimedAt: new Date(), lastReferencedAt: new Date() } },
+      )
+      reconciled += 1
+      continue
+    }
+    const outcome = await deletePropertyDraftAsset(organizationId, uploadSessionId, String(asset._id))
+    if (outcome.deleted) { deleted += 1; bytesReleased += Number(outcome.bytesReleased || 0) }
+  }
+
+  const intents: any[] = await WebsiteUploadIntent.find({ organizationId, context: 'property-draft', uploadSessionId })
+  let incompleteUploadsDeleted = 0
+  for (const intent of intents) {
+    const registered = await WebsiteAsset.exists({ organizationId, key: intent.key })
+    if (!registered) {
+      await Promise.allSettled((intent.objectKeys || []).map((key: string) => ObjectStorageService.remove(key)))
+      incompleteUploadsDeleted += 1
+    }
+    intent.status = 'cancelled'
+    intent.expiresAt = new Date(Date.now() + 2 * 60 * 60_000)
+    await intent.save()
+  }
+  return { checked: assets.length, deleted, reconciled, bytesReleased, incompleteUploadsDeleted }
+}
+
+const cleanupAbandonedPropertyDraftAssets = async (limit = 100) => {
+  const cutoff = new Date(Date.now() - config.assets.property_draft_ttl_minutes * 60_000)
+  const candidates: any[] = await WebsiteAsset.find({ context: 'property-draft', claimed: false, createdAt: { $lte: cutoff } })
+    .sort({ createdAt: 1 }).limit(limit)
+  const sessions = new Map<string, { organizationId: string; uploadSessionId: string }>()
+  for (const asset of candidates) {
+    const key = `${asset.organizationId}:${asset.uploadSessionId}`
+    if (asset.uploadSessionId) sessions.set(key, { organizationId: asset.organizationId, uploadSessionId: asset.uploadSessionId })
+  }
+
+  const staleIntents: any[] = await WebsiteUploadIntent.find({ context: 'property-draft', createdAt: { $lte: cutoff } })
+    .sort({ createdAt: 1 }).limit(limit)
+  for (const intent of staleIntents) {
+    const key = `${intent.organizationId}:${intent.uploadSessionId}`
+    if (intent.uploadSessionId) sessions.set(key, { organizationId: intent.organizationId, uploadSessionId: intent.uploadSessionId })
+  }
+
+  let deleted = 0
+  let reconciled = 0
+  let bytesReleased = 0
+  let incompleteUploadsDeleted = 0
+  for (const sessionInfo of sessions.values()) {
+    const result = await cleanupPropertyDraftSession(sessionInfo.organizationId, sessionInfo.uploadSessionId)
+    deleted += result.deleted
+    reconciled += result.reconciled
+    bytesReleased += result.bytesReleased
+    incompleteUploadsDeleted += result.incompleteUploadsDeleted
+    await WebsiteUploadIntent.deleteMany({ organizationId: sessionInfo.organizationId, context: 'property-draft', uploadSessionId: sessionInfo.uploadSessionId, status: 'cancelled', createdAt: { $lte: cutoff } })
+  }
+  return { sessions: sessions.size, checked: candidates.length, deleted, reconciled, bytesReleased, incompleteUploadsDeleted, cutoff }
+}
 
 const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
 const getAssetById = async (organizationId: string, assetId: string) => { const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId }).lean(); if (!asset) throw new ApiError(404, 'Asset not found'); return asset }
@@ -348,7 +541,7 @@ const deleteAsset = async (organizationId: string, assetId: string, allowReferen
   await OperationsQueueService.cancel(organizationId, 'asset_finalize', assetId)
   await Promise.allSettled([ObjectStorageService.remove(asset.key), ...(asset.variants || []).map((v) => ObjectStorageService.remove(v.key))])
   await asset.deleteOne()
-  await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: -Math.max(0, asset.size || 0) } })
+  await decrementStorageUsage(organizationId, Math.max(0, asset.size || 0))
   return { id: assetId }
 }
 
@@ -416,4 +609,4 @@ const getSitemap = async (identifier: string) => {
 const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
 const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

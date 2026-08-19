@@ -1,4 +1,5 @@
 import httpStatus from 'http-status'
+import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
@@ -14,6 +15,7 @@ import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.consta
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
+type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
 
 const isPublicPropertyStatus = (status?: string): status is PropertyStatus =>
   Boolean(status && (PUBLIC_PROPERTY_STATUSES as readonly string[]).includes(status))
@@ -41,7 +43,7 @@ const normalizeDiscount = (
   return next
 }
 
-const generateSlug = async (organizationId: string, title: string): Promise<string> => {
+const generateSlug = async (organizationId: string, title: string, session?: ClientSession | null): Promise<string> => {
   let baseSlug = title
     .toLowerCase()
     .trim()
@@ -54,7 +56,7 @@ const generateSlug = async (organizationId: string, title: string): Promise<stri
   let slug = baseSlug
   let count = 1
 
-  while (await Property.findOne({ organizationId, slug })) {
+  while (await Property.findOne({ organizationId, slug }).session(session || null)) {
     slug = `${baseSlug}-${count}`
     count++
   }
@@ -62,14 +64,24 @@ const generateSlug = async (organizationId: string, title: string): Promise<stri
   return slug
 }
 
+const emitPropertyCreated = async (organizationId: string, result: any) => DomainEventService.emit({
+  organizationId,
+  aggregateType: 'property',
+  aggregateId: result._id.toString(),
+  eventType: 'property.created',
+  propertyId: result._id.toString(),
+  payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
+})
+
 const createProperty = async (
   organizationId: string,
   payload: Partial<IProperty>,
   actor?: PropertyActor,
+  options: PropertyCreateOptions = {},
 ): Promise<IProperty> => {
   if (!payload.title) throw new ApiError(httpStatus.BAD_REQUEST, 'Property title is required')
 
-  const slug = await generateSlug(organizationId, payload.title)
+  const slug = await generateSlug(organizationId, payload.title, options.session)
   const postalNormalized = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
   const normalizedPayload = normalizeDiscount(postalNormalized, undefined, Boolean(actor?.canPublish))
   const status: IProperty['status'] = actor?.canPublish ? (normalizedPayload.status || 'Draft') : 'Draft'
@@ -87,15 +99,10 @@ const createProperty = async (
     publishedAt: isPublicPropertyStatus(status) ? new Date() : undefined,
   }
 
-  const result = await Property.create(propertyData)
-  await DomainEventService.emit({
-    organizationId,
-    aggregateType: 'property',
-    aggregateId: result._id.toString(),
-    eventType: 'property.created',
-    propertyId: result._id.toString(),
-    payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
-  })
+  const result = options.session
+    ? (await Property.create([propertyData], { session: options.session }))[0]
+    : await Property.create(propertyData)
+  if (options.emitEvent !== false) await emitPropertyCreated(organizationId, result)
   return result
 }
 
@@ -425,7 +432,7 @@ const deleteProperty = async (organizationId: string, id: string): Promise<IProp
   return result
 }
 
-export const PropertyService = {
+export const PropertyService = { emitPropertyCreated,
   createProperty,
   getAllProperties,
   getPublicProperties,

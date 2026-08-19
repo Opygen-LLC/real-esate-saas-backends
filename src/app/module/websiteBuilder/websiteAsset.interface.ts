@@ -1,5 +1,7 @@
 import { Model, Types } from 'mongoose'
 
+export type WebsiteAssetContext = 'website' | 'property-draft' | 'property'
+
 export interface IWebsiteAssetVariant {
   key: string
   url: string
@@ -24,6 +26,11 @@ export interface IWebsiteAsset {
   scanStatus?: 'pending' | 'clean' | 'skipped' | 'infected'
   variants?: IWebsiteAssetVariant[]
   uploadedBy?: Types.ObjectId | string
+  context?: WebsiteAssetContext
+  uploadSessionId?: string
+  claimed?: boolean
+  claimedByPropertyId?: Types.ObjectId | string
+  claimedAt?: Date
   lastReferencedAt?: Date
   createdAt?: Date
 }

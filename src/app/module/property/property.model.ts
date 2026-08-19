@@ -17,6 +17,7 @@ const propertyMediaLinkSchema = new Schema(
 
 const propertyImageSchema = new Schema(
   {
+    assetId: { type: Schema.Types.ObjectId, ref: 'WebsiteAsset', default: null },
     url: { type: String, required: true },
     publicId: { type: String, default: '' },
     caption: { type: String, default: '' },

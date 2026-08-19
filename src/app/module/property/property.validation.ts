@@ -38,7 +38,7 @@ const assetVariant = z.object({
   height: z.number().int().positive().optional(),
 }).strict()
 
-const image = z.object({ _id: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), url: z.string().url(), publicId: z.string().max(200).optional(), caption: z.string().max(200).optional(),
+const image = z.object({ _id: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), url: z.string().url(), publicId: z.string().max(1200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
 const propertyImages = z.array(image).max(20).superRefine((items, ctx) => {
   if (items.filter(item => item.isFeatured).length > 1) {
@@ -111,7 +111,12 @@ const validateDiscount = (value: PropertyInput, ctx: z.RefinementCtx) => {
   }
 }
 
-const createBody = z.object(fields).strict().superRefine(validateDiscount).transform(canonicalizePostalCode)
+const createBody = z.object({ ...fields, propertyDraftSessionId: z.string().uuid().optional() }).strict().superRefine((value, ctx) => {
+  validateDiscount(value, ctx)
+  if (value.images?.some((item) => item.assetId) && !value.propertyDraftSessionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['propertyDraftSessionId'], message: 'Property draft upload session is required for uploaded images' })
+  }
+}).transform(canonicalizePostalCode)
 const updateBody = z.object(Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()])))
   .strict()
   .refine(value => Object.keys(value).length > 0, 'At least one field is required')
@@ -119,12 +124,14 @@ const updateBody = z.object(Object.fromEntries(Object.entries(fields).map(([key,
   .transform(canonicalizePostalCode)
 
 export const PropertyValidation = {
-  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024) }).strict() }),
+  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),
   updatePropertyZodSchema: z.object({ body: updateBody }),
   updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(PROPERTY_STATUSES) }).strict() }),
   reorderImagesZodSchema: z.object({ body: z.object({ images: propertyImages }).strict() }),
-  importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional() }).strict() }),
+  importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional(), uploadSessionId: z.string().uuid().optional() }).strict() }),
+  cleanupDraftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),
+  deleteDraftAssetZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
   confirmImportZodSchema: z.object({ body: z.object({ importSessionId: z.string().uuid() }).strict() }),
 }

@@ -23,6 +23,7 @@ export interface IRegulatoryDetails {
 
 export interface IPropertyImage {
   _id?: mongoose.Types.ObjectId | string
+  assetId?: mongoose.Types.ObjectId | string
   url: string
   publicId?: string
   caption?: string
