@@ -131,6 +131,8 @@ describe('CRM Phase 14 automated regression contract', () => {
     expect(leadRoute).toContain("'/import/template.csv'")
     expect(leadRoute).toContain("'/import/template.xlsx'")
     expect(importService).toContain('IMPORT_SESSION_TTL_SECONDS = 30 * 60')
+    expect(importService).toContain("LeadImportSession.findOneAndDelete")
+    expect(importService).not.toContain('assertRedisSessionsAvailable')
     expect(importService).toContain("duplicatePolicy: 'reject'")
     expect(importService).toContain("Duplicate phone appears earlier in this import file")
     expect(importService).toContain("Duplicate phone matches an existing Lead")

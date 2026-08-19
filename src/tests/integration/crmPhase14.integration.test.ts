@@ -25,6 +25,7 @@ suite('CRM Phase 14 production integration matrix', () => {
   let ActivityService: any
   let LeadLifecycleService: any
   let LeadImportService: any
+  let LeadImportSession: any
   let RedisClient: any
   let getDayBoundsInTimeZone: any
   let LEAD_STATUS: any
@@ -130,6 +131,7 @@ suite('CRM Phase 14 production integration matrix', () => {
     ;({ ActivityService } = await import('../../app/module/activity/activity.service'))
     ;({ LeadLifecycleService } = await import('../../app/module/lead/leadLifecycle.service'))
     ;({ LeadImportService } = await import('../../app/module/lead/leadImport.service'))
+    ;({ LeadImportSession } = await import('../../app/module/lead/leadImportSession.model'))
     ;({ RedisClient } = await import('../../shared/redisClient'))
     ;({ getDayBoundsInTimeZone } = await import('../../app/module/lead/leadFollowUpTime'))
     ;({ LEAD_STATUS, LEAD_STATUS_VALUES } = await import('../../app/module/lead/leadStatus.contract'))
@@ -190,6 +192,7 @@ suite('CRM Phase 14 production integration matrix', () => {
       CrmConfig.deleteMany(orgFilter),
       LeadAssignmentAudit.deleteMany(orgFilter),
       OperationsJob.deleteMany(orgFilter),
+      LeadImportSession.deleteMany(orgFilter),
       Organization.deleteMany({ organizationId: { $in: [orgA, orgB] } }),
     ]).catch(() => undefined)
     await mongoose?.disconnect().catch(() => undefined)
@@ -438,7 +441,7 @@ suite('CRM Phase 14 production integration matrix', () => {
 
     const expiredPhone = nextPhone()
     const expired = await LeadImportService.preview(orgA, String(ownerA._id), access, makeUpload('expired.csv', Buffer.from(`name,phone\nExpired,${expiredPhone}`), 'text/csv'))
-    redisStore.clear()
+    await LeadImportSession.updateOne({ organizationId: orgA, userId: String(ownerA._id), sessionId: expired.importSessionId }, { $set: { expiresAt: new Date(Date.now() - 1_000) } })
     await expect(LeadImportService.confirm(orgA, String(ownerA._id), access, expired.importSessionId)).rejects.toMatchObject({ statusCode: 410 })
 
     const excelModule: any = await import('exceljs')

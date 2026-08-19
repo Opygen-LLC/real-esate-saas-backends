@@ -34,6 +34,7 @@ const run = async () => {
   const contacts = db.collection('contacts')
   const tasks = db.collection('tasks')
   const activities = db.collection('activities')
+  const leadImportSessions = db.collection('lead_import_sessions')
 
   const indexes = await Promise.all([
     ensureIndex(leads, { organizationId: 1, isConverted: 1, createdAt: -1 }, { name: 'lead_tenant_converted_created' }),
@@ -47,9 +48,11 @@ const run = async () => {
     ensureIndex(tasks, { organizationId: 1, linkedLead: 1, taskType: 1, status: 1, dueAt: 1 }, { name: 'task_tenant_lead_type_status_dueat' }),
     ensureIndex(activities, { organizationId: 1, leadId: 1, type: 1, createdAt: -1 }, { name: 'activity_tenant_lead_type_created' }),
     ensureIndex(activities, { organizationId: 1, contactId: 1, type: 1, createdAt: -1 }, { name: 'activity_tenant_contact_type_created' }),
+    ensureIndex(leadImportSessions, { organizationId: 1, userId: 1, sessionId: 1 }, { name: 'lead_import_session_owner_unique', unique: true }),
+    ensureIndex(leadImportSessions, { expiresAt: 1 }, { name: 'lead_import_session_expiry_ttl', expireAfterSeconds: 0 }),
   ])
 
-  console.log(`CRM Phase 13 performance index migration completed successfully (${indexes.join(', ')}).`)
+  console.log(`CRM performance/index migration completed successfully (${indexes.join(', ')}).`)
   await mongoose.disconnect()
 }
 

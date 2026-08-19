@@ -1,8 +1,6 @@
 import crypto from 'crypto'
 import ExcelJS from 'exceljs'
 import ApiError from '../../../errors/ApiError'
-import config from '../../../config'
-import { RedisClient } from '../../../shared/redisClient'
 import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.service'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { canAssignLeadTo, type CrmAccessContext } from '../crm/crmAccess'
@@ -10,6 +8,7 @@ import { Contact } from '../contact/contact.model'
 import { User } from '../user/user.model'
 import { Lead } from './lead.model'
 import { LeadService } from './lead.service'
+import { LeadImportSession } from './leadImportSession.model'
 import {
   LEAD_STATUS,
   LEAD_STATUS_LABELS,
@@ -17,7 +16,6 @@ import {
   type LeadStatus,
 } from './leadStatus.contract'
 
-const IMPORT_SESSION_NAMESPACE = 'crm-lead-import'
 const IMPORT_SESSION_TTL_SECONDS = 30 * 60
 const MAX_IMPORT_ROWS = 2_000
 const MAX_SESSION_BYTES = 8 * 1024 * 1024
@@ -286,38 +284,40 @@ const getImportAssignees = (organizationId: string) => User.find({
   userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
 }).select('_id name email userRole').lean()
 
-const assertRedisSessionsAvailable = async (): Promise<void> => {
-  if (!config.redis.enabled || !(await RedisClient.ping())) {
-    throw new ApiError(503, 'Secure lead import sessions require Redis to be enabled and available')
-  }
-}
-
-const sessionRedisKey = (organizationId: string, userId: string, sessionId: string): string =>
-  `${organizationId}:${userId}:${sessionId}`
-
-const storeSession = async (key: string, session: ImportSession): Promise<void> => {
+const storeSession = async (sessionId: string, session: ImportSession): Promise<void> => {
   try {
-    await RedisClient.command(['SET', RedisClient.key(IMPORT_SESSION_NAMESPACE, key), JSON.stringify(session), 'EX', IMPORT_SESSION_TTL_SECONDS])
+    await LeadImportSession.create({
+      sessionId,
+      organizationId: session.organizationId,
+      userId: session.userId,
+      payload: session,
+      createdAt: new Date(session.createdAt),
+      expiresAt: new Date(session.expiresAt),
+    })
   } catch {
     throw new ApiError(503, 'Lead import preview could not be stored securely. Please retry')
   }
 }
 
-const consumeSession = async (key: string): Promise<ImportSession | null> => {
+const consumeSession = async (organizationId: string, userId: string, sessionId: string): Promise<ImportSession | null> => {
   try {
-    const redisKey = RedisClient.key(IMPORT_SESSION_NAMESPACE, key)
-    const script = "local value=redis.call('GET',KEYS[1]); if value then redis.call('DEL',KEYS[1]); end; return value"
-    const value = await RedisClient.command(['EVAL', script, 1, redisKey])
-    if (typeof value !== 'string') return null
-    return JSON.parse(value) as ImportSession
+    // findOneAndDelete makes confirmation one-time and atomic across every API instance.
+    // expiresAt is checked in the same query, while a TTL index removes stale previews.
+    const stored = await LeadImportSession.findOneAndDelete({
+      organizationId,
+      userId,
+      sessionId,
+      expiresAt: { $gt: new Date() },
+    }).lean()
+    if (!stored?.payload) return null
+    return stored.payload as unknown as ImportSession
   } catch {
-    throw new ApiError(503, 'Lead import session could not be confirmed because Redis is unavailable')
+    throw new ApiError(503, 'Lead import session could not be confirmed because temporary storage is unavailable')
   }
 }
 
 const preview = async (organizationId: string, userId: string, access: CrmAccessContext, file?: Express.Multer.File) => {
   if (!file?.buffer?.length) throw new ApiError(400, 'Choose a CSV or XLSX file to import')
-  await assertRedisSessionsAvailable()
   const parsed = await parseUpload(file)
   const columns = buildColumnMap(parsed.headers)
   const assignees = await getImportAssignees(organizationId)
@@ -377,7 +377,7 @@ const preview = async (organizationId: string, userId: string, access: CrmAccess
   }
   const serializedSize = Buffer.byteLength(JSON.stringify(session), 'utf8')
   if (serializedSize > MAX_SESSION_BYTES) throw new ApiError(413, 'Validated import is too large to store securely. Split the file into smaller imports')
-  await storeSession(sessionRedisKey(organizationId, userId, sessionId), session)
+  await storeSession(sessionId, session)
 
   return {
     importSessionId: sessionId,
@@ -394,8 +394,7 @@ const preview = async (organizationId: string, userId: string, access: CrmAccess
 }
 
 const confirm = async (organizationId: string, userId: string, access: CrmAccessContext, importSessionId: string) => {
-  await assertRedisSessionsAvailable()
-  const session = await consumeSession(sessionRedisKey(organizationId, userId, importSessionId))
+  const session = await consumeSession(organizationId, userId, importSessionId)
   if (!session || session.version !== 1) throw new ApiError(410, 'Import preview expired, was already confirmed, or is no longer available')
   if (session.organizationId !== organizationId || session.userId !== userId) {
     throw new ApiError(403, 'Import session does not belong to this user and agency')
