@@ -48,9 +48,13 @@ const acknowledgeSubscriptionConfirmation = catchAsync(async (req: Request, res:
 })
 
 const getInvoiceReceipt = catchAsync(async (req: Request, res: Response) => {
-  const html = await BillingService.getInvoiceReceipt(requireTenant(req), req.params.id)
-  res.setHeader('Content-Type', 'text/html; charset=utf-8')
-  res.status(httpStatus.OK).send(html)
+  const receipt = await BillingService.getInvoiceReceipt(requireTenant(req), req.params.id)
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="${receipt.fileName}"`)
+  res.setHeader('Content-Length', String(receipt.buffer.length))
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.status(httpStatus.OK).send(receipt.buffer)
 })
 
 export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }

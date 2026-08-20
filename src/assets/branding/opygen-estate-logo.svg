@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="80" viewBox="0 0 360 80" role="img" aria-labelledby="title desc">
+  <title id="title">Opygen Estate</title>
+  <desc id="desc">Opygen Estate canonical horizontal brand mark</desc>
+  <rect width="360" height="80" rx="12" fill="#ffffff"/>
+  <g transform="translate(8 10)">
+    <rect x="0" y="0" width="60" height="60" rx="14" fill="#2563eb"/>
+    <path d="M14 31.5 30 18l16 13.5v15.2a2.3 2.3 0 0 1-2.3 2.3H16.3a2.3 2.3 0 0 1-2.3-2.3V31.5Z" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M24 49V37h12v12" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+    <circle cx="46" cy="17" r="5" fill="#93c5fd"/>
+  </g>
+  <text x="82" y="36" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="800" letter-spacing="0.8" fill="#0f172a">OPYGEN ESTATE</text>
+  <text x="83" y="57" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="2.1" fill="#64748b">REAL ESTATE OPERATING SYSTEM</text>
+</svg>

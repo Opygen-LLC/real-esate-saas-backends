@@ -305,19 +305,37 @@ const getRevenueDashboard = async () => {
   return { totalRevenue: totals[0]?.revenue || 0, paidInvoices: totals[0]?.payments || 0, monthRevenue: month[0]?.revenue || 0, monthInvoices: month[0]?.payments || 0, mrr: Number(mrr.toFixed(2)), activeSubscriptions: active.length, arpu: active.length ? Number((mrr / active.length).toFixed(2)) : 0, trend: trend.map((row: any) => ({ year: row._id.year, month: row._id.month, revenue: row.revenue, invoices: row.payments })), paymentStatus: status }
 }
 
-const escapeHtml = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-const renderReceipt = async (organizationId: string, id: string) => {
+const getReceiptData = async (organizationId: string, id: string) => {
   const clauses: any[] = [{ paymentNumber: id }, { receiptNumber: id }]
   if (/^[0-9a-fA-F]{24}$/.test(id)) clauses.push({ _id: id })
   const payment: any = await SubscriptionPayment.findOne({ organizationId, status: 'confirmed', $or: clauses }).lean()
   if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Confirmed subscription payment receipt not found')
+
   const [org, storedPlan] = await Promise.all([
-    Organization.findOne({ organizationId }).lean() as any,
+    Organization.findOne({ organizationId }).select('agencyName email').lean() as any,
     SubscriptionPlan.findOne({ planId: payment.planId, version: payment.planVersion }).select('name planId version').lean() as any,
   ])
-  const plan = storedPlan || { name: String(payment.planId).replace(/_/g, ' ').replace(/\b\w/g, (char: string) => char.toUpperCase()) }
-  const amount = new Intl.NumberFormat('en-BD', { style: 'currency', currency: 'BDT', currencyDisplay: 'narrowSymbol' }).format(payment.amount)
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payment.receiptNumber)}</title><style>body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:32px}.card{max-width:680px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:18px;padding:32px}.row{display:flex;justify-content:space-between;gap:16px}.muted{color:#64748b;font-size:13px}.total{font-size:24px;font-weight:800}.badge{display:inline-block;background:#dcfce7;color:#166534;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:24px}td,th{padding:12px;border-bottom:1px solid #e2e8f0;text-align:left}</style></head><body><div class="card"><div class="row"><div><h2>SUBSCRIPTION PAYMENT RECEIPT</h2><div class="muted">Opygen Estate</div></div><span class="badge">CONFIRMED</span></div><hr><p><b>Receipt:</b> ${escapeHtml(payment.receiptNumber)}</p><p><b>Payment:</b> ${escapeHtml(payment.paymentNumber)}</p><p><b>Agency:</b> ${escapeHtml(org?.agencyName || organizationId)} (${escapeHtml(org?.email || '')})</p><p><b>Paid:</b> ${escapeHtml(new Date(payment.paidAt || payment.confirmedAt).toLocaleString('en-BD'))}</p><table><tr><th>Description</th><th>Cycle</th><th>Amount</th></tr><tr><td>${escapeHtml(plan.name)} v${escapeHtml(payment.planVersion)}</td><td>${escapeHtml(payment.billingCycle)}</td><td>${escapeHtml(amount)}</td></tr></table><p class="muted">Method: ${escapeHtml(payment.method)}${payment.reference ? ` · Reference: ${escapeHtml(payment.reference)}` : ''}</p><div class="row"><span></span><span class="total">${escapeHtml(amount)}</span></div></div><script>window.print()</script></body></html>`
+  const planName = storedPlan?.name || String(payment.planId).replace(/_/g, ' ').replace(/\b\w/g, (character: string) => character.toUpperCase())
+
+  return {
+    receiptNumber: payment.receiptNumber,
+    paymentNumber: payment.paymentNumber,
+    status: 'CONFIRMED' as const,
+    agencyName: org?.agencyName || organizationId,
+    customerEmail: org?.email || '',
+    planName,
+    planVersion: Number(payment.planVersion || 1),
+    billingCycle: payment.billingCycle,
+    periodStart: payment.periodStart || null,
+    periodEnd: payment.periodEnd || null,
+    paymentMethod: payment.method || 'manual',
+    paymentReference: payment.reference || '',
+    paidAt: payment.paidAt || payment.confirmedAt || payment.createdAt,
+    confirmedAt: payment.confirmedAt || null,
+    subtotal: Number(payment.amount || 0),
+    total: Number(payment.amount || 0),
+    currency: payment.currency || 'BDT',
+  }
 }
 
-export const SubscriptionPaymentService = { createChangeRequest, getChangeRequests, cancelChangeRequest, getTenantPendingState, getTenantPaymentHistory, recordPayment, decidePayment, getUnacknowledgedConfirmation, acknowledgeConfirmation, getPaymentLedger, getRevenueDashboard, renderReceipt }
+export const SubscriptionPaymentService = { createChangeRequest, getChangeRequests, cancelChangeRequest, getTenantPendingState, getTenantPaymentHistory, recordPayment, decidePayment, getUnacknowledgedConfirmation, acknowledgeConfirmation, getPaymentLedger, getRevenueDashboard, getReceiptData }

@@ -23,7 +23,7 @@ export const PHASE0_REGRESSION_CONTRACTS = {
     realtimeEvent: 'subscription.changed', oncePerPayment: true, recovery: ['reload', 'login'] as const,
   },
   receiptDownload: {
-    contentType: 'application/pdf', filenameExtension: '.pdf', brand: 'Opygen Estate',
+    contentType: 'application/pdf', contentDisposition: 'attachment', filenameExtension: '.pdf', fileNamePrefix: 'opygen-estate-', brand: 'Opygen Estate', authenticatedBlobDownload: true,
   },
   publicBrokers: {
     adminControlled: true, requiresActiveMember: true, requiresLicenseNumber: true, tenantScoped: true,

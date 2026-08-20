@@ -20,10 +20,15 @@ const request = async (path: string, init: RequestInit = {}) => {
     headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', ...(init.headers || {}) },
     redirect: init.redirect || 'manual',
   })
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/pdf')) {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    return { response, body: null as Json | null, text: '', bytes }
+  }
   const text = await response.text()
   let body: Json | null = null
   try { body = text ? JSON.parse(text) : null } catch { body = null }
-  return { response, body, text }
+  return { response, body, text, bytes: new Uint8Array() }
 }
 
 const bearerFor = async (phoneNumber: string) => {
@@ -179,6 +184,8 @@ suite('production journey integration', () => {
 
     const receipt = await request(`/api/v1/billing/history/${paymentNumber}/receipt`, { headers: auth })
     expect(receipt.response.status).toBe(200)
-    expect(receipt.text).toContain('SUBSCRIPTION PAYMENT RECEIPT')
+    expect(receipt.response.headers.get('content-type')).toContain('application/pdf')
+    expect(receipt.response.headers.get('content-disposition')).toMatch(/attachment; filename="opygen-estate-RCT-[^"]+\.pdf"/)
+    expect(Buffer.from(receipt.bytes).subarray(0, 5).toString('ascii')).toBe('%PDF-')
   }, 30_000)
 })
