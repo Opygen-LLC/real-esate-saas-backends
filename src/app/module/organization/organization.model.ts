@@ -1,6 +1,7 @@
 import mongoose, { Schema, model } from 'mongoose'
 import { IOrganization, OrganizationModel } from './organization.interface'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
+import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION } from './onboarding.constants'
 
 const organizationSchema = new Schema<IOrganization, OrganizationModel>(
   {
@@ -120,8 +121,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
     onboarding: {
       status: { type: String, enum: ['not_started', 'in_progress', 'completed', 'skipped'], default: 'not_started', index: true },
-      currentStep: { type: Number, default: 1, min: 1, max: 5 },
-      version: { type: Number, default: 1, min: 1 },
+      currentStep: { type: Number, default: 1, min: 1, max: ONBOARDING_TOTAL_STEPS },
+      version: { type: Number, default: ONBOARDING_VERSION, min: 1 },
       completedAt: { type: Date, default: null },
       skippedAt: { type: Date, default: null },
     },

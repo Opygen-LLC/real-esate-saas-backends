@@ -15,6 +15,7 @@ import { AuditEvent } from '../audit/audit.model'
 import { DomainRecord } from '../domain/domain.model'
 import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { Organization } from '../organization/organization.model'
+import { ONBOARDING_VERSION, normalizeOnboardingState } from '../organization/onboarding.constants'
 import { User } from '../user/user.model'
 import { AccountCredential } from '../accountCredential/accountCredential.model'
 import { UserProfile } from '../userProfile/userProfile.model'
@@ -84,7 +85,7 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
     DomainRecord.findOne({ organizationId: user.organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
   ])
-  const onboarding = organization?.onboarding || { status: 'completed' as const, currentStep: 5, version: 1 }
+  const onboarding = normalizeOnboardingState(organization?.onboarding)
   return {
     accessToken: accessTokenFor(user),
     refreshToken,
@@ -243,7 +244,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       secondaryColor: '#0f172a',
       font: 'Inter',
       websiteStatus: 'provisioned',
-      onboarding: { status: 'not_started', currentStep: 1, version: 1 },
+      onboarding: { status: 'not_started', currentStep: 1, version: ONBOARDING_VERSION },
       metaTitle: `${payload.agencyName} | Real Estate in Bangladesh`,
       metaDescription: `Browse homes, land and commercial property with ${payload.agencyName}.`,
       websiteSettings: {

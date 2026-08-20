@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
+import { ONBOARDING_TOTAL_STEPS } from './onboarding.constants'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
 const agencyType = z.enum(['residential', 'commercial', 'mixed', 'brokerage', 'developer', 'general'])
@@ -55,6 +56,9 @@ const websiteSettings = z.object({
   renderMode: z.enum(['template', 'builder']).optional(),
   content: websiteContent.optional(),
 }).strict()
+const onboardingWebsiteSettings = z.object({
+  heroSubtitle: z.string().max(400).optional(),
+}).strict()
 
 
 export const OrganizationValidation = {
@@ -85,13 +89,13 @@ export const OrganizationValidation = {
   }).strict() }),
 
   onboarding: z.object({ body: z.object({
-    currentStep: z.number().int().min(1).max(5).optional(),
+    currentStep: z.number().int().min(1).max(ONBOARDING_TOTAL_STEPS).optional(),
     agencyName: z.string().trim().min(2).max(120).optional(), agencyType: agencyType.optional(), licenseNumber: z.string().max(100).optional(),
     address: z.string().max(300).optional(), city: z.string().max(100).optional(), state: z.string().max(100).optional(), country: z.literal('Bangladesh').optional(),
     defaultLanguage: z.enum(['en', 'bn']).optional(), addressDetails: addressDetails.optional(), serviceAreas: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
     logo: optionalUrl.optional(), primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-    font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), templateId: z.enum(WEBSITE_TEMPLATE_IDS).optional(),
-    websiteSettings: websiteSettings.optional(), socialLinks: socialLinks.optional(),
+    font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(),
+    websiteSettings: onboardingWebsiteSettings.optional(), socialLinks: socialLinks.optional(),
   }).strict() }),
 
   platformUpdate: z.object({ body: z.object({ reason: z.string().trim().min(10).max(500),

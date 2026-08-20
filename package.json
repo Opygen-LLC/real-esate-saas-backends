@@ -69,7 +69,8 @@
     "test:phase10": "vitest run src/tests/contract/phase10FinalAcceptance.contract.test.ts src/tests/contract/phase10ProductionRelease.contract.test.ts src/tests/contract/teamQuota.contract.test.ts src/tests/unit/phase5FilterSort.contract.test.ts src/tests/unit/propertyImportExport.contract.test.ts src/tests/unit/propertyDraftAssetLifecycle.contract.test.ts src/tests/contract/phase8AuthSessions.contract.test.ts src/tests/contract/phase9CustomDomainLifecycle.contract.test.ts",
     "verify:phase10": "node scripts/verify-phase10-final-matrix.mjs && node scripts/verify-phase10-release.mjs",
     "migrate:phase5-dashboard-ordering": "ts-node --transpile-only src/app/db/migratePhase5DashboardOrdering.ts",
-    "migrate:phase8-broker-visibility": "ts-node --transpile-only src/app/db/migratePhase8LicensedBrokerVisibility.ts"
+    "migrate:phase8-broker-visibility": "ts-node --transpile-only src/app/db/migratePhase8LicensedBrokerVisibility.ts",
+    "migrate:onboarding-four-steps": "ts-node --transpile-only src/app/db/migrateOnboardingToFourSteps.ts"
   },
   "keywords": [
     "real-estate",

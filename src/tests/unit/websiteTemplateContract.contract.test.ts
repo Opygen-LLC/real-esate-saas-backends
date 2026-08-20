@@ -17,11 +17,18 @@ const minimalBuilderDocument = (templateId: (typeof WEBSITE_TEMPLATE_IDS)[number
 })
 
 describe('website template contract', () => {
-  it('accepts every registered template in website settings and onboarding', () => {
+  it('accepts every registered template in website settings but rejects template selection during onboarding', () => {
     for (const templateId of WEBSITE_TEMPLATE_IDS) {
       expect(OrganizationValidation.website.safeParse({ body: { templateId } }).success).toBe(true)
-      expect(OrganizationValidation.onboarding.safeParse({ body: { templateId } }).success).toBe(true)
+      expect(OrganizationValidation.onboarding.safeParse({ body: { templateId } }).success).toBe(false)
     }
+  })
+
+  it('enforces the four-step onboarding contract and blocks website-mode changes', () => {
+    expect(OrganizationValidation.onboarding.safeParse({ body: { currentStep: 4 } }).success).toBe(true)
+    expect(OrganizationValidation.onboarding.safeParse({ body: { currentStep: 5 } }).success).toBe(false)
+    expect(OrganizationValidation.onboarding.safeParse({ body: { websiteSettings: { heroSubtitle: 'Trusted local experts' } } }).success).toBe(true)
+    expect(OrganizationValidation.onboarding.safeParse({ body: { websiteSettings: { renderMode: 'builder' } } }).success).toBe(false)
   })
 
   it('accepts every registered template in builder documents', () => {

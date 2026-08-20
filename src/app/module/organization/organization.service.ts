@@ -15,6 +15,7 @@ import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
 import { Organization } from './organization.model'
+import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
 const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
@@ -33,7 +34,7 @@ const getMyOrganization = async (organizationId: string): Promise<IOrganization 
   return {
     ...result,
     websiteStatus: result.websiteStatus || 'published',
-    onboarding: result.onboarding || { status: 'completed', currentStep: 5, version: 1, completedAt: result.createdAt || new Date() },
+    onboarding: normalizeOnboardingState(result.onboarding, result.createdAt || new Date()),
     websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
   } as IOrganization
 }
@@ -166,8 +167,7 @@ const updateMyOrganization = async (organizationId: string, payload: Partial<IOr
 }
 
 const saveOnboarding = async (organizationId: string, payload: Record<string, any>): Promise<IOrganization> => {
-  if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
-  const currentStep = Math.max(1, Math.min(5, Number(payload.currentStep || 1)))
+  const currentStep = normalizeOnboardingStep(payload.currentStep || 1)
   const update: Record<string, unknown> = definedEntries({
     agencyName: payload.agencyName,
     agencyType: payload.agencyType,
@@ -183,14 +183,12 @@ const saveOnboarding = async (organizationId: string, payload: Record<string, an
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
     font: payload.font,
-    templateId: payload.templateId,
     socialLinks: payload.socialLinks,
     'onboarding.status': 'in_progress',
     'onboarding.currentStep': currentStep,
-    'onboarding.version': 1,
+    'onboarding.version': ONBOARDING_VERSION,
   })
   if (payload.websiteSettings) for (const [key, value] of Object.entries(definedEntries(payload.websiteSettings))) update[`websiteSettings.${key}`] = value
-  if (payload.templateId) update['websiteSettings.renderMode'] = 'template'
 
   const result = await Organization.findOneAndUpdate({ organizationId }, { $set: update }, { new: true })
   if (!result) throw new ApiError(404, 'Organization not found')
@@ -203,8 +201,8 @@ const finalizeOnboarding = async (organizationId: string, status: Extract<Onboar
   const set: Record<string, unknown> = {
     websiteStatus: 'published',
     'onboarding.status': status,
-    'onboarding.currentStep': 5,
-    'onboarding.version': 1,
+    'onboarding.currentStep': ONBOARDING_TOTAL_STEPS,
+    'onboarding.version': ONBOARDING_VERSION,
     'websiteSettings.renderMode': 'template',
     ...(status === 'completed' ? { 'onboarding.completedAt': now, 'onboarding.skippedAt': null } : { 'onboarding.skippedAt': now, 'onboarding.completedAt': null }),
   }
