@@ -11,7 +11,8 @@ const getAllPlans = catchAsync(async (_req: Request, res: Response) => {
 })
 
 const getAllPlanVersions = catchAsync(async (req: Request, res: Response) => {
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Plan version history fetched successfully', data: (await SubscriptionPlanService.getAllPlanVersions(req.query.planId as string | undefined)).map((plan: any) => toTeamMemberLimitContract(plan)) })
+  const result = await SubscriptionPlanService.getAllPlanVersions(req.query as any)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Plan version history fetched successfully', data: result.data.map((plan: any) => toTeamMemberLimitContract(plan)), meta: result.meta })
 })
 
 const createPlan = catchAsync(async (req: Request, res: Response) => {

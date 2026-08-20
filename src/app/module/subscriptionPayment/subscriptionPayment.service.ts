@@ -92,7 +92,19 @@ const getTenantPendingState = async (organizationId: string) => {
   return { ...request, payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null }
 }
 
-const getTenantPaymentHistory = async (organizationId: string) => SubscriptionPayment.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).limit(100).lean()
+const getTenantPaymentHistory = async (organizationId: string, query: any = {}) => {
+  const page = Math.max(1, Number(query.page || 1))
+  const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
+  const allowedSortFields = new Set(['createdAt', 'paidAt', 'amount', 'status'])
+  const sortBy = allowedSortFields.has(String(query.sortBy || '')) ? String(query.sortBy) : 'createdAt'
+  const sortOrder = String(query.sortOrder || 'desc') === 'asc' ? 1 : -1
+  const filter: any = { organizationId }
+  const [data, total] = await Promise.all([
+    SubscriptionPayment.find(filter).sort({ [sortBy]: sortOrder, _id: sortOrder }).skip((page - 1) * limit).limit(limit).lean(),
+    SubscriptionPayment.countDocuments(filter),
+  ])
+  return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } }
+}
 
 const recordPayment = async (input: {
   organizationId: string; changeRequestId?: string; planId?: string; planVersion?: number; billingCycle?: 'monthly' | 'yearly';

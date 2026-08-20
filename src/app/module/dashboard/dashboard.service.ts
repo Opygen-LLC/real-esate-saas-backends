@@ -390,6 +390,24 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
   }
 }
 
+
+const getBrokerPerformance = async (organizationId: string, range: string = '30d', query: any = {}) => {
+  const analytics = await getAnalytics(organizationId, range)
+  const page = Math.max(1, Number(query.page || 1))
+  const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
+  const rows = [...(analytics.brokerPerformance || [])]
+  const total = rows.length
+  return { data: rows.slice((page - 1) * limit, page * limit), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } }
+}
+
+const exportBrokerPerformanceCsv = async (organizationId: string, range: string = '30d') => {
+  const analytics = await getAnalytics(organizationId, range)
+  const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
+  const header = ['Broker Name','Email','License #','Leads Handled','Viewings Conducted','Deals Won','Win Rate %'].join(',')
+  const body = (analytics.brokerPerformance || []).map((broker: any) => [broker.name, broker.email, broker.licenseNumber || '', broker.leadsHandled, broker.viewingsConducted, broker.dealsWon, broker.conversionRate].map(escape).join(',')).join('\n')
+  return `${header}\n${body}`
+}
+
 const getSuperAdminOverviewStats = async () => {
   const [organizationStats, entityStats, revenue, health] = await Promise.all([
     Organization.aggregate([
@@ -442,4 +460,4 @@ const getSuperAdminOverviewStats = async () => {
   }
 }
 
-export const DashboardService = { globalSearch, getOverviewStats, getAnalytics, getSuperAdminOverviewStats }
+export const DashboardService = { globalSearch, getOverviewStats, getAnalytics, getBrokerPerformance, exportBrokerPerformanceCsv, getSuperAdminOverviewStats }

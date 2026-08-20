@@ -16,7 +16,7 @@ const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling
   return result
 }
 
-const getBillingHistory = async (organizationId: string) => SubscriptionPaymentService.getTenantPaymentHistory(organizationId)
+const getBillingHistory = async (organizationId: string, query: any = {}) => SubscriptionPaymentService.getTenantPaymentHistory(organizationId, query)
 
 const usagePercentage = (used: number, limit: number): number => {
   if (limit <= 0) return used > 0 ? 100 : 0

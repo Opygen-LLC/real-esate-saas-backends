@@ -199,7 +199,7 @@ const getAuditLog = async (query: any) => {
     AuditEvent.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     AuditEvent.countDocuments(filter),
   ])
-  return { data, meta: { page, limit, total } }
+  return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } }
 }
 
 

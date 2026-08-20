@@ -103,14 +103,24 @@ const updatePublicBrokerProfile = catchAsync(async (req: Request, res: Response)
 
 const getAgentLeaderboard = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await UserService.getAgentLeaderboard(organizationId, req.query.startDate as string | undefined, req.query.endDate as string | undefined)
+  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+  const result = await UserService.getAgentLeaderboard(organizationId, req.query.startDate as string | undefined, req.query.endDate as string | undefined, paginationOptions)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: 'Agent leaderboard fetched successfully',
-    data: result,
+    data: result.data,
+    meta: result.meta,
   })
+})
+
+const exportTeamMembersCsv = catchAsync(async (req: Request, res: Response) => {
+  const filters = pick(req.query, ['searchTerm', 'userRole', 'status'])
+  const csv = await UserService.exportTeamMembersCsv(requireTenant(req), filters)
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="team-members-${new Date().toISOString().slice(0, 10)}.csv"`)
+  res.status(httpStatus.OK).send(`\uFEFF${csv}`)
 })
 
 const getUserById = catchAsync(async (req: Request, res: Response) => {
@@ -261,6 +271,7 @@ export const UserController = {
   getPublicAgentDetail,
   updatePublicBrokerProfile,
   getAgentLeaderboard,
+  exportTeamMembersCsv,
   getUserById,
   updateUserById,
   deleteUserById,

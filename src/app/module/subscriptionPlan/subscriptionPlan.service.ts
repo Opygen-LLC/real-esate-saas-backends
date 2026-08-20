@@ -75,9 +75,24 @@ const getPlanById = async (planId: string, version?: number): Promise<ISubscript
   return SubscriptionPlan.findOne({ planId, ...planWindowFilter(new Date()) }).sort({ version: -1 })
 }
 
-const getAllPlanVersions = async (planId?: string) => {
+const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknown; page?: unknown; limit?: unknown; sortBy?: unknown; sortOrder?: unknown } = {}) => {
   await ensureDefaults()
-  return SubscriptionPlan.find(planId ? { planId } : {}).sort({ planId: 1, version: -1 }).lean()
+  const page = Math.max(1, Number(query.page || 1))
+  const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
+  const filter: any = query.planId ? { planId: query.planId } : {}
+  if (String(query.currentOnly || '') === 'true') filter.isCurrent = true
+  const allowed = new Set(['createdAt', 'effectiveFrom', 'version', 'planId', 'priceMonthly'])
+  const sortBy = allowed.has(String(query.sortBy || '')) ? String(query.sortBy) : 'createdAt'
+  const order: 1 | -1 = String(query.sortOrder || 'desc') === 'asc' ? 1 : -1
+  const summaryFilter: any = query.planId ? { planId: query.planId } : {}
+  const now = new Date()
+  const [data, total, grandfathered, scheduled] = await Promise.all([
+    SubscriptionPlan.find(filter).sort({ [sortBy]: order, _id: order }).skip((page - 1) * limit).limit(limit).lean(),
+    SubscriptionPlan.countDocuments(filter),
+    SubscriptionPlan.countDocuments({ ...summaryFilter, grandfatherExisting: true }),
+    SubscriptionPlan.countDocuments({ ...summaryFilter, effectiveFrom: { $gt: now } }),
+  ])
+  return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary: { grandfathered, scheduled } } }
 }
 
 const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Promise<ISubscriptionPlan> => {

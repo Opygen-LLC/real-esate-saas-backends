@@ -41,6 +41,8 @@ router.get(
   UserController.getAgentLeaderboard
 )
 
+router.get('/export.csv', authMiddlewares.requirePermission('users.read'), UserController.exportTeamMembersCsv)
+
 router.get(
   '/',
   authMiddlewares.requirePermission('users.read'),

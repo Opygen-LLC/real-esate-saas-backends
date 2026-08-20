@@ -30,6 +30,23 @@ const getAnalytics = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const getBrokerPerformance = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const range = (req.query.range as string) || '30d'
+  const result = await DashboardService.getBrokerPerformance(organizationId, range, req.query)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Broker performance fetched successfully', data: result.data, meta: result.meta })
+})
+
+const exportBrokerPerformanceCsv = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const range = (req.query.range as string) || '30d'
+  const csv = await DashboardService.exportBrokerPerformanceCsv(organizationId, range)
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="broker-performance-${range}.csv"`)
+  res.status(httpStatus.OK).send(`\uFEFF${csv}`)
+})
+
 const globalSearch = catchAsync(async (req: Request, res: Response) => {
   const organizationId = req.tenant?.organizationId || (req.user?.organizationId as string)
   const data = await DashboardService.globalSearch(organizationId, String(req.query.q || ''), crmAccessFromRequest(req))
@@ -50,6 +67,8 @@ const getSuperAdminOverviewStats = catchAsync(async (req: Request, res: Response
 export const DashboardController = {
   getOverviewStats,
   getAnalytics,
+  getBrokerPerformance,
+  exportBrokerPerformanceCsv,
   getSuperAdminOverviewStats,
   globalSearch,
 }

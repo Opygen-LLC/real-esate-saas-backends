@@ -22,6 +22,9 @@ router.get(
   DashboardController.getAnalytics
 )
 
+router.get('/analytics/brokers', authMiddlewares.requirePermission('analytics.read'), DashboardController.getBrokerPerformance)
+router.get('/analytics/brokers/export.csv', authMiddlewares.requirePermission('analytics.read'), DashboardController.exportBrokerPerformanceCsv)
+
 router.get(
   '/super-admin-overview',
   authMiddlewares.authSuperAdmin,

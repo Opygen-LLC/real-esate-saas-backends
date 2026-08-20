@@ -147,7 +147,7 @@ const getAllUsers = async (
     limit,
   })
   return {
-    meta: { page, limit, total },
+    meta: { page, limit, total, totalPages: Math.ceil(total / limit) } as any,
     data: rows.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })),
   }
 }
@@ -338,7 +338,7 @@ const updatePublicBrokerProfile = async (
   return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
-const getAgentLeaderboard = async (organizationId: string, startDate?: string, endDate?: string): Promise<any[]> => {
+const getAgentLeaderboard = async (organizationId: string, startDate?: string, endDate?: string, paginationOptions: IPaginationOptions = {}): Promise<IGenericResponse<any[]>> => {
   const end = endDate ? new Date(`${endDate}T23:59:59.999+06:00`) : new Date()
   const start = startDate ? new Date(`${startDate}T00:00:00+06:00`) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
   const agents = await listUsersWithProfiles({ organizationId, status: 'active', userRole: { $in: ['agent', 'agency_admin', 'agency_owner'] } })
@@ -357,7 +357,7 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
   const leads = new Map(leadRows.map((row: any) => [String(row._id), row]))
   const viewings = new Map(viewingRows.map((row: any) => [String(row._id), row]))
   const listings = new Map(listingRows.map((row: any) => [String(row._id), row]))
-  return agents.map((agent) => {
+  const ranked = agents.map((agent) => {
     const l: any = leads.get(String(agent._id)) || {}
     const v: any = viewings.get(String(agent._id)) || {}
     const p: any = listings.get(String(agent._id)) || {}
@@ -374,6 +374,17 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
       range: { start: start.toISOString(), end: end.toISOString() },
     }
   }).sort((a: any, b: any) => b.dealsWon - a.dealsWon || b.slaComplianceRate - a.slaComplianceRate || b.totalLeads - a.totalLeads)
+  const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
+  return { data: ranked.slice(skip, skip + limit), meta: { page, limit, total: ranked.length, totalPages: Math.ceil(ranked.length / limit) } as any }
+}
+
+const exportTeamMembersCsv = async (organizationId: string, filters: IUserFilter) => {
+  const whereCondition = buildUserWhere({ ...filters, organizationId })
+  const rows = await listUsersWithProfiles(whereCondition, { sort: { createdAt: -1, _id: -1 } })
+  const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
+  const header = ['ID','Name','Email','Phone','Role','Status'].join(',')
+  const body = rows.map((user: any) => [user._id, user.name, user.email, user.phoneNumber, user.userRole, user.status].map(escape).join(',')).join('\n')
+  return `${header}\n${body}`
 }
 
 const getUserById = async (organizationId: string, id: string) => {
@@ -705,7 +716,7 @@ export const UserService = {
   getPublicAgents,
   getPublicAgentDetail,
   updatePublicBrokerProfile,
-  getAgentLeaderboard,
+  getAgentLeaderboard, exportTeamMembersCsv,
   getUserById,
   updateUserById,
   deleteUserById,

@@ -7,8 +7,8 @@ import { requireTenant } from '../../middlewares/auth'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 
 const getBillingHistory = catchAsync(async (req: Request, res: Response) => {
-  const result = await BillingService.getBillingHistory(requireTenant(req))
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Manual subscription payment history fetched successfully', data: result })
+  const result = await BillingService.getBillingHistory(requireTenant(req), req.query)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Manual subscription payment history fetched successfully', data: result.data, meta: result.meta })
 })
 
 const getSubscriptionUsage = catchAsync(async (req: Request, res: Response) => {
