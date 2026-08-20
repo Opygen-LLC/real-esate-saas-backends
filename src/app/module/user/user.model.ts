@@ -66,6 +66,7 @@ const roleProfileField = (field: string, fallback: unknown) => function (this: a
 userSchema.virtual('profileImgURL').get(commonProfileField('profileImgURL', ''))
 userSchema.virtual('bio').get(commonProfileField('bio', ''))
 userSchema.virtual('licenseNumber').get(roleProfileField('licenseNumber', ''))
+userSchema.virtual('showAsLicensedBroker').get(roleProfileField('showAsLicensedBroker', false))
 userSchema.virtual('specialization').get(roleProfileField('specialization', []))
 userSchema.virtual('serviceAreas').get(roleProfileField('serviceAreas', []))
 

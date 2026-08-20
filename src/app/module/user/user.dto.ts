@@ -17,6 +17,7 @@ export interface UserResponseDto {
   profileImgURL: string
   bio: string
   licenseNumber: string
+  showAsLicensedBroker: boolean
   specialization: string[]
   serviceAreas: string[]
   isAddProfile: boolean

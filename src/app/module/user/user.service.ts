@@ -18,6 +18,8 @@ import { convertedStatusExpression } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { Viewing } from '../viewing/viewing.model'
+import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
+import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionCatalog, permissionsForRole } from './accessControl'
 import { UserResponseDto } from './user.dto'
 import { IUserCreateInput, IUserFilter, IUserRole, IUserUpdateInput } from './user.interface'
@@ -30,6 +32,7 @@ import {
   syncRoleProfile,
   toPublicAgentDto,
   toUserDto,
+  updateLicensedBrokerProfile,
   updateUserProfileFields,
 } from './userProfile.service'
 import { asUserObjectId, findUserWithProfiles, listUsersWithProfiles, paginateUsersWithProfiles, userProfileProjectionStages } from './userReadModel.service'
@@ -105,6 +108,7 @@ const createUser = async (organizationId: string, userData: IUserCreateInput, ac
     }, session)
     await syncRoleProfile(userId, organizationId, role, {
       licenseNumber: userData.licenseNumber,
+      showAsLicensedBroker: userData.showAsLicensedBroker,
       specialization: userData.specialization,
       serviceAreas: userData.serviceAreas,
     }, session)
@@ -174,16 +178,37 @@ const getTeamRoleSummary = async (organizationId: string) => {
   }
 }
 
+const PUBLIC_BROKER_MEMBER_ROLES: IUserRole[] = ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer']
+const LICENSE_PRESENT = /\S/
+
+const publicBrokerVisibilityStage = {
+  $match: {
+    $or: [
+      {
+        userRole: 'agency_owner',
+        'agencyOwnerProfile.showAsLicensedBroker': true,
+        'agencyOwnerProfile.licenseNumber': LICENSE_PRESENT,
+      },
+      {
+        userRole: { $in: ['agency_admin', 'agent', 'staff', 'viewer'] },
+        'agentProfile.showAsLicensedBroker': true,
+        'agentProfile.licenseNumber': LICENSE_PRESENT,
+      },
+    ],
+  },
+}
+
 const getPublicAgents = async (organizationId: string): Promise<any[]> => {
   const agents = await User.aggregate([
     {
       $match: {
         organizationId,
         status: 'active',
-        userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'staff'] },
+        userRole: { $in: PUBLIC_BROKER_MEMBER_ROLES },
       },
     },
     ...userProfileProjectionStages(),
+    publicBrokerVisibilityStage,
     {
       $lookup: {
         from: Property.collection.name,
@@ -236,8 +261,9 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
   if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
 
   const [row] = await User.aggregate([
-    { $match: { _id: objectId, status: 'active', userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff'] } } },
+    { $match: { _id: objectId, status: 'active', userRole: { $in: PUBLIC_BROKER_MEMBER_ROLES } } },
     ...userProfileProjectionStages(),
+    publicBrokerVisibilityStage,
     {
       $lookup: {
         from: Property.collection.name,
@@ -258,6 +284,58 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
   ])
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
   return { agent: toPublicAgentDto(row), activeProperties: row.activeProperties || [] }
+}
+
+const updatePublicBrokerProfile = async (
+  organizationId: string,
+  actorUserId: string,
+  targetUserId: string,
+  payload: { showAsLicensedBroker: boolean; licenseNumber?: string },
+): Promise<UserResponseDto> => {
+  const objectId = asUserObjectId(targetUserId)
+  if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+
+  const [actor, target] = await Promise.all([
+    User.findOne({ _id: actorUserId, organizationId, status: 'active' }).select('_id userRole').lean(),
+    User.findOne({ _id: objectId, organizationId }).select('_id organizationId userRole status').lean(),
+  ])
+  if (!actor) throw new ApiError(httpStatus.FORBIDDEN, 'Managing public broker profiles is not available')
+  if (!target) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+  if (!PUBLIC_BROKER_MEMBER_ROLES.includes(target.userRole)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'This team role cannot have a public broker profile')
+  }
+  if (target.userRole === 'agency_owner' && String(actor._id) !== String(target._id)) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only the agency owner can change the owner public broker profile')
+  }
+  if (payload.showAsLicensedBroker && target.status !== 'active') {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Only active team members can be shown as licensed brokers')
+  }
+
+  const existingProfile = target.userRole === 'agency_owner'
+    ? await AgencyOwnerProfile.findOne({ userId: target._id, organizationId }).select('licenseNumber showAsLicensedBroker').lean()
+    : await AgentProfile.findOne({ userId: target._id, organizationId }).select('licenseNumber showAsLicensedBroker').lean()
+  if (!existingProfile) throw new ApiError(httpStatus.CONFLICT, 'Team member role profile is missing')
+
+  const licenseNumber = payload.licenseNumber !== undefined
+    ? payload.licenseNumber.trim()
+    : String(existingProfile.licenseNumber || '').trim()
+  if (payload.showAsLicensedBroker && !licenseNumber) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'A license number is required before publishing this broker profile')
+  }
+
+  await updateLicensedBrokerProfile(target._id, organizationId, target.userRole, {
+    licenseNumber,
+    showAsLicensedBroker: payload.showAsLicensedBroker,
+  })
+  await CacheInvalidationService.invalidateTenant(organizationId)
+
+  const readModel = await findUserWithProfiles({ _id: target._id, organizationId })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+
+  const event = { type: 'team.changed' as const, action: 'updated', entityId: String(target._id) }
+  RealtimeService.emitOrganization(organizationId, event)
+  RealtimeService.emitPublicOrganization(organizationId, event)
+  return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
 const getAgentLeaderboard = async (organizationId: string, startDate?: string, endDate?: string): Promise<any[]> => {
@@ -313,8 +391,10 @@ const updateUserById = async (organizationId: string, id: string, userData: IUse
   await user.save()
   await updateUserProfileFields(user._id, userData)
   const currentRoleFields = await getRoleProfileFields(user._id)
+  const nextLicenseNumber = userData.licenseNumber ?? currentRoleFields.licenseNumber
   await syncRoleProfile(user._id, organizationId, user.userRole, {
-    licenseNumber: userData.licenseNumber ?? currentRoleFields.licenseNumber,
+    licenseNumber: nextLicenseNumber,
+    showAsLicensedBroker: String(nextLicenseNumber || '').trim() ? currentRoleFields.showAsLicensedBroker : false,
     specialization: userData.specialization ?? currentRoleFields.specialization,
     serviceAreas: userData.serviceAreas ?? currentRoleFields.serviceAreas,
   })
@@ -519,6 +599,7 @@ export const UserService = {
   getTeamRoleSummary,
   getPublicAgents,
   getPublicAgentDetail,
+  updatePublicBrokerProfile,
   getAgentLeaderboard,
   getUserById,
   updateUserById,

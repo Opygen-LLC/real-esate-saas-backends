@@ -27,8 +27,6 @@ export interface IViewing {
     interestLevel?: 'Very High' | 'Interested' | 'Neutral' | 'Not Interested'
     clientBudgetFeedback?: string
     notes?: string
-  calendarSyncStatus?: 'not_configured' | 'pending_provider_approval' | 'synced' | 'failed'
-  calendarProviderEventId?: string
   }
   createdAt?: Date
   updatedAt?: Date
@@ -45,6 +43,26 @@ export type IViewingFilter = {
   startDate?: string
   endDate?: string
   viewMode?: 'list' | 'calendar'
+}
+
+export type IViewingCalendarFilter = {
+  organizationId: string
+  startDate: string
+  endDate: string
+  status?: string
+  propertyId?: string
+  agentId?: string
+}
+
+export type ViewingCalendarItem = {
+  _id: string
+  date: string
+  startTime: string
+  endTime: string
+  status: IViewingStatus
+  clientName: string
+  property: { _id: string; title: string; city?: string } | null
+  agent: { _id: string; name: string } | null
 }
 
 export type ViewingModel = Model<IViewing>

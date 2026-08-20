@@ -47,6 +47,13 @@ router.get(
   UserController.getAllUsers
 )
 
+router.patch(
+  '/:id/public-broker',
+  authMiddlewares.requirePermission('users.write'),
+  validateRequest(UserValidation.publicBroker),
+  UserController.updatePublicBrokerProfile
+)
+
 router.patch('/:id/access', authMiddlewares.auth('agency_owner'), validateRequest(UserValidation.memberAccess), UserController.updateMemberAccess)
 
 // Platform routes must be explicit and declared before tenant `/:id` routes.

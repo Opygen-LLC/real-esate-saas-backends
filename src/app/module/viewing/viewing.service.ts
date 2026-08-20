@@ -16,7 +16,7 @@ import { Property } from '../property/property.model'
 import { Organization } from '../organization/organization.model'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
-import { IViewing, IViewingFilter } from './viewing.interface'
+import { IViewing, IViewingCalendarFilter, IViewingFilter, ViewingCalendarItem } from './viewing.interface'
 import { Viewing } from './viewing.model'
 import type { PublicViewingRequestInput } from './viewing.validation'
 const normalizePhone=(value:string)=>{try{return normalizeBangladeshPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
@@ -94,7 +94,45 @@ const getAllViewings = async (
   ])
   return { meta: { page, limit, total }, data: result }
 }
+const getCalendarViewings = async (filters: IViewingCalendarFilter): Promise<ViewingCalendarItem[]> => {
+  const { organizationId, startDate, endDate, status, propertyId, agentId } = filters
+  const where: Record<string, unknown> = {
+    organizationId,
+    date: { $gte: startDate, $lte: endDate },
+    ...(status ? { status } : {}),
+    ...(propertyId ? { propertyId } : {}),
+    ...(agentId ? { agentId } : {}),
+  }
+
+  const rows: any[] = await Viewing.find(where)
+    .select('_id date startTime endTime status clientName propertyId agentId')
+    .populate('propertyId', 'title city')
+    .populate(userRefPopulate('agentId', 'name'))
+    .sort(paginationHelper.buildCalendarSort())
+    .limit(2001)
+    .lean()
+
+  if (rows.length > 2000) {
+    throw new ApiError(413, 'Too many viewings in this calendar range. Narrow the date range or filters.')
+  }
+
+  return rows.map((row) => ({
+    _id: String(row._id),
+    date: row.date,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    status: row.status,
+    clientName: row.clientName,
+    property: row.propertyId
+      ? { _id: String(row.propertyId._id), title: row.propertyId.title || 'Property', city: row.propertyId.city }
+      : null,
+    agent: row.agentId
+      ? { _id: String(row.agentId._id), name: row.agentId.name || 'Assigned broker' }
+      : null,
+  }))
+}
+
 const getViewingById=async(organizationId:string,id:string)=>{const result=await Viewing.findOne({_id:id,organizationId}).populate('propertyId','title price images address city propertyType bedrooms bathrooms').populate(userRefPopulate('agentId', 'name email phoneNumber userRole')).populate('leadId','name phone email leadStatus');if(!result)throw new ApiError(404,'Viewing not found');return result}
 const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext)=>{const existing:any=await Viewing.findOne({_id:id,organizationId,...crmMutationOwnerFilter('agentId',access)});if(!existing)throw new ApiError(404,'Viewing not found');if(access&&!access.isManager&&payload.agentId!==undefined&&String(payload.agentId)!==access.userId)throw new ApiError(403,'Team members cannot reassign viewings to another member');const linkedLead=payload.leadId||existing.leadId;if(linkedLead&&access)await LeadService.getLeadById(organizationId,String(linkedLead),access);const date=payload.date||existing.date,startTime=payload.startTime||existing.startTime,endTime=payload.endTime||existing.endTime,agentId=String(payload.agentId||existing.agentId),propertyId=String(payload.propertyId||existing.propertyId);if(payload.date||payload.startTime||payload.endTime||payload.agentId||payload.propertyId){const conflict=await checkConflict(organizationId,agentId,propertyId,date,startTime,endTime,id);if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict')}if(payload.clientPhone)payload.clientPhone=normalizePhone(payload.clientPhone);const result:any=await Viewing.findOneAndUpdate({_id:id,organizationId},payload,{new:true}).populate('propertyId','title price images address city').populate(userRefPopulate('agentId', 'name email phoneNumber userRole')).populate('leadId','name phone email leadStatus');if(['Cancelled','Completed','NoShow'].includes(result.status))await OperationsQueueService.cancel(organizationId,'viewing_reminder',id);else if(payload.date||payload.startTime||payload.status==='Rescheduled')await scheduleReminder(result);if(payload.status==='Completed'&&linkedLead)await LeadLifecycleService.changeStatus(organizationId,String(linkedLead),LEAD_STATUS.VIEWING_COMPLETED,{actorId,access,reason:'Viewing completed'});if(payload.date||payload.startTime||payload.endTime||payload.status)await OperationsQueueService.schedule({organizationId,type:'calendar_sync',entityId:id,runAt:new Date(Date.now()+1_000)});await DomainEventService.emit({organizationId,aggregateType:'viewing',aggregateId:id,eventType:payload.status==='Completed'?'viewing.completed':'viewing.updated',leadId:result.leadId?.toString(),propertyId:propertyId,actorId:actorId||agentId,payload:{summary:`Viewing ${result.status} for ${result.date} at ${result.startTime}`,status:result.status}});return result}
 const deleteViewing=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result=await Viewing.findOneAndDelete({_id:id,organizationId,...crmMutationOwnerFilter('agentId',access)});if(!result)throw new ApiError(httpStatus.NOT_FOUND,'Viewing not found');await OperationsQueueService.cancel(organizationId,'viewing_reminder',id);return result}
-export const ViewingService={checkConflict,createViewing,publicRequestViewing,getAllViewings,getViewingById,updateViewing,deleteViewing}
+export const ViewingService={checkConflict,createViewing,publicRequestViewing,getAllViewings,getCalendarViewings,getViewingById,updateViewing,deleteViewing}

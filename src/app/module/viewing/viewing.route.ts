@@ -18,6 +18,12 @@ router.post(
 )
 
 router.get(
+  '/calendar',
+  authMiddlewares.requirePermission('viewings.read'),
+  ViewingController.getCalendarViewings
+)
+
+router.get(
   '/',
   authMiddlewares.requirePermission('viewings.read'),
   ViewingController.getAllViewings

@@ -29,6 +29,7 @@ export interface IUserProfileInput {
   profileImgURL?: string
   bio?: string
   licenseNumber?: string
+  showAsLicensedBroker?: boolean
   specialization?: string[]
   serviceAreas?: string[]
   address?: string

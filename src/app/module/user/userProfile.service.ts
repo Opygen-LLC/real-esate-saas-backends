@@ -9,8 +9,8 @@ import { IUserProfileInput, IUserRole } from './user.interface'
 
 export const USER_PROFILE_POPULATES = [
   { path: 'profile', select: 'profileImgURL bio address gender isAddProfile sidebarPermission accessControl' },
-  { path: 'agencyOwnerProfile', select: 'organizationId licenseNumber specialization serviceAreas' },
-  { path: 'agentProfile', select: 'organizationId licenseNumber specialization serviceAreas' },
+  { path: 'agencyOwnerProfile', select: 'organizationId licenseNumber showAsLicensedBroker specialization serviceAreas' },
+  { path: 'agentProfile', select: 'organizationId licenseNumber showAsLicensedBroker specialization serviceAreas' },
   { path: 'superAdminProfile', select: 'title' },
 ]
 
@@ -55,6 +55,7 @@ export const toUserDto = (source: any, options: UserDtoOptions = {}): UserRespon
     profileImgURL: profile.profileImgURL || '',
     bio: profile.bio || '',
     licenseNumber: roleProfile.licenseNumber || '',
+    showAsLicensedBroker: roleProfile.showAsLicensedBroker === true,
     specialization: Array.isArray(roleProfile.specialization) ? roleProfile.specialization : [],
     serviceAreas: Array.isArray(roleProfile.serviceAreas) ? roleProfile.serviceAreas : [],
     isAddProfile: profile.isAddProfile !== false,
@@ -117,12 +118,13 @@ export const getUserAccessControl = async (userId: string | Types.ObjectId) => {
 
 export const getRoleProfileFields = async (userId: string | Types.ObjectId) => {
   const [owner, agent] = await Promise.all([
-    AgencyOwnerProfile.findOne({ userId }).select('licenseNumber specialization serviceAreas').lean(),
-    AgentProfile.findOne({ userId }).select('licenseNumber specialization serviceAreas').lean(),
+    AgencyOwnerProfile.findOne({ userId }).select('licenseNumber showAsLicensedBroker specialization serviceAreas').lean(),
+    AgentProfile.findOne({ userId }).select('licenseNumber showAsLicensedBroker specialization serviceAreas').lean(),
   ])
   const source: any = owner || agent || {}
   return {
     licenseNumber: source.licenseNumber || '',
+    showAsLicensedBroker: source.showAsLicensedBroker === true,
     specialization: Array.isArray(source.specialization) ? source.specialization : [],
     serviceAreas: Array.isArray(source.serviceAreas) ? source.serviceAreas : [],
   }
@@ -176,11 +178,12 @@ export const syncRoleProfile = async (
   userId: string | Types.ObjectId,
   organizationId: string,
   role: IUserRole,
-  input: Pick<IUserProfileInput, 'licenseNumber' | 'specialization' | 'serviceAreas'> = {},
+  input: Pick<IUserProfileInput, 'licenseNumber' | 'showAsLicensedBroker' | 'specialization' | 'serviceAreas'> = {},
   session?: ClientSession,
 ) => {
   const roleFields = {
     licenseNumber: input.licenseNumber || '',
+    showAsLicensedBroker: input.showAsLicensedBroker === true,
     specialization: input.specialization || [],
     serviceAreas: input.serviceAreas || [],
   }
@@ -221,6 +224,20 @@ export const syncRoleProfile = async (
     AgencyOwnerProfile.deleteOne({ userId }, sessionOption(session)),
     SuperAdminProfile.deleteOne({ userId }, sessionOption(session)),
   ])
+}
+
+export const updateLicensedBrokerProfile = async (
+  userId: string | Types.ObjectId,
+  organizationId: string,
+  role: IUserRole,
+  input: { licenseNumber: string; showAsLicensedBroker: boolean },
+) => {
+  const update = { $set: { licenseNumber: input.licenseNumber, showAsLicensedBroker: input.showAsLicensedBroker } }
+  const options = { new: true, runValidators: true }
+  if (role === 'agency_owner') {
+    return AgencyOwnerProfile.findOneAndUpdate({ userId, organizationId }, update, options)
+  }
+  return AgentProfile.findOneAndUpdate({ userId, organizationId }, update, options)
 }
 
 export const deleteUserCompanionRecords = async (userId: string | Types.ObjectId, session?: ClientSession) => {

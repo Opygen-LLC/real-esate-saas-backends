@@ -26,7 +26,10 @@ export const PHASE0_REGRESSION_CONTRACTS = {
     contentType: 'application/pdf', contentDisposition: 'attachment', filenameExtension: '.pdf', fileNamePrefix: 'opygen-estate-', brand: 'Opygen Estate', authenticatedBlobDownload: true,
   },
   publicBrokers: {
-    adminControlled: true, requiresActiveMember: true, requiresLicenseNumber: true, tenantScoped: true,
+    adminControlled: true, visibilityField: 'showAsLicensedBroker', requiresActiveMember: true, requiresLicenseNumber: true, tenantScoped: true,
+    update: { method: 'PATCH', path: '/users/:id/public-broker', permission: 'users.write' },
+    publicList: { method: 'GET', path: '/users/public/:organizationId' },
+    publicDetail: { method: 'GET', path: '/users/public-agent/:id', hiddenReturnsNotFound: true },
   },
   viewings: {
     defaultTab: 'table', tabs: ['table', 'calendar'] as const,

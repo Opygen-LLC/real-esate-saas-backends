@@ -144,7 +144,7 @@ export const permissionCatalog = [
   ] },
   { group: 'Team & agency', items: [
     { permission: 'users.read', label: 'View team', description: 'View the agency roster.' },
-    { permission: 'users.write', label: 'Manage team', description: 'Invite and remove team members. Member access policy remains owner-only.' },
+    { permission: 'users.write', label: 'Manage team', description: 'Invite/remove team members and manage public broker visibility. Member access policy remains owner-only.' },
     { permission: 'organization.manage', label: 'Agency settings', description: 'Update agency profile and operational settings.' },
   ] },
   { group: 'Growth', items: [

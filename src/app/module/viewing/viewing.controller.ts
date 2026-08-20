@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import mongoose from 'mongoose'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import catchAsync from '../../../shared/catchAsync'
@@ -87,6 +88,49 @@ const getAllViewings = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+const MAX_CALENDAR_RANGE_DAYS = 62
+const VIEWING_STATUSES = new Set(['Scheduled', 'Confirmed', 'Completed', 'Cancelled', 'NoShow', 'Rescheduled'])
+
+const getCalendarViewings = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const filters = pick(req.query, ['startDate', 'endDate', 'status', 'propertyId', 'agentId'])
+  const startDate = String(filters.startDate || '')
+  const endDate = String(filters.endDate || '')
+
+  if (!DATE_ONLY_RE.test(startDate) || !DATE_ONLY_RE.test(endDate)) {
+    throw new ApiError(400, 'startDate and endDate are required in YYYY-MM-DD format')
+  }
+  const start = Date.parse(`${startDate}T00:00:00Z`)
+  const end = Date.parse(`${endDate}T00:00:00Z`)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    throw new ApiError(400, 'Invalid viewing calendar date range')
+  }
+  const rangeDays = Math.floor((end - start) / 86_400_000) + 1
+  if (rangeDays > MAX_CALENDAR_RANGE_DAYS) {
+    throw new ApiError(400, `Viewing calendar range cannot exceed ${MAX_CALENDAR_RANGE_DAYS} days`)
+  }
+  if (filters.status && !VIEWING_STATUSES.has(String(filters.status))) throw new ApiError(400, 'Invalid viewing status')
+  if (filters.propertyId && !mongoose.isValidObjectId(String(filters.propertyId))) throw new ApiError(400, 'Invalid property filter')
+  if (filters.agentId && !mongoose.isValidObjectId(String(filters.agentId))) throw new ApiError(400, 'Invalid agent filter')
+
+  const data = await ViewingService.getCalendarViewings({
+    organizationId,
+    startDate,
+    endDate,
+    status: filters.status ? String(filters.status) : undefined,
+    propertyId: filters.propertyId ? String(filters.propertyId) : undefined,
+    agentId: filters.agentId ? String(filters.agentId) : undefined,
+  })
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Viewing calendar fetched successfully',
+    data,
+  })
+})
+
 const getViewingById = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
@@ -131,6 +175,7 @@ export const ViewingController = {
   createViewing,
   publicRequestViewing,
   getAllViewings,
+  getCalendarViewings,
   getViewingById,
   updateViewing,
   deleteViewing,

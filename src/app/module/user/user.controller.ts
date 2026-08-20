@@ -83,6 +83,24 @@ const getPublicAgentDetail = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const updatePublicBrokerProfile = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const result = await UserService.updatePublicBrokerProfile(organizationId, req.user!._id!, req.params.id, req.body)
+  await writeAudit({
+    organizationId, actorId: req.user!._id!, actorRole: req.user!.userRole,
+    action: 'team.public_broker_updated', entityType: 'user', entityId: req.params.id,
+    reason: req.body.showAsLicensedBroker ? 'Public licensed broker profile enabled or updated' : 'Public licensed broker profile disabled',
+    requestId: req.requestId, ip: req.ip,
+    metadata: { showAsLicensedBroker: result.showAsLicensedBroker, hasLicenseNumber: Boolean(result.licenseNumber) },
+  })
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.showAsLicensedBroker ? 'Public broker profile enabled' : 'Public broker profile disabled',
+    data: result,
+  })
+})
+
 const getAgentLeaderboard = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const result = await UserService.getAgentLeaderboard(organizationId, req.query.startDate as string | undefined, req.query.endDate as string | undefined)
@@ -218,6 +236,7 @@ export const UserController = {
   getTeamRoleSummary,
   getPublicAgents,
   getPublicAgentDetail,
+  updatePublicBrokerProfile,
   getAgentLeaderboard,
   getUserById,
   updateUserById,
