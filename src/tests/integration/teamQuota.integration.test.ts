@@ -6,18 +6,23 @@ let mongoose: typeof import('mongoose')
 let Organization: any
 let User: any
 let TeamInvitation: any
+let AuthSession: any
+let AuditEvent: any
 let EntitlementService: any
 let reconcileTeamSeats: any
+let reconcileOrganizationEntitlements: any
 let UserService: any
 let owner: any
 const organizationId = 'org_phase2_team_quota'
 
 const clearTenantMembers = async () => {
   await TeamInvitation.deleteMany({ organizationId })
+  await AuthSession.deleteMany({ organizationId })
+  await AuditEvent.collection.deleteMany({ organizationId })
   await User.deleteMany({ organizationId, _id: { $ne: owner._id } })
 }
 
-const addMember = async (role: 'agency_admin' | 'agent' | 'staff' | 'viewer', suffix: string) => User.create({
+const addMember = async (role: 'agency_owner' | 'agency_admin' | 'agent' | 'staff' | 'viewer', suffix: string) => User.create({
   name: `${role} ${suffix}`,
   email: `${role}-${suffix}@example.test`,
   phoneNumber: `+88018${suffix.padStart(8, '0').slice(-8)}`,
@@ -61,8 +66,11 @@ suite('phase 2 tenant-wide team quota', () => {
     ;({ Organization } = await import('../../app/module/organization/organization.model'))
     ;({ User } = await import('../../app/module/user/user.model'))
     ;({ TeamInvitation } = await import('../../app/module/teamInvitation/teamInvitation.model'))
+    ;({ AuthSession } = await import('../../app/module/auth/authSession.model'))
+    ;({ AuditEvent } = await import('../../app/module/audit/audit.model'))
     ;({ EntitlementService } = await import('../../app/module/entitlement/entitlement.service'))
     ;({ reconcileTeamSeats } = await import('../../app/module/entitlement/teamSeatReconciliation.service'))
+    ;({ reconcileOrganizationEntitlements } = await import('../../app/module/entitlement/subscriptionEntitlementReconciliation.service'))
     ;({ UserService } = await import('../../app/module/user/user.service'))
 
     await Organization.create({
@@ -128,17 +136,24 @@ suite('phase 2 tenant-wide team quota', () => {
     await Organization.updateOne({ organizationId }, { $set: { 'subscription.maxAgents': 3 } })
 
     expect(await User.countDocuments({ organizationId })).toBe(5)
-    const reconciliation = await reconcileTeamSeats(organizationId, 3, {
-      previousMaxTeamMembers: 5,
-      actorId: 'system:test',
-      reason: 'Integration-test downgrade',
-    })
+    const reconciliation = await reconcileOrganizationEntitlements(
+      organizationId,
+      { plan: 'professional', planVersion: 1, maxAgents: 5 },
+      { plan: 'starter', planVersion: 1, maxAgents: 3 },
+      { actorId: 'system:test', reason: 'Integration-test downgrade' },
+    )
 
-    expect(reconciliation.blockedUserIds).toHaveLength(2)
+    expect(reconciliation.direction).toBe('downgrade')
+    expect(reconciliation.teamSeats.blockedUserIds).toHaveLength(2)
     expect(await User.countDocuments({ organizationId })).toBe(5)
     expect(await User.countDocuments({ organizationId, userRole: 'agency_owner', status: 'active' })).toBe(1)
     expect(await User.countDocuments({ organizationId, status: { $ne: 'blocked' } })).toBe(3)
     expect(await User.countDocuments({ organizationId, status: 'blocked', 'accessRestriction.source': 'subscription_quota' })).toBe(2)
+
+    const audit = await AuditEvent.findOne({ organizationId, action: 'subscription.team_seats_reconciled' }).lean()
+    expect(audit?.metadata?.protectedOwnerUserId).toBe(String(owner._id))
+    expect(audit?.metadata?.selectionPolicy).toBe('canonical_owner>agency_admin>agent>staff>viewer>oldest_membership>id')
+    expect(audit?.metadata?.blockedUserIds).toHaveLength(2)
 
     const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
     expect(quota).toMatchObject({ maxTeamMembers: 3, teamMembersUsed: 3, teamMembersReserved: 0, teamMembersAvailable: 0, teamMembersOverCapacityBy: 0 })
@@ -175,4 +190,176 @@ suite('phase 2 tenant-wide team quota', () => {
     expect(quota).toMatchObject({ maxTeamMembers: 2, teamMembersUsed: 1, teamMembersAvailable: 1 })
     await User.updateOne({ _id: owner._id }, { $set: { status: 'active' }, $unset: { accessRestriction: '' } })
   })
+
+  it('keeps members deterministically by role priority and then oldest membership', async () => {
+    await clearTenantMembers()
+    const newerAdmin = await addMember('agency_admin', '61000001')
+    const olderAgent = await addMember('agent', '61000002')
+    const newerAgent = await addMember('agent', '61000003')
+    const oldestStaff = await addMember('staff', '61000004')
+
+    await User.updateOne({ _id: newerAdmin._id }, { $set: { createdAt: new Date('2025-04-01T00:00:00.000Z') } })
+    await User.updateOne({ _id: olderAgent._id }, { $set: { createdAt: new Date('2025-01-01T00:00:00.000Z') } })
+    await User.updateOne({ _id: newerAgent._id }, { $set: { createdAt: new Date('2025-02-01T00:00:00.000Z') } })
+    await User.updateOne({ _id: oldestStaff._id }, { $set: { createdAt: new Date('2024-01-01T00:00:00.000Z') } })
+
+    await reconcileTeamSeats(organizationId, 3, { previousMaxTeamMembers: 5, actorId: 'system:test' })
+
+    expect((await User.findById(newerAdmin._id).lean())?.status).toBe('active')
+    expect((await User.findById(olderAgent._id).lean())?.status).toBe('active')
+    expect((await User.findById(newerAgent._id).lean())?.accessRestriction?.source).toBe('subscription_quota')
+    expect((await User.findById(oldestStaff._id).lean())?.accessRestriction?.source).toBe('subscription_quota')
+  })
+
+  it('protects only the canonical organization owner when legacy duplicate owner-role users exist', async () => {
+    await clearTenantMembers()
+    const duplicateOwner = await addMember('agency_owner', '62000001')
+
+    const reconciliation = await reconcileTeamSeats(organizationId, 1, { previousMaxTeamMembers: 2, actorId: 'system:test' })
+
+    expect(reconciliation.protectedOwnerUserId).toBe(String(owner._id))
+    expect((await User.findById(owner._id).lean())?.status).toBe('active')
+    expect((await User.findById(duplicateOwner._id).lean())?.status).toBe('blocked')
+    expect((await User.findById(duplicateOwner._id).lean())?.accessRestriction?.source).toBe('subscription_quota')
+    const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(quota).toMatchObject({ maxTeamMembers: 2, teamMembersUsed: 1 })
+  })
+
+  it('never auto-reactivates a legacy blocked user with unknown restriction provenance', async () => {
+    await clearTenantMembers()
+    const legacyBlocked = await addMember('agent', '63000001')
+    await User.collection.updateOne({ _id: legacyBlocked._id }, { $set: { status: 'blocked' }, $unset: { accessRestriction: '' } })
+
+    await reconcileTeamSeats(organizationId, 3, { previousMaxTeamMembers: 2, actorId: 'system:test' })
+
+    const after = await User.findById(legacyBlocked._id).lean()
+    expect(after?.status).toBe('blocked')
+    expect(after?.accessRestriction).toBeFalsy()
+  })
+
+  it('revokes active sessions for users blocked by a downgrade', async () => {
+    await clearTenantMembers()
+    const admin = await addMember('agency_admin', '64000001')
+    const overflow = await addMember('viewer', '64000002')
+    await AuthSession.create({
+      userId: overflow._id,
+      organizationId,
+      familyId: 'phase6-overflow-session',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      revokedAt: null,
+      sessionVersion: 1,
+      authorizationVersion: 1,
+    })
+
+    await reconcileTeamSeats(organizationId, 2, { previousMaxTeamMembers: 3, actorId: 'system:test' })
+
+    expect((await User.findById(admin._id).lean())?.status).toBe('active')
+    expect((await User.findById(overflow._id).lean())?.accessRestriction?.source).toBe('subscription_quota')
+    const session = await AuthSession.findOne({ userId: overflow._id }).lean()
+    expect(session?.revokedAt).toBeTruthy()
+    expect(session?.revokeReason).toBe('subscription_quota')
+  })
+
+  it('allows an agency admin to manage normal seats but never the canonical owner seat', async () => {
+    await clearTenantMembers()
+    await Organization.updateOne({ organizationId }, { $set: { 'subscription.maxAgents': 3 } })
+    const admin = await addMember('agency_admin', '65000001')
+    const staff = await addMember('staff', '65000002')
+
+    await expect(UserService.updateMemberSeatAccess(
+      organizationId,
+      admin._id.toString(),
+      owner._id.toString(),
+      false,
+    )).rejects.toMatchObject({ statusCode: 403, code: 'OWNER_SEAT_PROTECTED' })
+
+    await UserService.updateMemberSeatAccess(
+      organizationId,
+      admin._id.toString(),
+      staff._id.toString(),
+      false,
+    )
+    const blockedStaff = await User.findById(staff._id).lean()
+    expect(blockedStaff?.status).toBe('blocked')
+    expect(blockedStaff?.accessRestriction?.source).toBe('tenant_admin')
+    expect(blockedStaff?.accessRestriction?.blockedBy).toBe(String(admin._id))
+  })
+
+  it('scopes seat-access writes to the actor tenant', async () => {
+    await clearTenantMembers()
+    const outsider = await User.create({
+      name: 'Other Tenant Agent',
+      email: 'other-tenant-agent@example.test',
+      phoneNumber: '+8801865000003',
+      organizationId: 'other_tenant',
+      userRole: 'agent',
+      status: 'active',
+      isVerified: true,
+    })
+
+    await expect(UserService.updateMemberSeatAccess(
+      organizationId,
+      owner._id.toString(),
+      outsider._id.toString(),
+      false,
+    )).rejects.toMatchObject({ statusCode: 404 })
+
+    expect((await User.findById(outsider._id).lean())?.status).toBe('active')
+    await User.deleteOne({ _id: outsider._id })
+  })
+
+  it('serializes simultaneous unblocks so only one request can claim the final seat', async () => {
+    await clearTenantMembers()
+    await Organization.updateOne({ organizationId }, { $set: { 'subscription.maxAgents': 3 } })
+    const admin = await addMember('agency_admin', '66000001')
+    const firstBlocked = await addMember('staff', '66000002')
+    const secondBlocked = await addMember('viewer', '66000003')
+
+    await User.updateMany(
+      { _id: { $in: [firstBlocked._id, secondBlocked._id] } },
+      {
+        $set: {
+          status: 'blocked',
+          accessRestriction: {
+            source: 'tenant_admin',
+            reason: 'Concurrency fixture',
+            blockedAt: new Date(),
+            blockedBy: owner._id.toString(),
+            previousStatus: 'active',
+          },
+        },
+      },
+    )
+
+    const before = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(before).toMatchObject({
+      maxTeamMembers: 3,
+      teamMembersUsed: 2,
+      teamMembersCommitted: 2,
+      teamMembersAvailable: 1,
+    })
+
+    const attempts = await Promise.allSettled([
+      UserService.updateMemberSeatAccess(organizationId, admin._id.toString(), firstBlocked._id.toString(), true),
+      UserService.updateMemberSeatAccess(organizationId, admin._id.toString(), secondBlocked._id.toString(), true),
+    ])
+
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = attempts.find((result) => result.status === 'rejected') as PromiseRejectedResult
+    expect(rejected.reason).toMatchObject({ statusCode: 409, code: 'TEAM_SEAT_LIMIT_REACHED' })
+
+    const after = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(after).toMatchObject({
+      maxTeamMembers: 3,
+      teamMembersUsed: 3,
+      teamMembersCommitted: 3,
+      teamMembersAvailable: 0,
+    })
+    expect(await User.countDocuments({
+      _id: { $in: [firstBlocked._id, secondBlocked._id] },
+      status: 'active',
+    })).toBe(1)
+  })
+
+
 })

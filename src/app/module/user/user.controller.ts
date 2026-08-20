@@ -195,7 +195,7 @@ const updateMemberSeatAccess = catchAsync(async (req: Request, res: Response) =>
     action: req.body.active ? 'team.member_unblocked' : 'team.member_blocked',
     entityType: 'user',
     entityId: req.params.id,
-    reason: req.body.active ? 'Agency owner restored a team seat' : 'Agency owner blocked a team member',
+    reason: req.body.active ? 'Tenant administrator restored a team seat' : 'Tenant administrator blocked a team member',
     requestId: req.requestId,
     ip: req.ip,
     metadata: { status: result.status, restrictionSource: result.accessRestriction?.source || null },

@@ -57,7 +57,13 @@ router.patch(
 )
 
 router.patch('/:id/access', authMiddlewares.auth('agency_owner'), validateRequest(UserValidation.memberAccess), UserController.updateMemberAccess)
-router.patch('/:id/seat-access', authMiddlewares.auth('agency_owner'), validateRequest(UserValidation.memberSeatAccess), UserController.updateMemberSeatAccess)
+router.patch(
+  '/:id/seat-access',
+  authMiddlewares.auth('agency_owner', 'agency_admin'),
+  authMiddlewares.requirePermission('users.write'),
+  validateRequest(UserValidation.memberSeatAccess),
+  UserController.updateMemberSeatAccess,
+)
 
 // Platform routes must be explicit and declared before tenant `/:id` routes.
 router.get('/super-admin/summary', authMiddlewares.authSuperAdmin, UserController.getSuperAdminUserSummary)

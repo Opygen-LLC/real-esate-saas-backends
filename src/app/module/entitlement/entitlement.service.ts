@@ -126,17 +126,31 @@ const recommendPlanForLimit = async (resource: LimitedResource, required: number
   return plan?.planId || null
 }
 
-const countLimitedResourceUsage = async (organizationId: string, resource: LimitedResource, session?: ClientSession): Promise<number> => {
+const countLimitedResourceUsage = async (
+  organizationId: string,
+  resource: LimitedResource,
+  session?: ClientSession,
+  protectedOwnerId?: unknown,
+): Promise<number> => {
   if (resource === 'properties') {
     return withSession(Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }), session)
   }
   if (resource === 'teamMembers') {
+    let canonicalOwnerId = protectedOwnerId
+    if (!canonicalOwnerId) {
+      const legacyOwnerQuery = User.findOne({ organizationId, userRole: 'agency_owner' })
+        .select('_id')
+        .sort({ createdAt: 1, _id: 1 })
+      canonicalOwnerId = (await withSession(legacyOwnerQuery, session).lean())?._id
+    }
+    const protectedOwnerClause = canonicalOwnerId ? [{ _id: canonicalOwnerId }] : []
     return withSession(User.countDocuments({
       organizationId,
       userRole: { $in: TEAM_MEMBER_SEAT_ROLES },
-      // The agency owner is a protected subscribed seat even if platform access
-      // is temporarily suspended. Other blocked members do not consume seats.
-      $or: [{ status: { $ne: 'blocked' } }, { userRole: 'agency_owner' }],
+      // Only the canonical Organization.ownerId is a protected subscribed seat
+      // while blocked. Legacy tenants without ownerId deterministically fall back
+      // to the oldest agency_owner. Additional owner-role records are normal seats.
+      $or: [{ status: { $ne: 'blocked' } }, ...protectedOwnerClause],
     }), session)
   }
   return withSession(Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }), session)
@@ -150,7 +164,7 @@ const countReservedTeamMembers = async (organizationId: string, session?: Client
 const getTeamMemberQuotaSnapshot = async (organizationId: string, session?: ClientSession, resolvedInput?: Awaited<ReturnType<typeof resolve>>) => {
   const resolved = resolvedInput || await resolve(organizationId, session)
   const [teamMembersUsed, teamMembersReserved] = await Promise.all([
-    countLimitedResourceUsage(organizationId, 'teamMembers', session),
+    countLimitedResourceUsage(organizationId, 'teamMembers', session, resolved.organization.ownerId),
     countReservedTeamMembers(organizationId, session),
   ])
   return buildTeamMemberQuotaContract(Number(resolved.limits.maxTeamMembers || 0), teamMembersUsed, teamMembersReserved)
@@ -160,7 +174,7 @@ const getUsageSnapshot = async (organizationId: string) => {
   const resolved = await resolve(organizationId)
   const [properties, teamMembersUsed, teamMembersReserved, leads] = await Promise.all([
     countLimitedResourceUsage(organizationId, 'properties'),
-    countLimitedResourceUsage(organizationId, 'teamMembers'),
+    countLimitedResourceUsage(organizationId, 'teamMembers', undefined, resolved.organization.ownerId),
     countReservedTeamMembers(organizationId),
     countLimitedResourceUsage(organizationId, 'leads'),
   ])

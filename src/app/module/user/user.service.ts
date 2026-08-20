@@ -625,34 +625,96 @@ const updateMemberSeatAccess = async (
   targetUserId: string,
   active: boolean,
 ) => {
-  if (String(actorUserId) === String(targetUserId)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'You cannot block or unblock your own agency-owner seat')
+  const actorId = asUserObjectId(actorUserId)
+  const targetId = asUserObjectId(targetUserId)
+  if (!actorId || !targetId) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+  if (String(actorId) === String(targetId)) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'You cannot block or unblock your own account',
+      '',
+      'SELF_SEAT_ACCESS_FORBIDDEN',
+    )
   }
 
   const changedAt = new Date()
-  const userId = asUserObjectId(targetUserId)
-  if (!userId) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
 
   await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
-    const targetQuery = User.findOne({ _id: userId, organizationId })
-    if (session) targetQuery.session(session)
-    const target = await targetQuery
+    const actorQuery = User.findOne({
+      _id: actorId,
+      organizationId,
+      status: 'active',
+      userRole: { $in: ['agency_owner', 'agency_admin'] },
+    }).select('_id userRole')
+    const targetQuery = User.findOne({ _id: targetId, organizationId })
+      .select('_id userRole status accessRestriction')
+    const organizationQuery = Organization.findOne({ organizationId }).select('_id ownerId')
+
+    if (session) {
+      actorQuery.session(session)
+      targetQuery.session(session)
+      organizationQuery.session(session)
+    }
+
+    const [actor, target, organization] = await Promise.all([
+      actorQuery,
+      targetQuery,
+      organizationQuery.lean(),
+    ])
+
+    if (!actor) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        'Only an agency owner or agency administrator can manage team seat access',
+        '',
+        'TEAM_SEAT_ACCESS_FORBIDDEN',
+      )
+    }
     if (!target) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
-    if (target.userRole === 'agency_owner') throw new ApiError(httpStatus.FORBIDDEN, 'Agency owner seat cannot be blocked')
-    if (!TEAM_MEMBER_SEAT_ROLES.includes(target.userRole as any)) throw new ApiError(httpStatus.BAD_REQUEST, 'This account does not consume a team seat')
+    if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+    if (!TEAM_MEMBER_SEAT_ROLES.includes(target.userRole as any)) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'This account does not consume a team seat')
+    }
+
+    let canonicalOwnerId = organization.ownerId ? String(organization.ownerId) : ''
+    if (!canonicalOwnerId) {
+      const fallbackOwnerQuery = User.findOne({ organizationId, userRole: 'agency_owner' })
+        .select('_id')
+        .sort({ createdAt: 1, _id: 1 })
+      if (session) fallbackOwnerQuery.session(session)
+      canonicalOwnerId = String((await fallbackOwnerQuery.lean())?._id || '')
+    }
+
+    if (canonicalOwnerId && String(target._id) === canonicalOwnerId) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        'The agency owner seat is protected and cannot be blocked or quota-restricted',
+        '',
+        'OWNER_SEAT_PROTECTED',
+      )
+    }
 
     if (active) {
-      if (target.status !== 'blocked') return
+      if (target.status !== 'blocked') return { changed: false }
+
       const source = target.accessRestriction?.source
       if (source === 'platform_admin' || !source) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'This member was suspended by the platform and cannot be reactivated from the agency dashboard', '', 'PLATFORM_RESTRICTION')
+        throw new ApiError(
+          httpStatus.FORBIDDEN,
+          'This member was suspended by the platform and cannot be reactivated from the agency dashboard',
+          '',
+          'PLATFORM_RESTRICTION',
+        )
       }
 
+      // This snapshot is read inside the same tenant quota transaction that locked
+      // Organization.teamQuotaRevision. Pending invitations are commitments too,
+      // so two concurrent unblocks cannot both claim the final seat.
       const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId, session)
-      if (quota.teamMembersCommitted + 1 > quota.maxTeamMembers) {
+      if (quota.teamMembersCommitted >= quota.maxTeamMembers) {
         throw new ApiError(
           httpStatus.CONFLICT,
-          `Team seat limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}). Block another member or revoke a pending invitation first.`,
+          `Your plan supports ${quota.maxTeamMembers} team seats and all are committed (${quota.teamMembersUsed} active, ${quota.teamMembersReserved} pending). Block another member or revoke a pending invitation first.`,
           '',
           'TEAM_SEAT_LIMIT_REACHED',
           {
@@ -668,23 +730,28 @@ const updateMemberSeatAccess = async (
       target.status = target.accessRestriction?.previousStatus === 'pending' ? 'pending' : 'active'
       target.accessRestriction = undefined
       await target.save(session ? { session } : undefined)
-      return
+      return { changed: true }
     }
 
     if (target.status === 'blocked') {
       if (target.accessRestriction?.source === 'platform_admin' || !target.accessRestriction?.source) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'This member is already restricted by the platform', '', 'PLATFORM_RESTRICTION')
+        throw new ApiError(
+          httpStatus.FORBIDDEN,
+          'This member is already restricted by the platform',
+          '',
+          'PLATFORM_RESTRICTION',
+        )
       }
-      if (target.accessRestriction?.source === 'tenant_admin') return
+      if (target.accessRestriction?.source === 'tenant_admin') return { changed: false }
     }
 
     const previousStatus = target.status === 'pending' ? 'pending' : 'active'
     target.status = 'blocked'
     target.accessRestriction = {
       source: 'tenant_admin',
-      reason: 'Agency owner blocked this member',
+      reason: `Team access blocked manually by ${actor.userRole === 'agency_owner' ? 'agency owner' : 'agency administrator'}`,
       blockedAt: changedAt,
-      blockedBy: actorUserId,
+      blockedBy: String(actor._id),
       previousStatus,
     }
     await target.save(session ? { session } : undefined)
@@ -693,19 +760,20 @@ const updateMemberSeatAccess = async (
       { $set: { revokedAt: changedAt, revokeReason: 'tenant_member_blocked' } },
       session ? { session } : undefined,
     )
+    return { changed: true }
   })
 
   await CacheInvalidationService.invalidateTenant(organizationId)
-  const readModel = await findUserWithProfiles({ _id: userId, organizationId })
+  const readModel = await findUserWithProfiles({ _id: targetId, organizationId })
   if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
   const result = toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
   RealtimeService.emitAuthorizationChanged({
-    userId: String(userId),
+    userId: String(targetId),
     organizationId,
     forceLogout: result.status === 'blocked',
     reason: result.status === 'blocked' ? 'tenant_member_blocked' : 'tenant_member_unblocked',
   })
-  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: String(userId) })
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: String(targetId) })
   return result
 }
 

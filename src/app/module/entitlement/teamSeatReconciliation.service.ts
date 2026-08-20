@@ -1,6 +1,7 @@
 import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { AuthSession } from '../auth/authSession.model'
+import { writeAudit } from '../audit/audit.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
@@ -11,6 +12,7 @@ import { TEAM_MEMBER_SEAT_ROLES, teamSeatRolePriority } from './teamSeat.contrac
 export interface TeamSeatReconciliationResult {
   organizationId: string
   maxTeamMembers: number
+  protectedOwnerUserId: string | null
   blockedUserIds: string[]
   unblockedUserIds: string[]
   revokedInvitationIds: string[]
@@ -18,6 +20,7 @@ export interface TeamSeatReconciliationResult {
   teamMembersReserved: number
 }
 
+const SELECTION_POLICY = 'canonical_owner>agency_admin>agent>staff>viewer>oldest_membership>id'
 const sessionOptions = (session?: ClientSession) => session ? { session } : undefined
 
 const compareMembers = (left: any, right: any) => {
@@ -29,14 +32,32 @@ const compareMembers = (left: any, right: any) => {
   return String(left._id).localeCompare(String(right._id))
 }
 
+const resolveCanonicalOwner = (users: any[], organizationOwnerId?: unknown) => {
+  const persistedOwnerId = organizationOwnerId ? String(organizationOwnerId) : ''
+  if (persistedOwnerId) {
+    const persistedOwner = users.find((user) => String(user._id) === persistedOwnerId)
+    if (persistedOwner) return { user: persistedOwner, usedFallback: false }
+  }
+
+  // Legacy organizations can pre-date ownerId. Protect exactly one deterministic
+  // agency_owner in that case; additional agency_owner records are normal seat
+  // consumers and can be quota-blocked like any other member.
+  const fallback = users
+    .filter((user) => user.userRole === 'agency_owner')
+    .sort(compareMembers)[0]
+  return { user: fallback || null, usedFallback: Boolean(fallback) }
+}
+
 /**
  * Reconciles tenant-wide team seats against an already-resolved effective limit.
  *
  * Invariants:
- * - The agency owner is never blocked by subscription quota reconciliation.
+ * - Exactly the canonical agency owner is protected from subscription blocking.
+ * - Other roles (and any duplicate/legacy owner-role record) consume normal seats.
  * - Existing non-blocked members take priority over pending invitations.
+ * - Member selection is deterministic: owner, role priority, oldest membership, id.
  * - Only users blocked specifically by `subscription_quota` can be auto-restored.
- * - Tenant/platform/manual restrictions are never auto-cleared.
+ * - Tenant/platform/manual/legacy restrictions are never auto-cleared.
  * - Overflow data is preserved; only access is restricted and sessions are revoked.
  *
  * Callers that change a plan should invoke this in the same transaction/session as
@@ -63,16 +84,19 @@ export const reconcileTeamSeats = async (
   if (session) userQuery.session(session)
   const users: any[] = await userQuery.lean()
 
-  const ownerId = String(organization.ownerId || users.find((user) => user.userRole === 'agency_owner')?._id || '')
-  const protectedOwners = users.filter((user) => user.userRole === 'agency_owner' || String(user._id) === ownerId)
-  const nonOwners = users.filter((user) => !protectedOwners.some((owner) => String(owner._id) === String(user._id)))
+  const canonicalOwner = resolveCanonicalOwner(users, organization.ownerId)
+  const protectedOwnerUserId = canonicalOwner.user ? String(canonicalOwner.user._id) : null
+  const normalSeatMembers = protectedOwnerUserId
+    ? users.filter((user) => String(user._id) !== protectedOwnerUserId)
+    : [...users]
 
-  // Reserve one seat for the canonical owner even if the owner is temporarily
-  // restricted by a platform action. That prevents a later owner reactivation
-  // from silently taking the tenant above the subscribed capacity.
-  const memberCapacity = Math.max(0, maxTeamMembers - 1)
+  // Reserve exactly one seat for the canonical owner even while a platform action
+  // temporarily blocks that account. This prevents a later explicit owner
+  // reactivation from taking the tenant above its paid capacity.
+  const ownerCommitment = protectedOwnerUserId ? 1 : 0
+  const memberCapacity = Math.max(0, maxTeamMembers - ownerCommitment)
 
-  const currentlyCommitted = nonOwners
+  const currentlyCommitted = normalSeatMembers
     .filter((user) => user.status !== 'blocked')
     .sort(compareMembers)
 
@@ -83,7 +107,7 @@ export const reconcileTeamSeats = async (
   if (blockedUserIds.length) {
     const operations = overflowCommitted.map((user) => ({
       updateOne: {
-        filter: { _id: user._id, organizationId, userRole: { $ne: 'agency_owner' } },
+        filter: { _id: user._id, organizationId },
         update: {
           $set: {
             status: 'blocked',
@@ -106,18 +130,19 @@ export const reconcileTeamSeats = async (
     )
   }
 
-  // The owner always consumes one protected seat. Existing members also take
-  // priority over pending invitations. On an upgrade, previously quota-blocked
-  // members are restored before invitation reservations are retained.
-  const ownerCommitment = 1
+  // Existing members take priority over pending invitations. On an upgrade,
+  // previously quota-blocked members are restored before reservation capacity is
+  // assigned to invitations. No other restriction provenance is auto-restored.
   const nonOwnerCommittedAfterBlock = keepCommitted.length
   let remainingCapacity = Math.max(0, maxTeamMembers - ownerCommitment - nonOwnerCommittedAfterBlock)
 
-  const quotaBlocked = nonOwners
+  const quotaBlocked = normalSeatMembers
     .filter((user) => user.status === 'blocked' && user.accessRestriction?.source === 'subscription_quota')
     .sort(compareMembers)
-  const limitIncreased = previousMaxTeamMembers !== undefined
-    && maxTeamMembers > Math.max(1, Math.floor(Number(previousMaxTeamMembers || 0)))
+  const normalizedPreviousLimit = previousMaxTeamMembers === undefined
+    ? undefined
+    : Math.max(1, Math.floor(Number(previousMaxTeamMembers || 0)))
+  const limitIncreased = normalizedPreviousLimit !== undefined && maxTeamMembers > normalizedPreviousLimit
   const toRestore = limitIncreased ? quotaBlocked.slice(0, remainingCapacity) : []
   const unblockedUserIds = toRestore.map((user) => String(user._id))
   if (toRestore.length) {
@@ -126,7 +151,6 @@ export const reconcileTeamSeats = async (
         filter: {
           _id: user._id,
           organizationId,
-          userRole: { $ne: 'agency_owner' },
           status: 'blocked',
           'accessRestriction.source': 'subscription_quota',
         },
@@ -159,10 +183,35 @@ export const reconcileTeamSeats = async (
 
   const teamMembersUsed = ownerCommitment + nonOwnerCommittedAfterBlock + toRestore.length
   const teamMembersReserved = keptInvitations.length
+  const limitChanged = normalizedPreviousLimit !== undefined && normalizedPreviousLimit !== maxTeamMembers
+  if (limitChanged || blockedUserIds.length || unblockedUserIds.length || revokedInvitationIds.length) {
+    await writeAudit({
+      organizationId,
+      actorId,
+      actorRole: actorId.startsWith('system:') || actorId === 'system' ? 'system' : undefined,
+      action: 'subscription.team_seats_reconciled',
+      entityType: 'organization',
+      entityId: String(organization._id),
+      reason,
+      metadata: {
+        previousMaxTeamMembers: normalizedPreviousLimit ?? null,
+        maxTeamMembers,
+        protectedOwnerUserId,
+        ownerFallbackUsed: canonicalOwner.usedFallback,
+        selectionPolicy: SELECTION_POLICY,
+        blockedUserIds,
+        unblockedUserIds,
+        revokedInvitationIds,
+        teamMembersUsed,
+        teamMembersReserved,
+      },
+    }, session)
+  }
 
   return {
     organizationId,
     maxTeamMembers,
+    protectedOwnerUserId,
     blockedUserIds,
     unblockedUserIds,
     revokedInvitationIds,
