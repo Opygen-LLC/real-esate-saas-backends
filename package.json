@@ -74,7 +74,8 @@
     "migrate:onboarding-four-steps": "ts-node --transpile-only src/app/db/migrateOnboardingToFourSteps.ts",
     "reconcile:phase8-entitlements": "ts-node --transpile-only src/app/db/reconcilePhase8ResourceEntitlements.ts",
     "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts",
-    "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts"
+    "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts",
+    "migrate:continuous-subscription": "ts-node --transpile-only src/app/db/migrateContinuousSubscriptionPolicy.ts"
   },
   "keywords": [
     "real-estate",

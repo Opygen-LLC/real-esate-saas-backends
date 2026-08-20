@@ -28,6 +28,14 @@ export interface BenefitPeriodInput {
   plan: BenefitPlanSnapshot
 }
 
+export interface PreviousBenefitPeriodSnapshot {
+  planId: SubscriptionPlanId
+  billingCycle: BenefitBillingCycle
+  periodEnd: Date
+  renewalStreak: number
+  renewalBonusEnabled?: boolean
+}
+
 export interface BenefitAllowanceCalculation {
   renewalStreak: number
   baseLeadAllowance: number
@@ -41,46 +49,62 @@ export interface BenefitAllowanceCalculation {
 
 const integer = (value: unknown): number => Math.max(0, Math.trunc(Number(value || 0)))
 
-const isConsecutiveMonthlyPeriod = (
-  previous: { periodEnd: Date; renewalBonusEnabled?: boolean } | null,
+const isConsecutiveStarterMonthlyPeriod = (
+  plan: BenefitPlanSnapshot,
+  billingCycle: BenefitBillingCycle,
+  previous: PreviousBenefitPeriodSnapshot | null,
   currentStart: Date,
   graceDays: number,
 ): boolean => {
-  if (!previous || previous.renewalBonusEnabled !== true) return false
+  if (plan.planId !== 'starter' || billingCycle !== 'monthly') return false
+  if (!previous || previous.planId !== plan.planId || previous.billingCycle !== 'monthly') return false
+  if (previous.renewalBonusEnabled !== true) return false
+
   const previousEnd = new Date(previous.periodEnd).getTime()
   const current = currentStart.getTime()
   if (!Number.isFinite(previousEnd) || !Number.isFinite(current)) return false
-  // Early renewals are scheduled to start at the previous period end. Late renewals may
-  // continue the streak only within the versioned continuity grace window.
-  return current >= previousEnd - 60_000 && current <= previousEnd + graceDays * DAY_MS
+
+  // A renewal can only extend a streak after the prior paid period has completed.
+  // On-time prepayments are scheduled to begin exactly at previousEnd by the payment services.
+  if (current < previousEnd) return false
+
+  // Late renewals may keep continuity only inside the plan version's configured grace window.
+  return current <= previousEnd + graceDays * DAY_MS
 }
 
 export const calculateBenefitPeriodAllowance = (
   plan: BenefitPlanSnapshot,
   billingCycle: BenefitBillingCycle,
   periodStart: Date,
-  previous: { periodEnd: Date; renewalStreak: number; renewalBonusEnabled?: boolean } | null,
+  previous: PreviousBenefitPeriodSnapshot | null,
 ): BenefitAllowanceCalculation => {
   const baseMonthly = integer(plan.baseMonthlyLeadAllowance)
   const renewalLeadBonus = integer(plan.renewalLeadBonus)
   const maxRenewalLeadBonus = integer(plan.maxRenewalLeadBonus)
   const continuityGraceDays = Math.min(31, integer(plan.continuityGraceDays))
-  const renewalBonusEnabled = Boolean(plan.renewalBonusEnabled) && billingCycle === 'monthly' && renewalLeadBonus > 0
+
+  // Phase 11 intentionally limits the loyalty program to paid monthly Starter renewals.
+  // Other plans can still snapshot a base paid-period allowance, but they cannot earn this streak bonus.
+  const starterMonthlyBonusConfigured = plan.planId === 'starter'
+    && billingCycle === 'monthly'
+    && Boolean(plan.renewalBonusEnabled)
+    && renewalLeadBonus > 0
 
   // The commercial field is explicitly monthly. A yearly paid period receives twelve
   // monthly base allocations as one immutable period snapshot; loyalty streaks remain monthly-only.
   const baseLeadAllowance = billingCycle === 'yearly' ? baseMonthly * 12 : baseMonthly
-  const consecutive = renewalBonusEnabled && isConsecutiveMonthlyPeriod(previous, periodStart, continuityGraceDays)
+  const consecutive = starterMonthlyBonusConfigured
+    && isConsecutiveStarterMonthlyPeriod(plan, billingCycle, previous, periodStart, continuityGraceDays)
   const renewalStreak = consecutive ? Math.max(1, integer(previous?.renewalStreak)) + 1 : 1
-  const uncappedBonus = renewalBonusEnabled ? Math.max(0, renewalStreak - 1) * renewalLeadBonus : 0
-  const bonusLeadAllowance = renewalBonusEnabled ? Math.min(uncappedBonus, maxRenewalLeadBonus) : 0
+  const uncappedBonus = starterMonthlyBonusConfigured ? Math.max(0, renewalStreak - 1) * renewalLeadBonus : 0
+  const bonusLeadAllowance = starterMonthlyBonusConfigured ? Math.min(uncappedBonus, maxRenewalLeadBonus) : 0
 
   return {
     renewalStreak,
     baseLeadAllowance,
     bonusLeadAllowance,
     totalLeadAllowance: baseLeadAllowance + bonusLeadAllowance,
-    renewalBonusEnabled,
+    renewalBonusEnabled: starterMonthlyBonusConfigured,
     renewalLeadBonus,
     maxRenewalLeadBonus,
     continuityGraceDays,
@@ -100,6 +124,20 @@ const findExisting = async (paymentSource: BenefitPaymentSource, paymentNumber: 
   return query
 }
 
+const findPreviousConfirmedBenefitPeriod = async (
+  organizationId: string,
+  session?: ClientSession,
+): Promise<PreviousBenefitPeriodSnapshot | null> => {
+  // Continuity follows the actual sequence of confirmed paid subscription periods.
+  // Searching across every plan family is deliberate: Starter -> Professional -> Starter must reset.
+  const query = SubscriptionBenefitPeriod.findOne({ organizationId })
+    .sort({ createdAt: -1, _id: -1 })
+    .select('planId billingCycle periodEnd renewalStreak renewalBonusEnabled')
+    .lean()
+  if (session) query.session(session)
+  return query as unknown as PreviousBenefitPeriodSnapshot | null
+}
+
 const createForPaidSubscription = async (input: BenefitPeriodInput, session?: ClientSession) => {
   validateInput(input)
   const existing: any = await findExisting(input.paymentSource, input.paymentNumber, session)
@@ -111,19 +149,11 @@ const createForPaidSubscription = async (input: BenefitPeriodInput, session?: Cl
     return { period: existing, created: false as const }
   }
 
-  let previous: any = null
-  if (input.billingCycle === 'monthly') {
-    const previousQuery = SubscriptionBenefitPeriod.findOne({
-      organizationId: input.organizationId,
-      planId: input.plan.planId,
-      billingCycle: 'monthly',
-      periodStart: { $lte: input.periodStart },
-    }).sort({ periodEnd: -1, _id: -1 })
-    if (session) previousQuery.session(session)
-    previous = await previousQuery.lean()
-  }
-
+  // This service is invoked only by confirmed paid activation paths. The previous ledger row,
+  // not the current Organization.subscription object, defines continuity and plan-switch resets.
+  const previous = await findPreviousConfirmedBenefitPeriod(input.organizationId, session)
   const allowance = calculateBenefitPeriodAllowance(input.plan, input.billingCycle, input.periodStart, previous)
+
   try {
     const docs = await SubscriptionBenefitPeriod.create([{
       organizationId: input.organizationId,

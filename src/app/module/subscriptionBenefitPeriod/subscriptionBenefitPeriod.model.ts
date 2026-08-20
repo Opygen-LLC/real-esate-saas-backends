@@ -33,6 +33,10 @@ subscriptionBenefitPeriodSchema.index(
   { name: 'tenant_benefit_history' },
 )
 subscriptionBenefitPeriodSchema.index(
+  { organizationId: 1, createdAt: -1, _id: -1 },
+  { name: 'tenant_continuity_confirmation_order' },
+)
+subscriptionBenefitPeriodSchema.index(
   { organizationId: 1, planId: 1, billingCycle: 1, periodEnd: -1, _id: -1 },
   { name: 'tenant_plan_continuity' },
 )

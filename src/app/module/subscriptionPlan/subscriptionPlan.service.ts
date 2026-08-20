@@ -32,9 +32,25 @@ const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig =>
 
 const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T & LeadAllowanceConfig => {
   const fallback = plan.planId === 'starter' ? starterLeadAllowanceDefaults : neutralLeadAllowanceDefaults(plan.maxLeads)
+  const baseMonthlyLeadAllowance = Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance)
+
+  // Phase 11 policy: consecutive-renewal loyalty applies only to monthly Starter subscriptions.
+  // Keep the base paid-period allowance available to every plan, but fail closed for loyalty
+  // fields on other plan families until a separate commercial policy is introduced for them.
+  if (plan.planId !== 'starter') {
+    return {
+      ...plan,
+      baseMonthlyLeadAllowance,
+      renewalLeadBonus: 0,
+      renewalBonusEnabled: false,
+      maxRenewalLeadBonus: 0,
+      continuityGraceDays: 0,
+    }
+  }
+
   return {
     ...plan,
-    baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
+    baseMonthlyLeadAllowance,
     renewalLeadBonus: Number(plan.renewalLeadBonus ?? fallback.renewalLeadBonus),
     renewalBonusEnabled: Boolean(plan.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
     maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
