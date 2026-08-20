@@ -72,7 +72,7 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
   return request
 }
 
-const getChangeRequests = async (organizationId: string) => SubscriptionChangeRequest.find({ organizationId }).sort({ createdAt: -1 }).limit(50).lean()
+const getChangeRequests = async (organizationId: string) => SubscriptionChangeRequest.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).limit(50).lean()
 
 const cancelChangeRequest = async (organizationId: string, requestId: string, actorId: string) => {
   const request: any = await SubscriptionChangeRequest.findOne({ _id: requestId, organizationId })
@@ -90,7 +90,7 @@ const getTenantPendingState = async (organizationId: string) => {
   return { ...request, payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null }
 }
 
-const getTenantPaymentHistory = async (organizationId: string) => SubscriptionPayment.find({ organizationId }).sort({ createdAt: -1 }).limit(100).lean()
+const getTenantPaymentHistory = async (organizationId: string) => SubscriptionPayment.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).limit(100).lean()
 
 const recordPayment = async (input: {
   organizationId: string; changeRequestId?: string; planId?: string; planVersion?: number; billingCycle?: 'monthly' | 'yearly';

@@ -135,7 +135,7 @@ const list = async (organizationId: string, filters: WebsiteSubmissionFilter, pa
   const [rows, total] = await Promise.all([
     WebsiteSubmission.find(where)
       .populate({ path: 'propertyId', select: 'title slug address city images', match: { organizationId } })
-      .sort({ [sortBy]: sortOrder })
+      .sort({ [sortBy]: sortOrder, _id: sortOrder })
       .skip(skip)
       .limit(limit)
       .lean(),

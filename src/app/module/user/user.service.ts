@@ -136,7 +136,7 @@ const getAllUsers = async (
   const { rows, total } = await paginateUsersWithProfiles({
     match: whereCondition,
     searchTerm: filters.searchTerm,
-    sort: { [sortBy]: sortOrder === 1 ? 1 : -1 },
+    sort: { [sortBy]: sortOrder === 1 ? 1 : -1, _id: sortOrder === 1 ? 1 : -1 },
     skip,
     limit,
   })
@@ -346,7 +346,7 @@ const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IP
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({ ...paginationOptions, limit: paginationOptions.limit || 10 })
   const whereConditions = superAdminUserWhere(filters)
   const sortConditions: Record<string, 1 | -1> = sortBy
-    ? { [sortBy]: sortOrder === 1 ? 1 : -1, ...(sortBy === 'createdAt' ? { _id: sortOrder === 1 ? 1 : -1 } : {}) }
+    ? { [sortBy]: sortOrder === 1 ? 1 : -1, _id: sortOrder === 1 ? 1 : -1 }
     : { createdAt: -1, _id: -1 }
   const { rows, total } = await paginateUsersWithProfiles({
     match: whereConditions,

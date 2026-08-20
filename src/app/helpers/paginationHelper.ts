@@ -2,6 +2,11 @@ import { SortOrder } from 'mongoose'
 import { IPaginationOptions } from '../../interfaces/common'
 import config from '../../config'
 
+export type PaginationDefaults = {
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+}
+
 type IOptionsResult = {
   page: number
   limit: number
@@ -15,17 +20,24 @@ const positiveInt = (value: unknown, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
 }
 
-const calculatePagination = (options: IPaginationOptions): IOptionsResult => {
+const calculatePagination = (options: IPaginationOptions, defaults: PaginationDefaults = {}): IOptionsResult => {
   const page = Math.min(1_000_000, positiveInt(options.page, 1))
   const requestedLimit = positiveInt(options.limit, 20)
   const limit = Math.min(requestedLimit, config.runtime.max_page_size)
   const skip = (page - 1) * limit
 
-  const sortBy = typeof options.sortBy === 'string' && /^[a-zA-Z0-9_.]{1,80}$/.test(options.sortBy) ? options.sortBy : 'createdAt'
-  const sortOrder: SortOrder = options.sortOrder === 'asc' ? 1 : -1
+  const requestedSortBy = options.sortBy ?? defaults.sortBy
+  const sortBy = typeof requestedSortBy === 'string' && /^[a-zA-Z0-9_.]{1,80}$/.test(requestedSortBy) ? requestedSortBy : 'createdAt'
+  const requestedSortOrder = options.sortOrder ?? defaults.sortOrder ?? 'desc'
+  const sortOrder: SortOrder = requestedSortOrder === 'asc' ? 1 : -1
 
   return { page, limit, skip, sortBy, sortOrder }
 }
 
-export const paginationHelper = { calculatePagination }
+export const buildStableSort = (sortBy: string, sortOrder: SortOrder): Record<string, 1 | -1> => {
+  const direction: 1 | -1 = sortOrder === 1 || sortOrder === 'asc' || sortOrder === 'ascending' ? 1 : -1
+  return { [sortBy]: direction, _id: direction }
+}
+
+export const paginationHelper = { calculatePagination, buildStableSort }
 export default paginationHelper

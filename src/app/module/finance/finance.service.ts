@@ -148,7 +148,7 @@ const listTransactions = async (organizationId: string, query: Record<string, un
       .populate('vendorId', 'name category')
       .populate('propertyId', 'title')
       .populate('createdBy', 'name email')
-      .sort({ [safeSortBy]: sortOrder, createdAt: -1 })
+      .sort({ [safeSortBy]: sortOrder, createdAt: -1, _id: sortOrder })
       .skip(skip).limit(limit).lean(),
     FinanceTransaction.countDocuments(where),
   ])
@@ -249,7 +249,7 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'issueDate'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder, createdAt: -1 }).skip(skip).limit(limit).lean(),
+    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder, createdAt: -1, _id: sortOrder }).skip(skip).limit(limit).lean(),
     FinanceInvoice.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
@@ -391,7 +391,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder }).skip(skip).limit(limit),
+    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate('leadId', 'name phone email').sort({ [safeSortBy]: sortOrder, _id: sortOrder }).skip(skip).limit(limit),
     FinanceCommission.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
@@ -459,7 +459,7 @@ const listVendors = async (organizationId: string, query: Record<string, unknown
   const searchTerm = asString(query.searchTerm); if (searchTerm) { const regex = escapeRegex(searchTerm); conditions.push({ $or: ['name', 'email', 'phone', 'category'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } })) }) }
   const allowedSort = new Set(['name', 'category', 'createdAt', 'updatedAt', 'status']); const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'name'
   const where = { $and: conditions }
-  const [data, total] = await Promise.all([FinanceVendor.find(where).sort({ [safeSortBy]: sortOrder }).skip(skip).limit(limit).lean(), FinanceVendor.countDocuments(where)])
+  const [data, total] = await Promise.all([FinanceVendor.find(where).sort({ [safeSortBy]: sortOrder, _id: sortOrder }).skip(skip).limit(limit).lean(), FinanceVendor.countDocuments(where)])
   const ids = data.map((item) => item._id)
   const spend = ids.length ? await FinanceTransaction.aggregate([{ $match: { organizationId, vendorId: { $in: ids }, type: 'expense', status: 'paid' } }, { $group: { _id: '$vendorId', totalSpend: { $sum: '$amount' } } }]) : []
   const spendMap = new Map(spend.map((row) => [String(row._id), row.totalSpend]))
@@ -497,7 +497,7 @@ const listBudgets = async (organizationId: string, query: Record<string, unknown
   const searchTerm = asString(query.searchTerm); if (searchTerm) conditions.push({ name: { $regex: escapeRegex(searchTerm), $options: 'i' } })
   const allowedSort = new Set(['startDate', 'endDate', 'amount', 'name', 'createdAt']); const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'startDate'
   const where = { $and: conditions }
-  const [rows, total] = await Promise.all([FinanceBudget.find(where).sort({ [safeSortBy]: sortOrder }).skip(skip).limit(limit).lean(), FinanceBudget.countDocuments(where)])
+  const [rows, total] = await Promise.all([FinanceBudget.find(where).sort({ [safeSortBy]: sortOrder, _id: sortOrder }).skip(skip).limit(limit).lean(), FinanceBudget.countDocuments(where)])
   return { meta: { page, limit, total }, data: await enrichBudgets(organizationId, rows) }
 }
 

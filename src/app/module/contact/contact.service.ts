@@ -163,7 +163,7 @@ const getAllContacts = async (
   access?: CrmAccessContext,
 ): Promise<IGenericResponse<IContact[]>> => {
   const whereCondition = buildContactWhere(filters, access)
-  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions, { sortBy: 'updatedAt', sortOrder: 'desc' })
   const pageResult = await readContactListPage<IContact>({
     match: whereCondition,
     skip,

@@ -51,4 +51,35 @@ describe('Phase 0 regression coverage invariants', () => {
     expect(reviewController).toMatch(/WebsiteSubmissionService\.captureReview/)
     expect(domainRoutes).toMatch(/\/resolve\/:host/)
   })
+
+  it('freezes tenant-scoped contact, notification, billing, broker and viewing boundaries', () => {
+    const contactController = read('src/app/module/contact/contact.controller.ts')
+    const contactService = read('src/app/module/contact/contact.service.ts')
+    const notificationService = read('src/app/module/notification/notification.service.ts')
+    const billingRoutes = read('src/app/module/billing/billing.route.ts')
+    const userService = read('src/app/module/user/user.service.ts')
+    const viewingService = read('src/app/module/viewing/viewing.service.ts')
+
+    expect(contactController).toMatch(/requireTenant\(req\)/)
+    expect(contactService).toMatch(/buildContactWhere\(filters, access\)/)
+    expect(notificationService).toMatch(/organizationId[\s\S]*userId|userId[\s\S]*organizationId/)
+    expect(billingRoutes).toMatch(/history\/:id\/receipt/)
+    expect(userService).toMatch(/getPublicAgents[\s\S]*organizationId/)
+    expect(viewingService).toMatch(/getAllViewings[\s\S]*organizationId/)
+  })
+
+  it('keeps stable sorting contracts on paginated dashboard resources', () => {
+    const contactService = read('src/app/module/contact/contact.service.ts')
+    const readModel = read('src/app/module/crm/crmListReadModel.service.ts')
+    const organizationService = read('src/app/module/organization/organization.service.ts')
+    const websiteSubmissions = read('src/app/module/websiteSubmission/websiteSubmission.service.ts')
+    const viewings = read('src/app/module/viewing/viewing.service.ts')
+
+    expect(contactService).toMatch(/sortBy: 'updatedAt', sortOrder: 'desc'/)
+    expect(readModel).toMatch(/return \{ \[field\]: order, _id: order \}/)
+    expect(organizationService).toMatch(/_id: sortOrder/)
+    expect(websiteSubmissions).toMatch(/_id: sortOrder/)
+    expect(viewings).toMatch(/date:1,startTime:1[\s\S]*_id:1/)
+  })
+
 })

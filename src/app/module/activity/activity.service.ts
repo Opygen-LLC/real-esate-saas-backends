@@ -190,7 +190,7 @@ const getActivitiesByLead = async (
   const [result, total] = await Promise.all([
     Activity.find({ organizationId, leadId })
       .populate(userRefPopulate('agentId', 'name email userRole'))
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit),
     Activity.countDocuments({ organizationId, leadId }),
