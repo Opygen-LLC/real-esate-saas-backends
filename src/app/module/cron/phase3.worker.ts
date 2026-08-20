@@ -5,6 +5,7 @@ import { WebsiteBuilderService } from '../websiteBuilder/websiteBuilder.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { Lead } from '../lead/lead.model'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 let running = false
 let cleanupTick = 0
@@ -27,10 +28,11 @@ export const runPhase3Maintenance = async () => {
       OperationsQueueService.schedulePendingDomainChecks(100),
       OperationsQueueService.schedulePendingCalendarSync(50),
     ])
-    const [operations, planVersions, sla] = await Promise.all([
+    const [operations, planVersions, sla, leadAllowanceReservations] = await Promise.all([
       OperationsQueueService.processDue(config.runtime.worker_batch_size),
       SubscriptionPlanService.applyDuePlanVersions(),
       Lead.updateMany({ firstResponseAt: { $exists: false }, responseDueAt: { $lt: new Date() }, slaBreachedAt: { $exists: false } }, { $set: { slaBreachedAt: new Date() } }),
+      EntitlementService.cleanupStaleLeadAllowanceReservations(100),
     ])
     const [backlog, domainBacklog] = await Promise.all([OperationsQueueService.backlog(), OperationsQueueService.domainBacklog()])
     Metrics.setGauge('operations_queue_pending', backlog.pending)
@@ -51,7 +53,7 @@ export const runPhase3Maintenance = async () => {
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
     Metrics.setGauge('worker_last_duration_ms', lastDurationMs)
-    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, domainBacklog, planVersions, slaMarked: sla.modifiedCount, assets, propertyDraftAssets }
+    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, domainBacklog, planVersions, slaMarked: sla.modifiedCount, leadAllowanceReservations, assets, propertyDraftAssets }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     lastDurationMs = performance.now() - started

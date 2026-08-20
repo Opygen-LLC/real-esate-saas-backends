@@ -19,6 +19,9 @@ const leadSchema = new Schema<ILead, LeadModel>({
   bedrooms:{type:Number,default:1},
   leadStatus:{type:String,enum:LEAD_STATUS_VALUES,default:LEAD_STATUS.NEW,required:true,index:true},
   assignedAgent:{type:Schema.Types.ObjectId,ref:'User',index:true},
+  leadAllowanceReservationId:{type:String,index:true},
+  benefitPeriodId:{type:Schema.Types.ObjectId,ref:'SubscriptionBenefitPeriod',index:true},
+  leadAllowanceConsumedAt:{type:Date,index:true},
 
   createdBy:{type:Schema.Types.ObjectId,ref:'User',index:true},
   updatedBy:{type:Schema.Types.ObjectId,ref:'User'},
@@ -52,6 +55,9 @@ leadSchema.pre('validate', function (this: ILead) {
 
 leadSchema.index({organizationId:1,normalizedPhone:1},{unique:true,partialFilterExpression:{normalizedPhone:{$type:'string'}}})
 leadSchema.index({organizationId:1,normalizedEmail:1},{unique:true,partialFilterExpression:{normalizedEmail:{$type:'string',$gt:''}}})
+
+leadSchema.index({organizationId:1,leadAllowanceReservationId:1},{name:'lead_tenant_allowance_reservation'})
+leadSchema.index({organizationId:1,benefitPeriodId:1,createdAt:-1},{name:'lead_tenant_benefit_period_created'})
 
 // Phase 1 canonical CRM access paths.
 leadSchema.index({organizationId:1,isConverted:1,leadStatus:1},{name:'lead_tenant_converted_status'})

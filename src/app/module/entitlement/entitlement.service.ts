@@ -1,9 +1,13 @@
+import { randomUUID } from 'crypto'
 import mongoose, { type ClientSession } from 'mongoose'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { buildTeamMemberQuotaContract } from '../../../contracts/workspaceContracts'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { Lead } from '../lead/lead.model'
+import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
+import { LeadAllowanceReservation } from './leadAllowanceReservation.model'
+import type { LeadAllowanceSource } from './leadAllowanceReservation.interface'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
@@ -382,6 +386,411 @@ const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (sessio
   return withLocalTeamQuotaLock(organizationId, work)
 }
 
+
+
+export interface LeadAllowanceReservationResult {
+  reservationId: string | null
+  mode: 'benefit_period' | 'pipeline_fallback'
+  benefitPeriodId: string | null
+  requestedUnits: number
+  grantedUnits: number
+  usedUnits: number
+  limitUnits: number
+  availableUnits: number
+  source: LeadAllowanceSource
+  legacyFallback: boolean
+  periodInactive: boolean
+}
+
+const LEAD_ALLOWANCE_RESERVATION_TTL_MS = 30 * 60 * 1000
+const localLeadQuotaLocks = new Map<string, Promise<void>>()
+
+const withLocalLeadQuotaLock = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  const previous = localLeadQuotaLocks.get(organizationId) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolveGate) => { release = resolveGate })
+  const chain = previous.then(() => gate)
+  localLeadQuotaLocks.set(organizationId, chain)
+  await previous
+  try {
+    return await work(undefined)
+  } finally {
+    release()
+    if (localLeadQuotaLocks.get(organizationId) === chain) localLeadQuotaLocks.delete(organizationId)
+  }
+}
+
+const withLeadQuotaGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => {
+        const lock = await Organization.updateOne(
+          { organizationId },
+          { $inc: { leadQuotaRevision: 1 } },
+          { session },
+        )
+        if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
+        value = await work(session)
+      })
+      if (value === undefined) throw new ApiError(500, 'Lead allowance transaction did not complete')
+      return value
+    } finally {
+      await session.endSession()
+    }
+  }
+
+  if (config.env === 'production') {
+    throw new ApiError(503, 'Lead allowance changes require a MongoDB replica set or mongos in production')
+  }
+  return withLocalLeadQuotaLock(organizationId, work)
+}
+
+const outstandingFallbackReservationUnits = async (organizationId: string, session?: ClientSession): Promise<number> => {
+  const aggregation = LeadAllowanceReservation.aggregate([
+    { $match: { organizationId, mode: 'pipeline_fallback', status: 'reserved' } },
+    { $project: { outstanding: { $max: [0, { $subtract: ['$grantedUnits', { $add: ['$consumedUnits', '$releasedUnits'] }] }] } } },
+    { $group: { _id: null, total: { $sum: '$outstanding' } } },
+  ])
+  if (session) aggregation.session(session)
+  const rows = await aggregation
+  return Math.max(0, Number(rows[0]?.total || 0))
+}
+
+const activeBenefitPeriod = async (organizationId: string, session?: ClientSession) => {
+  const now = new Date()
+  const query = SubscriptionBenefitPeriod.findOne({
+    organizationId,
+    periodStart: { $lte: now },
+    periodEnd: { $gt: now },
+  }).sort({ periodStart: -1, _id: -1 })
+  if (session) query.session(session)
+  return query
+}
+
+const latestBenefitPeriod = async (organizationId: string, session?: ClientSession) => {
+  const query = SubscriptionBenefitPeriod.findOne({ organizationId }).sort({ periodEnd: -1, _id: -1 })
+  if (session) query.session(session)
+  return query
+}
+
+const leadAllowanceError = (snapshot: {
+  mode: 'benefit_period' | 'pipeline_fallback'
+  used: number
+  limit: number
+  requested: number
+  currentPlan: string
+  benefitPeriodId?: string | null
+}) => new ApiError(
+  409,
+  snapshot.mode === 'benefit_period'
+    ? `Monthly lead allowance reached (${snapshot.used}/${snapshot.limit}).`
+    : `Lead limit reached (${snapshot.used}/${snapshot.limit}).`,
+  '',
+  'LEAD_ALLOWANCE_EXHAUSTED',
+  {
+    resource: 'monthlyLeads',
+    allowanceMode: snapshot.mode,
+    used: snapshot.used,
+    limit: snapshot.limit,
+    remaining: Math.max(0, snapshot.limit - snapshot.used),
+    requestedIncrement: snapshot.requested,
+    currentPlan: snapshot.currentPlan,
+    benefitPeriodId: snapshot.benefitPeriodId || null,
+  },
+)
+
+const inactiveBenefitPeriodError = (currentPlan: string) => new ApiError(
+  409,
+  'No active paid benefit period is available. Confirm the next subscription payment to restore monthly lead allowance.',
+  '',
+  'LEAD_BENEFIT_PERIOD_INACTIVE',
+  { resource: 'monthlyLeads', currentPlan, remaining: 0 },
+)
+
+const reserveLeadAllowance = async (
+  organizationId: string,
+  requestedUnits = 1,
+  options: { allowPartial?: boolean; source?: LeadAllowanceSource } = {},
+): Promise<LeadAllowanceReservationResult> => {
+  const requested = Math.max(1, Math.trunc(Number(requestedUnits || 1)))
+  const allowPartial = Boolean(options.allowPartial)
+  const source = options.source || 'api'
+
+  return withLeadQuotaGuard(organizationId, async (session) => {
+    const resolved = await resolve(organizationId, session)
+    const benefit: any = await activeBenefitPeriod(organizationId, session)
+    const latestBenefit: any = benefit || await latestBenefitPeriod(organizationId, session)
+    let mode: 'benefit_period' | 'pipeline_fallback' = 'pipeline_fallback'
+    let benefitPeriodId: string | null = null
+    let used = 0
+    let limit = 0
+    let legacyFallback = true
+    let periodInactive = false
+
+    if (benefit) {
+      mode = 'benefit_period'
+      benefitPeriodId = String(benefit._id)
+      used = Math.max(0, Number(benefit.usedLeadAllowance || 0))
+      limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
+      legacyFallback = false
+    } else if (latestBenefit && resolved.organization.subscription.plan !== 'trial') {
+      // Once a tenant has entered the benefit-ledger system, an expired period cannot
+      // silently fall back to the old active-pipeline cap. That would let a lapsed paid
+      // subscription bypass the monthly allowance until the next confirmed payment.
+      mode = 'benefit_period'
+      legacyFallback = false
+      periodInactive = true
+      used = 0
+      limit = 0
+    } else {
+      const [pipelineUsed, outstanding] = await Promise.all([
+        countLimitedResourceUsage(organizationId, 'leads', session),
+        outstandingFallbackReservationUnits(organizationId, session),
+      ])
+      used = pipelineUsed + outstanding
+      limit = Math.max(0, Number(resolved.limits.maxLeads || 0))
+    }
+
+    const available = Math.max(0, limit - used)
+    const granted = allowPartial ? Math.min(requested, available) : (requested <= available ? requested : 0)
+    if (granted < 1) {
+      if (allowPartial) {
+        return {
+          reservationId: null,
+          mode,
+          benefitPeriodId,
+          requestedUnits: requested,
+          grantedUnits: 0,
+          usedUnits: used,
+          limitUnits: limit,
+          availableUnits: available,
+          source,
+          legacyFallback,
+          periodInactive,
+        }
+      }
+      if (periodInactive) throw inactiveBenefitPeriodError(resolved.organization.subscription.plan)
+      throw leadAllowanceError({
+        mode,
+        used,
+        limit,
+        requested,
+        currentPlan: resolved.organization.subscription.plan,
+        benefitPeriodId,
+      })
+    }
+
+    if (mode === 'benefit_period') {
+      const updated = await SubscriptionBenefitPeriod.updateOne(
+        {
+          _id: benefit!._id,
+          organizationId,
+          $expr: { $lte: [{ $add: ['$usedLeadAllowance', granted] }, '$totalLeadAllowance'] },
+        },
+        { $inc: { usedLeadAllowance: granted } },
+        session ? { session } : undefined,
+      )
+      if (!updated.modifiedCount) {
+        throw leadAllowanceError({
+          mode,
+          used: Number(benefit!.usedLeadAllowance || 0),
+          limit: Number(benefit!.totalLeadAllowance || 0),
+          requested: granted,
+          currentPlan: resolved.organization.subscription.plan,
+          benefitPeriodId,
+        })
+      }
+    }
+
+    const reservationId = randomUUID()
+    await LeadAllowanceReservation.create([{
+      reservationId,
+      organizationId,
+      mode,
+      benefitPeriodId: benefit?._id,
+      source,
+      requestedUnits: requested,
+      grantedUnits: granted,
+      consumedUnits: 0,
+      releasedUnits: 0,
+      status: 'reserved',
+      expiresAt: new Date(Date.now() + LEAD_ALLOWANCE_RESERVATION_TTL_MS),
+    }], session ? { session } : undefined)
+
+    return {
+      reservationId,
+      mode,
+      benefitPeriodId,
+      requestedUnits: requested,
+      grantedUnits: granted,
+      usedUnits: used,
+      limitUnits: limit,
+      availableUnits: Math.max(0, available - granted),
+      source,
+      legacyFallback,
+      periodInactive,
+    }
+  })
+}
+
+const consumeLeadAllowanceReservation = async (organizationId: string, reservationId: string, units = 1): Promise<void> => {
+  const increment = Math.max(1, Math.trunc(Number(units || 1)))
+  const reservation: any = await LeadAllowanceReservation.findOneAndUpdate(
+    {
+      organizationId,
+      reservationId,
+      status: 'reserved',
+      $expr: { $lte: [{ $add: ['$consumedUnits', '$releasedUnits', increment] }, '$grantedUnits'] },
+    },
+    { $inc: { consumedUnits: increment } },
+    { new: true },
+  )
+  if (!reservation) throw new ApiError(409, 'Lead allowance reservation is no longer available', '', 'LEAD_ALLOWANCE_RESERVATION_INVALID')
+  if (Number(reservation.consumedUnits || 0) + Number(reservation.releasedUnits || 0) >= Number(reservation.grantedUnits || 0)) {
+    reservation.status = Number(reservation.consumedUnits || 0) > 0 ? 'finalized' : 'released'
+    await reservation.save()
+  }
+}
+
+const releaseLeadAllowanceReservation = async (
+  organizationId: string,
+  reservationId: string,
+  requestedUnits?: number,
+): Promise<number> => withLeadQuotaGuard(organizationId, async (session) => {
+  const query = LeadAllowanceReservation.findOne({ organizationId, reservationId })
+  if (session) query.session(session)
+  const reservation: any = await query
+  if (!reservation || reservation.status !== 'reserved') return 0
+  const outstanding = Math.max(0, Number(reservation.grantedUnits || 0) - Number(reservation.consumedUnits || 0) - Number(reservation.releasedUnits || 0))
+  const release = requestedUnits == null ? outstanding : Math.min(outstanding, Math.max(0, Math.trunc(Number(requestedUnits || 0))))
+  if (!release) return 0
+
+  if (reservation.mode === 'benefit_period' && reservation.benefitPeriodId) {
+    const benefitUpdate = await SubscriptionBenefitPeriod.updateOne(
+      { _id: reservation.benefitPeriodId, organizationId, usedLeadAllowance: { $gte: release } },
+      { $inc: { usedLeadAllowance: -release } },
+      session ? { session } : undefined,
+    )
+    if (!benefitUpdate.modifiedCount) throw new ApiError(409, 'Unable to release monthly lead allowance safely', '', 'LEAD_ALLOWANCE_RELEASE_CONFLICT')
+  }
+
+  reservation.releasedUnits = Number(reservation.releasedUnits || 0) + release
+  if (Number(reservation.consumedUnits || 0) + Number(reservation.releasedUnits || 0) >= Number(reservation.grantedUnits || 0)) {
+    reservation.status = Number(reservation.consumedUnits || 0) > 0 ? 'finalized' : 'released'
+  }
+  await reservation.save(session ? { session } : undefined)
+  return release
+})
+
+const getMonthlyLeadAllowanceSnapshot = async (organizationId: string) => {
+  const resolved = await resolve(organizationId)
+  const benefit: any = await activeBenefitPeriod(organizationId)
+  if (benefit) {
+    const used = Math.max(0, Number(benefit.usedLeadAllowance || 0))
+    const limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
+    return {
+      mode: 'benefit_period' as const,
+      benefitPeriodId: String(benefit._id),
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      renewalStreak: Number(benefit.renewalStreak || 1),
+      baseLeadAllowance: Number(benefit.baseLeadAllowance || 0),
+      bonusLeadAllowance: Number(benefit.bonusLeadAllowance || 0),
+      planId: benefit.planId,
+      planVersion: benefit.planVersion,
+      periodStart: benefit.periodStart,
+      periodEnd: benefit.periodEnd,
+      legacyFallback: false,
+      periodInactive: false,
+    }
+  }
+  const latest: any = await latestBenefitPeriod(organizationId)
+  if (latest && resolved.organization.subscription.plan !== 'trial') {
+    return {
+      mode: 'benefit_period' as const,
+      benefitPeriodId: null,
+      used: 0,
+      limit: 0,
+      remaining: 0,
+      renewalStreak: Number(latest.renewalStreak || 1),
+      baseLeadAllowance: 0,
+      bonusLeadAllowance: 0,
+      planId: resolved.organization.subscription.plan,
+      planVersion: resolved.organization.subscription.planVersion,
+      periodStart: null,
+      periodEnd: null,
+      legacyFallback: false,
+      periodInactive: true,
+      previousPeriodEnd: latest.periodEnd,
+    }
+  }
+  const [pipelineUsed, outstanding] = await Promise.all([
+    countLimitedResourceUsage(organizationId, 'leads'),
+    outstandingFallbackReservationUnits(organizationId),
+  ])
+  const limit = Math.max(0, Number(resolved.limits.maxLeads || 0))
+  const used = pipelineUsed + outstanding
+  return {
+    mode: 'pipeline_fallback' as const,
+    benefitPeriodId: null,
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    renewalStreak: 1,
+    baseLeadAllowance: limit,
+    bonusLeadAllowance: 0,
+    planId: resolved.organization.subscription.plan,
+    planVersion: resolved.organization.subscription.planVersion,
+    periodStart: null,
+    periodEnd: resolved.organization.subscription.currentPeriodEnd || null,
+    legacyFallback: true,
+    periodInactive: false,
+  }
+}
+
+const cleanupStaleLeadAllowanceReservations = async (limit = 100) => {
+  const stale = await LeadAllowanceReservation.find({ status: 'reserved', expiresAt: { $lt: new Date() } })
+    .sort({ expiresAt: 1, _id: 1 })
+    .limit(Math.max(1, Math.min(500, limit)))
+    .lean()
+  let checked = 0
+  let finalized = 0
+  let released = 0
+  for (const row of stale as any[]) {
+    checked += 1
+    await withLeadQuotaGuard(row.organizationId, async (session) => {
+      const reservationQuery = LeadAllowanceReservation.findOne({ organizationId: row.organizationId, reservationId: row.reservationId, status: 'reserved' })
+      if (session) reservationQuery.session(session)
+      const reservation: any = await reservationQuery
+      if (!reservation || new Date(reservation.expiresAt).getTime() > Date.now()) return true
+
+      const linkedQuery = Lead.countDocuments({ organizationId: row.organizationId, leadAllowanceReservationId: row.reservationId })
+      const linked = session ? await linkedQuery.session(session) : await linkedQuery
+      const consumedTarget = Math.min(Number(reservation.grantedUnits || 0), Math.max(Number(reservation.consumedUnits || 0), Number(linked || 0)))
+      reservation.consumedUnits = consumedTarget
+      const outstanding = Math.max(0, Number(reservation.grantedUnits || 0) - consumedTarget - Number(reservation.releasedUnits || 0))
+
+      if (outstanding && reservation.mode === 'benefit_period' && reservation.benefitPeriodId) {
+        await SubscriptionBenefitPeriod.updateOne(
+          { _id: reservation.benefitPeriodId, organizationId: row.organizationId, usedLeadAllowance: { $gte: outstanding } },
+          { $inc: { usedLeadAllowance: -outstanding } },
+          session ? { session } : undefined,
+        )
+      }
+      reservation.releasedUnits = Number(reservation.releasedUnits || 0) + outstanding
+      reservation.status = consumedTarget > 0 ? 'finalized' : 'released'
+      await reservation.save(session ? { session } : undefined)
+      if (consumedTarget > 0) finalized += 1
+      if (outstanding > 0) released += outstanding
+      return true
+    })
+  }
+  return { checked, finalized, released }
+}
+
 export const featureEnabled = (limits: Record<string, any>, feature: Feature): boolean => {
   const mapping: Record<Feature, boolean> = {
     customDomain: Boolean(limits.hasCustomDomain),
@@ -465,6 +874,12 @@ export const EntitlementService = {
   withTeamMemberQuotaGuard,
   withPropertyQuotaGuard,
   assertPropertyCapacity,
+  withLeadQuotaGuard,
+  reserveLeadAllowance,
+  consumeLeadAllowanceReservation,
+  releaseLeadAllowanceReservation,
+  getMonthlyLeadAllowanceSnapshot,
+  cleanupStaleLeadAllowanceReservations,
   assertFeature,
   hasFeature,
   assertStorage,

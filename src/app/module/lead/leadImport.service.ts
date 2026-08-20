@@ -5,6 +5,7 @@ import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.ser
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { canAssignLeadTo, type CrmAccessContext } from '../crm/crmAccess'
 import { Contact } from '../contact/contact.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
 import { User } from '../user/user.model'
 import { Lead } from './lead.model'
 import { LeadService } from './lead.service'
@@ -52,7 +53,7 @@ type PreviewRow = {
 
 type ImportIssue = {
   row: number
-  type: 'invalid' | 'duplicate' | 'failed'
+  type: 'invalid' | 'duplicate' | 'failed' | 'quota'
   reason: string
 }
 
@@ -417,29 +418,68 @@ const confirm = async (organizationId: string, userId: string, access: CrmAccess
     } else rowsToCreate.push(row)
   }
 
-  for (const row of rowsToCreate) {
-    try {
-      const data = row.data
-      await LeadService.createLead(organizationId, {
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        source: data.source,
-        leadStatus: data.leadStatus,
-        assignedAgent: data.assignedAgent,
-        followUpDate: data.followUpDate ? new Date(data.followUpDate) : undefined,
-        notes: data.notes,
-      }, userId, access, { duplicatePolicy: 'reject' })
-      created += 1
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Lead import failed'
-      if (error?.statusCode === 409 || error?.code === 11000 || /same phone or email|already exists|duplicate/i.test(message)) {
-        skippedDuplicates += 1
-        issues.push({ row: row.row, type: 'duplicate', reason: message })
-      } else {
+  // Reserve the complete valid batch once. The reservation is serialized per tenant,
+  // so concurrent browser/API/import requests all compete for the same atomic allowance.
+  // Partial grants are intentional: 247/250 + 10 valid rows grants exactly 3 slots.
+  const allowance = rowsToCreate.length
+    ? await EntitlementService.reserveLeadAllowance(organizationId, rowsToCreate.length, { allowPartial: true, source: 'bulk_import' })
+    : null
+  let attemptedReservedSlots = 0
+  let quotaExceeded = 0
+
+  try {
+    for (const row of rowsToCreate) {
+      if (!allowance?.reservationId || attemptedReservedSlots >= allowance.grantedUnits) {
+        quotaExceeded += 1
         failed += 1
-        issues.push({ row: row.row, type: 'failed', reason: message })
+        issues.push({
+          row: row.row,
+          type: 'quota',
+          reason: allowance?.periodInactive
+            ? 'No active paid benefit period. Confirm the next subscription payment before importing more Leads.'
+            : `Monthly lead allowance exhausted (${allowance?.usedUnits ?? allowance?.limitUnits ?? 0}/${allowance?.limitUnits ?? 0}). Upgrade or wait for the next benefit period.`,
+        })
+        continue
       }
+
+      // Count the slot before attempting creation. This prevents a post-persist side-effect
+      // failure from allowing the same reserved unit to be reused for another row.
+      attemptedReservedSlots += 1
+      try {
+        const data = row.data
+        await LeadService.createLead(organizationId, {
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          source: data.source,
+          leadStatus: data.leadStatus,
+          assignedAgent: data.assignedAgent,
+          followUpDate: data.followUpDate ? new Date(data.followUpDate) : undefined,
+          notes: data.notes,
+        }, userId, access, {
+          duplicatePolicy: 'reject',
+          allowanceSource: 'bulk_import',
+          allowanceReservation: {
+            reservationId: allowance.reservationId,
+            benefitPeriodId: allowance.benefitPeriodId,
+          },
+        })
+        created += 1
+      } catch (error: any) {
+        const message = error instanceof Error ? error.message : 'Lead import failed'
+        if (error?.code === 11000 || /same phone or email|already exists|duplicate/i.test(message)) {
+          skippedDuplicates += 1
+          issues.push({ row: row.row, type: 'duplicate', reason: message })
+        } else {
+          failed += 1
+          issues.push({ row: row.row, type: 'failed', reason: message })
+        }
+      }
+    }
+  } finally {
+    // Any granted unit that did not produce a Lead is returned to the benefit period.
+    if (allowance?.reservationId) {
+      await EntitlementService.releaseLeadAllowanceReservation(organizationId, allowance.reservationId)
     }
   }
 
@@ -447,6 +487,7 @@ const confirm = async (organizationId: string, userId: string, access: CrmAccess
     total: session.total,
     created,
     skippedDuplicates,
+    quotaExceeded,
     failed,
     errors: issues.sort((a, b) => a.row - b.row),
   }

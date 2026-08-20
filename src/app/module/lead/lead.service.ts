@@ -13,6 +13,8 @@ import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } fr
 import { canAssignLeadTo, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import type { LeadAllowanceSource } from '../entitlement/leadAllowanceReservation.interface'
+import { logger } from '../../../shared/logger'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
@@ -38,7 +40,7 @@ const scoreLead=(lead:Partial<ILead>)=>{let score=10;const reasons:string[]=['Ba
 const prepareLeadMutationPayload=(payload:Partial<ILead>,actorId?:string)=>{
   const prepared:any={...payload}
   // Server-owned lifecycle/audit fields are never accepted from callers.
-  for(const field of ['createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId']) delete prepared[field]
+  for(const field of ['createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId','leadAllowanceReservationId','benefitPeriodId','leadAllowanceConsumedAt']) delete prepared[field]
   if(prepared.followUpDate!==undefined){const value=new Date(prepared.followUpDate);if(Number.isNaN(value.getTime()))throw new ApiError(400,'Invalid follow-up date');prepared.followUpDate=value}
   else if(prepared.nextFollowUp!==undefined){const value=new Date(prepared.nextFollowUp);if(Number.isNaN(value.getTime()))throw new ApiError(400,'Invalid follow-up date');prepared.followUpDate=value}
   // Keep the legacy schema field readable, but stop writing new canonical state into it.
@@ -69,7 +71,11 @@ const mergeInto=async(existing:any,payload:Partial<ILead>,context:{source:string
 
 const findDuplicates=async(organizationId:string,phone:string,email:string)=>Lead.find({organizationId,$or:[{normalizedPhone:phone},...(email?[{normalizedEmail:email}]:[])]}).sort({createdAt:1})
 
-export type CreateLeadOptions = { duplicatePolicy?: 'merge' | 'reject' }
+export type CreateLeadOptions = {
+  duplicatePolicy?: 'merge' | 'reject'
+  allowanceSource?: LeadAllowanceSource
+  allowanceReservation?: { reservationId: string; benefitPeriodId?: string | null }
+}
 
 export type LeadCreateOutcome = 'created' | 'merged'
 export type LeadAssignedAgentSummary = {
@@ -196,7 +202,6 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
     return { lead, outcome: 'merged', assignedAgent: await assignedAgentSummary(organizationId, lead) }
   }
 
-  await EntitlementService.assertLimit(organizationId,'leads')
   const config:any=await CrmService.getConfig(organizationId)
   if(prepared.assignedAgent){
     const validAgent=await User.exists({_id:prepared.assignedAgent,organizationId,status:'active',userRole:{$in:['agency_owner','agency_admin','agent']}})
@@ -219,8 +224,38 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
   prepared.responseDueAt=new Date(now.getTime()+(config.responseSlaMinutes||30)*60_000)
   prepared.lastContact=undefined
   if(prepared.attribution)prepared.attribution={...prepared.attribution,firstTouchAt:now,lastTouchAt:now}
+  const ownedAllowanceReservation = !options.allowanceReservation
+    ? await EntitlementService.reserveLeadAllowance(organizationId, 1, { source: options.allowanceSource || 'api' })
+    : null
+  const allowanceReservation = options.allowanceReservation || (ownedAllowanceReservation?.reservationId ? {
+    reservationId: ownedAllowanceReservation.reservationId,
+    benefitPeriodId: ownedAllowanceReservation.benefitPeriodId,
+  } : undefined)
+  if (!allowanceReservation?.reservationId) throw new ApiError(409, 'No lead allowance is available', '', 'LEAD_ALLOWANCE_EXHAUSTED')
+
+  const releaseOwnedAllowance = async () => {
+    if (!ownedAllowanceReservation?.reservationId) return
+    try {
+      await EntitlementService.releaseLeadAllowanceReservation(organizationId, ownedAllowanceReservation.reservationId)
+    } catch (releaseError) {
+      logger.error('[Lead allowance] failed to release reservation', { organizationId, reservationId: ownedAllowanceReservation.reservationId, error: releaseError })
+    }
+  }
+
+  prepared.leadAllowanceReservationId=allowanceReservation.reservationId
+  if(allowanceReservation.benefitPeriodId)prepared.benefitPeriodId=allowanceReservation.benefitPeriodId
+  prepared.leadAllowanceConsumedAt=now
+  let leadPersisted = false
   try{
     const result:any=await Lead.create({...prepared,organizationId})
+    leadPersisted = true
+    try {
+      await EntitlementService.consumeLeadAllowanceReservation(organizationId, allowanceReservation.reservationId, 1)
+    } catch (consumeError) {
+      // The allowance was already atomically reserved before Lead.create. Do not roll it back
+      // after the Lead exists; stale-reservation recovery reconciles this marker if needed.
+      logger.error('[Lead allowance] lead persisted but reservation finalization failed', { organizationId, leadId: result._id.toString(), reservationId: allowanceReservation.reservationId, error: consumeError })
+    }
     if(result.assignedAgent)await CrmService.recordAssignment({organizationId,leadId:result._id.toString(),assignedAgentId:result.assignedAgent.toString(),strategy:assignment.strategy,reason:assignment.reason,actorId:creatorAgentId})
     await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:result._id.toString(),eventType:'lead.created',leadId:result._id.toString(),actorId:creatorAgentId,payload:{summary:`New lead created from ${result.source}`,leadScore:result.leadScore,responseDueAt:result.responseDueAt?.toISOString(),assignmentStrategy:assignment.strategy}})
     if(result.assignedAgent)await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:result._id.toString(),eventType:'lead.assigned',leadId:result._id.toString(),actorId:creatorAgentId,payload:{summary:`Lead assigned during capture (${assignment.strategy})`,previousAgentId:'',assignedAgentId:result.assignedAgent.toString(),strategy:assignment.strategy,reason:assignment.reason}})
@@ -228,6 +263,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
     const lead = await finalizeLifecycle(result,true)
     return { lead, outcome: 'created', assignedAgent: await assignedAgentSummary(organizationId, lead) }
   }catch(error:any){
+    if(!leadPersisted && ownedAllowanceReservation?.reservationId) await releaseOwnedAllowance()
     if(error?.code===11000){
       if(options.duplicatePolicy==='reject')throw new ApiError(409,'A lead with the same phone or email already exists in this agency')
       const after:any=(await findDuplicates(organizationId,normalizedPhone,normalizedEmail))[0]
@@ -261,7 +297,7 @@ const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string
     if(!propertyBelongsToTenant)throw new ApiError(400,'Property does not belong to this agency','','VALIDATION_ERROR',undefined,{propertyInterest:['Select a property from this agency']})
   }
   const normalizedPhone=normalizePhone(phone)
-  const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined)
+  const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined,undefined,{allowanceSource:'website'})
   await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, normalizedPhone, policyVersion, context)
   return lead
 }

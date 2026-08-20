@@ -51,7 +51,7 @@ const publicRequestViewing=async(payload:PublicViewingRequestInput,context:{ip?:
   await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
   const agentId=await resolvePublicViewingAgent(organizationId,prop.agentId?.toString())
   const normalizedPhone=normalizePhone(clientPhone)
-  const lead:any=await LeadService.createLead(organizationId,{name:clientName,phone:normalizedPhone,email:clientEmail,source:'Website',leadStatus:LEAD_STATUS.NEW,assignedAgent:agentId,propertyInterest:[propertyId],notes:notes||'',attribution})
+  const lead:any=await LeadService.createLead(organizationId,{name:clientName,phone:normalizedPhone,email:clientEmail,source:'Website',leadStatus:LEAD_STATUS.NEW,assignedAgent:agentId,propertyInterest:[propertyId],notes:notes||'',attribution},undefined,undefined,{allowanceSource:'website'})
   await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId,normalizedPhone,policyVersion,context)
   return createViewing(organizationId,{propertyId,agentId,leadId:lead._id,date,startTime,endTime,clientName,clientPhone:normalizedPhone,clientEmail,status:'Scheduled',notes},agentId)
 }

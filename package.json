@@ -75,7 +75,8 @@
     "reconcile:phase8-entitlements": "ts-node --transpile-only src/app/db/reconcilePhase8ResourceEntitlements.ts",
     "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts",
     "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts",
-    "migrate:continuous-subscription": "ts-node --transpile-only src/app/db/migrateContinuousSubscriptionPolicy.ts"
+    "migrate:continuous-subscription": "ts-node --transpile-only src/app/db/migrateContinuousSubscriptionPolicy.ts",
+    "migrate:lead-allowance-reservations": "ts-node --transpile-only src/app/db/migrateLeadAllowanceReservations.ts"
   },
   "keywords": [
     "real-estate",

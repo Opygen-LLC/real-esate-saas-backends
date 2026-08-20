@@ -55,6 +55,11 @@ export interface ILead {
   leadStatus:ILeadStatus
   assignedAgent?:mongoose.Types.ObjectId|string
 
+  /** Monthly lead allowance audit fields. Server controlled. */
+  leadAllowanceReservationId?: string
+  benefitPeriodId?: mongoose.Types.ObjectId|string
+  leadAllowanceConsumedAt?: Date
+
   /** Read-only list presenter fields. These are not persisted on Lead documents. */
   propertySummary?: ILeadPropertySummary
   latestNote?: ILeadListActivityProjection

@@ -128,6 +128,7 @@ export interface IOrganization {
   visitorUsageMonth?: string
   teamQuotaRevision?: number
   propertyQuotaRevision?: number
+  leadQuotaRevision?: number
   createdAt?: Date
   updatedAt?: Date
 }

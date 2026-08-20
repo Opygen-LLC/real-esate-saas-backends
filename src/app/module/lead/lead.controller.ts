@@ -16,7 +16,7 @@ const createLead = catchAsync(async (req, res) => sendResponse(res, {
   statusCode: 201,
   success: true,
   message: 'Lead capture completed successfully',
-  data: await LeadService.createLeadWithOutcome(requireTenant(req), req.body, actor(req), crmAccessFromRequest(req)),
+  data: await LeadService.createLeadWithOutcome(requireTenant(req), req.body, actor(req), crmAccessFromRequest(req), { allowanceSource: 'manual' }),
 }))
 
 const publicCaptureLead = catchAsync(async (req, res) => {
