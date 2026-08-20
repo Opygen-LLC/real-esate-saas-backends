@@ -225,6 +225,10 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       type: Boolean,
       default: false,
     },
+    quotaLocked: { type: Boolean, default: false, index: true },
+    quotaLockedReason: { type: String, enum: ['subscription_limit', 'tenant_admin', null], default: null },
+    quotaLockedAt: { type: Date, default: null },
+    quotaLockedBy: { type: String, default: null },
   },
   {
     timestamps: true,
@@ -241,5 +245,7 @@ propertySchema.index({ organizationId: 1, _id: 1 })
 propertySchema.index({ organizationId: 1, createdAt: -1 })
 propertySchema.index({ organizationId: 1, agentId: 1, status: 1 })
 propertySchema.index({ organizationId: 1, views: -1, updatedAt: -1 })
+
+propertySchema.index({ organizationId: 1, quotaLocked: 1, status: 1, createdAt: 1 })
 
 export const Property = model<IProperty, PropertyModel>('Property', propertySchema)

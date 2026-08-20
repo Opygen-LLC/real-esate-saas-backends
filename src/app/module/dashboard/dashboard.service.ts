@@ -74,7 +74,7 @@ const getOverviewStats = async (organizationId: string) => {
         $group: {
           _id: null,
           totalProperties: { $sum: 1 },
-          activeListings: { $sum: { $cond: [{ $eq: ['$status', 'Available'] }, 1, 0] } },
+          activeListings: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'Available'] }, { $ne: ['$quotaLocked', true] }] }, 1, 0] } },
         },
       },
     ]),
@@ -260,7 +260,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
               $group: {
                 _id: null,
                 totalProperties: { $sum: 1 },
-                activeListings: { $sum: { $cond: [{ $eq: ['$status', 'Available'] }, 1, 0] } },
+                activeListings: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'Available'] }, { $ne: ['$quotaLocked', true] }] }, 1, 0] } },
               },
             },
           ],

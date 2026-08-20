@@ -13,6 +13,7 @@ import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
@@ -142,6 +143,7 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
     furnished,
     isFeatured,
     agentId,
+    quotaLocked,
   } = filters
 
   const andConditions: Array<Record<string, unknown>> = []
@@ -185,6 +187,8 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   if (districtId) andConditions.push({ 'bangladeshAddress.districtId': districtId })
   if (upazilaId) andConditions.push({ 'bangladeshAddress.upazilaId': upazilaId })
   if (agentId) andConditions.push({ agentId })
+  if (quotaLocked === false || quotaLocked === 'false') andConditions.push({ quotaLocked: { $ne: true } })
+  if (quotaLocked === true || quotaLocked === 'true') andConditions.push({ quotaLocked: true })
 
   const minPriceValue = numericFilter(minPrice, 'Minimum price')
   const maxPriceValue = numericFilter(maxPrice, 'Maximum price')
@@ -296,7 +300,7 @@ const getPublicProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<IProperty[]>> => getAllProperties(
-  { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES] },
+  { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
   paginationOptions,
 )
 
@@ -307,7 +311,7 @@ const getPropertyById = async (organizationId: string, id: string): Promise<IPro
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return result
 }
@@ -319,8 +323,8 @@ const getPublicPropertyDetail = async (
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
   const tenantScope = { organizationId }
   const query = isObjectId
-    ? { _id: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }
-    : { slug: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] } }
+    ? { _id: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }
+    : { slug: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }
 
   const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true, runValidators: true, context: 'query' })
     .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
@@ -331,6 +335,7 @@ const getPublicPropertyDetail = async (
     organizationId: property.organizationId,
     _id: { $ne: property._id },
     status: { $in: [...PUBLIC_PROPERTY_STATUSES] },
+    quotaLocked: { $ne: true },
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
   }).limit(3).populate(userRefPopulate('agentId', 'name email userRole'))
 
@@ -345,6 +350,10 @@ const updateProperty = async (
 ): Promise<IProperty | null> => {
   const existing = await Property.findOne({ _id: id, organizationId })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+
+  if (existing.quotaLocked && payload.status && isPublicPropertyStatus(payload.status)) {
+    throw new ApiError(httpStatus.CONFLICT, 'This property is locked by the subscription limit. Unlock it before publishing.', '', 'PROPERTY_QUOTA_LOCKED', { propertyId: id, quotaLockedReason: existing.quotaLockedReason })
+  }
 
   const clearDiscountPrice = payload.isDiscount === false
   payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
@@ -392,8 +401,11 @@ const updatePropertyStatus = async (
   actor?: PropertyActor,
 ): Promise<IProperty | null> => {
   if (!actor?.canPublish) throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
-  const existing = await Property.findOne({ _id: id, organizationId }).select('_id status publishedAt')
+  const existing = await Property.findOne({ _id: id, organizationId }).select('_id status publishedAt quotaLocked quotaLockedReason')
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  if (existing.quotaLocked && isPublicPropertyStatus(status)) {
+    throw new ApiError(httpStatus.CONFLICT, 'This property is locked by the subscription limit. Unlock it before publishing.', '', 'PROPERTY_QUOTA_LOCKED', { propertyId: id, quotaLockedReason: existing.quotaLockedReason })
+  }
 
   const update: Partial<IProperty> = { status }
   if (isPublicPropertyStatus(status) && !isPublicPropertyStatus(existing.status) && !existing.publishedAt) update.publishedAt = new Date()
@@ -407,6 +419,52 @@ const updatePropertyStatus = async (
       eventType: 'property.status_changed',
       propertyId: id,
       payload: { status, previousStatus: existing.status, publicVisible: isPublicPropertyStatus(existing.status) || isPublicPropertyStatus(status) },
+    })
+  }
+  return result
+}
+
+
+const setQuotaAccess = async (
+  organizationId: string,
+  id: string,
+  active: boolean,
+  actorId = 'tenant-admin',
+): Promise<IProperty | null> => {
+  const result = await EntitlementService.withPropertyQuotaGuard(organizationId, async (session) => {
+    const query = Property.findOne({ _id: id, organizationId })
+    if (session) query.session(session)
+    const property: any = await query
+    if (!property) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+
+    if (active) {
+      if (!property.quotaLocked) return property
+      const consumesSeat = !['Sold', 'Rented', 'OffMarket'].includes(String(property.status))
+      if (consumesSeat) await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: 1, session })
+      property.quotaLocked = false
+      property.quotaLockedReason = null
+      property.quotaLockedAt = null
+      property.quotaLockedBy = null
+    } else {
+      if (property.quotaLocked && property.quotaLockedReason === 'tenant_admin') return property
+      property.quotaLocked = true
+      property.quotaLockedReason = 'tenant_admin'
+      property.quotaLockedAt = new Date()
+      property.quotaLockedBy = actorId
+    }
+    await property.save(session ? { session } : undefined)
+    return property
+  })
+
+  if (result) {
+    await DomainEventService.emit({
+      organizationId,
+      aggregateType: 'property',
+      aggregateId: id,
+      eventType: 'property.updated',
+      actorId,
+      propertyId: id,
+      payload: { changedFields: ['quotaLocked', 'quotaLockedReason'], quotaLocked: Boolean((result as any).quotaLocked), publicVisible: isPublicPropertyStatus((result as any).status) && !(result as any).quotaLocked },
     })
   }
   return result
@@ -441,6 +499,7 @@ export const PropertyService = { emitPropertyCreated,
   getPublicPropertyDetail,
   updateProperty,
   updatePropertyStatus,
+  setQuotaAccess,
   reorderPropertyImages,
   deleteProperty,
   exportCsv,

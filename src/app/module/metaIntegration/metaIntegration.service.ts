@@ -87,7 +87,7 @@ const resolveOrganization = async (identifier: string) => {
   const direct = await Organization.findOne({ $or: [{ organizationId: identifier }, { sub_domain: identifier }] }).select('organizationId').lean()
   if (direct) return direct.organizationId
   const normalized = identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
-  const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
+  const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
   return domain?.organizationId || null
 }
 

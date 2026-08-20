@@ -3,6 +3,7 @@ import ApiError from '../../../errors/ApiError'
 import { Resilience } from '../../../shared/resilience'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 import { LeadService } from '../lead/lead.service'
 import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import type { CrmAccessContext } from '../crm/crmAccess'
@@ -55,6 +56,7 @@ export const mapSmsDeliveryStatus = (value: unknown): 'sent' | 'delivered' | 'fa
 }
 
 const deliverPrepared = async (organizationId: string, input: PreparedSms) => {
+  await EntitlementService.assertFeature(organizationId, 'smsAutomation')
   if (await SmsOptOut.exists({ organizationId, phone: input.phone })) throw new ApiError(409, 'Recipient opted out before queued SMS delivery')
   const response = await Resilience.fetch('sms-provider', config.sms.api_url, {
     method: 'POST',

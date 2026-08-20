@@ -7,6 +7,7 @@ import config from '../../../config'
 import { errorLogger, logger } from '../../../shared/logger'
 import { jwtHelpers } from '../../helpers/jwtHelpers'
 import { Organization } from '../organization/organization.model'
+import { DomainRecord } from '../domain/domain.model'
 import { User } from '../user/user.model'
 import { RealtimeService } from './realtime.service'
 
@@ -30,17 +31,24 @@ const safeOrigin = async (origin?: string): Promise<boolean> => {
     candidates.push(hostname.slice(0, -(publicHost.length + 1)))
   }
 
-  const found = await Organization.exists({
+  const direct = await Organization.exists({
     isBlocked: { $ne: true },
     websiteStatus: { $ne: 'suspended' },
     $or: [
-      { customDomain: hostname },
-      { domain: hostname },
       { sub_domain: { $in: candidates } },
       { organizationId: { $in: candidates } },
     ],
   })
-  return Boolean(found)
+  if (direct) return true
+
+  const domain: any = await DomainRecord.findOne({
+    domain: hostname,
+    entitlementStatus: { $ne: 'suspended' },
+    status: 'verified',
+    tlsStatus: 'active',
+  }).select('organizationId').lean()
+  if (!domain?.organizationId) return false
+  return Boolean(await Organization.exists({ organizationId: domain.organizationId, isBlocked: { $ne: true }, websiteStatus: { $ne: 'suspended' } }))
 }
 
 const redisOptions = (): any => ({
@@ -77,17 +85,27 @@ const resolveTenant = async (identifier: string) => {
   const normalized = identifier.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0]
   if (!normalized || normalized.length > 253 || !/^[a-z0-9.-]+$/.test(normalized)) return null
   const subdomain = normalized.includes('.') ? normalized.split('.')[0] : normalized
-  return Organization.findOne({
+  const direct = await Organization.findOne({
     isBlocked: { $ne: true },
     websiteStatus: { $ne: 'suspended' },
     $or: [
       { organizationId: normalized },
       { sub_domain: normalized },
       { sub_domain: subdomain },
-      { domain: normalized },
-      { customDomain: normalized },
     ],
   }).select('organizationId sub_domain domain customDomain websiteStatus').lean()
+  if (direct) return direct
+
+  const domain: any = await DomainRecord.findOne({
+    domain: normalized,
+    entitlementStatus: { $ne: 'suspended' },
+    status: 'verified',
+    tlsStatus: 'active',
+  }).select('organizationId').lean()
+  if (!domain?.organizationId) return null
+  return Organization.findOne({ organizationId: domain.organizationId, isBlocked: { $ne: true }, websiteStatus: { $ne: 'suspended' } })
+    .select('organizationId sub_domain domain customDomain websiteStatus')
+    .lean()
 }
 
 const initializeRealtimeServer = async (httpServer: HttpServer) => {

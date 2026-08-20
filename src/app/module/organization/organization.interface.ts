@@ -112,10 +112,22 @@ export interface IOrganization {
   }
   totalVisitor?: number
   isBlocked?: boolean
+  entitlementRestrictions?: {
+    premiumTemplates?: boolean
+    customDomain?: boolean
+    advancedAnalytics?: boolean
+    whatsAppAutomation?: boolean
+    smsAutomation?: boolean
+    leadAutomations?: boolean
+    storageWrites?: boolean
+    storageOverageBytes?: number
+    updatedAt?: Date | null
+  }
   storageUsedBytes?: number
   monthlyVisitorCount?: number
   visitorUsageMonth?: string
   teamQuotaRevision?: number
+  propertyQuotaRevision?: number
   createdAt?: Date
   updatedAt?: Date
 }

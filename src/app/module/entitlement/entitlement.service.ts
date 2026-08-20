@@ -16,6 +16,12 @@ import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
 
+export const PROPERTY_NON_CONSUMING_STATUSES = ['Sold', 'Rented', 'OffMarket'] as const
+export const propertyCountsTowardQuotaFilter = () => ({
+  quotaLocked: { $ne: true },
+  status: { $nin: [...PROPERTY_NON_CONSUMING_STATUSES] },
+})
+
 export { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 
 const activePlanFilter = () => ({
@@ -133,7 +139,7 @@ const countLimitedResourceUsage = async (
   protectedOwnerId?: unknown,
 ): Promise<number> => {
   if (resource === 'properties') {
-    return withSession(Property.countDocuments({ organizationId, status: { $ne: 'Archived' } }), session)
+    return withSession(Property.countDocuments({ organizationId, ...propertyCountsTowardQuotaFilter() }), session)
   }
   if (resource === 'teamMembers') {
     let canonicalOwnerId = protectedOwnerId
@@ -168,6 +174,19 @@ const getTeamMemberQuotaSnapshot = async (organizationId: string, session?: Clie
     countReservedTeamMembers(organizationId, session),
   ])
   return buildTeamMemberQuotaContract(Number(resolved.limits.maxTeamMembers || 0), teamMembersUsed, teamMembersReserved)
+}
+
+
+const getPropertyQuotaSnapshot = async (organizationId: string, session?: ClientSession, resolvedInput?: Awaited<ReturnType<typeof resolve>>) => {
+  const resolved = resolvedInput || await resolve(organizationId, session)
+  const propertiesUsed = await countLimitedResourceUsage(organizationId, 'properties', session)
+  const maxProperties = Math.max(0, Number(resolved.limits.maxProperties || 0))
+  return {
+    maxProperties,
+    propertiesUsed,
+    propertiesAvailable: Math.max(0, maxProperties - propertiesUsed),
+    propertiesOverCapacityBy: Math.max(0, propertiesUsed - maxProperties),
+  }
 }
 
 const getUsageSnapshot = async (organizationId: string) => {
@@ -224,9 +243,14 @@ const assertLimit = async (organizationId: string, resource: LimitedResource, in
     return
   }
 
+  if (resource === 'properties') {
+    await assertPropertyCapacity(organizationId, { additionalCommitments: increment, session })
+    return
+  }
+
   const { organization, limits } = await resolve(organizationId, session)
   const usage = await countLimitedResourceUsage(organizationId, resource, session)
-  const maximum = resource === 'properties' ? limits.maxProperties : limits.maxLeads
+  const maximum = limits.maxLeads
 
   if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
     const recommendedPlan = await recommendPlanForLimit(resource, usage + increment)
@@ -236,6 +260,77 @@ const assertLimit = async (organizationId: string, resource: LimitedResource, in
       '',
       'PLAN_LIMIT_REACHED',
       { resource, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
+    )
+  }
+}
+
+
+const localPropertyQuotaLocks = new Map<string, Promise<void>>()
+
+const withLocalPropertyQuotaLock = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  const previous = localPropertyQuotaLocks.get(organizationId) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolveGate) => { release = resolveGate })
+  const chain = previous.then(() => gate)
+  localPropertyQuotaLocks.set(organizationId, chain)
+  await previous
+  try {
+    return await work(undefined)
+  } finally {
+    release()
+    if (localPropertyQuotaLocks.get(organizationId) === chain) localPropertyQuotaLocks.delete(organizationId)
+  }
+}
+
+const withPropertyQuotaGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => {
+        const lock = await Organization.updateOne(
+          { organizationId },
+          { $inc: { propertyQuotaRevision: 1 } },
+          { session },
+        )
+        if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
+        value = await work(session)
+      })
+      if (value === undefined) throw new ApiError(500, 'Property quota transaction did not complete')
+      return value
+    } finally {
+      await session.endSession()
+    }
+  }
+
+  if (config.env === 'production') {
+    throw new ApiError(503, 'Property quota changes require a MongoDB replica set or mongos in production')
+  }
+  return withLocalPropertyQuotaLock(organizationId, work)
+}
+
+const assertPropertyCapacity = async (
+  organizationId: string,
+  options: { additionalCommitments?: number; session?: ClientSession } = {},
+): Promise<void> => {
+  const additionalCommitments = Math.max(0, Number(options.additionalCommitments || 0))
+  const resolved = await resolve(organizationId, options.session)
+  const quota = await getPropertyQuotaSnapshot(organizationId, options.session, resolved)
+  const required = quota.propertiesUsed + additionalCommitments
+  if (required > quota.maxProperties) {
+    const recommendedPlan = await recommendPlanForLimit('properties', required)
+    throw new ApiError(
+      409,
+      `Property limit reached (${quota.propertiesUsed}/${quota.maxProperties}). Lock or move another listing off market first.`,
+      '',
+      'PROPERTY_QUOTA_LIMIT_REACHED',
+      {
+        resource: 'properties',
+        ...quota,
+        requestedIncrement: additionalCommitments,
+        currentPlan: resolved.organization.subscription.plan,
+        recommendedPlan,
+      },
     )
   }
 }
@@ -364,9 +459,12 @@ export const EntitlementService = {
   resolve,
   getUsageSnapshot,
   getTeamMemberQuotaSnapshot,
+  getPropertyQuotaSnapshot,
   assertLimit,
   assertTeamMemberCapacity,
   withTeamMemberQuotaGuard,
+  withPropertyQuotaGuard,
+  assertPropertyCapacity,
   assertFeature,
   hasFeature,
   assertStorage,

@@ -16,6 +16,9 @@ const domainRecordSchema = new Schema({
   organizationId: { type: String, required: true, unique: true, index: true },
   domain: { type: String, required: true, unique: true, index: true },
   ownershipToken: { type: String, required: true },
+  entitlementStatus: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
+  entitlementSuspendedAt: { type: Date, default: null },
+  entitlementSuspendedReason: { type: String, default: '', maxlength: 500 },
 
   // Canonical Phase 9 lifecycle. The legacy status/tlsStatus fields remain for
   // rolling compatibility with older organization/public-site read paths.

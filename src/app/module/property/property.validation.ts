@@ -129,6 +129,7 @@ export const PropertyValidation = {
   createPropertyZodSchema: z.object({ body: createBody }),
   updatePropertyZodSchema: z.object({ body: updateBody }),
   updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(PROPERTY_STATUSES) }).strict() }),
+  updateQuotaAccessZodSchema: z.object({ body: z.object({ active: z.boolean() }).strict() }),
   reorderImagesZodSchema: z.object({ body: z.object({ images: propertyImages }).strict() }),
   importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional(), uploadSessionId: z.string().uuid().optional() }).strict() }),
   cleanupDraftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),

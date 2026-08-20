@@ -35,6 +35,7 @@ router.post('/', authMiddlewares.requirePermission('properties.write'), validate
 router.get('/:id', authMiddlewares.requirePermission('properties.read'), PropertyController.getPropertyById)
 router.patch('/:id', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.updatePropertyZodSchema), PropertyController.updateProperty)
 router.patch('/:id/status', authMiddlewares.requirePermission('properties.publish'), validateRequest(PropertyValidation.updateStatusZodSchema), PropertyController.updatePropertyStatus)
+router.patch('/:id/quota-access', authMiddlewares.requirePermission('properties.publish'), validateRequest(PropertyValidation.updateQuotaAccessZodSchema), PropertyController.updatePropertyQuotaAccess)
 router.patch('/:id/images/reorder', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.reorderImagesZodSchema), PropertyController.reorderPropertyImages)
 router.delete('/:id', authMiddlewares.requirePermission('properties.delete'), PropertyController.deleteProperty)
 

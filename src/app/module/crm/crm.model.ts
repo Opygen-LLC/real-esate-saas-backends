@@ -30,6 +30,7 @@ const crmConfigSchema = new Schema({
     roundRobinCursor: { type: Number, default: 0 },
     territoryRules: { type: [territoryRuleSchema], default: [] },
   },
+  entitlementExecutionBlocked: { type: Boolean, default: false, index: true },
   reminders: {
     taskMinutesBefore: { type: Number, default: 30, min: 0, max: 10080 },
     viewingMinutesBefore: { type: Number, default: 120, min: 0, max: 10080 },

@@ -26,7 +26,7 @@ import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionP
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
-import { EntitlementService } from '../entitlement/entitlement.service'
+import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -63,10 +63,10 @@ const getTenantHealth = async (query: any) => {
   if (!ids.length) return { data: [], meta: { page, limit, total } }
 
   const [properties, teamMembers, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
-    groupCounts(Property, ids, { status: { $ne: 'Archived' } }),
+    groupCounts(Property, ids, propertyCountsTowardQuotaFilter()),
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, activePipelineLeadFilter()),
-    DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
+    DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus entitlementStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
     SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
     SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted'] } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
@@ -108,7 +108,7 @@ const getTenantHealth = async (query: any) => {
         storageUsedBytes: org.storageUsedBytes || 0,
         monthlyVisitors: org.monthlyVisitorCount || 0,
       },
-      domain: domain ? { host: domain.domain, status: domain.status, tlsStatus: domain.tlsStatus, lastCheckedAt: domain.lastCheckedAt } : null,
+      domain: domain ? { host: domain.domain, status: domain.status, tlsStatus: domain.tlsStatus, entitlementStatus: domain.entitlementStatus || 'active', lastCheckedAt: domain.lastCheckedAt } : null,
       lastActivity: eventMap.get(org.organizationId) || { at: org.updatedAt, type: 'organization.updated' },
       errors: errorCount,
       isBlocked: Boolean(org.isBlocked),
@@ -245,7 +245,7 @@ const tenantUsage = async (organizationId: string, session?: mongoose.ClientSess
     $or: [{ status: { $ne: 'blocked' } }, ...protectedOwnerClause],
   })
   const invitationQuery = TeamInvitation.countDocuments({ organizationId, status: 'pending', expiresAt: { $gt: new Date() } })
-  const propertyQuery = Property.countDocuments({ organizationId, status: { $ne: 'Archived' } })
+  const propertyQuery = Property.countDocuments({ organizationId, ...propertyCountsTowardQuotaFilter() })
   const leadQuery = Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() })
   if (session) {
     teamQuery.session(session)

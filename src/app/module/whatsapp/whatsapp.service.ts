@@ -10,7 +10,7 @@ import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import { WhatsAppIntegration } from './whatsapp.model'
 
-const publicShape = (doc: any) => ({ organizationId: doc.organizationId, status: doc.status, businessAccountId: doc.businessAccountId, phoneNumberId: doc.phoneNumberId, displayPhoneNumber: doc.displayPhoneNumber, hasAccessToken: Boolean(doc.encryptedAccessToken), lastTestAt: doc.lastTestAt, lastError: doc.lastError, diagnostics: doc.diagnostics || {}, updatedAt: doc.updatedAt })
+const publicShape = (doc: any) => ({ organizationId: doc.organizationId, status: doc.status, entitlementStatus: doc.entitlementStatus || 'active', businessAccountId: doc.businessAccountId, phoneNumberId: doc.phoneNumberId, displayPhoneNumber: doc.displayPhoneNumber, hasAccessToken: Boolean(doc.encryptedAccessToken), lastTestAt: doc.lastTestAt, lastError: doc.lastError, diagnostics: doc.diagnostics || {}, updatedAt: doc.updatedAt })
 const get = async (organizationId: string) => { const doc: any = await WhatsAppIntegration.findOne({ organizationId }).select('+encryptedAccessToken').lean(); return doc ? publicShape(doc) : { organizationId, status: 'disabled', hasAccessToken: false } }
 
 const verify = async (organizationId: string) => {
@@ -37,7 +37,7 @@ const verify = async (organizationId: string) => {
 const save = async (organizationId: string, payload: any) => {
   await EntitlementService.assertFeature(organizationId, 'whatsAppAutomation')
   const requestedStatus = payload.status || 'pending_approval'
-  const $set: any = { businessAccountId: payload.businessAccountId || '', phoneNumberId: payload.phoneNumberId || '', displayPhoneNumber: payload.displayPhoneNumber || '', status: requestedStatus === 'disabled' ? 'disabled' : 'pending_approval', lastError: '' }
+  const $set: any = { entitlementStatus: 'active', entitlementSuspendedAt: null, businessAccountId: payload.businessAccountId || '', phoneNumberId: payload.phoneNumberId || '', displayPhoneNumber: payload.displayPhoneNumber || '', status: requestedStatus === 'disabled' ? 'disabled' : 'pending_approval', lastError: '' }
   if (payload.accessToken) $set.encryptedAccessToken = encryptField(payload.accessToken)
   const doc: any = await WhatsAppIntegration.findOneAndUpdate({ organizationId }, { $set, $setOnInsert: { organizationId } }, { new: true, upsert: true }).select('+encryptedAccessToken')
   if (requestedStatus === 'connected') return verify(organizationId)

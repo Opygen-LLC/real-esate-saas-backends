@@ -175,6 +175,9 @@ const add = async (organizationId: string, input: string) => {
         $set: {
           domain,
           ownershipToken,
+          entitlementStatus: 'active',
+          entitlementSuspendedAt: null,
+          entitlementSuspendedReason: '',
           provider: provider.name,
           lifecycleStatus: 'PENDING_DNS',
           providerRegistrationStatus: providerRegistration.registered ? 'registered' : 'pending',
@@ -380,6 +383,7 @@ const markLifecycleFailure = async (record: any, error: unknown) => {
 const verifyById = async (recordId: string) => {
   const record: any = await DomainRecord.findById(recordId)
   if (!record) return null
+  if (record.entitlementStatus === 'suspended') return publicDomainStatus(record)
   try { return await verifyRecord(record) }
   catch (error) {
     await markLifecycleFailure(record, error)
@@ -388,6 +392,7 @@ const verifyById = async (recordId: string) => {
 }
 
 const verify = async (organizationId: string) => {
+  await EntitlementService.assertFeature(organizationId, 'customDomain')
   const record: any = await DomainRecord.findOne({ organizationId })
   if (!record) throw new ApiError(404, 'No custom domain is configured')
   try { return await verifyRecord(record) }
@@ -403,7 +408,7 @@ const get = async (organizationId: string) => {
 }
 
 const retryDue = async (limit = 50) => {
-  const records = await DomainRecord.find({ nextCheckAt: { $lte: new Date() } }).sort({ nextCheckAt: 1 }).limit(limit)
+  const records = await DomainRecord.find({ entitlementStatus: { $ne: 'suspended' }, nextCheckAt: { $lte: new Date() } }).sort({ nextCheckAt: 1 }).limit(limit)
   let checked = 0
   let failed = 0
   for (const record of records) {
@@ -424,6 +429,7 @@ const resolveVerifiedHost = async (host: string) => {
   const domain = normalizeDomain(rawHost)
   const record: any = await DomainRecord.findOne({
     domain,
+    entitlementStatus: { $ne: 'suspended' },
     tlsStatus: 'active',
     $or: [
       { lifecycleStatus: 'ACTIVE', publicRoutingStatus: 'active' },

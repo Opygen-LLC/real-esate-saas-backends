@@ -8,14 +8,73 @@ import { Organization } from '../organization/organization.model'
 import { ISubscriptionPlan, SubscriptionPlanId } from './subscriptionPlan.interface'
 import { SubscriptionPlan } from './subscriptionPlan.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
-import { publishTeamSeatReconciliation, reconcileTeamSeats } from '../entitlement/teamSeatReconciliation.service'
+import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
+
+type LeadAllowanceConfig = Pick<ISubscriptionPlan,
+  'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
+>
+
+const starterLeadAllowanceDefaults: LeadAllowanceConfig = {
+  baseMonthlyLeadAllowance: 200,
+  renewalLeadBonus: 50,
+  renewalBonusEnabled: true,
+  maxRenewalLeadBonus: 500,
+  continuityGraceDays: 3,
+}
+
+const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig => ({
+  baseMonthlyLeadAllowance: Math.max(0, Number(maxLeads || 0)),
+  renewalLeadBonus: 0,
+  renewalBonusEnabled: false,
+  maxRenewalLeadBonus: 0,
+  continuityGraceDays: 0,
+})
+
+const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T & LeadAllowanceConfig => {
+  const fallback = plan.planId === 'starter' ? starterLeadAllowanceDefaults : neutralLeadAllowanceDefaults(plan.maxLeads)
+  return {
+    ...plan,
+    baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
+    renewalLeadBonus: Number(plan.renewalLeadBonus ?? fallback.renewalLeadBonus),
+    renewalBonusEnabled: Boolean(plan.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
+    maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
+    continuityGraceDays: Number(plan.continuityGraceDays ?? fallback.continuityGraceDays),
+  }
+}
+
+const validateLeadAllowanceConfig = (plan: Partial<ISubscriptionPlan>) => {
+  const base = Number(plan.baseMonthlyLeadAllowance ?? 0)
+  const bonus = Number(plan.renewalLeadBonus ?? 0)
+  const cap = Number(plan.maxRenewalLeadBonus ?? 0)
+  const grace = Number(plan.continuityGraceDays ?? 0)
+  const enabled = Boolean(plan.renewalBonusEnabled)
+
+  if (![base, bonus, cap, grace].every(Number.isFinite) || [base, bonus, cap, grace].some((value) => value < 0)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Lead allowance values must be non-negative numbers')
+  }
+  if (![base, bonus, cap, grace].every(Number.isInteger)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Lead allowance values must be whole numbers')
+  }
+  if (grace > 31) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Continuity grace period cannot exceed 31 days')
+  }
+  if (enabled && base < 1) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Base monthly lead allowance must be at least 1 when renewal bonus is enabled')
+  }
+  if (enabled && bonus < 1) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Renewal lead bonus must be at least 1 when renewal bonus is enabled')
+  }
+  if (enabled && cap < bonus) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum renewal lead bonus must be at least the per-renewal bonus')
+  }
+}
 
 const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId: SubscriptionPlanId }> = [
   {
     planId: 'starter', name: 'Starter', priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
     description: 'Perfect for solo real estate agents and boutique teams starting out.',
-    features: ['1–3 Team Agents', '100 Property Listings', '500 Active Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
-    maxAgents: 3, maxProperties: 100, maxLeads: 500, hasCustomDomain: false, hasAdvancedAnalytics: false,
+    features: ['1–3 Team Agents', '100 Property Listings', '200 Leads / Paid Month', '+50 Leads per Consecutive Renewal', 'Up to 500 Active Pipeline Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
+    maxAgents: 3, maxProperties: 100, maxLeads: 500, ...starterLeadAllowanceDefaults, hasCustomDomain: false, hasAdvancedAnalytics: false,
     hasWhatsAppIntegration: false, hasLeadAutomations: false, hasSmsAutomation: false, hasPremiumTemplates: false,
     maxStorageMb: 1024, maxMonthlyVisitors: 10000, isPopular: false, isActive: true,
   },
@@ -23,7 +82,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     planId: 'professional', name: 'Professional', priceMonthly: 3490, priceYearly: 34900, currency: 'BDT',
     description: 'Designed for high-growth real estate teams and established agencies.',
     features: ['Up to 10 Team Agents', '1,000 Property Listings', 'Unlimited Leads & Deals', 'Custom Domain (www.agency.com)', 'Advanced Lead Pipeline & Kanban', 'Viewing Calendar & Booking', 'Advanced Real Estate Analytics', 'Priority Email Support'],
-    maxAgents: 10, maxProperties: 1000, maxLeads: 10000, hasCustomDomain: true, hasAdvancedAnalytics: true,
+    maxAgents: 10, maxProperties: 1000, maxLeads: 10000, ...neutralLeadAllowanceDefaults(10000), hasCustomDomain: true, hasAdvancedAnalytics: true,
     hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: true, hasPremiumTemplates: true,
     maxStorageMb: 10240, maxMonthlyVisitors: 100000, isPopular: true, isActive: true,
   },
@@ -31,7 +90,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     planId: 'agency', name: 'Agency Scale', priceMonthly: 6990, priceYearly: 69900, currency: 'BDT',
     description: 'Full-featured enterprise platform for large brokerages and multi-office firms.',
     features: ['Unlimited Team Agents', 'Unlimited Property Listings', 'Unlimited Leads & Contacts', 'Custom Domain + Multi-Branch', 'WhatsApp Integration & SMS Marketing', 'Agent Performance Leaderboards', 'Lead Auto-Routing Rules', 'Dedicated Account Manager & 24/7 Support'],
-    maxAgents: 9999, maxProperties: 99999, maxLeads: 999999, hasCustomDomain: true, hasAdvancedAnalytics: true,
+    maxAgents: 9999, maxProperties: 99999, maxLeads: 999999, ...neutralLeadAllowanceDefaults(999999), hasCustomDomain: true, hasAdvancedAnalytics: true,
     hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: true, hasPremiumTemplates: true,
     maxStorageMb: 51200, maxMonthlyVisitors: 1000000, isPopular: false, isActive: true,
   },
@@ -62,11 +121,12 @@ const ensureDefaults = async (): Promise<void> => {
 const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
   await ensureDefaults()
   const cached = await Cache.plans.get<ISubscriptionPlan[]>('catalog')
-  if (cached) return cached
+  if (cached) return cached.map((plan: any) => normalizeLeadAllowanceConfig(plan)) as ISubscriptionPlan[]
   const now = new Date()
-  const plans = await SubscriptionPlan.find(planWindowFilter(now)).sort({ priceMonthly: 1, version: -1 }).lean()
+  const rows = await SubscriptionPlan.find(planWindowFilter(now)).sort({ priceMonthly: 1, version: -1 }).lean()
+  const plans = rows.map((plan: any) => normalizeLeadAllowanceConfig(plan)) as ISubscriptionPlan[]
   await Cache.plans.set('catalog', plans, 300)
-  return plans as ISubscriptionPlan[]
+  return plans
 }
 
 const getPlanById = async (planId: string, version?: number): Promise<ISubscriptionPlan | null> => {
@@ -92,7 +152,7 @@ const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknow
     SubscriptionPlan.countDocuments({ ...summaryFilter, grandfatherExisting: true }),
     SubscriptionPlan.countDocuments({ ...summaryFilter, effectiveFrom: { $gt: now } }),
   ])
-  return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary: { grandfathered, scheduled } } }
+  return { data: data.map((plan: any) => normalizeLeadAllowanceConfig(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary: { grandfathered, scheduled } } }
 }
 
 const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Promise<ISubscriptionPlan> => {
@@ -101,8 +161,10 @@ const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Pr
   if (await SubscriptionPlan.exists({ planId })) {
     throw new ApiError(httpStatus.CONFLICT, 'This plan family already exists. Create a new version instead.')
   }
+  const normalizedPayload = normalizeLeadAllowanceConfig({ ...payload, planId })
+  validateLeadAllowanceConfig(normalizedPayload)
   const result = await SubscriptionPlan.create({
-    ...payload,
+    ...normalizedPayload,
     planId,
     version: 1,
     currency: 'BDT',
@@ -130,6 +192,8 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
   if (Number.isNaN(effectiveFrom.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid effective date')
 
   const snapshot = current.toObject()
+  const mergedCommercialSnapshot = normalizeLeadAllowanceConfig({ ...snapshot, ...payload, planId: current.planId })
+  validateLeadAllowanceConfig(mergedCommercialSnapshot)
   const nextVersion = (latest?.version || current.version || 1) + 1
   const grandfatherExisting = payload.grandfatherExisting ?? true
 
@@ -148,6 +212,7 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
 
   const docs = await SubscriptionPlan.create([{
     ...snapshot,
+    ...mergedCommercialSnapshot,
     _id: undefined,
     __v: undefined,
     createdAt: undefined,
@@ -226,12 +291,11 @@ const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migrat
     }).select('organizationId').lean()
 
     for (const tenant of tenants) {
-      let reconciliation: Awaited<ReturnType<typeof reconcileTeamSeats>> | null = null
+      let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
       const migrated = await EntitlementService.withTeamMemberQuotaGuard(tenant.organizationId, async (session) => {
-        const currentQuery = Organization.findOne({ organizationId: tenant.organizationId }).select('subscription.maxAgents')
+        const currentQuery = Organization.findOne({ organizationId: tenant.organizationId }).select('subscription')
         if (session) currentQuery.session(session)
         const current: any = await currentQuery.lean()
-        const previousMaxTeamMembers = Number(current?.subscription?.maxAgents || 0)
         const result = await Organization.updateOne(
           {
             organizationId: tenant.organizationId,
@@ -246,17 +310,16 @@ const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migrat
           session ? { session } : undefined,
         )
         if (!result.modifiedCount) return false
-        reconciliation = await reconcileTeamSeats(tenant.organizationId, Number(plan.maxAgents || 0), {
+        reconciliation = await reconcileOrganizationEntitlements(tenant.organizationId, current?.subscription, plan, {
           session,
           actorId: 'system:plan-version-worker',
           reason: `Subscription plan version migrated to ${plan.planId} v${plan.version}`,
-          previousMaxTeamMembers,
         })
         return true
       })
       if (migrated) {
         migratedTenants += 1
-        await publishTeamSeatReconciliation(reconciliation)
+        await publishSubscriptionEntitlementReconciliation(reconciliation)
       }
     }
 

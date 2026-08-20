@@ -71,7 +71,9 @@
     "verify:phase10": "node scripts/verify-phase10-final-matrix.mjs && node scripts/verify-phase10-release.mjs",
     "migrate:phase5-dashboard-ordering": "ts-node --transpile-only src/app/db/migratePhase5DashboardOrdering.ts",
     "migrate:phase8-broker-visibility": "ts-node --transpile-only src/app/db/migratePhase8LicensedBrokerVisibility.ts",
-    "migrate:onboarding-four-steps": "ts-node --transpile-only src/app/db/migrateOnboardingToFourSteps.ts"
+    "migrate:onboarding-four-steps": "ts-node --transpile-only src/app/db/migrateOnboardingToFourSteps.ts",
+    "reconcile:phase8-entitlements": "ts-node --transpile-only src/app/db/reconcilePhase8ResourceEntitlements.ts",
+    "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts"
   },
   "keywords": [
     "real-estate",

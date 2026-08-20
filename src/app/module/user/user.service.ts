@@ -352,7 +352,7 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
       { $match: { organizationId, agentId: { $in: agentIds }, date: { $gte: start.toISOString().slice(0, 10), $lte: end.toISOString().slice(0, 10) } } },
       { $group: { _id: '$agentId', totalViewings: { $sum: 1 }, completedViewings: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } } } },
     ]),
-    Property.aggregate([{ $match: { organizationId, agentId: { $in: agentIds }, status: 'Available' } }, { $group: { _id: '$agentId', activeListings: { $sum: 1 } } }]),
+    Property.aggregate([{ $match: { organizationId, agentId: { $in: agentIds }, status: 'Available', quotaLocked: { $ne: true } } }, { $group: { _id: '$agentId', activeListings: { $sum: 1 } } }]),
   ])
   const leads = new Map(leadRows.map((row: any) => [String(row._id), row]))
   const viewings = new Map(viewingRows.map((row: any) => [String(row._id), row]))

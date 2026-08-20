@@ -13,6 +13,7 @@ import { PropertyImportService } from './propertyImport.service'
 import config from '../../../config'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { logger } from '../../../shared/logger'
+import { Organization } from '../organization/organization.model'
 
 
 const propertyActor = (req: Request) => ({
@@ -75,7 +76,6 @@ const exportXlsx = catchAsync(async (req: Request, res: Response) => {
 
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  await EntitlementService.assertLimit(organizationId, 'properties')
   const { propertyDraftSessionId, ...propertyPayload } = req.body
   const actor = {
     id: req.user?._id || req.user?.id,
@@ -89,6 +89,11 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
     if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property media claiming requires MongoDB transactions in production')
     const session = canTransact ? await mongoose.startSession() : null
     const execute = async () => {
+      if (session) {
+        const lock = await Organization.updateOne({ organizationId }, { $inc: { propertyQuotaRevision: 1 } }, { session })
+        if (!lock.matchedCount) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+      }
+      await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: 1, session: session || undefined })
       await WebsiteBuilderService.validatePropertyDraftAssets(organizationId, propertyDraftSessionId, propertyPayload.images || [], session)
       result = await PropertyService.createProperty(organizationId, propertyPayload, actor, { session, emitEvent: false })
       await WebsiteBuilderService.claimPropertyDraftAssets(organizationId, propertyDraftSessionId, result._id.toString(), propertyPayload.images || [], session)
@@ -104,7 +109,11 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
       logger.warn('[property-media] post-create draft cleanup deferred to worker', { organizationId, propertyId: result?._id?.toString(), error })
     })
   } else {
-    result = await PropertyService.createProperty(organizationId, propertyPayload, actor)
+    result = await EntitlementService.withPropertyQuotaGuard(organizationId, async (session) => {
+      await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: 1, session })
+      return PropertyService.createProperty(organizationId, propertyPayload, actor, { session, emitEvent: false })
+    })
+    await PropertyService.emitPropertyCreated(organizationId, result)
   }
 
   sendResponse(res, {
@@ -293,6 +302,24 @@ const updatePropertyStatus = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const updatePropertyQuotaAccess = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const { id } = req.params
+  const result = await PropertyService.setQuotaAccess(
+    organizationId,
+    id,
+    Boolean(req.body.active),
+    String(req.user?._id || req.user?.id || 'tenant-admin'),
+  )
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: req.body.active ? 'Property unlocked for active inventory' : 'Property locked from active inventory',
+    data: result,
+  })
+})
+
 const reorderPropertyImages = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
@@ -335,6 +362,7 @@ export const PropertyController = {
   getPublicPropertyBySlug,
   updateProperty,
   updatePropertyStatus,
+  updatePropertyQuotaAccess,
   reorderPropertyImages,
   deleteProperty,
   previewImport,

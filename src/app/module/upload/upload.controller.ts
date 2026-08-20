@@ -1,6 +1,9 @@
 import { Request, Response } from 'express'
 import { StorageService } from './upload.service'
 import catchAsync from '../../../shared/catchAsync'
+import { requireTenant } from '../../middlewares/auth'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { Organization } from '../organization/organization.model'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 
@@ -50,7 +53,10 @@ const uploadSingle = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(httpStatus.BAD_REQUEST, "No file uploaded. Please send a file field named 'file' or 'image'.")
   }
 
+  const organizationId = requireTenant(req)
+  await EntitlementService.assertStorage(organizationId, file.size)
   const result = await StorageService.uploadFile(file)
+  await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: result.sizeBytes } })
 
   res.status(httpStatus.CREATED).json({
     publicUrl: result.publicUrl,
@@ -63,7 +69,10 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(httpStatus.BAD_REQUEST, "No files uploaded. Please send files field named 'files' or 'images'.")
   }
 
+  const organizationId = requireTenant(req)
+  await EntitlementService.assertStorage(organizationId, files.reduce((sum, file) => sum + Number(file.size || 0), 0))
   const results = await StorageService.uploadMultipleFiles(files)
+  await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: results.reduce((sum, item) => sum + item.sizeBytes, 0) } })
 
   res.status(httpStatus.CREATED).json({
     publicUrls: results.map((item) => item.publicUrl),

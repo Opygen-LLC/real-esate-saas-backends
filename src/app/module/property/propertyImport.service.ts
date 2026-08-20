@@ -414,46 +414,52 @@ const preview = async (organizationId: string, actor: ImportActor, file?: Expres
 
 const confirm = async (organizationId: string, actor: ImportActor, importSessionId: string) => {
   await assertRedisSessionsAvailable()
-  const session = await consumeSession(sessionRedisKey(organizationId, actor.id, importSessionId))
-  if (!session || session.version !== 1) throw new ApiError(410, 'Import preview expired, was already confirmed, or is no longer available')
-  if (session.organizationId !== organizationId || session.userId !== actor.id) throw new ApiError(403, 'Import session does not belong to this user and agency')
+  const previewSession = await consumeSession(sessionRedisKey(organizationId, actor.id, importSessionId))
+  if (!previewSession || previewSession.version !== 1) throw new ApiError(410, 'Import preview expired, was already confirmed, or is no longer available')
+  if (previewSession.organizationId !== organizationId || previewSession.userId !== actor.id) throw new ApiError(403, 'Import session does not belong to this user and agency')
 
-  const issues: ImportIssue[] = [...session.preflightIssues]
-  let created = 0
-  let failed = session.preflightIssues.length
+  return EntitlementService.withPropertyQuotaGuard(organizationId, async (dbSession) => {
+    const issues: ImportIssue[] = [...previewSession.preflightIssues]
+    let created = 0
+    let failed = previewSession.preflightIssues.length
 
-  if (session.validRows.length) await EntitlementService.assertLimit(organizationId, 'properties', session.validRows.length)
+    if (previewSession.validRows.length) {
+      await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: previewSession.validRows.length, session: dbSession })
+    }
 
-  const assignedIds = [...new Set(session.validRows.map((row) => row.data.agentId).filter(Boolean) as string[])]
-  const activeAssignedIds = assignedIds.length
-    ? new Set((await User.find({
+    const assignedIds = [...new Set(previewSession.validRows.map((row) => row.data.agentId).filter(Boolean) as string[])]
+    const assignedQuery = User.find({
       _id: { $in: assignedIds },
       organizationId,
       status: 'active',
       userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-    }).select('_id').lean()).map((user: any) => String(user._id)))
-    : new Set<string>()
+    }).select('_id')
+    if (dbSession) assignedQuery.session(dbSession)
+    const activeAssignedIds = assignedIds.length
+      ? new Set((await assignedQuery.lean()).map((user: any) => String(user._id)))
+      : new Set<string>()
 
-  for (const row of session.validRows) {
-    try {
-      if (row.data.agentId && !activeAssignedIds.has(row.data.agentId)) {
-        throw new ApiError(400, 'Assigned agent is no longer an active assignable member of this agency')
+    for (const row of previewSession.validRows) {
+      try {
+        if (row.data.agentId && !activeAssignedIds.has(row.data.agentId)) {
+          throw new ApiError(400, 'Assigned agent is no longer an active assignable member of this agency')
+        }
+        const { agentName: _agentName, ...payload } = row.data
+        await PropertyService.createProperty(organizationId, payload, actor, { session: dbSession })
+        created += 1
+      } catch (error: any) {
+        failed += 1
+        issues.push({ row: row.row, type: 'failed', reason: error instanceof Error ? error.message : 'Property import failed' })
       }
-      const { agentName: _agentName, ...payload } = row.data
-      await PropertyService.createProperty(organizationId, payload, actor)
-      created += 1
-    } catch (error: any) {
-      failed += 1
-      issues.push({ row: row.row, type: 'failed', reason: error instanceof Error ? error.message : 'Property import failed' })
     }
-  }
 
-  return {
-    total: session.total,
-    created,
-    failed,
-    errors: issues.sort((a, b) => a.row - b.row),
-  }
+    return {
+      total: previewSession.total,
+      created,
+      failed,
+      errors: issues.sort((a, b) => a.row - b.row),
+    }
+  })
 }
 
 const csvTemplate = (): string => {

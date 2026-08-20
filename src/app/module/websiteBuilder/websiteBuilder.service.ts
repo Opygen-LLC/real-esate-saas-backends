@@ -40,7 +40,12 @@ const sanitizeDocument = (value: any, key = ''): any => {
   return value
 }
 
+const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
 const defaultDocument = () => buildDefaultWebsiteDocument()
+const applyPublicTemplateEntitlement = (document: any, blocked: boolean) => {
+  if (!blocked || !document || !PREMIUM_TEMPLATE_IDS.has(String(document?.template?.id || ''))) return document
+  return { ...document, template: { ...(document.template || {}), id: 'template-1', version: '2.0.0' }, entitlementFallback: { reason: 'premium_template_not_in_plan', configuredTemplateId: document?.template?.id || '' } }
+}
 
 const normalizeIdentifier = (identifier: string) => identifier.toLowerCase().replace(/^www\./, '').split(':')[0]
 
@@ -62,7 +67,7 @@ const resolveOrganization = async (identifier: string) => {
     await cacheOrganizationResolution(normalized, direct)
     return direct
   }
-  const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
+  const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean()
   if (!domain) return null
   const org = await Organization.findOne({ organizationId: domain.organizationId })
   if (org) await cacheOrganizationResolution(normalized, org)
@@ -574,7 +579,7 @@ const assertPublicWebsite = (org: any) => {
 }
 
 const canonicalBase = async (org: any) => {
-  const verified = org.domain ? await DomainRecord.findOne({ organizationId: org.organizationId, domain: org.domain, status: 'verified', tlsStatus: 'active' }).lean() : null
+  const verified = org.domain ? await DomainRecord.findOne({ organizationId: org.organizationId, domain: org.domain, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean() : null
   return buildTenantWebsiteUrl(org.sub_domain || org.organizationId, verified?.domain)
 }
 
@@ -594,7 +599,8 @@ const getPublicPage = async (identifier: string, slug = '/') => {
     .select('title slug publishedDocument seo updatedAt')
     .lean()
   const base = await canonicalBase(org)
-  const result = { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain, domain: org.domain }, page: page ? { title: page.title, slug: page.slug, publishedDocument: page.publishedDocument, seo: { ...(page.seo || {}), canonicalUrl: page.seo?.canonicalUrl || `${base}${targetSlug === '/' ? '' : targetSlug}` } } : null }
+  const premiumBlocked = Boolean(org.entitlementRestrictions?.premiumTemplates)
+  const result = { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain, domain: org.entitlementRestrictions?.customDomain ? '' : org.domain }, page: page ? { title: page.title, slug: page.slug, publishedDocument: applyPublicTemplateEntitlement(page.publishedDocument, premiumBlocked), seo: { ...(page.seo || {}), canonicalUrl: page.seo?.canonicalUrl || `${base}${targetSlug === '/' ? '' : targetSlug}` } } : null }
   await WebsiteCache.set('published', org.organizationId, targetSlug, result, 300)
   return result
 }
@@ -602,11 +608,11 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 const getSitemap = async (identifier: string) => {
   const org = assertPublicWebsite(await resolveOrganization(identifier))
   const base = await canonicalBase(org)
-  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available' }).select('_id updatedAt').lean()])
+  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }
 
 const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
-const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available' }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
+const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
 
 export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

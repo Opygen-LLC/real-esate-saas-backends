@@ -12,6 +12,11 @@ export interface ISubscriptionPlan {
   maxAgents: number
   maxProperties: number
   maxLeads: number
+  baseMonthlyLeadAllowance: number
+  renewalLeadBonus: number
+  renewalBonusEnabled: boolean
+  maxRenewalLeadBonus: number
+  continuityGraceDays: number
   hasCustomDomain: boolean
   hasAdvancedAnalytics: boolean
   hasWhatsAppIntegration: boolean

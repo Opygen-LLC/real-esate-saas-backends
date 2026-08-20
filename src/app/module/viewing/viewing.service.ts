@@ -45,7 +45,7 @@ const publicRequestViewing=async(payload:PublicViewingRequestInput,context:{ip?:
   if(!organization)throw new ApiError(404,'Agency not found')
   if(organization.isBlocked||organization.websiteStatus==='suspended')throw new ApiError(423,'This agency is currently suspended','','TENANT_SUSPENDED')
   if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
-  const prop:any=await Property.findOne({_id:propertyId,organizationId,status:'Available'}).select('agentId').lean()
+  const prop:any=await Property.findOne({_id:propertyId,organizationId,status:'Available',quotaLocked:{ $ne:true }}).select('agentId').lean()
   if(!prop)throw new ApiError(404,'Property not found or is no longer available')
   if(!privacyConsent)throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})
   await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)

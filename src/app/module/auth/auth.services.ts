@@ -83,7 +83,7 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
   const [projectedUser, organization, verifiedDomain] = await Promise.all([
     findUserWithProfiles({ _id: user._id }),
     Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
-    DomainRecord.findOne({ organizationId: user.organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+    DomainRecord.findOne({ organizationId: user.organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
   ])
   const onboarding = normalizeOnboardingState(organization?.onboarding)
   return {
@@ -764,7 +764,7 @@ const changePassword = async (userId: string, payload: IChangePassword, meta: Re
 const getWebsiteUrlForUser = async (organizationId: string): Promise<string | undefined> => {
   const org = await Organization.findOne({ organizationId }).select('sub_domain').lean()
   if (!org?.sub_domain) return undefined
-  const verified = await DomainRecord.findOne({ organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean()
+  const verified = await DomainRecord.findOne({ organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean()
   return buildTenantWebsiteUrl(org.sub_domain, verified?.domain)
 }
 

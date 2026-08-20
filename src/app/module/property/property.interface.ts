@@ -89,6 +89,10 @@ export interface IProperty {
   publishedAt?: Date | null
   views: number
   isFeatured?: boolean
+  quotaLocked?: boolean
+  quotaLockedReason?: 'subscription_limit' | 'tenant_admin' | null
+  quotaLockedAt?: Date | null
+  quotaLockedBy?: string | null
   createdAt?: Date
   updatedAt?: Date
 }
@@ -113,6 +117,7 @@ export type IPropertyFilter = {
   furnished?: boolean | string
   isFeatured?: boolean | string
   agentId?: string
+  quotaLocked?: boolean | string
 }
 
 export type PropertyModel = Model<IProperty>

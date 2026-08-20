@@ -145,7 +145,7 @@ const schedulePendingMeta = async (limit = 100) => {
 }
 
 const schedulePendingDomainChecks = async (limit = 100) => {
-  const candidates: any[] = await DomainRecord.find({ nextCheckAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextCheckAt: 1 }).limit(limit).lean()
+  const candidates: any[] = await DomainRecord.find({ entitlementStatus: { $ne: 'suspended' }, nextCheckAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextCheckAt: 1 }).limit(limit).lean()
   const ids = candidates.map((item) => item._id.toString())
   const existing = new Set((await OperationsJob.find({ type: 'domain_verify', entityId: { $in: ids }, status: { $in: ['pending', 'processing'] } }).select('entityId').lean()).map((job: any) => job.entityId))
   let scheduled = 0

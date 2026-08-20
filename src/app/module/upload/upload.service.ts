@@ -6,6 +6,7 @@ import httpStatus from 'http-status'
 
 export interface IUploadResult {
   publicUrl: string
+  sizeBytes: number
 }
 
 const compressImage = async (buffer: Buffer, mimetype: string): Promise<Buffer> => {
@@ -53,7 +54,7 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
 
     blobStream.on('finish', () => {
       const publicUrl = `https://storage.googleapis.com/${storageConfig.bucketName}/${blob.name}`
-      resolve({ publicUrl })
+      resolve({ publicUrl, sizeBytes: compressedBuffer.length })
     })
 
     blobStream.end(compressedBuffer)

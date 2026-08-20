@@ -17,6 +17,8 @@ import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organiza
 import { Organization } from './organization.model'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
+const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
+
 const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
@@ -28,7 +30,7 @@ const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrg
 const getMyOrganization = async (organizationId: string): Promise<IOrganization | null> => {
   const [result, verifiedDomain] = await Promise.all([
     Organization.findOne({ organizationId }).lean(),
-    DomainRecord.findOne({ organizationId, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+    DomainRecord.findOne({ organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
   ])
   if (!result) return null
   return {
@@ -45,7 +47,7 @@ const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrga
   if (direct) return direct
   const alias = await SubdomainAlias.findOne({ alias: normalized }).lean()
   if (alias) return Organization.findOne({ organizationId: alias.organizationId })
-  const domain = await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).lean()
+  const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean()
   return domain ? Organization.findOne({ organizationId: domain.organizationId }) : null
 }
 
@@ -55,14 +57,14 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (cached) return cached
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
-    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
+    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
     .lean()
 
   if (!org) {
     const alias = await SubdomainAlias.findOne({ alias: cacheKey }).lean()
     if (alias) {
       org = await Organization.findOne({ organizationId: alias.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
         .lean()
     }
   }
@@ -70,11 +72,11 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (!org) {
     const normalized = cacheKey.replace(/^www\./, '').split(':')[0]
     const resolved = await Cache.tenantResolve.get(normalized)
-    const verifiedDomain: any = resolved || await DomainRecord.findOne({ domain: normalized, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
+    const verifiedDomain: any = resolved || await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
     if (verifiedDomain?.organizationId) {
       await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
       org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
         .lean()
     }
   }
@@ -82,7 +84,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
 
   const [totalProperties, totalAgents] = await Promise.all([
-    Property.countDocuments({ organizationId: org.organizationId, status: 'Available' }),
+    Property.countDocuments({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }),
     User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
   ])
   const result = {
@@ -90,14 +92,20 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     defaultLanguage: org.defaultLanguage || 'en',
     metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
     metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
-    templateId: org.templateId || 'template-1',
+    templateId: org.entitlementRestrictions?.premiumTemplates && PREMIUM_TEMPLATE_IDS.has(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
+    configuredTemplateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
     primaryColor: org.primaryColor || '#1877F2',
     secondaryColor: org.secondaryColor || '#0f172a',
     websiteSettings: { renderMode: 'template', ...(org.websiteSettings || {}) },
     stats: { totalProperties, totalAgents },
   }
-  const identifiers = [cacheKey, org.organizationId, org.sub_domain, org.domain].filter(Boolean).map(String)
+  const identifiers = [
+    cacheKey,
+    org.organizationId,
+    org.sub_domain,
+    ...(org.entitlementRestrictions?.customDomain ? [] : [org.domain]),
+  ].filter(Boolean).map(String)
   await Promise.all(identifiers.map((key) => Cache.tenantPublic.set(key, result, 300)))
   await Promise.all(identifiers.map((key) => Cache.tenantResolve.set(key, org.organizationId, 300)))
   return result
