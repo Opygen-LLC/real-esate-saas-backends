@@ -48,6 +48,7 @@ const activityProjection: Record<string, { type: string; title: string }> = {
   'viewing.scheduled': { type: 'viewing', title: 'Viewing scheduled' },
   'viewing.updated': { type: 'viewing', title: 'Viewing updated' },
   'viewing.completed': { type: 'viewing', title: 'Viewing completed' },
+  'viewing.deleted': { type: 'viewing', title: 'Viewing cancelled' },
   'viewing.reminder_due': { type: 'viewing', title: 'Viewing reminder due' },
   'sms.sent': { type: 'system', title: 'SMS sent' },
   'sms.delivered': { type: 'system', title: 'SMS delivered' },

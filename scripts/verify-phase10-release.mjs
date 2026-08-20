@@ -2,10 +2,12 @@ import fs from 'node:fs'
 
 const requiredFiles = [
   'src/tests/contract/phase10ProductionRelease.contract.test.ts',
+  'src/tests/contract/phase10FinalAcceptance.contract.test.ts',
   'src/tests/integration/teamQuota.integration.test.ts',
   'src/tests/integration/crmPhase14.integration.test.ts',
   'src/tests/integration/websiteSubmissions.integration.test.ts',
   'src/tests/integration/tenantIsolation.integration.test.ts',
+  'src/tests/integration/phase10FinalAcceptance.integration.test.ts',
   'src/tests/integration/propertyImportExport.integration.test.ts',
   'src/tests/integration/propertyDraftAssetLifecycle.integration.test.ts',
   'src/tests/integration/phase8AuthSessionManagement.integration.test.ts',
