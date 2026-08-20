@@ -12,6 +12,7 @@ import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
+import { publishTeamSeatReconciliation, reconcileTeamSeats } from '../entitlement/teamSeatReconciliation.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const serial = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(10).toString('hex').toUpperCase()}`
@@ -144,7 +145,7 @@ const recordPayment = async (input: {
 }
 
 const decidePayment = async (paymentNumber: string, decision: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) => {
-  const organizationId = await commercialTransaction(async (session) => {
+  const transactionResult = await commercialTransaction(async (session) => {
     const paymentQuery = SubscriptionPayment.findOne({ paymentNumber })
     if (session) paymentQuery.session(session)
     const payment: any = await paymentQuery
@@ -172,7 +173,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         await request.save(session ? { session } : undefined)
       }
       await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_rejected', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Payment rejected', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber } }, session)
-      return payment.organizationId
+      return { organizationId: payment.organizationId, teamSeatReconciliation: null }
     }
 
     const plan = await resolvePlan(payment.planId, payment.planVersion, session)
@@ -188,6 +189,12 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_payment', maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
     }
     await org.save(session ? { session } : undefined)
+    const teamSeatReconciliation = await reconcileTeamSeats(payment.organizationId, Number(plan.maxAgents || 0), {
+      session,
+      actorId: actor.id,
+      reason: `Subscription changed to ${plan.planId} v${plan.version}`,
+      previousMaxTeamMembers: Number(previous.maxAgents || 0),
+    })
     payment.status = 'confirmed'; payment.confirmedBy = actor.id; payment.confirmedAt = now; payment.rejectedReason = ''; payment.periodStart = start; payment.periodEnd = end
     // Only confirmations performed by the new lifecycle are eligible for the one-time customer success modal.
     // This intentionally prevents legacy confirmed payments from replaying after deployment.
@@ -198,10 +205,12 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       request.status = 'approved'; request.reviewedBy = actor.id; request.reviewedAt = now; request.rejectionReason = ''
       await request.save(session ? { session } : undefined)
     }
-    await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_confirmed', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Manual subscription payment confirmed', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber, receiptNumber: payment.receiptNumber, previousSubscription: previous, currentSubscription: org.subscription?.toObject?.() || org.subscription } }, session)
-    return payment.organizationId
+    await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_confirmed', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Manual subscription payment confirmed', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber, receiptNumber: payment.receiptNumber, previousSubscription: previous, currentSubscription: org.subscription?.toObject?.() || org.subscription, teamSeatReconciliation } }, session)
+    return { organizationId: payment.organizationId, teamSeatReconciliation }
   })
+  const { organizationId, teamSeatReconciliation } = transactionResult
   await CacheInvalidationService.invalidateTenant(organizationId)
+  await publishTeamSeatReconciliation(teamSeatReconciliation)
   const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
   if (decision.status === 'confirmed' && result) {
     // Emit only after the commercial transaction has committed and tenant caches have been invalidated.

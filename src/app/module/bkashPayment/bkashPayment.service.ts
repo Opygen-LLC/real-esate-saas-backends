@@ -12,6 +12,8 @@ import { writeAudit } from '../audit/audit.service'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { calculateSubscriptionCharge } from '../billing/pricing'
 import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashCheckoutUrl } from './bkashPayment.verification'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { publishTeamSeatReconciliation, reconcileTeamSeats } from '../entitlement/teamSeatReconciliation.service'
 
 type CreatePaymentInput = {
   organizationId: string
@@ -164,66 +166,79 @@ const verifyGatewayPayment = async (paymentId: string): Promise<BkashGatewayPaym
 }
 
 const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewayPayment) => {
-  const organization = await Organization.findOne({ organizationId: attempt.organizationId })
-  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  let reconciliation: Awaited<ReturnType<typeof reconcileTeamSeats>> | null = null
 
-  const now = new Date()
-  const currentPeriodEnd = organization.subscription?.currentPeriodEnd
-  const isRenewal =
-    organization.subscription?.plan === attempt.planId &&
-    currentPeriodEnd instanceof Date &&
-    currentPeriodEnd > now
-  const periodEnd = new Date(isRenewal ? currentPeriodEnd : now)
-  periodEnd.setMonth(periodEnd.getMonth() + (attempt.billingCycle === 'yearly' ? 12 : 1))
+  await EntitlementService.withTeamMemberQuotaGuard(attempt.organizationId, async (session) => {
+    const organizationQuery = Organization.findOne({ organizationId: attempt.organizationId })
+    if (session) organizationQuery.session(session)
+    const organization: any = await organizationQuery
+    if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
-  await Organization.updateOne(
-    { organizationId: attempt.organizationId },
-    {
-      $set: {
-        'subscription.plan': attempt.planId,
-        'subscription.planVersion': attempt.planVersion || 1,
-        'subscription.status': 'active',
-        'subscription.currentPeriodEnd': periodEnd,
-        'subscription.lastPaymentDate': now,
-        'subscription.maxProperties': attempt.maxProperties,
-        'subscription.maxAgents': attempt.maxAgents,
-        'subscription.gracePeriodEnd': null,
-        'subscription.cancelAtPeriodEnd': false,
-        'subscription.source': 'bkash',
-      },
+    const now = new Date()
+    const previousMaxTeamMembers = Number(organization.subscription?.maxAgents || 0)
+    const currentPeriodEnd = organization.subscription?.currentPeriodEnd
+    const isRenewal =
+      organization.subscription?.plan === attempt.planId &&
+      currentPeriodEnd instanceof Date &&
+      currentPeriodEnd > now
+    const periodEnd = new Date(isRenewal ? currentPeriodEnd : now)
+    periodEnd.setMonth(periodEnd.getMonth() + (attempt.billingCycle === 'yearly' ? 12 : 1))
+
+    organization.subscription = {
+      ...(organization.subscription?.toObject?.() || organization.subscription || {}),
+      plan: attempt.planId,
+      planVersion: attempt.planVersion || 1,
+      status: 'active',
+      currentPeriodEnd: periodEnd,
+      lastPaymentDate: now,
+      maxProperties: attempt.maxProperties,
+      maxAgents: attempt.maxAgents,
+      gracePeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      source: 'bkash',
     }
-  )
+    await organization.save(session ? { session } : undefined)
 
-  const tax = attempt.taxSnapshot
-  const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,
-    operatorLegalName: tax?.operatorLegalName || '', binEncrypted: tax?.binEncrypted || '', vatRate: tax?.vatRate || 0,
-    pricesIncludeVat: tax?.pricesIncludeVat ?? true, netAmount: tax?.baseAmount || attempt.amount, vatAmount: tax?.vatAmount || 0 }
-  await Billing.findOneAndUpdate(
-    { paymentId: attempt.paymentId },
-    {
-      $setOnInsert: {
-        organizationId: attempt.organizationId,
-        invoiceId: attempt.invoiceNumber,
-        serviceType: 'subscription',
-        serviceName: `${attempt.planName} Plan (${attempt.billingCycle})`,
-        plan: attempt.planId,
-        planVersion: attempt.planVersion || 1,
-        billingCycle: attempt.billingCycle,
-        date: now.toISOString().split('T')[0],
-        amount: attempt.amount,
-        currency: 'BDT',
-        paymentId: attempt.paymentId,
-        transactionId: payment.trxID || '',
-        paymentMethod: 'bKash',
-        status: 'paid',
-        taxSnapshot,
+    reconciliation = await reconcileTeamSeats(attempt.organizationId, Number(attempt.maxAgents || 0), {
+      session,
+      actorId: attempt.initiatedBy || 'system:bkash',
+      reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
+      previousMaxTeamMembers,
+    })
+
+    const tax = attempt.taxSnapshot
+    const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,
+      operatorLegalName: tax?.operatorLegalName || '', binEncrypted: tax?.binEncrypted || '', vatRate: tax?.vatRate || 0,
+      pricesIncludeVat: tax?.pricesIncludeVat ?? true, netAmount: tax?.baseAmount || attempt.amount, vatAmount: tax?.vatAmount || 0 }
+    await Billing.findOneAndUpdate(
+      { paymentId: attempt.paymentId },
+      {
+        $setOnInsert: {
+          organizationId: attempt.organizationId,
+          invoiceId: attempt.invoiceNumber,
+          serviceType: 'subscription',
+          serviceName: `${attempt.planName} Plan (${attempt.billingCycle})`,
+          plan: attempt.planId,
+          planVersion: attempt.planVersion || 1,
+          billingCycle: attempt.billingCycle,
+          date: now.toISOString().split('T')[0],
+          amount: attempt.amount,
+          currency: 'BDT',
+          paymentId: attempt.paymentId,
+          transactionId: payment.trxID || '',
+          paymentMethod: 'bKash',
+          status: 'paid',
+          taxSnapshot,
+        },
       },
-    },
-    { upsert: true, new: true }
-  )
-  await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
-    action: 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
-    metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle } })
+      { upsert: true, new: true, ...(session ? { session } : {}) }
+    )
+    await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
+      action: 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
+      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle, teamSeatReconciliation: reconciliation } }, session)
+  })
+
+  await publishTeamSeatReconciliation(reconciliation)
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {

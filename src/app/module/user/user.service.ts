@@ -503,6 +503,20 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
   const previousStatus = user.status
   user.userRole = resultingRole
   user.status = resultingStatus
+  if (changes.status === 'blocked') {
+    // A platform suspension must always become the authoritative restriction,
+    // even if the account was already quota- or tenant-blocked. Otherwise a
+    // later plan upgrade could incorrectly auto-reactivate it.
+    user.accessRestriction = {
+      source: 'platform_admin',
+      reason,
+      blockedAt: new Date(),
+      blockedBy: actorId || '',
+      previousStatus: user.accessRestriction?.previousStatus === 'pending' || previousStatus === 'pending' ? 'pending' : 'active',
+    }
+  } else if (changes.status === 'active' && previousStatus === 'blocked') {
+    user.accessRestriction = undefined
+  }
   await user.save()
   if (resultingRole !== previousRole) await syncRoleProfile(user._id, user.organizationId, resultingRole, roleFields)
   if (resultingRole !== previousRole || resultingStatus !== previousStatus) await markSessionAuthorizationChanged(user._id, user.organizationId, resultingRole !== previousRole ? 'role_changed' : 'status_changed', resultingStatus !== 'active')
@@ -593,6 +607,97 @@ const updateMemberAccess = async (
   return toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
+
+const updateMemberSeatAccess = async (
+  organizationId: string,
+  actorUserId: string,
+  targetUserId: string,
+  active: boolean,
+) => {
+  if (String(actorUserId) === String(targetUserId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'You cannot block or unblock your own agency-owner seat')
+  }
+
+  const changedAt = new Date()
+  const userId = asUserObjectId(targetUserId)
+  if (!userId) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+
+  await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
+    const targetQuery = User.findOne({ _id: userId, organizationId })
+    if (session) targetQuery.session(session)
+    const target = await targetQuery
+    if (!target) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+    if (target.userRole === 'agency_owner') throw new ApiError(httpStatus.FORBIDDEN, 'Agency owner seat cannot be blocked')
+    if (!TEAM_MEMBER_SEAT_ROLES.includes(target.userRole as any)) throw new ApiError(httpStatus.BAD_REQUEST, 'This account does not consume a team seat')
+
+    if (active) {
+      if (target.status !== 'blocked') return
+      const source = target.accessRestriction?.source
+      if (source === 'platform_admin' || !source) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'This member was suspended by the platform and cannot be reactivated from the agency dashboard', '', 'PLATFORM_RESTRICTION')
+      }
+
+      const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId, session)
+      if (quota.teamMembersCommitted + 1 > quota.maxTeamMembers) {
+        throw new ApiError(
+          httpStatus.CONFLICT,
+          `Team seat limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}). Block another member or revoke a pending invitation first.`,
+          '',
+          'TEAM_SEAT_LIMIT_REACHED',
+          {
+            maxTeamMembers: quota.maxTeamMembers,
+            teamMembersUsed: quota.teamMembersUsed,
+            teamMembersReserved: quota.teamMembersReserved,
+            teamMembersCommitted: quota.teamMembersCommitted,
+            teamMembersAvailable: quota.teamMembersAvailable,
+          },
+        )
+      }
+
+      target.status = target.accessRestriction?.previousStatus === 'pending' ? 'pending' : 'active'
+      target.accessRestriction = undefined
+      await target.save(session ? { session } : undefined)
+      return
+    }
+
+    if (target.status === 'blocked') {
+      if (target.accessRestriction?.source === 'platform_admin' || !target.accessRestriction?.source) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'This member is already restricted by the platform', '', 'PLATFORM_RESTRICTION')
+      }
+      if (target.accessRestriction?.source === 'tenant_admin') return
+    }
+
+    const previousStatus = target.status === 'pending' ? 'pending' : 'active'
+    target.status = 'blocked'
+    target.accessRestriction = {
+      source: 'tenant_admin',
+      reason: 'Agency owner blocked this member',
+      blockedAt: changedAt,
+      blockedBy: actorUserId,
+      previousStatus,
+    }
+    await target.save(session ? { session } : undefined)
+    await AuthSession.updateMany(
+      { userId: target._id, revokedAt: null },
+      { $set: { revokedAt: changedAt, revokeReason: 'tenant_member_blocked' } },
+      session ? { session } : undefined,
+    )
+  })
+
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  const readModel = await findUserWithProfiles({ _id: userId, organizationId })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found')
+  const result = toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
+  RealtimeService.emitAuthorizationChanged({
+    userId: String(userId),
+    organizationId,
+    forceLogout: result.status === 'blocked',
+    reason: result.status === 'blocked' ? 'tenant_member_blocked' : 'tenant_member_unblocked',
+  })
+  RealtimeService.emitOrganization(organizationId, { type: 'team.changed', action: 'updated', entityId: String(userId) })
+  return result
+}
+
 export const UserService = {
   createUser,
   getAllUsers,
@@ -610,4 +715,5 @@ export const UserService = {
   updateUserRoleSuperAdmin,
   getMyAccess,
   updateMemberAccess,
+  updateMemberSeatAccess,
 }

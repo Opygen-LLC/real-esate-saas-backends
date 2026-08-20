@@ -175,6 +175,29 @@ const updateMemberAccess = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Team member access updated', data: result })
 })
 
+const updateMemberSeatAccess = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const result = await UserService.updateMemberSeatAccess(organizationId, req.user!._id!, req.params.id, req.body.active)
+  await writeAudit({
+    organizationId,
+    actorId: req.user!._id!,
+    actorRole: req.user!.userRole,
+    action: req.body.active ? 'team.member_unblocked' : 'team.member_blocked',
+    entityType: 'user',
+    entityId: req.params.id,
+    reason: req.body.active ? 'Agency owner restored a team seat' : 'Agency owner blocked a team member',
+    requestId: req.requestId,
+    ip: req.ip,
+    metadata: { status: result.status, restrictionSource: result.accessRestriction?.source || null },
+  })
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: req.body.active ? 'Team member unblocked' : 'Team member blocked',
+    data: result,
+  })
+})
+
 const getAllUsersSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const filters = pick(req.query, ['searchTerm', 'userRole', 'status', 'organizationId'])
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
@@ -249,4 +272,5 @@ export const UserController = {
   getMyProfile,
   updateMyProfile,
   updateMemberAccess,
+  updateMemberSeatAccess,
 }

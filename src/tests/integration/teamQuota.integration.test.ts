@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 const requiredDb = process.env.TEST_DATABASE_URL
 const suite = requiredDb ? describe : describe.skip
@@ -7,6 +7,8 @@ let Organization: any
 let User: any
 let TeamInvitation: any
 let EntitlementService: any
+let reconcileTeamSeats: any
+let UserService: any
 let owner: any
 const organizationId = 'org_phase2_team_quota'
 
@@ -60,6 +62,8 @@ suite('phase 2 tenant-wide team quota', () => {
     ;({ User } = await import('../../app/module/user/user.model'))
     ;({ TeamInvitation } = await import('../../app/module/teamInvitation/teamInvitation.model'))
     ;({ EntitlementService } = await import('../../app/module/entitlement/entitlement.service'))
+    ;({ reconcileTeamSeats } = await import('../../app/module/entitlement/teamSeatReconciliation.service'))
+    ;({ UserService } = await import('../../app/module/user/user.service'))
 
     await Organization.create({
       organizationId,
@@ -78,7 +82,13 @@ suite('phase 2 tenant-wide team quota', () => {
       status: 'active',
       isVerified: true,
     })
+    await Organization.updateOne({ organizationId }, { $set: { ownerId: owner._id } })
   }, 20_000)
+
+  beforeEach(async () => {
+    await Organization.updateOne({ organizationId }, { $set: { 'subscription.maxAgents': 2 } })
+    await User.updateOne({ _id: owner._id }, { $set: { status: 'active' }, $unset: { accessRestriction: '' } })
+  })
 
   afterAll(async () => {
     if (mongoose?.connection?.readyState) await mongoose.connection.dropDatabase().catch(() => undefined)
@@ -109,15 +119,60 @@ suite('phase 2 tenant-wide team quota', () => {
     expect(quota).toMatchObject({ teamMembersUsed: 1, teamMembersReserved: 1, teamMembersCommitted: 2, teamMembersAvailable: 0 })
   })
 
-  it('preserves existing users after a downgrade and reports over-capacity instead of deleting them', async () => {
+  it('downgrades to a three-seat plan as owner + two members and quota-blocks overflow without deleting accounts', async () => {
     await clearTenantMembers()
     await addMember('agent', '40000001')
     await addMember('agency_admin', '40000002')
     await addMember('staff', '40000003')
+    await addMember('viewer', '40000004')
+    await Organization.updateOne({ organizationId }, { $set: { 'subscription.maxAgents': 3 } })
+
+    expect(await User.countDocuments({ organizationId })).toBe(5)
+    const reconciliation = await reconcileTeamSeats(organizationId, 3, {
+      previousMaxTeamMembers: 5,
+      actorId: 'system:test',
+      reason: 'Integration-test downgrade',
+    })
+
+    expect(reconciliation.blockedUserIds).toHaveLength(2)
+    expect(await User.countDocuments({ organizationId })).toBe(5)
+    expect(await User.countDocuments({ organizationId, userRole: 'agency_owner', status: 'active' })).toBe(1)
+    expect(await User.countDocuments({ organizationId, status: { $ne: 'blocked' } })).toBe(3)
+    expect(await User.countDocuments({ organizationId, status: 'blocked', 'accessRestriction.source': 'subscription_quota' })).toBe(2)
+
     const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
-    expect(quota).toMatchObject({ maxTeamMembers: 2, teamMembersUsed: 4, teamMembersAvailable: 0, teamMembersOverCapacityBy: 2 })
-    expect(await User.countDocuments({ organizationId, status: { $ne: 'blocked' } })).toBe(4)
-    await expect(EntitlementService.assertTeamMemberCapacity(organizationId, { additionalCommitments: 1 })).rejects.toMatchObject({ code: 'PLAN_LIMIT_REACHED' })
-    expect(await User.countDocuments({ organizationId, status: { $ne: 'blocked' } })).toBe(4)
+    expect(quota).toMatchObject({ maxTeamMembers: 3, teamMembersUsed: 3, teamMembersReserved: 0, teamMembersAvailable: 0, teamMembersOverCapacityBy: 0 })
+  })
+
+  it('returns TEAM_SEAT_LIMIT_REACHED on unblock when full, then permits a one-for-one seat swap', async () => {
+    await clearTenantMembers()
+    const activeMember = await addMember('agent', '50000001')
+    const overflowMember = await addMember('staff', '50000002')
+    await reconcileTeamSeats(organizationId, 2, { previousMaxTeamMembers: 3, actorId: 'system:test' })
+
+    const blocked = await User.findById(overflowMember._id).lean()
+    expect(blocked?.status).toBe('blocked')
+    expect(blocked?.accessRestriction?.source).toBe('subscription_quota')
+
+    await expect(UserService.updateMemberSeatAccess(organizationId, owner._id.toString(), overflowMember._id.toString(), true))
+      .rejects.toMatchObject({ statusCode: 409, code: 'TEAM_SEAT_LIMIT_REACHED' })
+
+    await UserService.updateMemberSeatAccess(organizationId, owner._id.toString(), activeMember._id.toString(), false)
+    let quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(quota).toMatchObject({ teamMembersUsed: 1, teamMembersAvailable: 1 })
+
+    await UserService.updateMemberSeatAccess(organizationId, owner._id.toString(), overflowMember._id.toString(), true)
+    quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(quota).toMatchObject({ teamMembersUsed: 2, teamMembersAvailable: 0 })
+    expect((await User.findById(activeMember._id).lean())?.accessRestriction?.source).toBe('tenant_admin')
+    expect((await User.findById(overflowMember._id).lean())?.status).toBe('active')
+  })
+
+  it('keeps the agency-owner seat reserved even while the platform has blocked the owner', async () => {
+    await clearTenantMembers()
+    await User.updateOne({ _id: owner._id }, { $set: { status: 'blocked', accessRestriction: { source: 'platform_admin', reason: 'test', blockedAt: new Date(), blockedBy: 'test', previousStatus: 'active' } } })
+    const quota = await EntitlementService.getTeamMemberQuotaSnapshot(organizationId)
+    expect(quota).toMatchObject({ maxTeamMembers: 2, teamMembersUsed: 1, teamMembersAvailable: 1 })
+    await User.updateOne({ _id: owner._id }, { $set: { status: 'active' }, $unset: { accessRestriction: '' } })
   })
 })

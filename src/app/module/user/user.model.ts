@@ -1,6 +1,17 @@
 import { Schema, model } from 'mongoose'
 import { IUser, UserModel } from './user.interface'
 
+const accessRestrictionSchema = new Schema(
+  {
+    source: { type: String, enum: ['subscription_quota', 'tenant_admin', 'platform_admin'], required: true },
+    reason: { type: String, default: '', maxlength: 500 },
+    blockedAt: { type: Date, required: true },
+    blockedBy: { type: String, default: '' },
+    previousStatus: { type: String, enum: ['pending', 'active'], default: 'active' },
+  },
+  { _id: false },
+)
+
 const userSchema = new Schema<IUser, UserModel>(
   {
     name: { type: String, required: true, trim: true },
@@ -15,6 +26,7 @@ const userSchema = new Schema<IUser, UserModel>(
       index: true,
     },
     status: { type: String, enum: ['pending', 'active', 'blocked'], default: 'pending', index: true },
+    accessRestriction: { type: accessRestrictionSchema, default: undefined },
     isVerified: { type: Boolean, default: false },
   },
   {
@@ -39,6 +51,7 @@ const userSchema = new Schema<IUser, UserModel>(
 userSchema.index({ phoneNumber: 1 }, { unique: true, name: 'user_phone_unique' })
 userSchema.index({ email: 1 }, { unique: true, name: 'user_email_unique' })
 userSchema.index({ organizationId: 1, userRole: 1, status: 1 }, { name: 'user_tenant_role_status' })
+userSchema.index({ organizationId: 1, 'accessRestriction.source': 1, status: 1 }, { name: 'user_tenant_access_restriction' })
 
 // One-to-one companion records. These virtuals intentionally keep the core
 // User collection small while allowing focused queries to populate profiles.

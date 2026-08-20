@@ -11,11 +11,12 @@ import { Property } from '../property/property.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
+import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
 
-export const TEAM_MEMBER_SEAT_ROLES = ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] as const
+export { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 
 const activePlanFilter = () => ({
   isActive: true,
@@ -132,8 +133,10 @@ const countLimitedResourceUsage = async (organizationId: string, resource: Limit
   if (resource === 'teamMembers') {
     return withSession(User.countDocuments({
       organizationId,
-      status: { $ne: 'blocked' },
       userRole: { $in: TEAM_MEMBER_SEAT_ROLES },
+      // The agency owner is a protected subscribed seat even if platform access
+      // is temporarily suspended. Other blocked members do not consume seats.
+      $or: [{ status: { $ne: 'blocked' } }, { userRole: 'agency_owner' }],
     }), session)
   }
   return withSession(Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }), session)
@@ -182,7 +185,7 @@ const assertTeamMemberCapacity = async (
     const recommendedPlan = await recommendPlanForLimit('teamMembers', requiredCommitted)
     throw new ApiError(
       402,
-      `Team member limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}). Existing members were preserved.`,
+      `Team member limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}).`,
       '',
       'PLAN_LIMIT_REACHED',
       {

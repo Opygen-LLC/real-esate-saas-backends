@@ -5,6 +5,14 @@ export interface UserAccessControlDto {
   permissions: string[]
 }
 
+export interface UserAccessRestrictionDto {
+  source: 'subscription_quota' | 'tenant_admin' | 'platform_admin'
+  reason: string
+  blockedAt: Date | string
+  blockedBy: string
+  previousStatus: 'pending' | 'active'
+}
+
 export interface UserResponseDto {
   _id: string
   name: string
@@ -13,6 +21,7 @@ export interface UserResponseDto {
   organizationId: string
   userRole: IUserRole
   status: 'pending' | 'active' | 'blocked'
+  accessRestriction?: UserAccessRestrictionDto | null
   isVerified: boolean
   profileImgURL: string
   bio: string

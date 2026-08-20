@@ -20,6 +20,13 @@ export interface IUser {
   organizationId: string
   userRole: IUserRole
   status: 'pending' | 'active' | 'blocked'
+  accessRestriction?: {
+    source: 'subscription_quota' | 'tenant_admin' | 'platform_admin'
+    reason: string
+    blockedAt: Date
+    blockedBy: string
+    previousStatus: 'pending' | 'active'
+  } | null
   isVerified: boolean
   createdAt?: Date
   updatedAt?: Date

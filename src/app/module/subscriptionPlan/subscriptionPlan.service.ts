@@ -7,6 +7,8 @@ import ApiError from '../../../errors/ApiError'
 import { Organization } from '../organization/organization.model'
 import { ISubscriptionPlan, SubscriptionPlanId } from './subscriptionPlan.interface'
 import { SubscriptionPlan } from './subscriptionPlan.model'
+import { EntitlementService } from '../entitlement/entitlement.service'
+import { publishTeamSeatReconciliation, reconcileTeamSeats } from '../entitlement/teamSeatReconciliation.service'
 
 const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId: SubscriptionPlanId }> = [
   {
@@ -203,15 +205,46 @@ const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migrat
 
   let migratedTenants = 0
   for (const plan of due) {
-    const result = await Organization.updateMany(
-      { 'subscription.plan': plan.planId, $or: [{ 'subscription.planVersion': { $exists: false } }, { 'subscription.planVersion': { $ne: plan.version } }] },
-      { $set: {
-        'subscription.planVersion': plan.version,
-        'subscription.maxProperties': plan.maxProperties,
-        'subscription.maxAgents': plan.maxAgents,
-      } },
-    )
-    migratedTenants += result.modifiedCount
+    const tenants = await Organization.find({
+      'subscription.plan': plan.planId,
+      $or: [{ 'subscription.planVersion': { $exists: false } }, { 'subscription.planVersion': { $ne: plan.version } }],
+    }).select('organizationId').lean()
+
+    for (const tenant of tenants) {
+      let reconciliation: Awaited<ReturnType<typeof reconcileTeamSeats>> | null = null
+      const migrated = await EntitlementService.withTeamMemberQuotaGuard(tenant.organizationId, async (session) => {
+        const currentQuery = Organization.findOne({ organizationId: tenant.organizationId }).select('subscription.maxAgents')
+        if (session) currentQuery.session(session)
+        const current: any = await currentQuery.lean()
+        const previousMaxTeamMembers = Number(current?.subscription?.maxAgents || 0)
+        const result = await Organization.updateOne(
+          {
+            organizationId: tenant.organizationId,
+            'subscription.plan': plan.planId,
+            $or: [{ 'subscription.planVersion': { $exists: false } }, { 'subscription.planVersion': { $ne: plan.version } }],
+          },
+          { $set: {
+            'subscription.planVersion': plan.version,
+            'subscription.maxProperties': plan.maxProperties,
+            'subscription.maxAgents': plan.maxAgents,
+          } },
+          session ? { session } : undefined,
+        )
+        if (!result.modifiedCount) return false
+        reconciliation = await reconcileTeamSeats(tenant.organizationId, Number(plan.maxAgents || 0), {
+          session,
+          actorId: 'system:plan-version-worker',
+          reason: `Subscription plan version migrated to ${plan.planId} v${plan.version}`,
+          previousMaxTeamMembers,
+        })
+        return true
+      })
+      if (migrated) {
+        migratedTenants += 1
+        await publishTeamSeatReconciliation(reconciliation)
+      }
+    }
+
     plan.migrationAppliedAt = new Date()
     await plan.save()
   }

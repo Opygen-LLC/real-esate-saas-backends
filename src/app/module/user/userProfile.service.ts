@@ -51,6 +51,13 @@ export const toUserDto = (source: any, options: UserDtoOptions = {}): UserRespon
     organizationId: user.organizationId,
     userRole: user.userRole,
     status: user.status,
+    accessRestriction: user.accessRestriction ? {
+      source: user.accessRestriction.source,
+      reason: user.accessRestriction.reason || '',
+      blockedAt: user.accessRestriction.blockedAt,
+      blockedBy: user.accessRestriction.blockedBy || '',
+      previousStatus: user.accessRestriction.previousStatus === 'pending' ? 'pending' : 'active',
+    } : null,
     isVerified: Boolean(user.isVerified),
     profileImgURL: profile.profileImgURL || '',
     bio: profile.bio || '',
