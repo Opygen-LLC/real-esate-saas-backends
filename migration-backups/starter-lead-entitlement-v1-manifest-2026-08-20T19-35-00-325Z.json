@@ -1,0 +1,22 @@
+{
+  "migrationName": "starter-lead-entitlement-v1",
+  "generatedAt": "2026-08-20T19:35:00.325Z",
+  "missingConfigBefore": 6,
+  "neutralBackfillMatched": 6,
+  "neutralBackfillModified": 6,
+  "starterVersionCreated": true,
+  "starterVersion": 3,
+  "starterConfig": {
+    "baseMonthlyLeadAllowance": 200,
+    "renewalLeadBonus": 50,
+    "renewalBonusEnabled": true,
+    "maxRenewalLeadBonus": 500,
+    "continuityGraceDays": 3
+  },
+  "existingSubscriptionPolicy": "Existing tenants remain assigned to their immutable historical plan version; the new Starter version is used for future purchases/renewals that select it.",
+  "backup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/starter-lead-entitlement-v1-subscriptionplans-2026-08-20T19-34-59-863Z.jsonl",
+    "count": 6,
+    "sha256": "f3c61fc4fc119bf8f30f620c3df0ccd13ef22711d7db61071780a29ea97d3d5f"
+  }
+}

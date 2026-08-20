@@ -1,0 +1,12 @@
+{
+  "migrationName": "onboarding-four-steps",
+  "generatedAt": "2026-08-20T19:34:57.005Z",
+  "affected": 6,
+  "matchedCount": 6,
+  "modifiedCount": 6,
+  "backup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/onboarding-four-steps-organizations-2026-08-20T19-34-56-877Z.jsonl",
+    "count": 6,
+    "sha256": "0d83f581b3e06ac113d2ea63e22baaf7a2fa36baac04b23bb708919d8d2c950a"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "migrationName": "continuous-subscription-policy-v1",
+  "generatedAt": "2026-08-20T19:35:04.078Z",
+  "existingPeriods": 0,
+  "dataPolicy": "Existing benefit-period snapshots remain immutable. The new continuity policy is evaluated only when a future payment is confirmed.",
+  "indexes": [
+    {
+      "name": "_id_",
+      "key": {
+        "_id": 1
+      },
+      "unique": false
+    },
+    {
+      "name": "organizationId_1",
+      "key": {
+        "organizationId": 1
+      },
+      "unique": false
+    },
+    {
+      "name": "planId_1",
+      "key": {
+        "planId": 1
+      },
+      "unique": false
+    },
+    {
+      "name": "periodStart_1",
+      "key": {
+        "periodStart": 1
+      },
+      "unique": false
+    },
+    {
+      "name": "periodEnd_1",
+      "key": {
+        "periodEnd": 1
+      },
+      "unique": false
+    },
+    {
+      "name": "unique_payment_benefit_period",
+      "key": {
+        "paymentSource": 1,
+        "paymentNumber": 1
+      },
+      "unique": true
+    },
+    {
+      "name": "tenant_benefit_history",
+      "key": {
+        "organizationId": 1,
+        "periodStart": -1,
+        "_id": -1
+      },
+      "unique": false
+    },
+    {
+      "name": "tenant_continuity_confirmation_order",
+      "key": {
+        "organizationId": 1,
+        "createdAt": -1,
+        "_id": -1
+      },
+      "unique": false
+    },
+    {
+      "name": "tenant_plan_continuity",
+      "key": {
+        "organizationId": 1,
+        "planId": 1,
+        "billingCycle": 1,
+        "periodEnd": -1,
+        "_id": -1
+      },
+      "unique": false
+    },
+    {
+      "name": "tenant_active_benefit_period",
+      "key": {
+        "organizationId": 1,
+        "periodStart": 1,
+        "periodEnd": 1
+      },
+      "unique": false
+    }
+  ]
+}
