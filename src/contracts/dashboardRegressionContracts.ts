@@ -16,7 +16,8 @@ export const PHASE0_REGRESSION_CONTRACTS = {
     clickBehavior: ['dismiss', 'navigate'] as const,
   },
   teamRolePercentages: {
-    denominator: 'members-in-role', independentPerRole: true,
+    denominator: 'members-in-role', independentPerRole: true, activeRolePercentage: 100,
+    source: 'tenant-active-role-summary',
   },
   subscriptionConfirmation: {
     realtimeEvent: 'subscription.changed', oncePerPayment: true, recovery: ['reload', 'login'] as const,

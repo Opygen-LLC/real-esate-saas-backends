@@ -48,6 +48,7 @@ describe('Phase 0 dashboard regression contracts', () => {
     expect(PHASE0_REGRESSION_CONTRACTS.contacts.tenantScoped).toBe(true)
     expect(PHASE0_REGRESSION_CONTRACTS.notifications.clickBehavior).toEqual(['dismiss', 'navigate'])
     expect(PHASE0_REGRESSION_CONTRACTS.teamRolePercentages.independentPerRole).toBe(true)
+    expect(PHASE0_REGRESSION_CONTRACTS.teamRolePercentages.activeRolePercentage).toBe(100)
     expect(PHASE0_REGRESSION_CONTRACTS.subscriptionConfirmation.oncePerPayment).toBe(true)
     expect(PHASE0_REGRESSION_CONTRACTS.receiptDownload.contentType).toBe('application/pdf')
     expect(PHASE0_REGRESSION_CONTRACTS.publicBrokers.adminControlled).toBe(true)

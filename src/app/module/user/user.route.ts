@@ -30,6 +30,12 @@ router.post(
 )
 
 router.get(
+  '/team-summary',
+  authMiddlewares.requirePermission('users.read'),
+  UserController.getTeamRoleSummary
+)
+
+router.get(
   '/leaderboard',
   authMiddlewares.requirePermission('users.read'),
   UserController.getAgentLeaderboard

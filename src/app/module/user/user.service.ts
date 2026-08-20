@@ -12,7 +12,7 @@ import { AuthSession } from '../auth/authSession.model'
 import { OtpChallenge } from '../auth/otpChallenge.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { RealtimeService } from '../realtime/realtime.service'
-import { EntitlementService } from '../entitlement/entitlement.service'
+import { EntitlementService, TEAM_MEMBER_SEAT_ROLES } from '../entitlement/entitlement.service'
 import { Lead } from '../lead/lead.model'
 import { convertedStatusExpression } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
@@ -143,6 +143,32 @@ const getAllUsers = async (
   return {
     meta: { page, limit, total },
     data: rows.map((user) => toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })),
+  }
+}
+
+const getTeamRoleSummary = async (organizationId: string) => {
+  const grouped = await User.aggregate<{ _id: IUserRole; activeCount: number }>([
+    {
+      $match: {
+        organizationId,
+        status: 'active',
+        userRole: { $in: [...TEAM_MEMBER_SEAT_ROLES] },
+      },
+    },
+    { $group: { _id: '$userRole', activeCount: { $sum: 1 } } },
+  ])
+
+  const counts = new Map<IUserRole, number>(
+    grouped.map((item) => [item._id, Number(item.activeCount || 0)]),
+  )
+
+  const roles = TEAM_MEMBER_SEAT_ROLES
+    .map((role) => ({ role, activeCount: counts.get(role) || 0 }))
+    .filter((item) => item.activeCount > 0)
+
+  return {
+    totalActive: roles.reduce((total, item) => total + item.activeCount, 0),
+    roles,
   }
 }
 
@@ -490,6 +516,7 @@ const updateMemberAccess = async (
 export const UserService = {
   createUser,
   getAllUsers,
+  getTeamRoleSummary,
   getPublicAgents,
   getPublicAgentDetail,
   getAgentLeaderboard,

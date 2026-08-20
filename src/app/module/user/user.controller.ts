@@ -48,6 +48,17 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getTeamRoleSummary = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.getTeamRoleSummary(requireTenant(req))
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Team role summary fetched successfully',
+    data: result,
+  })
+})
+
 const getPublicAgents = catchAsync(async (req: Request, res: Response) => {
   const { organizationId } = req.params
   const result = await UserService.getPublicAgents(organizationId)
@@ -204,6 +215,7 @@ export const UserController = {
   createUser,
   inviteAgent,
   getAllUsers,
+  getTeamRoleSummary,
   getPublicAgents,
   getPublicAgentDetail,
   getAgentLeaderboard,
