@@ -11,6 +11,7 @@ export interface ISubscriptionChangeRequest {
   currentPlan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
   currentPlanVersion: number
   requestedPlan: 'starter' | 'professional' | 'agency' | 'enterprise'
+  requestedPlanName?: string
   requestedPlanVersion: number
   billingCycle: 'monthly' | 'yearly'
   amount: number

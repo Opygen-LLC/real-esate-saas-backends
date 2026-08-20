@@ -37,6 +37,18 @@ const resolvePlan = async (planId: string, version?: number, session?: ClientSes
 
 const priceFor = (plan: any, billingCycle: 'monthly' | 'yearly') => Number(billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly)
 
+const fallbackPlanName = (planId: string) => String(planId || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase())
+
+const toChangeRequestContract = (request: any, requestedPlanName?: string) => {
+  const plain = typeof request?.toObject === 'function' ? request.toObject() : { ...(request || {}) }
+  return {
+    ...plain,
+    requestedPlanName: String(requestedPlanName || plain.requestedPlanName || fallbackPlanName(plain.requestedPlan)).trim(),
+  }
+}
+
 const commercialTransaction = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
   if (await mongoSupportsTransactions()) {
     const session = await mongoose.startSession()
@@ -64,17 +76,44 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
   }
   const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (existing) throw new ApiError(httpStatus.CONFLICT, `A subscription request is already open (${existing.requestNumber}). Complete or cancel it first.`)
-  const request = await SubscriptionChangeRequest.create({
-    requestNumber: serial('REQ'), organizationId,
-    currentPlan: org.subscription?.plan || 'trial', currentPlanVersion: Number(org.subscription?.planVersion || 1),
-    requestedPlan: plan.planId, requestedPlanVersion: plan.version, billingCycle: input.billingCycle,
-    amount: priceFor(plan, input.billingCycle), currency: 'BDT', status: 'pending_payment', requestedBy,
-  })
-  await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount } })
-  return request
+  let request: any
+  try {
+    request = await SubscriptionChangeRequest.create({
+      requestNumber: serial('REQ'), organizationId,
+      currentPlan: org.subscription?.plan || 'trial', currentPlanVersion: Number(org.subscription?.planVersion || 1),
+      requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle,
+      amount: priceFor(plan, input.billingCycle), currency: 'BDT', status: 'pending_payment', requestedBy,
+    })
+  } catch (error: any) {
+    if (Number(error?.code) !== 11000) throw error
+    const concurrent: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
+    throw new ApiError(httpStatus.CONFLICT, concurrent?.requestNumber
+      ? `A subscription request is already open (${concurrent.requestNumber}). Complete or cancel it first.`
+      : 'A subscription request is already open. Complete or cancel it first.')
+  }
+  await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount, currency: request.currency } })
+  return toChangeRequestContract(request, plan.name)
 }
 
-const getChangeRequests = async (organizationId: string) => SubscriptionChangeRequest.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).limit(50).lean()
+const getChangeRequests = async (organizationId: string) => {
+  const requests: any[] = await SubscriptionChangeRequest.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).limit(50).lean()
+  const missing = requests.filter((request) => !request.requestedPlanName)
+  if (!missing.length) return requests.map((request) => toChangeRequestContract(request))
+
+  const keys = Array.from(new Set(missing.map((request) => `${request.requestedPlan}:${request.requestedPlanVersion}`)))
+  const planClauses = keys.map((key) => {
+    const [planId, version] = key.split(':')
+    return { planId, version: Number(version) }
+  })
+  const plans: any[] = planClauses.length
+    ? await SubscriptionPlan.find({ $or: planClauses }).select('planId version name').lean()
+    : []
+  const names = new Map(plans.map((plan) => [`${plan.planId}:${plan.version}`, plan.name]))
+  return requests.map((request) => toChangeRequestContract(
+    request,
+    names.get(`${request.requestedPlan}:${request.requestedPlanVersion}`),
+  ))
+}
 
 const cancelChangeRequest = async (organizationId: string, requestId: string, actorId: string) => {
   const request: any = await SubscriptionChangeRequest.findOne({ _id: requestId, organizationId })
@@ -82,14 +121,22 @@ const cancelChangeRequest = async (organizationId: string, requestId: string, ac
   if (request.status !== 'pending_payment') throw new ApiError(httpStatus.CONFLICT, 'Only requests waiting for payment can be cancelled')
   request.status = 'cancelled'; request.reviewedBy = actorId; request.reviewedAt = new Date(); await request.save()
   await writeAudit({ organizationId, actorId, actorRole: 'agency_owner', action: 'subscription.change_cancelled', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency cancelled the pending subscription request', metadata: { requestNumber: request.requestNumber } })
-  return request
+  return toChangeRequestContract(request)
 }
 
 const getTenantPendingState = async (organizationId: string) => {
   const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (!request) return null
-  const payment: any = request.paymentId ? await SubscriptionPayment.findOne({ paymentNumber: request.paymentId }).lean() : null
-  return { ...request, payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null }
+  const [payment, plan] = await Promise.all([
+    request.paymentId ? SubscriptionPayment.findOne({ paymentNumber: request.paymentId }).lean() : null,
+    request.requestedPlanName
+      ? Promise.resolve(null)
+      : SubscriptionPlan.findOne({ planId: request.requestedPlan, version: request.requestedPlanVersion }).select('name').lean(),
+  ]) as [any, any]
+  return {
+    ...toChangeRequestContract(request, plan?.name),
+    payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null,
+  }
 }
 
 const getTenantPaymentHistory = async (organizationId: string, query: any = {}) => {

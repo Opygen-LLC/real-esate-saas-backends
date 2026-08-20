@@ -8,6 +8,7 @@ const subscriptionChangeRequestSchema = new Schema<ISubscriptionChangeRequest>(
     currentPlan: { type: String, enum: ['trial', 'starter', 'professional', 'agency', 'enterprise'], required: true },
     currentPlanVersion: { type: Number, required: true, min: 1 },
     requestedPlan: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise'], required: true },
+    requestedPlanName: { type: String, trim: true, maxlength: 120, default: '' },
     requestedPlanVersion: { type: Number, required: true, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true, min: 0 },
