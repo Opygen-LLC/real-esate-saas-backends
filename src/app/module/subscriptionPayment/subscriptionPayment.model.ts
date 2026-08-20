@@ -27,6 +27,9 @@ const subscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
     periodStart: { type: Date, default: null },
     periodEnd: { type: Date, default: null },
     source: { type: String, enum: ['manual_admin', 'legacy_migration'], default: 'manual_admin' },
+    // Keep these delivery-coordination fields internal. Historical rows do not become eligible automatically.
+    confirmationNoticeEligible: { type: Boolean, default: false, select: false },
+    customerAcknowledgedBy: { type: [String], default: [], select: false },
   },
   { timestamps: true, toJSON: { virtuals: true } },
 )
@@ -34,6 +37,10 @@ const subscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
 subscriptionPaymentSchema.index({ organizationId: 1, createdAt: -1 }, { name: 'tenant_created' })
 subscriptionPaymentSchema.index({ organizationId: 1, status: 1, createdAt: -1 }, { name: 'tenant_status_created' })
 subscriptionPaymentSchema.index({ status: 1, createdAt: -1 }, { name: 'status_created' })
+subscriptionPaymentSchema.index(
+  { organizationId: 1, status: 1, confirmationNoticeEligible: 1, confirmedAt: -1, _id: -1 },
+  { name: 'tenant_confirmation_delivery' },
+)
 subscriptionPaymentSchema.index(
   { changeRequestId: 1, status: 1 },
   { name: 'one_pending_payment_per_request', unique: true, partialFilterExpression: { changeRequestId: { $type: 'objectId' }, status: 'pending' } },

@@ -29,6 +29,10 @@ export interface ISubscriptionPayment {
   periodStart?: Date | null
   periodEnd?: Date | null
   source?: 'manual_admin' | 'legacy_migration'
+  /** Internal delivery flag. Legacy confirmations stay ineligible so deployment does not replay old success modals. */
+  confirmationNoticeEligible?: boolean
+  /** User ids that have persistently acknowledged this confirmed payment. Never exposed in tenant billing DTOs. */
+  customerAcknowledgedBy?: string[]
   createdAt?: Date
   updatedAt?: Date
 }

@@ -36,10 +36,21 @@ const cancelSubscription = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription will cancel at the end of the current period', data: result })
 })
 
+
+const getUnacknowledgedConfirmation = catchAsync(async (req: Request, res: Response) => {
+  const result = await SubscriptionPaymentService.getUnacknowledgedConfirmation(requireTenant(req), req.user!._id!)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription confirmation state fetched successfully', data: result })
+})
+
+const acknowledgeSubscriptionConfirmation = catchAsync(async (req: Request, res: Response) => {
+  const result = await SubscriptionPaymentService.acknowledgeConfirmation(requireTenant(req), req.user!._id!, req.params.paymentNumber)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription confirmation acknowledged', data: result })
+})
+
 const getInvoiceReceipt = catchAsync(async (req: Request, res: Response) => {
   const html = await BillingService.getInvoiceReceipt(requireTenant(req), req.params.id)
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.status(httpStatus.OK).send(html)
 })
 
-export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelSubscription, getInvoiceReceipt }
+export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }

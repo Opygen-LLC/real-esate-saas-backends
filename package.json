@@ -34,6 +34,7 @@
     "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
     "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",
     "migrate:phase2-notifications": "ts-node --transpile-only src/app/db/migratePhase2NotificationLifecycle.ts",
+    "migrate:phase4-subscription-confirmation": "ts-node --transpile-only src/app/db/migratePhase4SubscriptionConfirmation.ts",
     "migrate:phase-0-media": "ts-node --transpile-only src/app/db/migratePhase0PropertyMedia.ts",
     "migrate:phase-1-manual-subscriptions": "ts-node --transpile-only src/app/db/migratePhase1ManualSubscriptions.ts",
     "migrate:phase-3-agency-publishing": "ts-node --transpile-only src/app/db/migratePhase3AgencyPublishing.ts",

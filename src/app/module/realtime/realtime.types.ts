@@ -11,9 +11,10 @@ export type RealtimeChannelEvent =
   | 'auth.changed'
   | 'session.changed'
   | 'organization.changed'
+  | 'subscription.changed'
   | 'platform.notification.changed'
 
-export type RealtimeAction = 'created' | 'updated' | 'deleted' | 'status_changed' | 'assigned' | 'read' | 'resync' | 'authorization_changed' | 'revoked'
+export type RealtimeAction = 'created' | 'updated' | 'deleted' | 'status_changed' | 'assigned' | 'read' | 'resync' | 'authorization_changed' | 'revoked' | 'confirmed'
 
 export interface RealtimeEnvelope {
   type: RealtimeChannelEvent
@@ -26,6 +27,8 @@ export interface RealtimeEnvelope {
   occurredAt: string
   publicVisible?: boolean
   forceLogout?: boolean
+  /** Sanitized event details only. Never include payment references, notes, amounts, or other sensitive billing data. */
+  payload?: Record<string, unknown>
 }
 
 export interface DomainRealtimeInput {

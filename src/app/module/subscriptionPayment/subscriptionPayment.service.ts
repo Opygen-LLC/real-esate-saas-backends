@@ -9,6 +9,7 @@ import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.servi
 import { Organization } from '../organization/organization.model'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
 
@@ -188,6 +189,10 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     }
     await org.save(session ? { session } : undefined)
     payment.status = 'confirmed'; payment.confirmedBy = actor.id; payment.confirmedAt = now; payment.rejectedReason = ''; payment.periodStart = start; payment.periodEnd = end
+    // Only confirmations performed by the new lifecycle are eligible for the one-time customer success modal.
+    // This intentionally prevents legacy confirmed payments from replaying after deployment.
+    payment.confirmationNoticeEligible = true
+    payment.customerAcknowledgedBy = []
     await payment.save(session ? { session } : undefined)
     if (request) {
       request.status = 'approved'; request.reviewedBy = actor.id; request.reviewedAt = now; request.rejectionReason = ''
@@ -197,7 +202,71 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     return payment.organizationId
   })
   await CacheInvalidationService.invalidateTenant(organizationId)
-  return SubscriptionPayment.findOne({ paymentNumber }).lean()
+  const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
+  if (decision.status === 'confirmed' && result) {
+    // Emit only after the commercial transaction has committed and tenant caches have been invalidated.
+    // The payload deliberately excludes amount, method, reference, notes and proof metadata.
+    RealtimeService.emitOrganization(organizationId, {
+      type: 'subscription.changed',
+      action: 'confirmed',
+      entityId: result.paymentNumber,
+      eventType: 'subscription.payment_confirmed',
+      payload: {
+        paymentNumber: result.paymentNumber,
+        receiptNumber: result.receiptNumber,
+        plan: result.planId,
+        billingCycle: result.billingCycle,
+        periodStart: result.periodStart ? new Date(result.periodStart).toISOString() : null,
+        periodEnd: result.periodEnd ? new Date(result.periodEnd).toISOString() : null,
+      },
+    })
+  }
+  return result
+}
+
+const planDisplayName = (planId: string) => String(planId || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\b\w/g, (character) => character.toUpperCase())
+
+const getUnacknowledgedConfirmation = async (organizationId: string, userId: string) => {
+  const payment: any = await SubscriptionPayment.findOne({
+    organizationId,
+    status: 'confirmed',
+    confirmationNoticeEligible: true,
+    customerAcknowledgedBy: { $ne: userId },
+  })
+    .sort({ confirmedAt: -1, _id: -1 })
+    .select('organizationId paymentNumber receiptNumber planId planVersion billingCycle periodStart periodEnd confirmedAt')
+    .lean()
+
+  if (!payment) return null
+  const plan: any = await SubscriptionPlan.findOne({ planId: payment.planId, version: payment.planVersion })
+    .select('name')
+    .lean()
+
+  return {
+    organizationId: payment.organizationId,
+    paymentNumber: payment.paymentNumber,
+    receiptNumber: payment.receiptNumber,
+    planId: payment.planId,
+    planName: plan?.name || planDisplayName(payment.planId),
+    billingCycle: payment.billingCycle,
+    periodStart: payment.periodStart || null,
+    periodEnd: payment.periodEnd || null,
+    confirmedAt: payment.confirmedAt || null,
+  }
+}
+
+const acknowledgeConfirmation = async (organizationId: string, userId: string, paymentNumber: string) => {
+  const payment: any = await SubscriptionPayment.findOneAndUpdate(
+    { organizationId, paymentNumber, status: 'confirmed', confirmationNoticeEligible: true },
+    { $addToSet: { customerAcknowledgedBy: userId } },
+    { new: true },
+  )
+    .select('paymentNumber receiptNumber')
+    .lean()
+  if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription confirmation not found')
+  return { paymentNumber: payment.paymentNumber, receiptNumber: payment.receiptNumber, acknowledged: true as const }
 }
 
 const getPaymentLedger = async (query: any) => {
@@ -251,4 +320,4 @@ const renderReceipt = async (organizationId: string, id: string) => {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payment.receiptNumber)}</title><style>body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:32px}.card{max-width:680px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:18px;padding:32px}.row{display:flex;justify-content:space-between;gap:16px}.muted{color:#64748b;font-size:13px}.total{font-size:24px;font-weight:800}.badge{display:inline-block;background:#dcfce7;color:#166534;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:24px}td,th{padding:12px;border-bottom:1px solid #e2e8f0;text-align:left}</style></head><body><div class="card"><div class="row"><div><h2>SUBSCRIPTION PAYMENT RECEIPT</h2><div class="muted">Opygen Estate</div></div><span class="badge">CONFIRMED</span></div><hr><p><b>Receipt:</b> ${escapeHtml(payment.receiptNumber)}</p><p><b>Payment:</b> ${escapeHtml(payment.paymentNumber)}</p><p><b>Agency:</b> ${escapeHtml(org?.agencyName || organizationId)} (${escapeHtml(org?.email || '')})</p><p><b>Paid:</b> ${escapeHtml(new Date(payment.paidAt || payment.confirmedAt).toLocaleString('en-BD'))}</p><table><tr><th>Description</th><th>Cycle</th><th>Amount</th></tr><tr><td>${escapeHtml(plan.name)} v${escapeHtml(payment.planVersion)}</td><td>${escapeHtml(payment.billingCycle)}</td><td>${escapeHtml(amount)}</td></tr></table><p class="muted">Method: ${escapeHtml(payment.method)}${payment.reference ? ` · Reference: ${escapeHtml(payment.reference)}` : ''}</p><div class="row"><span></span><span class="total">${escapeHtml(amount)}</span></div></div><script>window.print()</script></body></html>`
 }
 
-export const SubscriptionPaymentService = { createChangeRequest, getChangeRequests, cancelChangeRequest, getTenantPendingState, getTenantPaymentHistory, recordPayment, decidePayment, getPaymentLedger, getRevenueDashboard, renderReceipt }
+export const SubscriptionPaymentService = { createChangeRequest, getChangeRequests, cancelChangeRequest, getTenantPendingState, getTenantPaymentHistory, recordPayment, decidePayment, getUnacknowledgedConfirmation, acknowledgeConfirmation, getPaymentLedger, getRevenueDashboard, renderReceipt }
