@@ -1,0 +1,7 @@
+{
+  "migrationName": "phase2-notification-lifecycle",
+  "generatedAt": "2026-08-20T10:41:55.282Z",
+  "appliedIndexes": [
+    "notifications.tenant_user_dismissed_created"
+  ]
+}

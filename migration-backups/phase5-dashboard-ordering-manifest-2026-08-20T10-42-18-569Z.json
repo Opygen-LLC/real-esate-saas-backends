@@ -1,0 +1,26 @@
+{
+  "migrationName": "phase5-dashboard-ordering",
+  "generatedAt": "2026-08-20T10:42:18.569Z",
+  "appliedIndexes": [
+    "properties.phase5_tenant_created_stable",
+    "leads.phase5_tenant_converted_created_stable",
+    "tasks.phase5_tenant_created_stable",
+    "viewings.phase5_tenant_created_stable",
+    "viewings.phase5_tenant_calendar_stable",
+    "users.phase5_tenant_created_stable",
+    "websitesubmissions.phase5_tenant_created_stable",
+    "agencyreviews.phase5_tenant_created_stable",
+    "reviewinvitations.phase5_tenant_created_stable",
+    "financetransactions.phase5_tenant_created_stable",
+    "financeinvoices.phase5_tenant_active_created_stable",
+    "financecommissions.phase5_tenant_created_stable",
+    "financevendors.phase5_tenant_created_stable",
+    "financebudgets.phase5_tenant_created_stable",
+    "subscriptionpayments.phase5_tenant_created_stable",
+    "subscriptionpayments.phase5_created_stable",
+    "auditevents.phase5_tenant_created_stable",
+    "auditevents.phase5_created_stable",
+    "organizations.phase5_created_stable",
+    "bkashpayments.phase5_created_stable"
+  ]
+}

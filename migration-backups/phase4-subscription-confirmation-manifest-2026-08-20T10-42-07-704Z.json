@@ -1,0 +1,8 @@
+{
+  "migrationName": "phase4-subscription-confirmation",
+  "generatedAt": "2026-08-20T10:42:07.704Z",
+  "appliedIndexes": [
+    "subscriptionpayments.tenant_confirmation_delivery"
+  ],
+  "dataBackfill": "none-existing-confirmed-payments-remain-ineligible"
+}
