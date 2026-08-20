@@ -67,7 +67,8 @@
     "migrate:property-draft-assets": "ts-node --transpile-only src/app/db/migratePropertyDraftAssets.ts",
     "migrate:domain-lifecycle": "ts-node --transpile-only src/app/db/migratePhase9DomainLifecycle.ts",
     "test:phase10": "vitest run src/tests/contract/phase10ProductionRelease.contract.test.ts src/tests/contract/teamQuota.contract.test.ts src/tests/unit/phase5FilterSort.contract.test.ts src/tests/unit/propertyImportExport.contract.test.ts src/tests/unit/propertyDraftAssetLifecycle.contract.test.ts src/tests/contract/phase8AuthSessions.contract.test.ts src/tests/contract/phase9CustomDomainLifecycle.contract.test.ts",
-    "verify:phase10": "node scripts/verify-phase10-release.mjs"
+    "verify:phase10": "node scripts/verify-phase10-release.mjs",
+    "migrate:phase5-dashboard-ordering": "ts-node --transpile-only src/app/db/migratePhase5DashboardOrdering.ts"
   },
   "keywords": [
     "real-estate",

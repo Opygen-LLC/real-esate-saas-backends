@@ -39,5 +39,17 @@ export const buildStableSort = (sortBy: string, sortOrder: SortOrder): Record<st
   return { [sortBy]: direction, _id: direction }
 }
 
-export const paginationHelper = { calculatePagination, buildStableSort }
+export const buildAllowedStableSort = (
+  requestedSortBy: string,
+  sortOrder: SortOrder,
+  allowedFields: ReadonlySet<string>,
+  fallbackSortBy = 'createdAt',
+): Record<string, 1 | -1> => {
+  const sortBy = allowedFields.has(requestedSortBy) ? requestedSortBy : fallbackSortBy
+  return buildStableSort(sortBy, sortOrder)
+}
+
+export const buildCalendarSort = (): Record<string, 1 | -1> => ({ date: 1, startTime: 1, _id: 1 })
+
+export const paginationHelper = { calculatePagination, buildStableSort, buildAllowedStableSort, buildCalendarSort }
 export default paginationHelper

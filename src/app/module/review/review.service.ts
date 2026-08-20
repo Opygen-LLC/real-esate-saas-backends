@@ -23,8 +23,8 @@ const createInvitation = async (organizationId: string, createdBy: string, prope
 
 const list = async (organizationId: string) => {
   const [reviews, invitations] = await Promise.all([
-    AgencyReview.find({ organizationId }).populate('propertyId', 'title slug images').sort({ createdAt: -1 }).lean(),
-    ReviewInvitation.find({ organizationId }).populate('propertyId', 'title slug').select('-tokenHash').sort({ createdAt: -1 }).limit(100).lean(),
+    AgencyReview.find({ organizationId }).populate('propertyId', 'title slug images').sort({ createdAt: -1, _id: -1 }).lean(),
+    ReviewInvitation.find({ organizationId }).populate('propertyId', 'title slug').select('-tokenHash').sort({ createdAt: -1, _id: -1 }).limit(100).lean(),
   ])
   return { reviews, invitations }
 }
@@ -99,6 +99,6 @@ const revokeInvitation = async (organizationId: string, id: string) => {
 }
 
 const getPublicReviews = async (organizationId: string) => AgencyReview.find({ organizationId, status: 'published' })
-  .populate('propertyId', 'title slug images').select('name rating comment propertyId createdAt').sort({ createdAt: -1 }).limit(50).lean()
+  .populate('propertyId', 'title slug images').select('name rating comment propertyId createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean()
 
 export const ReviewService = { createInvitation, list, getInvitation, submit, moderate, remove, revokeInvitation, getPublicReviews }

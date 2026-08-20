@@ -65,9 +65,9 @@ const getTenantHealth = async (query: any) => {
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, activePipelineLeadFilter()),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus lastCheckedAt diagnostics').lean(),
-    DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
-    SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
-    SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted'] } } }, { $sort: { createdAt: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
+    DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
+    SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
+    SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted'] } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
     groupCounts(OperationsJob, ids, { status: 'failed' }),
     groupCounts(MetaEvent, ids, { status: 'dead' }),
   ])
@@ -194,7 +194,7 @@ const getAuditLog = async (query: any) => {
     filter.$or = ['action', 'entityType', 'entityId', 'reason', 'organizationId', 'actorId'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } }))
   }
   const [data, total] = await Promise.all([
-    AuditEvent.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    AuditEvent.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     AuditEvent.countDocuments(filter),
   ])
   return { data, meta: { page, limit, total } }
@@ -336,11 +336,11 @@ const searchPlatform = async (query: string) => {
   const regex = new RegExp(safeRegex(q), 'i')
   const [organizations, users, payments] = await Promise.all([
     Organization.find({ $or: [{ agencyName: regex }, { organizationId: regex }, { email: regex }, { phone: regex }, { domain: regex }, { sub_domain: regex }] })
-      .select('_id organizationId agencyName email subscription.plan isBlocked').sort({ updatedAt: -1 }).limit(6).lean(),
+      .select('_id organizationId agencyName email subscription.plan isBlocked').sort({ updatedAt: -1, _id: -1 }).limit(6).lean(),
     User.find({ $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] })
-      .select('_id name email phoneNumber userRole organizationId status').sort({ updatedAt: -1 }).limit(6).lean(),
+      .select('_id name email phoneNumber userRole organizationId status').sort({ updatedAt: -1, _id: -1 }).limit(6).lean(),
     SubscriptionPayment.find({ $or: [{ paymentNumber: regex }, { receiptNumber: regex }, { reference: regex }, { organizationId: regex }] })
-      .select('_id paymentNumber organizationId amount status method createdAt').sort({ createdAt: -1 }).limit(4).lean(),
+      .select('_id paymentNumber organizationId amount status method createdAt').sort({ createdAt: -1, _id: -1 }).limit(4).lean(),
   ])
   return [
     ...organizations.map((row:any) => ({ kind: 'organization', id: String(row._id), title: row.agencyName, subtitle: `${row.organizationId} · ${row.subscription?.plan || 'trial'}${row.isBlocked ? ' · suspended' : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}` })),
@@ -351,10 +351,10 @@ const searchPlatform = async (query: string) => {
 
 const getPlatformNotifications = async () => {
   const [pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
-    SubscriptionPayment.find({ status: 'pending' }).select('_id paymentNumber organizationId amount method createdAt').sort({ createdAt: -1 }).limit(6).lean(),
-    OperationsJob.find({ status: 'failed' }).select('_id organizationId type entityId lastError updatedAt').sort({ updatedAt: -1 }).limit(6).lean(),
-    Organization.find({ isBlocked: true }).select('_id organizationId agencyName platformAccess.suspensionReason updatedAt').sort({ updatedAt: -1 }).limit(4).lean(),
-    DomainRecord.find({ $or: [{ status: 'failed' }, { tlsStatus: 'failed' }] }).select('_id organizationId domain status tlsStatus updatedAt').sort({ updatedAt: -1 }).limit(4).lean(),
+    SubscriptionPayment.find({ status: 'pending' }).select('_id paymentNumber organizationId amount method createdAt').sort({ createdAt: -1, _id: -1 }).limit(6).lean(),
+    OperationsJob.find({ status: 'failed' }).select('_id organizationId type entityId lastError updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(6).lean(),
+    Organization.find({ isBlocked: true }).select('_id organizationId agencyName platformAccess.suspensionReason updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(4).lean(),
+    DomainRecord.find({ $or: [{ status: 'failed' }, { tlsStatus: 'failed' }] }).select('_id organizationId domain status tlsStatus updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(4).lean(),
   ])
   const items = [
     ...pendingPayments.map((row:any) => ({ id: `payment:${row._id}`, type: 'payment_pending', severity: 'warning', title: 'Payment needs review', body: `${row.paymentNumber} · ${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: '/dashboard/super-admin/subscriptions', createdAt: row.createdAt })),

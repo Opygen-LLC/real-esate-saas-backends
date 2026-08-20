@@ -61,7 +61,7 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
   if (org.subscription?.plan === plan.planId && Number(org.subscription?.planVersion || 1) === Number(plan.version) && ['active', 'grace', 'cancel_at_period_end'].includes(org.subscription?.status)) {
     throw new ApiError(httpStatus.CONFLICT, 'This is already your current subscription plan')
   }
-  const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1 }).lean()
+  const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (existing) throw new ApiError(httpStatus.CONFLICT, `A subscription request is already open (${existing.requestNumber}). Complete or cancel it first.`)
   const request = await SubscriptionChangeRequest.create({
     requestNumber: serial('REQ'), organizationId,
@@ -85,7 +85,7 @@ const cancelChangeRequest = async (organizationId: string, requestId: string, ac
 }
 
 const getTenantPendingState = async (organizationId: string) => {
-  const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1 }).lean()
+  const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (!request) return null
   const payment: any = request.paymentId ? await SubscriptionPayment.findOne({ paymentNumber: request.paymentId }).lean() : null
   return { ...request, payment: payment ? { paymentNumber: payment.paymentNumber, status: payment.status, method: payment.method, reference: payment.reference, paidAt: payment.paidAt, amount: payment.amount } : null }
@@ -295,7 +295,7 @@ const getRevenueDashboard = async () => {
   const [totals, month, latest, trend, status, active] = await Promise.all([
     SubscriptionPayment.aggregate([{ $match: { status: 'confirmed' } }, { $group: { _id: null, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }]),
     SubscriptionPayment.aggregate([{ $match: { status: 'confirmed', confirmedAt: { $gte: monthStart } } }, { $group: { _id: null, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }]),
-    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed' } }, { $sort: { confirmedAt: -1 } }, { $group: { _id: '$organizationId', amount: { $first: '$amount' }, billingCycle: { $first: '$billingCycle' } } }]),
+    SubscriptionPayment.aggregate([{ $match: { status: 'confirmed' } }, { $sort: { confirmedAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', amount: { $first: '$amount' }, billingCycle: { $first: '$billingCycle' } } }]),
     SubscriptionPayment.aggregate([{ $match: { status: 'confirmed', confirmedAt: { $gte: sixMonthsAgo } } }, { $group: { _id: { year: { $year: '$confirmedAt' }, month: { $month: '$confirmedAt' } }, revenue: { $sum: '$amount' }, payments: { $sum: 1 } } }, { $sort: { '_id.year': 1, '_id.month': 1 } }]),
     SubscriptionPayment.aggregate([{ $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
     Organization.find({ isBlocked: { $ne: true }, 'subscription.status': { $in: ['active', 'grace', 'cancel_at_period_end'] }, 'subscription.plan': { $ne: 'trial' } }).select('organizationId').lean(),

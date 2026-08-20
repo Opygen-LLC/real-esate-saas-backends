@@ -108,7 +108,7 @@ const parseBoundary = (value: string | undefined, field: string): Date | undefin
 const list = async (organizationId: string, filters: WebsiteSubmissionFilter, paginationOptions: IPaginationOptions) => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({
     ...paginationOptions,
-    sortBy: paginationOptions.sortBy || 'submittedAt',
+    sortBy: paginationOptions.sortBy || 'createdAt',
     sortOrder: paginationOptions.sortOrder || 'desc',
     limit: paginationOptions.limit || 50,
   })
@@ -135,7 +135,7 @@ const list = async (organizationId: string, filters: WebsiteSubmissionFilter, pa
   const [rows, total] = await Promise.all([
     WebsiteSubmission.find(where)
       .populate({ path: 'propertyId', select: 'title slug address city images', match: { organizationId } })
-      .sort({ [sortBy]: sortOrder, _id: sortOrder })
+      .sort(paginationHelper.buildStableSort(sortBy, sortOrder))
       .skip(skip)
       .limit(limit)
       .lean(),

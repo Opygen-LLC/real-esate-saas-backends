@@ -78,8 +78,11 @@ describe('Phase 0 regression coverage invariants', () => {
     expect(contactService).toMatch(/sortBy: 'updatedAt', sortOrder: 'desc'/)
     expect(readModel).toMatch(/return \{ \[field\]: order, _id: order \}/)
     expect(organizationService).toMatch(/_id: sortOrder/)
-    expect(websiteSubmissions).toMatch(/_id: sortOrder/)
-    expect(viewings).toMatch(/date:1,startTime:1[\s\S]*_id:1/)
+    expect(websiteSubmissions).toMatch(/sortBy: paginationOptions\.sortBy \|\| 'createdAt'/)
+    expect(websiteSubmissions).toMatch(/buildStableSort\(sortBy, sortOrder\)/)
+    expect(viewings).toMatch(/viewMode === 'calendar'/)
+    expect(viewings).toMatch(/buildCalendarSort\(\)/)
+    expect(viewings).toMatch(/buildAllowedStableSort\(sortBy, sortOrder, VIEWING_LIST_SORT_FIELDS, 'createdAt'\)/)
   })
 
 })

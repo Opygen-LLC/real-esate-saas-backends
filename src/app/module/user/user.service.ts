@@ -121,6 +121,8 @@ const createUser = async (organizationId: string, userData: IUserCreateInput, ac
   return toUserDto(user, { includeAccessControl: true, includePrivateProfile: true, includePermissions: true })
 }
 
+const USER_LIST_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'name', 'email', 'userRole', 'status'])
+
 const buildUserWhere = (filters: IUserFilter) => {
   const { searchTerm: _searchTerm, ...filterFields } = filters
   const entries = Object.entries(filterFields).filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -136,7 +138,7 @@ const getAllUsers = async (
   const { rows, total } = await paginateUsersWithProfiles({
     match: whereCondition,
     searchTerm: filters.searchTerm,
-    sort: { [sortBy]: sortOrder === 1 ? 1 : -1, _id: sortOrder === 1 ? 1 : -1 },
+    sort: paginationHelper.buildAllowedStableSort(sortBy, sortOrder, USER_LIST_SORT_FIELDS, 'createdAt'),
     skip,
     limit,
   })
@@ -371,9 +373,7 @@ const superAdminExportWhere = (filters: IUserFilter) => {
 const getAllUsersSuperAdmin = async (filters: IUserFilter, paginationOptions: IPaginationOptions) => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({ ...paginationOptions, limit: paginationOptions.limit || 10 })
   const whereConditions = superAdminUserWhere(filters)
-  const sortConditions: Record<string, 1 | -1> = sortBy
-    ? { [sortBy]: sortOrder === 1 ? 1 : -1, _id: sortOrder === 1 ? 1 : -1 }
-    : { createdAt: -1, _id: -1 }
+  const sortConditions = paginationHelper.buildAllowedStableSort(sortBy, sortOrder, USER_LIST_SORT_FIELDS, 'createdAt')
   const { rows, total } = await paginateUsersWithProfiles({
     match: whereConditions,
     searchTerm: filters.searchTerm,

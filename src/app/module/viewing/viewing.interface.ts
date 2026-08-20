@@ -44,6 +44,7 @@ export type IViewingFilter = {
   date?: string
   startDate?: string
   endDate?: string
+  viewMode?: 'list' | 'calendar'
 }
 
 export type ViewingModel = Model<IViewing>

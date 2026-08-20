@@ -177,13 +177,13 @@ const getAllTasks = async (
   const where = conditions.length ? { $and: conditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
   const allowedSort = new Set(['dueAt', 'createdAt', 'updatedAt', 'priority', 'status', 'approvalStatus', 'title'])
-  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'dueAt'
+  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const [result, total] = await Promise.all([
     Task.find(where)
       .populate(userRefPopulate('assignedAgent', 'name email userRole'))
       .populate('linkedLead', 'name phone email')
       .populate('linkedProperty', 'title price')
-      .sort({ [safeSortBy]: sortOrder, _id: sortOrder })
+      .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
       .skip(skip)
       .limit(limit),
     Task.countDocuments(where),

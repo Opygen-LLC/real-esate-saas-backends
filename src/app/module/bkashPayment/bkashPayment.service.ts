@@ -290,7 +290,7 @@ const searchPayments = async (search: string, status?: string) => {
   const query: Record<string, unknown> = {}
   if (search) query.$or = ['paymentId', 'transactionId', 'invoiceNumber', 'organizationId'].map(field => ({ [field]: { $regex: escaped, $options: 'i' } }))
   if (status) query.status = status
-  return BkashPayment.find(query).sort({ createdAt: -1 }).limit(100)
+  return BkashPayment.find(query).sort({ createdAt: -1, _id: -1 }).limit(100)
 }
 
 const manualReconcile = async (paymentId: string, reason: string, actor: { id: string; requestId?: string; ip?: string }) => {

@@ -70,6 +70,7 @@ const getAllViewings = catchAsync(async (req: Request, res: Response) => {
     'date',
     'startDate',
     'endDate',
+    'viewMode',
   ])
 
   filters.organizationId = requireTenant(req)
