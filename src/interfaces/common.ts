@@ -25,6 +25,8 @@ export type IGenericResponse<T> = {
     page: number
     limit: number
     total: number
+    totalPages?: number
+    summary?: Record<string, number>
   }
   data: T
 }

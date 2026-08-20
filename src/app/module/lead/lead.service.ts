@@ -372,7 +372,7 @@ const getAllLeads=async(filters:ILeadFilter,paginationOptions:IPaginationOptions
   const where=buildLeadWhere(filters,access)
   const{page,limit,skip,sortBy,sortOrder}=paginationHelper.calculatePagination(paginationOptions)
   const pageResult=await readLeadListPage<ILead>({match:where,skip,limit,sortBy,sortOrder})
-  return{meta:{page,limit,total:pageResult.total},data:pageResult.rows}
+  return{meta:{page,limit,total:pageResult.total,totalPages:Math.ceil(pageResult.total/Math.max(limit,1))},data:pageResult.rows}
 }
 
 
@@ -402,7 +402,7 @@ const getTodayFollowUps=async(
     sortOrder:1,
   })
   return{
-    meta:{page,limit,total:pageResult.total},
+    meta:{page,limit,total:pageResult.total,totalPages:Math.ceil(pageResult.total/Math.max(limit,1))},
     data:pageResult.rows,
     day:{
       timeZone:bounds.timeZone,

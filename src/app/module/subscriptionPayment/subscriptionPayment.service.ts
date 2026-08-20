@@ -100,6 +100,19 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
       : 'A subscription request is already open. Complete or cancel it first.')
   }
   await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount, currency: request.currency } })
+  RealtimeService.emitRole('super-admin', {
+    type: 'platform.notification.changed',
+    action: 'created',
+    entityId: String(request._id),
+    eventType: 'subscription.change_requested',
+    payload: {
+      requestNumber: request.requestNumber,
+      organizationId,
+      requestedPlan: plan.planId,
+      requestedPlanVersion: plan.version,
+      billingCycle: input.billingCycle,
+    },
+  })
   return toChangeRequestContract(request, plan.name)
 }
 
@@ -129,6 +142,13 @@ const cancelChangeRequest = async (organizationId: string, requestId: string, ac
   if (request.status !== 'pending_payment') throw new ApiError(httpStatus.CONFLICT, 'Only requests waiting for payment can be cancelled')
   request.status = 'cancelled'; request.reviewedBy = actorId; request.reviewedAt = new Date(); await request.save()
   await writeAudit({ organizationId, actorId, actorRole: 'agency_owner', action: 'subscription.change_cancelled', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency cancelled the pending subscription request', metadata: { requestNumber: request.requestNumber } })
+  RealtimeService.emitRole('super-admin', {
+    type: 'platform.notification.changed',
+    action: 'updated',
+    entityId: String(request._id),
+    eventType: 'subscription.change_cancelled',
+    payload: { requestNumber: request.requestNumber, organizationId },
+  })
   return toChangeRequestContract(request)
 }
 
@@ -379,7 +399,7 @@ const getPaymentLedger = async (query: any) => {
   const ids = [...new Set(rows.map((row: any) => row.organizationId))]
   const orgs = await Organization.find({ organizationId: { $in: ids } }).select('organizationId agencyName email').lean()
   const orgMap = new Map(orgs.map((org: any) => [org.organizationId, org]))
-  return { data: rows.map((row: any) => ({ ...row, organization: orgMap.get(row.organizationId) || null })), meta: { page, limit, total, summary } }
+  return { data: rows.map((row: any) => ({ ...row, organization: orgMap.get(row.organizationId) || null })), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary } }
 }
 
 const getRevenueDashboard = async () => {

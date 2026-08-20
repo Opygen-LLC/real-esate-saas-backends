@@ -13,6 +13,10 @@ const tenantHealth = catchAsync(async (req: Request, res: Response) => {
 })
 const suspendTenant = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Organization suspended without deleting tenant data', data: await PlatformAdminService.suspendTenant(req.params.organizationId, { id: req.user!._id!, reason: req.body.reason, requestId: req.requestId, ip: req.ip }) }))
 const reactivateTenant = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Organization reactivated', data: await PlatformAdminService.reactivateTenant(req.params.organizationId, { id: req.user!._id!, reason: req.body.reason, requestId: req.requestId, ip: req.ip }) }))
+const subscriptionRequests = catchAsync(async (req: Request, res: Response) => {
+  const result = await PlatformAdminService.getSubscriptionRequests(req.query)
+  sendResponse(res, { statusCode: 200, success: true, message: 'Subscription requests fetched', data: result.data, meta: result.meta as any })
+})
 const paymentLedger = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getPaymentLedger(req.query)
   sendResponse(res, { statusCode: 200, success: true, message: 'Manual subscription payment ledger fetched', data: result.data, meta: result.meta as any })
@@ -59,4 +63,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, subscriptionRequests, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }

@@ -178,7 +178,8 @@ const getAllTasks = async (
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
   const allowedSort = new Set(['dueAt', 'createdAt', 'updatedAt', 'priority', 'status', 'approvalStatus', 'title'])
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
-  const [result, total] = await Promise.all([
+  const dayBounds = getDayBoundsInTimeZone(new Date(), CRM_FOLLOW_UP_TIME_ZONE)
+  const [result, summaryRows] = await Promise.all([
     Task.find(where)
       .populate(userRefPopulate('assignedAgent', 'name email userRole'))
       .populate('linkedLead', 'name phone email')
@@ -186,9 +187,58 @@ const getAllTasks = async (
       .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
       .skip(skip)
       .limit(limit),
-    Task.countDocuments(where),
+    Task.aggregate([
+      { $match: where },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } },
+          dueToday: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ['$dueAt', dayBounds.start] },
+                    { $lt: ['$dueAt', dayBounds.endExclusive] },
+                    { $ne: ['$status', 'Completed'] },
+                    { $ne: ['$status', 'Cancelled'] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          overdue: {
+            $sum: {
+              $cond: [
+                { $and: [{ $lt: ['$dueAt', dayBounds.start] }, { $ne: ['$status', 'Completed'] }, { $ne: ['$status', 'Cancelled'] }] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
   ])
-  return { meta: { page, limit, total }, data: result }
+  const summary = summaryRows[0] || { total: 0, completed: 0, dueToday: 0, overdue: 0 }
+  const total = Number(summary.total || 0)
+  return {
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / Math.max(limit, 1)),
+      summary: {
+        completed: Number(summary.completed || 0),
+        dueToday: Number(summary.dueToday || 0),
+        overdue: Number(summary.overdue || 0),
+      },
+    },
+    data: result,
+  }
 }
 
 

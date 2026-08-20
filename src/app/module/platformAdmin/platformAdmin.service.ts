@@ -167,6 +167,94 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
   return org
 }
 
+const getSubscriptionRequests = async (query: any) => {
+  const page = Math.max(1, Number(query.page || 1))
+  const limit = clampLimit(query.limit, 20)
+  const filter: any = {}
+
+  if (query.planId) filter.requestedPlan = String(query.planId)
+  if (query.billingCycle) filter.billingCycle = String(query.billingCycle)
+
+  if (query.search) {
+    const rawSearch = String(query.search).trim()
+    const regex = safeRegex(rawSearch)
+    const organizationMatches = await Organization.find({
+      $or: [
+        { agencyName: { $regex: regex, $options: 'i' } },
+        { email: { $regex: regex, $options: 'i' } },
+        { organizationId: { $regex: regex, $options: 'i' } },
+      ],
+    }).distinct('organizationId')
+    filter.$or = [
+      { requestNumber: { $regex: regex, $options: 'i' } },
+      { organizationId: { $regex: regex, $options: 'i' } },
+      ...(organizationMatches.length ? [{ organizationId: { $in: organizationMatches } }] : []),
+    ]
+  }
+
+  // Summary cards follow search/plan/cycle filters but intentionally ignore the status tab.
+  const summaryFilter = { ...filter }
+  const status = String(query.status || 'open')
+  if (status === 'open') filter.status = { $in: ['pending_payment', 'payment_submitted'] }
+  else if (status !== 'all') filter.status = status
+
+  const [requests, total, statusSummary] = await Promise.all([
+    SubscriptionChangeRequest.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    SubscriptionChangeRequest.countDocuments(filter),
+    SubscriptionChangeRequest.aggregate([
+      { $match: summaryFilter },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+  ])
+
+  if (!requests.length) {
+    return {
+      data: [],
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / Math.max(limit, 1)),
+        summary: Object.fromEntries(statusSummary.map((row: any) => [String(row._id), Number(row.count || 0)])),
+      },
+    }
+  }
+
+  const organizationIds = [...new Set(requests.map((request: any) => String(request.organizationId)))]
+  const paymentNumbers = requests.map((request: any) => String(request.paymentId || '')).filter(Boolean)
+  const [organizations, payments] = await Promise.all([
+    Organization.find({ organizationId: { $in: organizationIds } })
+      .select('organizationId agencyName email phone subscription.plan subscription.planVersion subscription.status subscription.currentPeriodEnd')
+      .lean(),
+    paymentNumbers.length
+      ? SubscriptionPayment.find({ paymentNumber: { $in: paymentNumbers } })
+        .select('paymentNumber receiptNumber status method reference paidAt confirmedAt rejectedAt rejectedReason amount currency createdAt')
+        .lean()
+      : Promise.resolve([]),
+  ])
+  const organizationMap = new Map(organizations.map((organization: any) => [String(organization.organizationId), organization]))
+  const paymentMap = new Map((payments as any[]).map((payment: any) => [String(payment.paymentNumber), payment]))
+
+  return {
+    data: requests.map((request: any) => ({
+      ...request,
+      organization: organizationMap.get(String(request.organizationId)) || null,
+      payment: request.paymentId ? paymentMap.get(String(request.paymentId)) || null : null,
+    })),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / Math.max(limit, 1)),
+      summary: Object.fromEntries(statusSummary.map((row: any) => [String(row._id), Number(row.count || 0)])),
+    },
+  }
+}
+
 const getPaymentLedger = async (query: any) => SubscriptionPaymentService.getPaymentLedger(query)
 const getBenefitPeriodHistory = async (query: any) => SubscriptionBenefitPeriodService.getHistory(query)
 const getTenantLeadEntitlement = async (organizationId: string) => SubscriptionBenefitPeriodService.getCurrentLeadEntitlement(organizationId)
@@ -426,13 +514,15 @@ const searchPlatform = async (query: string) => {
 }
 
 const getPlatformNotifications = async () => {
-  const [pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
+  const [subscriptionRequests, pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
+    SubscriptionChangeRequest.find({ status: 'pending_payment' }).select('_id requestNumber organizationId requestedPlan requestedPlanName requestedPlanVersion billingCycle amount createdAt').sort({ createdAt: -1, _id: -1 }).limit(8).lean(),
     SubscriptionPayment.find({ status: 'pending' }).select('_id paymentNumber organizationId amount method createdAt').sort({ createdAt: -1, _id: -1 }).limit(6).lean(),
     OperationsJob.find({ status: 'failed' }).select('_id organizationId type entityId lastError updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(6).lean(),
     Organization.find({ isBlocked: true }).select('_id organizationId agencyName platformAccess.suspensionReason updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(4).lean(),
     DomainRecord.find({ $or: [{ status: 'failed' }, { tlsStatus: 'failed' }] }).select('_id organizationId domain status tlsStatus updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(4).lean(),
   ])
   const items = [
+    ...subscriptionRequests.map((row:any) => ({ id: `subscription-request:${row._id}`, type: 'subscription_request', severity: 'warning', title: 'New subscription request', body: `${row.requestNumber} · ${row.organizationId} · ${row.requestedPlanName || String(row.requestedPlan).replace(/_/g, ' ')} v${row.requestedPlanVersion} · ${row.billingCycle} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: `/dashboard/super-admin/subscription-requests?search=${encodeURIComponent(row.requestNumber)}`, createdAt: row.createdAt })),
     ...pendingPayments.map((row:any) => ({ id: `payment:${row._id}`, type: 'payment_pending', severity: 'warning', title: 'Payment needs review', body: `${row.paymentNumber} · ${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: '/dashboard/super-admin/subscriptions', createdAt: row.createdAt })),
     ...failedJobs.map((row:any) => ({ id: `job:${row._id}`, type: 'operation_failed', severity: 'danger', title: `${String(row.type).replace(/_/g, ' ')} failed`, body: `${row.organizationId}${row.lastError ? ` · ${String(row.lastError).slice(0, 140)}` : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
     ...failedDomains.map((row:any) => ({ id: `domain:${row._id}`, type: 'domain_failed', severity: 'danger', title: 'Domain/TLS needs attention', body: `${row.domain || row.organizationId} · ${row.status}/${row.tlsStatus}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
@@ -492,4 +582,4 @@ const endImpersonation = async (token: string, _actorId?: string, requestId?: st
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

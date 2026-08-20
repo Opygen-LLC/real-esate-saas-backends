@@ -25,6 +25,14 @@ const renewalStreakBody = z.object({
     reason: z.string().trim().min(10).max(500),
   }),
 })
+const subscriptionRequestQuery = z.object({ query: z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  search: z.string().trim().max(200).optional(),
+  status: z.enum(['open', 'all', 'pending_payment', 'payment_submitted', 'approved', 'rejected', 'cancelled']).optional(),
+  planId: z.enum(['starter', 'professional', 'agency', 'enterprise']).optional(),
+  billingCycle: z.enum(['monthly', 'yearly']).optional(),
+}) })
 const benefitHistoryQuery = z.object({ query: z.object({
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -43,6 +51,7 @@ router.patch('/tenants/:organizationId/trial', authMiddlewares.authSuperAdmin, v
 router.get('/tenants/health', authMiddlewares.authSuperAdmin, PlatformAdminController.tenantHealth)
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
+router.get('/subscription-requests', authMiddlewares.authSuperAdmin, validateRequest(subscriptionRequestQuery), PlatformAdminController.subscriptionRequests)
 router.get('/payments', authMiddlewares.authSuperAdmin, PlatformAdminController.paymentLedger)
 router.get('/benefit-periods', authMiddlewares.authSuperAdmin, validateRequest(benefitHistoryQuery), PlatformAdminController.benefitPeriodHistory)
 router.get('/tenants/:organizationId/lead-entitlement', authMiddlewares.authSuperAdmin, validateRequest(tenantLeadEntitlementParams), PlatformAdminController.tenantLeadEntitlement)
