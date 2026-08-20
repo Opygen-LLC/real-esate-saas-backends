@@ -233,6 +233,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     teamQuotaRevision: { type: Number, default: 0, min: 0, select: false },
     propertyQuotaRevision: { type: Number, default: 0, min: 0, select: false },
     leadQuotaRevision: { type: Number, default: 0, min: 0, select: false },
+    subscriptionBenefitRevision: { type: Number, default: 0, min: 0, select: false },
   },
   {
     timestamps: true,

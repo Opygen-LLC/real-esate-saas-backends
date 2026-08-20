@@ -169,6 +169,24 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
 
 const getPaymentLedger = async (query: any) => SubscriptionPaymentService.getPaymentLedger(query)
 const getBenefitPeriodHistory = async (query: any) => SubscriptionBenefitPeriodService.getHistory(query)
+const getTenantLeadEntitlement = async (organizationId: string) => SubscriptionBenefitPeriodService.getCurrentLeadEntitlement(organizationId)
+
+const adjustTenantRenewalStreak = async (
+  organizationId: string,
+  input: { renewalStreak: number; reason: string },
+  actor: { id: string; requestId?: string; ip?: string },
+) => {
+  await EntitlementService.withSubscriptionBenefitGuard(organizationId, async (session) => {
+    const adjustment: any = await SubscriptionBenefitPeriodService.adjustRenewalStreak(organizationId, input, actor, session)
+    return { adjustmentId: String(adjustment._id) }
+  })
+  RealtimeService.emitRole('super-admin', {
+    type: 'platform.notification.changed',
+    action: 'updated',
+    entityId: `renewal_streak:${organizationId}`,
+  })
+  return SubscriptionBenefitPeriodService.getCurrentLeadEntitlement(organizationId)
+}
 
 const recordManualPayment = async (input: any, actor: { id: string; requestId?: string; ip?: string }) => {
   const result = await SubscriptionPaymentService.recordPayment(input, actor)
@@ -474,4 +492,4 @@ const endImpersonation = async (token: string, _actorId?: string, requestId?: st
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, getBenefitPeriodHistory, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

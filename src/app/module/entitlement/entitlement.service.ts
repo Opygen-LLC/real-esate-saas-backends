@@ -388,6 +388,55 @@ const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (sessio
 
 
 
+const localSubscriptionBenefitLocks = new Map<string, Promise<void>>()
+
+const withLocalSubscriptionBenefitLock = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  const previous = localSubscriptionBenefitLocks.get(organizationId) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolveGate) => { release = resolveGate })
+  const chain = previous.then(() => gate)
+  localSubscriptionBenefitLocks.set(organizationId, chain)
+  await previous
+  try {
+    return await work(undefined)
+  } finally {
+    release()
+    if (localSubscriptionBenefitLocks.get(organizationId) === chain) localSubscriptionBenefitLocks.delete(organizationId)
+  }
+}
+
+const withSubscriptionBenefitGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let value: T | undefined
+      await session.withTransaction(async () => {
+        // Support streak adjustments and paid subscription writes both touch the
+        // organization document. This revision provides an explicit tenant mutex
+        // so a support adjustment cannot race a payment-confirmation transaction.
+        const lock = await Organization.updateOne(
+          { organizationId },
+          { $inc: { subscriptionBenefitRevision: 1 } },
+          { session },
+        )
+        if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
+        value = await work(session)
+      })
+      if (value === undefined) throw new ApiError(500, 'Subscription benefit transaction did not complete')
+      return value
+    } finally {
+      await session.endSession()
+    }
+  }
+
+  if (config.env === 'production') {
+    throw new ApiError(503, 'Subscription benefit adjustments require a MongoDB replica set or mongos in production')
+  }
+  return withLocalSubscriptionBenefitLock(organizationId, work)
+}
+
+
+
 export interface LeadAllowanceReservationResult {
   reservationId: string | null
   mode: 'benefit_period' | 'pipeline_fallback'
@@ -872,6 +921,7 @@ export const EntitlementService = {
   assertLimit,
   assertTeamMemberCapacity,
   withTeamMemberQuotaGuard,
+  withSubscriptionBenefitGuard,
   withPropertyQuotaGuard,
   assertPropertyCapacity,
   withLeadQuotaGuard,

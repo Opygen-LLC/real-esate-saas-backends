@@ -76,7 +76,8 @@
     "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts",
     "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts",
     "migrate:continuous-subscription": "ts-node --transpile-only src/app/db/migrateContinuousSubscriptionPolicy.ts",
-    "migrate:lead-allowance-reservations": "ts-node --transpile-only src/app/db/migrateLeadAllowanceReservations.ts"
+    "migrate:lead-allowance-reservations": "ts-node --transpile-only src/app/db/migrateLeadAllowanceReservations.ts",
+    "migrate:subscription-benefit-streak-adjustments": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitStreakAdjustments.ts"
   },
   "keywords": [
     "real-estate",

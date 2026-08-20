@@ -4,6 +4,8 @@ import ApiError from '../../../errors/ApiError'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionPlanId } from '../subscriptionPlan/subscriptionPlan.interface'
 import { SubscriptionBenefitPeriod } from './subscriptionBenefitPeriod.model'
+import { SubscriptionBenefitStreakAdjustment } from './subscriptionBenefitAdjustment.model'
+import { writeAudit } from '../audit/audit.service'
 import type { BenefitBillingCycle, BenefitPaymentSource } from './subscriptionBenefitPeriod.interface'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -29,6 +31,7 @@ export interface BenefitPeriodInput {
 }
 
 export interface PreviousBenefitPeriodSnapshot {
+  _id?: unknown
   planId: SubscriptionPlanId
   billingCycle: BenefitBillingCycle
   periodEnd: Date
@@ -138,6 +141,22 @@ const findPreviousConfirmedBenefitPeriod = async (
   return query as unknown as PreviousBenefitPeriodSnapshot | null
 }
 
+const applyLatestSupportStreakAdjustment = async (
+  organizationId: string,
+  previous: PreviousBenefitPeriodSnapshot | null,
+  session?: ClientSession,
+): Promise<PreviousBenefitPeriodSnapshot | null> => {
+  if (!previous?._id || previous.planId !== 'starter' || previous.billingCycle !== 'monthly') return previous
+  const query = SubscriptionBenefitStreakAdjustment.findOne({
+    organizationId,
+    benefitPeriodId: String(previous._id),
+  }).sort({ createdAt: -1, _id: -1 }).select('adjustedRenewalStreak').lean()
+  if (session) query.session(session)
+  const adjustment: any = await query
+  if (!adjustment) return previous
+  return { ...previous, renewalStreak: Math.max(1, integer(adjustment.adjustedRenewalStreak)) }
+}
+
 const createForPaidSubscription = async (input: BenefitPeriodInput, session?: ClientSession) => {
   validateInput(input)
   const existing: any = await findExisting(input.paymentSource, input.paymentNumber, session)
@@ -152,7 +171,8 @@ const createForPaidSubscription = async (input: BenefitPeriodInput, session?: Cl
   // This service is invoked only by confirmed paid activation paths. The previous ledger row,
   // not the current Organization.subscription object, defines continuity and plan-switch resets.
   const previous = await findPreviousConfirmedBenefitPeriod(input.organizationId, session)
-  const allowance = calculateBenefitPeriodAllowance(input.plan, input.billingCycle, input.periodStart, previous)
+  const effectivePrevious = await applyLatestSupportStreakAdjustment(input.organizationId, previous, session)
+  const allowance = calculateBenefitPeriodAllowance(input.plan, input.billingCycle, input.periodStart, effectivePrevious)
 
   try {
     const docs = await SubscriptionBenefitPeriod.create([{
@@ -211,7 +231,167 @@ const getHistory = async (query: any = {}) => {
   }
 }
 
+
+const benefitPeriodStatus = (periodStart: Date, periodEnd: Date) => {
+  const now = Date.now()
+  const start = new Date(periodStart).getTime()
+  const end = new Date(periodEnd).getTime()
+  if (now < start) return 'upcoming' as const
+  if (now >= end) return 'expired' as const
+  return 'active' as const
+}
+
+const getLatestStreakAdjustment = async (organizationId: string, benefitPeriodId: string, session?: ClientSession) => {
+  const query = SubscriptionBenefitStreakAdjustment.findOne({ organizationId, benefitPeriodId })
+    .sort({ createdAt: -1, _id: -1 })
+    .lean()
+  if (session) query.session(session)
+  return query
+}
+
+const getCurrentLeadEntitlement = async (organizationId: string, session?: ClientSession) => {
+  const normalizedOrganizationId = String(organizationId || '').trim()
+  if (!normalizedOrganizationId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization is required')
+
+  const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId })
+    .select('organizationId agencyName email subscription.plan subscription.planVersion subscription.status subscription.currentPeriodEnd')
+    .lean()
+  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId })
+    .sort({ createdAt: -1, _id: -1 })
+    .lean()
+  if (session) {
+    organizationQuery.session(session)
+    periodQuery.session(session)
+  }
+  const [organization, period]: any[] = await Promise.all([organizationQuery, periodQuery])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+
+  if (!period) {
+    return {
+      organization: {
+        organizationId: organization.organizationId,
+        agencyName: organization.agencyName,
+        email: organization.email,
+        subscription: organization.subscription || null,
+      },
+      benefitPeriod: null,
+      adjustment: null,
+      eligibleForStreakAdjustment: false,
+    }
+  }
+
+  const adjustment: any = await getLatestStreakAdjustment(normalizedOrganizationId, String(period._id), session)
+  const grantedRenewalStreak = Math.max(1, integer(period.renewalStreak))
+  const currentRenewalStreak = adjustment
+    ? Math.max(1, integer(adjustment.adjustedRenewalStreak))
+    : grantedRenewalStreak
+  const remainingLeadAllowance = Math.max(0, integer(period.totalLeadAllowance) - integer(period.usedLeadAllowance))
+  const eligibleForStreakAdjustment = period.planId === 'starter'
+    && period.billingCycle === 'monthly'
+    && period.renewalBonusEnabled === true
+
+  return {
+    organization: {
+      organizationId: organization.organizationId,
+      agencyName: organization.agencyName,
+      email: organization.email,
+      subscription: organization.subscription || null,
+    },
+    benefitPeriod: {
+      ...period,
+      status: benefitPeriodStatus(period.periodStart, period.periodEnd),
+      grantedRenewalStreak,
+      currentRenewalStreak,
+      remainingLeadAllowance,
+    },
+    adjustment: adjustment || null,
+    eligibleForStreakAdjustment,
+  }
+}
+
+const adjustRenewalStreak = async (
+  organizationId: string,
+  input: { renewalStreak: number; reason: string },
+  actor: { id: string; requestId?: string; ip?: string },
+  session?: ClientSession,
+) => {
+  const normalizedOrganizationId = String(organizationId || '').trim()
+  const renewalStreak = Number(input.renewalStreak)
+  const reason = String(input.reason || '').trim()
+  if (!normalizedOrganizationId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization is required')
+  if (!Number.isInteger(renewalStreak) || renewalStreak < 1 || renewalStreak > 10000) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Renewal streak must be a whole number between 1 and 10000')
+  }
+  if (reason.length < 10 || reason.length > 500) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'A support reason between 10 and 500 characters is required')
+  }
+
+  const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId }).select('organizationId')
+  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId })
+    .sort({ createdAt: -1, _id: -1 })
+  if (session) {
+    organizationQuery.session(session)
+    periodQuery.session(session)
+  }
+  const [organization, period]: any[] = await Promise.all([organizationQuery, periodQuery])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (!period) throw new ApiError(httpStatus.CONFLICT, 'This tenant has no paid benefit period to adjust')
+  if (period.planId !== 'starter' || period.billingCycle !== 'monthly' || period.renewalBonusEnabled !== true) {
+    throw new ApiError(httpStatus.CONFLICT, 'Renewal streak adjustments are available only for Starter monthly loyalty periods')
+  }
+
+  const latestAdjustment: any = await getLatestStreakAdjustment(normalizedOrganizationId, String(period._id), session)
+  const previousEffectiveRenewalStreak = latestAdjustment
+    ? Math.max(1, integer(latestAdjustment.adjustedRenewalStreak))
+    : Math.max(1, integer(period.renewalStreak))
+  if (previousEffectiveRenewalStreak === renewalStreak) {
+    throw new ApiError(httpStatus.CONFLICT, `Renewal streak is already ${renewalStreak}`)
+  }
+
+  const docs = await SubscriptionBenefitStreakAdjustment.create([{
+    organizationId: normalizedOrganizationId,
+    benefitPeriodId: String(period._id),
+    paymentNumber: period.paymentNumber,
+    planId: period.planId,
+    planVersion: period.planVersion,
+    previousEffectiveRenewalStreak,
+    adjustedRenewalStreak: renewalStreak,
+    reason,
+    actorId: actor.id,
+    requestId: actor.requestId || '',
+    ip: actor.ip || '',
+  }], session ? { session } : undefined)
+  const adjustment: any = docs[0]
+
+  await writeAudit({
+    organizationId: normalizedOrganizationId,
+    actorId: actor.id,
+    actorRole: 'super-admin',
+    action: 'subscription.renewal_streak_adjusted',
+    entityType: 'subscriptionBenefitStreakAdjustment',
+    entityId: String(adjustment._id),
+    reason,
+    requestId: actor.requestId,
+    ip: actor.ip,
+    metadata: {
+      benefitPeriodId: String(period._id),
+      paymentNumber: period.paymentNumber,
+      planId: period.planId,
+      planVersion: period.planVersion,
+      previousEffectiveRenewalStreak,
+      adjustedRenewalStreak: renewalStreak,
+      currentPeriodAllowanceUnchanged: true,
+      totalLeadAllowance: period.totalLeadAllowance,
+      usedLeadAllowance: period.usedLeadAllowance,
+    },
+  }, session)
+
+  return adjustment
+}
+
 export const SubscriptionBenefitPeriodService = {
   createForPaidSubscription,
   getHistory,
+  getCurrentLeadEntitlement,
+  adjustRenewalStreak,
 }

@@ -129,6 +129,7 @@ export interface IOrganization {
   teamQuotaRevision?: number
   propertyQuotaRevision?: number
   leadQuotaRevision?: number
+  subscriptionBenefitRevision?: number
   createdAt?: Date
   updatedAt?: Date
 }

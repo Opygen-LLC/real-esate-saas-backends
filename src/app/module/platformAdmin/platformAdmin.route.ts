@@ -16,6 +16,15 @@ const trialBody = z.object({ body: z.object({
   trialEndsAt: z.string().datetime().optional(), reason: z.string().trim().min(10).max(500),
 }) })
 const reasonBody = z.object({ body: z.object({ reason: z.string().trim().min(10).max(500) }) })
+const organizationParams = z.object({ organizationId: z.string().trim().min(3).max(120) })
+const tenantLeadEntitlementParams = z.object({ params: organizationParams })
+const renewalStreakBody = z.object({
+  params: organizationParams,
+  body: z.object({
+    renewalStreak: z.number().int().min(1).max(10000),
+    reason: z.string().trim().min(10).max(500),
+  }),
+})
 const benefitHistoryQuery = z.object({ query: z.object({
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -36,6 +45,8 @@ router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, 
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
 router.get('/payments', authMiddlewares.authSuperAdmin, PlatformAdminController.paymentLedger)
 router.get('/benefit-periods', authMiddlewares.authSuperAdmin, validateRequest(benefitHistoryQuery), PlatformAdminController.benefitPeriodHistory)
+router.get('/tenants/:organizationId/lead-entitlement', authMiddlewares.authSuperAdmin, validateRequest(tenantLeadEntitlementParams), PlatformAdminController.tenantLeadEntitlement)
+router.patch('/tenants/:organizationId/renewal-streak', authMiddlewares.authSuperAdmin, validateRequest(renewalStreakBody), PlatformAdminController.adjustTenantRenewalStreak)
 router.post('/payments', authMiddlewares.authSuperAdmin, validateRequest(z.object({ body: subscriptionPaymentInputSchema })), PlatformAdminController.recordManualPayment)
 router.patch('/payments/:paymentId/decision', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: z.object({ paymentId: z.string().trim().min(8).max(80) }), body: subscriptionPaymentDecisionSchema })), PlatformAdminController.decideManualPayment)
 router.get('/revenue', authMiddlewares.authSuperAdmin, PlatformAdminController.revenue)
