@@ -41,6 +41,8 @@ const run = async () => {
     ensureIndex(leads, { organizationId: 1, assignedAgent: 1, isConverted: 1, followUpDate: 1 }, { name: 'lead_tenant_assignee_converted_followup' }),
     ensureIndex(leads, { organizationId: 1, leadStatus: 1, isConverted: 1, createdAt: -1 }, { name: 'lead_tenant_status_converted_created' }),
     ensureIndex(leads, { organizationId: 1, isConverted: 1, source: 1, createdAt: -1 }, { name: 'lead_tenant_converted_source_created' }),
+    ensureIndex(contacts, { organizationId: 1, relationshipState: 1, updatedAt: -1, _id: -1 }, { name: 'contact_tenant_relationship_updated_stable' }),
+    ensureIndex(contacts, { organizationId: 1, relationshipState: 1, assignedTo: 1, updatedAt: -1, _id: -1 }, { name: 'contact_tenant_relationship_assignee_updated_stable' }),
     ensureIndex(contacts, { organizationId: 1, relationshipState: 1, assignedTo: 1, followUpDate: 1 }, { name: 'contact_tenant_relationship_assignee_followup' }),
     ensureIndex(contacts, { organizationId: 1, relationshipState: 1, source: 1, updatedAt: -1 }, { name: 'contact_tenant_relationship_source_updated' }),
     ensureIndex(contacts, { organizationId: 1, sourceLeadId: 1 }, { name: 'contact_tenant_source_lead_unique', unique: true, partialFilterExpression: { sourceLeadId: { $type: 'objectId' } } }),

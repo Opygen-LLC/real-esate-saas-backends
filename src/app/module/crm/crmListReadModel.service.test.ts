@@ -35,15 +35,49 @@ describe('CRM list read-model performance contract', () => {
     expect(source).toContain("total: [{ $count: 'count' }]")
   })
 
+
+
+  it('falls back to tenant-scoped simple reads when the Contact aggregation presenter fails', () => {
+    const source = read('src/app/module/crm/crmListReadModel.service.ts')
+    expect(source).toContain('export const readContactListPageFallback')
+    expect(source).toContain("logger.warn('crm_contact_read_model_failed'")
+    expect(source).toContain("organizationId: options.organizationId")
+    expect(source).toContain("scope: options.scope || 'team'")
+    expect(source).toContain('requestId: options.requestId')
+    expect(source).toContain('mongoErrorCode:')
+    expect(source).toContain('return readContactListPageFallback<T>(options)')
+    expect(source).toContain("{ $and: [options.match, { organizationId: options.organizationId }] }")
+    expect(source).toContain("Property.find({ organizationId: options.organizationId")
+    expect(source).toContain("{ $eq: ['$organizationId', '$$organizationId'] }")
+    expect(source).toContain("Lead.find({ organizationId: options.organizationId")
+    expect(source).toContain("Activity.find({")
+  })
+
+  it('keeps Contact fallback enrichment batched and preserves stable newest-first sorting', () => {
+    const source = read('src/app/module/crm/crmListReadModel.service.ts')
+    expect(source).toContain("sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt')")
+    expect(source).toContain('return { [field]: order, _id: order }')
+    expect(source).toContain("safeFallbackEnrichment('assigned-users'")
+    expect(source).toContain("safeFallbackEnrichment('properties'")
+    expect(source).toContain("safeFallbackEnrichment('source-leads'")
+    expect(source).toContain("safeFallbackEnrichment('activities'")
+    expect(source).not.toContain("crm_contact_read_model_failed', { error")
+  })
+
   it('declares the compound indexes used by list, follow-up and timeline lookups', () => {
     const leadModel = read('src/app/module/lead/lead.model.ts')
     const contactModel = read('src/app/module/contact/contact.model.ts')
     const taskModel = read('src/app/module/task/task.model.ts')
     const activityModel = read('src/app/module/activity/activity.model.ts')
+    const migration = read('src/app/db/migrateCrmPerformanceHardening.ts')
 
     expect(leadModel).toContain('lead_tenant_assignee_converted_followup')
     expect(leadModel).toContain('lead_tenant_status_converted_created')
     expect(contactModel).toContain('contact_tenant_relationship_assignee_followup')
+    expect(contactModel).toContain('contact_tenant_relationship_updated_stable')
+    expect(contactModel).toContain('contact_tenant_relationship_assignee_updated_stable')
+    expect(migration).toContain('contact_tenant_relationship_updated_stable')
+    expect(migration).toContain('contact_tenant_relationship_assignee_updated_stable')
     expect(taskModel).toContain('task_tenant_lead_type_status_dueat')
     expect(activityModel).toContain('activity_tenant_lead_type_created')
     expect(activityModel).toContain('activity_tenant_contact_type_created')

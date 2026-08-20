@@ -18,6 +18,13 @@ export type CrmListReadModelOptions = {
   sortOrder: SortOrder
 }
 
+export type ContactListReadModelOptions = CrmListReadModelOptions & {
+  /** Explicit tenant boundary used by the resilient fallback and diagnostics. */
+  organizationId: string
+  scope?: 'mine' | 'team'
+  requestId?: string
+}
+
 type ReadModelPage<T> = { rows: T[]; total: number }
 
 const OBJECT_ID_MATCH_FIELDS = new Set([
@@ -87,9 +94,18 @@ const userLookupStages = (sourceField: string, targetField = sourceField): Pipel
   {
     $lookup: {
       from: User.collection.name,
-      let: { userId: `$${sourceField}` },
+      let: { userId: `$${sourceField}`, organizationId: '$organizationId' },
       pipeline: [
-        { $match: { $expr: { $eq: ['$_id', '$$userId'] } } },
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $eq: ['$_id', '$$userId'] },
+                { $eq: ['$organizationId', '$$organizationId'] },
+              ],
+            },
+          },
+        },
         {
           $lookup: {
             from: UserProfile.collection.name,
@@ -127,9 +143,21 @@ const propertyLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
     $lookup: {
       from: Property.collection.name,
-      let: { propertyIds: { $cond: [{ $isArray: '$propertyInterest' }, '$propertyInterest', []] } },
+      let: {
+        propertyIds: { $cond: [{ $isArray: '$propertyInterest' }, '$propertyInterest', []] },
+        organizationId: '$organizationId',
+      },
       pipeline: [
-        { $match: { $expr: { $in: ['$_id', '$$propertyIds'] } } },
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $in: ['$_id', '$$propertyIds'] },
+                { $eq: ['$organizationId', '$$organizationId'] },
+              ],
+            },
+          },
+        },
         {
           $project: {
             _id: 1,
@@ -410,6 +438,203 @@ const publicUserRef = (value: any) => {
   }
 }
 
+const objectIdKey = (value: unknown): string | undefined => {
+  const candidate = value && typeof value === 'object' && '_id' in (value as Record<string, unknown>)
+    ? (value as Record<string, unknown>)._id
+    : value
+  if (candidate instanceof Types.ObjectId) return candidate.toHexString()
+  if (typeof candidate === 'string' && Types.ObjectId.isValid(candidate)) return String(new Types.ObjectId(candidate))
+  return undefined
+}
+
+const uniqueObjectIds = (values: unknown[]): Types.ObjectId[] => {
+  const ids = new Map<string, Types.ObjectId>()
+  for (const value of values) {
+    const key = objectIdKey(value)
+    if (key && !ids.has(key)) ids.set(key, new Types.ObjectId(key))
+  }
+  return [...ids.values()]
+}
+
+const contactActivityProjection = (activity: any) => ({
+  id: String(activity._id),
+  type: String(activity?.metadata?.eventType || activity.type || 'system'),
+  title: String(activity.title || ''),
+  content: typeof activity.content === 'string' ? activity.content : '',
+  ...(objectIdKey(activity.leadId) ? { leadId: objectIdKey(activity.leadId) } : {}),
+  ...(objectIdKey(activity.contactId) ? { contactId: objectIdKey(activity.contactId) } : {}),
+  ...(objectIdKey(activity.agentId) ? { authorId: objectIdKey(activity.agentId) } : {}),
+  occurredAt: activity.createdAt,
+})
+
+const isInteractionActivity = (activity: any): boolean => {
+  if (['call', 'email', 'whatsapp', 'meeting', 'viewing', 'offer'].includes(String(activity?.type || ''))) return true
+  return typeof activity?.metadata?.eventType === 'string' && activity.metadata.eventType.startsWith('sms.')
+}
+
+const safeFallbackEnrichment = async <T>(
+  name: string,
+  options: ContactListReadModelOptions,
+  operation: () => Promise<T>,
+  fallback: T,
+): Promise<T> => {
+  try {
+    return await operation()
+  } catch (error) {
+    const candidate = error as { code?: unknown; codeName?: unknown; name?: unknown }
+    logger.warn('crm_contact_fallback_enrichment_degraded', {
+      organizationId: options.organizationId,
+      scope: options.scope || 'team',
+      requestId: options.requestId,
+      enrichment: name,
+      mongoErrorCode: typeof candidate?.code === 'string' || typeof candidate?.code === 'number' ? candidate.code : 'unknown',
+      mongoErrorName: typeof candidate?.codeName === 'string' ? candidate.codeName : typeof candidate?.name === 'string' ? candidate.name : 'Error',
+    })
+    return fallback
+  }
+}
+
+/**
+ * Resilient Contact list path used only when the optimized aggregation presenter
+ * fails. It deliberately uses simple tenant-scoped finds and batched lookups so
+ * missing/deleted legacy references cannot make the whole list unavailable.
+ */
+export const readContactListPageFallback = async <T = any>(options: ContactListReadModelOptions): Promise<ReadModelPage<T>> => {
+  const tenantMatch = { $and: [options.match, { organizationId: options.organizationId }] } as any
+  const sort = sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt') as any
+  const [documents, total] = await Promise.all([
+    Contact.find(tenantMatch)
+      .sort(sort)
+      .skip(options.skip)
+      .limit(options.limit)
+      .lean(),
+    Contact.countDocuments(tenantMatch),
+  ])
+
+  const contacts = documents as any[]
+  if (!contacts.length) return { rows: [], total }
+
+  const assignedIds = uniqueObjectIds(contacts.map((row) => row.assignedTo))
+  const sourceLeadIds = uniqueObjectIds(contacts.map((row) => row.sourceLeadId))
+  const propertyIds = uniqueObjectIds(contacts.flatMap((row) => Array.isArray(row.propertyInterest) ? row.propertyInterest : row.propertyInterest ? [row.propertyInterest] : []))
+  const contactIds = uniqueObjectIds(contacts.map((row) => row._id))
+
+  const [users, profiles, properties, sourceLeads, activities] = await Promise.all([
+    safeFallbackEnrichment('assigned-users', options, async () => assignedIds.length
+      ? User.find({ organizationId: options.organizationId, _id: { $in: assignedIds } })
+        .select('_id name email phoneNumber userRole')
+        .lean()
+      : [], [] as any[]),
+    safeFallbackEnrichment('assigned-user-profiles', options, async () => assignedIds.length
+      ? UserProfile.find({ userId: { $in: assignedIds } })
+        .select('userId profileImgURL')
+        .lean()
+      : [], [] as any[]),
+    safeFallbackEnrichment('properties', options, async () => propertyIds.length
+      ? Property.find({ organizationId: options.organizationId, _id: { $in: propertyIds } })
+        .select('_id title price images city propertyType bedrooms bathrooms')
+        .lean()
+      : [], [] as any[]),
+    safeFallbackEnrichment('source-leads', options, async () => sourceLeadIds.length
+      ? Lead.find({ organizationId: options.organizationId, _id: { $in: sourceLeadIds } })
+        .select('_id name phone email leadStatus source budgetMin budgetMax currency locationPreference propertyType createdAt convertedAt isConverted')
+        .lean()
+      : [], [] as any[]),
+    safeFallbackEnrichment('activities', options, async () => (contactIds.length || sourceLeadIds.length)
+      ? Activity.find({
+        organizationId: options.organizationId,
+        $and: [
+          {
+            $or: [
+              ...(contactIds.length ? [{ contactId: { $in: contactIds } }] : []),
+              ...(sourceLeadIds.length ? [{ leadId: { $in: sourceLeadIds } }] : []),
+            ],
+          },
+          {
+            $or: [
+              { type: { $in: ['note', 'call', 'email', 'whatsapp', 'meeting', 'viewing', 'offer'] } },
+              { 'metadata.eventType': { $regex: '^sms\\.' } },
+            ],
+          },
+        ],
+      })
+        .select('_id type title content leadId contactId agentId metadata createdAt')
+        .sort({ createdAt: -1, _id: -1 })
+        .lean()
+      : [], [] as any[]),
+  ])
+
+  const profileByUser = new Map<string, any>()
+  for (const profile of profiles as any[]) {
+    const key = objectIdKey(profile.userId)
+    if (key) profileByUser.set(key, profile)
+  }
+  const userById = new Map<string, any>()
+  for (const user of users as any[]) {
+    const key = objectIdKey(user._id)
+    if (key) userById.set(key, { ...user, profile: profileByUser.get(key) })
+  }
+  const propertyById = new Map<string, any>()
+  for (const property of properties as any[]) {
+    const key = objectIdKey(property._id)
+    if (key) propertyById.set(key, property)
+  }
+  const leadById = new Map<string, any>()
+  for (const lead of sourceLeads as any[]) {
+    const key = objectIdKey(lead._id)
+    if (key) leadById.set(key, lead)
+  }
+
+  const contactIdsByLead = new Map<string, Set<string>>()
+  for (const contact of contacts) {
+    const contactId = objectIdKey(contact._id)
+    const leadId = objectIdKey(contact.sourceLeadId)
+    if (!contactId || !leadId) continue
+    const set = contactIdsByLead.get(leadId) || new Set<string>()
+    set.add(contactId)
+    contactIdsByLead.set(leadId, set)
+  }
+
+  const latestNote = new Map<string, ReturnType<typeof contactActivityProjection>>()
+  const latestInteraction = new Map<string, ReturnType<typeof contactActivityProjection>>()
+  for (const activity of activities as any[]) {
+    const targets = new Set<string>()
+    const directContactId = objectIdKey(activity.contactId)
+    if (directContactId) targets.add(directContactId)
+    const leadId = objectIdKey(activity.leadId)
+    if (leadId) for (const contactId of contactIdsByLead.get(leadId) || []) targets.add(contactId)
+    for (const contactId of targets) {
+      if (activity.type === 'note' && !latestNote.has(contactId)) latestNote.set(contactId, contactActivityProjection(activity))
+      if (isInteractionActivity(activity) && !latestInteraction.has(contactId)) latestInteraction.set(contactId, contactActivityProjection(activity))
+    }
+  }
+
+  const rows = contacts.map((row) => {
+    const contactId = objectIdKey(row._id) || String(row._id)
+    const assignedKey = objectIdKey(row.assignedTo)
+    const sourceLeadKey = objectIdKey(row.sourceLeadId)
+    const rawPropertyRefs = Array.isArray(row.propertyInterest) ? row.propertyInterest : row.propertyInterest ? [row.propertyInterest] : []
+    const hydratedProperties = rawPropertyRefs
+      .map((ref: unknown) => {
+        const propertyKey = objectIdKey(ref)
+        return propertyKey ? propertyById.get(propertyKey) : undefined
+      })
+      .filter(Boolean)
+
+    return {
+      ...row,
+      assignedTo: assignedKey && userById.has(assignedKey) ? publicUserRef(userById.get(assignedKey)) : row.assignedTo,
+      sourceLeadId: sourceLeadKey && leadById.has(sourceLeadKey) ? leadById.get(sourceLeadKey) : row.sourceLeadId,
+      propertyInterest: hydratedProperties,
+      propertySummary: { count: hydratedProperties.length, primary: hydratedProperties[0] },
+      ...(latestNote.has(contactId) ? { latestNote: latestNote.get(contactId) } : {}),
+      ...(latestInteraction.has(contactId) ? { latestInteraction: latestInteraction.get(contactId) } : {}),
+    } as T
+  })
+
+  return { rows, total }
+}
+
 const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
   const query = options.match as any
   const sort = sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') as any
@@ -473,24 +698,37 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
   }
 }
 
-export const readContactListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
-  const result = await Contact.aggregate([
-    { $match: castAggregationMatch(options.match) as Record<string, unknown> },
-    {
-      $facet: {
-        rows: [
-          { $sort: sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt') },
-          { $skip: options.skip },
-          { $limit: options.limit },
-          ...userLookupStages('assignedTo'),
-          ...propertyLookupStages(),
-          ...contactActivityLookupStages(),
-          ...sourceLeadLookupStages(),
-        ],
-        total: [{ $count: 'count' }],
+export const readContactListPage = async <T = any>(options: ContactListReadModelOptions): Promise<ReadModelPage<T>> => {
+  try {
+    const result = await Contact.aggregate([
+      { $match: castAggregationMatch({ $and: [options.match, { organizationId: options.organizationId }] }) as Record<string, unknown> },
+      {
+        $facet: {
+          rows: [
+            { $sort: sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt') },
+            { $skip: options.skip },
+            { $limit: options.limit },
+            ...userLookupStages('assignedTo'),
+            ...propertyLookupStages(),
+            ...contactActivityLookupStages(),
+            ...sourceLeadLookupStages(),
+          ],
+          total: [{ $count: 'count' }],
+        },
       },
-    },
-  ]).allowDiskUse(true)
+    ]).allowDiskUse(true)
 
-  return unwrapFacet<T>(result)
+    return unwrapFacet<T>(result)
+  } catch (error) {
+    const candidate = error as { code?: unknown; codeName?: unknown; name?: unknown }
+    logger.warn('crm_contact_read_model_failed', {
+      organizationId: options.organizationId,
+      sortBy: options.sortBy,
+      scope: options.scope || 'team',
+      requestId: options.requestId,
+      mongoErrorCode: typeof candidate?.code === 'string' || typeof candidate?.code === 'number' ? candidate.code : 'unknown',
+      mongoErrorName: typeof candidate?.codeName === 'string' ? candidate.codeName : typeof candidate?.name === 'string' ? candidate.name : 'Error',
+    })
+    return readContactListPageFallback<T>(options)
+  }
 }

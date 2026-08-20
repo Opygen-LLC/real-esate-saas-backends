@@ -52,6 +52,8 @@ const contactSchema = new Schema<IContact, ContactModel>(
 )
 
 contactSchema.index({ organizationId: 1, relationshipState: 1, updatedAt: -1 }, { name: 'contact_tenant_relationship_updated' })
+contactSchema.index({ organizationId: 1, relationshipState: 1, updatedAt: -1, _id: -1 }, { name: 'contact_tenant_relationship_updated_stable' })
+contactSchema.index({ organizationId: 1, relationshipState: 1, assignedTo: 1, updatedAt: -1, _id: -1 }, { name: 'contact_tenant_relationship_assignee_updated_stable' })
 contactSchema.index({ organizationId: 1, name: 1 })
 contactSchema.index({ organizationId: 1, phone: 1 })
 contactSchema.index({ organizationId: 1, normalizedPhone: 1 }, { name: 'contact_tenant_normalized_phone' })

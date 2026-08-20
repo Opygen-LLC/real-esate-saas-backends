@@ -20,7 +20,12 @@ const getAllContacts = catchAsync(async (req: Request, res: Response) => {
   const filters = pick(req.query, ['searchTerm', 'type', 'city', 'tag', 'assignedTo', 'source', 'scope', 'origin', 'statusAtConversion', 'convertedFrom', 'convertedTo', 'followUpPreset', 'followUpFrom', 'followUpTo'])
   filters.organizationId = requireTenant(req)
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
-  const result = await ContactService.getAllContacts(filters, paginationOptions, crmAccessFromRequest(req, req.query.scope))
+  const result = await ContactService.getAllContacts(
+    filters,
+    paginationOptions,
+    crmAccessFromRequest(req, req.query.scope),
+    { requestId: req.requestId },
+  )
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Contacts fetched successfully', meta: result.meta, data: result.data })
 })
 

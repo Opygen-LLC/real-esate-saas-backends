@@ -393,6 +393,108 @@ suite('CRM Phase 14 production integration matrix', () => {
     expect(contactHistory.data.some((entry: any) => entry.eventType === 'lead.converted')).toBe(true)
   })
 
+  it('keeps the Contact list available through the resilient fallback for legacy and incomplete records', async () => {
+    const access = managerAccess(ownerA)
+    const tag = `phase1-contact-fallback-${runId}`
+    const baseTime = Date.now() - 60_000
+    const deletedUserId = new mongoose.Types.ObjectId()
+    const deletedPropertyId = new mongoose.Types.ObjectId()
+
+    const sourceLead = await createLead({ name: 'Phase1 Converted Source Lead' })
+    const manual = await Contact.create({
+      organizationId: orgA, name: 'Phase1 Manual Contact', phone: nextPhone(),
+      relationshipState: 'active', assignedTo: agentA1._id, tags: [tag],
+    })
+    const converted = await Contact.create({
+      organizationId: orgA, name: 'Phase1 Converted Contact', phone: nextPhone(),
+      relationshipState: 'active', assignedTo: agentA1._id, sourceLeadId: sourceLead._id, convertedAt: new Date(baseTime), tags: [tag],
+    })
+    const legacyId = new mongoose.Types.ObjectId()
+    await Contact.collection.insertOne({
+      _id: legacyId, organizationId: orgA, name: 'Phase1 Legacy Contact', phone: nextPhone(), tags: [tag],
+      createdAt: new Date(baseTime + 3_000), updatedAt: new Date(baseTime + 3_000),
+    })
+    const missingAssigned = await Contact.create({
+      organizationId: orgA, name: 'Phase1 Missing Assignee', phone: nextPhone(),
+      relationshipState: 'active', tags: [tag],
+    })
+    const deletedRefs = await Contact.create({
+      organizationId: orgA, name: 'Phase1 Deleted References', phone: nextPhone(),
+      relationshipState: 'active', assignedTo: deletedUserId, propertyInterest: [deletedPropertyId], tags: [tag],
+    })
+    const noActivity = await Contact.create({
+      organizationId: orgA, name: 'Phase1 No Activity', phone: nextPhone(),
+      relationshipState: 'active', assignedTo: agentA2._id, tags: [tag],
+    })
+    await Contact.create({
+      organizationId: orgB, name: 'Phase1 Foreign Tenant Contact', phone: nextPhone(),
+      relationshipState: 'active', assignedTo: agentB._id, tags: [tag],
+    })
+
+    const ordered = [manual, converted, { _id: legacyId }, missingAssigned, deletedRefs, noActivity]
+    for (let index = 0; index < ordered.length; index += 1) {
+      await Contact.collection.updateOne({ _id: ordered[index]._id }, { $set: { updatedAt: new Date(baseTime + (index + 1) * 1_000) } })
+    }
+
+    await Activity.create([
+      { organizationId: orgA, contactId: manual._id, type: 'note', title: 'Manual note', content: 'Contact note', agentId: ownerA._id },
+      { organizationId: orgA, contactId: manual._id, type: 'call', title: 'Manual call', content: 'Call completed', agentId: agentA1._id },
+      { organizationId: orgA, leadId: sourceLead._id, type: 'note', title: 'Inherited lead note', content: 'Visible after conversion', agentId: ownerA._id },
+    ])
+
+    const aggregateFailure = Object.assign(new Error('forced aggregation incompatibility'), { code: 40324, codeName: 'Location40324' })
+    const aggregateSpy = vi.spyOn(Contact, 'aggregate').mockImplementationOnce(() => ({
+      allowDiskUse: () => Promise.reject(aggregateFailure),
+    }) as any)
+
+    try {
+      const response = await ContactService.getAllContacts(
+        { organizationId: orgA, tag },
+        { page: 1, limit: 50 },
+        access,
+        { requestId: 'phase1-contact-fallback-test' },
+      )
+
+      expect(response.meta).toMatchObject({ page: 1, limit: 50, total: 6 })
+      expect(response.data.map((row: any) => row.name)).toEqual([
+        'Phase1 No Activity',
+        'Phase1 Deleted References',
+        'Phase1 Missing Assignee',
+        'Phase1 Legacy Contact',
+        'Phase1 Converted Contact',
+        'Phase1 Manual Contact',
+      ])
+      expect(response.data.some((row: any) => row.name === 'Phase1 Foreign Tenant Contact')).toBe(false)
+
+      const manualRow = response.data.find((row: any) => row.name === 'Phase1 Manual Contact') as any
+      expect(manualRow.assignedTo?.name).toBe(agentA1.name)
+      expect(manualRow.latestNote?.title).toBe('Manual note')
+      expect(manualRow.latestInteraction?.title).toBe('Manual call')
+
+      const convertedRow = response.data.find((row: any) => row.name === 'Phase1 Converted Contact') as any
+      expect(convertedRow.sourceLeadId?.name).toBe('Phase1 Converted Source Lead')
+      expect(convertedRow.latestNote?.title).toBe('Inherited lead note')
+
+      const legacyRow = response.data.find((row: any) => row.name === 'Phase1 Legacy Contact') as any
+      expect(legacyRow).toBeTruthy()
+      expect(legacyRow.relationshipState).toBeUndefined()
+
+      const missingAssignedRow = response.data.find((row: any) => row.name === 'Phase1 Missing Assignee') as any
+      expect(missingAssignedRow.assignedTo).toBeUndefined()
+
+      const deletedRefsRow = response.data.find((row: any) => row.name === 'Phase1 Deleted References') as any
+      expect(String(deletedRefsRow.assignedTo)).toBe(String(deletedUserId))
+      expect(deletedRefsRow.propertyInterest).toEqual([])
+      expect(deletedRefsRow.propertySummary).toMatchObject({ count: 0 })
+
+      const noActivityRow = response.data.find((row: any) => row.name === 'Phase1 No Activity') as any
+      expect(noActivityRow.latestNote).toBeUndefined()
+      expect(noActivityRow.latestInteraction).toBeUndefined()
+    } finally {
+      aggregateSpy.mockRestore()
+    }
+  }, 30_000)
+
   it('validates CSV/XLSX imports, skips duplicates, secures sessions, and creates only confirmed normalized rows', async () => {
     const access = managerAccess(ownerA)
     const existingPhone = nextPhone()

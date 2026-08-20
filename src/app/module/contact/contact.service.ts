@@ -161,10 +161,17 @@ const getAllContacts = async (
   filters: IContactFilter,
   paginationOptions: IPaginationOptions,
   access?: CrmAccessContext,
+  diagnostics?: { requestId?: string },
 ): Promise<IGenericResponse<IContact[]>> => {
+  const organizationId = String(filters.organizationId || '').trim()
+  if (!organizationId) throw new ApiError(httpStatus.FORBIDDEN, 'Tenant context is required to list contacts')
+
   const whereCondition = buildContactWhere(filters, access)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions, { sortBy: 'updatedAt', sortOrder: 'desc' })
   const pageResult = await readContactListPage<IContact>({
+    organizationId,
+    scope: access?.scope || 'team',
+    requestId: diagnostics?.requestId,
     match: whereCondition,
     skip,
     limit,
