@@ -249,6 +249,27 @@ const getLatestStreakAdjustment = async (organizationId: string, benefitPeriodId
   return query
 }
 
+const getEffectiveRenewalStreakForPeriod = async (
+  organizationId: string,
+  benefitPeriodId: string | null | undefined,
+  grantedRenewalStreak: number,
+  session?: ClientSession,
+): Promise<number> => {
+  const granted = Math.max(1, integer(grantedRenewalStreak))
+  if (!benefitPeriodId) return granted
+  const adjustment: any = await getLatestStreakAdjustment(String(organizationId || '').trim(), String(benefitPeriodId), session)
+  return adjustment ? Math.max(1, integer(adjustment.adjustedRenewalStreak)) : granted
+}
+
+const getUpcomingBenefitPeriod = async (organizationId: string, session?: ClientSession) => {
+  const query = SubscriptionBenefitPeriod.findOne({
+    organizationId: String(organizationId || '').trim(),
+    periodStart: { $gt: new Date() },
+  }).sort({ periodStart: 1, _id: 1 }).lean()
+  if (session) query.session(session)
+  return query
+}
+
 const getCurrentLeadEntitlement = async (organizationId: string, session?: ClientSession) => {
   const normalizedOrganizationId = String(organizationId || '').trim()
   if (!normalizedOrganizationId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization is required')
@@ -393,5 +414,7 @@ export const SubscriptionBenefitPeriodService = {
   createForPaidSubscription,
   getHistory,
   getCurrentLeadEntitlement,
+  getEffectiveRenewalStreakForPeriod,
+  getUpcomingBenefitPeriod,
   adjustRenewalStreak,
 }

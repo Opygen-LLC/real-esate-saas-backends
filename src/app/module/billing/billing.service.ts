@@ -7,6 +7,8 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { decryptField } from '../../helpers/fieldEncryption'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 import { SubscriptionReceiptPdfService, type GeneratedReceiptPdf } from './subscriptionReceiptPdf.service'
+import { SubscriptionBenefitPeriodService, calculateBenefitPeriodAllowance } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
+import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 
 const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling> => {
   if (!payload.invoiceId) {
@@ -24,9 +26,11 @@ const usagePercentage = (used: number, limit: number): number => {
 }
 
 const getSubscriptionUsage = async (organizationId: string) => {
-  const [resolved, pendingChangeRequest] = await Promise.all([
+  const [resolved, pendingChangeRequest, monthlyLeadAllowance, upcomingBenefitPeriod] = await Promise.all([
     EntitlementService.getUsageSnapshot(organizationId),
     SubscriptionPaymentService.getTenantPendingState(organizationId),
+    EntitlementService.getMonthlyLeadAllowanceSnapshot(organizationId),
+    SubscriptionBenefitPeriodService.getUpcomingBenefitPeriod(organizationId),
   ])
 
   const { organization: org, limits, usage, teamMemberQuota } = resolved
@@ -38,6 +42,108 @@ const getSubscriptionUsage = async (organizationId: string) => {
   const propertiesPercent = usagePercentage(currentProperties, maxProperties)
   const teamMembersPercent = usagePercentage(teamMemberQuota.teamMembersCommitted, maxTeamMembers)
   const leadsPercent = usagePercentage(currentLeads, maxLeads)
+  const allowanceUsed = Math.max(0, Number(monthlyLeadAllowance.used || 0))
+  const allowanceLimit = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
+  const allowancePercent = usagePercentage(allowanceUsed, allowanceLimit)
+  const sourceBenefitPeriodId = monthlyLeadAllowance.benefitPeriodId || monthlyLeadAllowance.previousBenefitPeriodId || null
+  const effectiveRenewalStreak = await SubscriptionBenefitPeriodService.getEffectiveRenewalStreakForPeriod(
+    organizationId,
+    sourceBenefitPeriodId,
+    Number(monthlyLeadAllowance.renewalStreak || 1),
+  )
+
+  let nextRenewal: any = null
+  if (upcomingBenefitPeriod) {
+    const upcoming: any = upcomingBenefitPeriod
+    const currentTotal = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
+    nextRenewal = {
+      alreadyConfirmed: true,
+      paymentNumber: upcoming.paymentNumber || null,
+      planId: upcoming.planId,
+      planVersion: Number(upcoming.planVersion || 1),
+      projectedRenewalStreak: Math.max(1, Number(upcoming.renewalStreak || 1)),
+      baseLeadAllowance: Math.max(0, Number(upcoming.baseLeadAllowance || 0)),
+      bonusLeadAllowance: Math.max(0, Number(upcoming.bonusLeadAllowance || 0)),
+      totalLeadAllowance: Math.max(0, Number(upcoming.totalLeadAllowance || 0)),
+      loyaltyStep: Math.max(0, Number(upcoming.renewalLeadBonus || 0)),
+      allowanceChange: Math.max(0, Number(upcoming.totalLeadAllowance || 0)) - currentTotal,
+      additionalLeadAllowance: Math.max(0, Math.max(0, Number(upcoming.totalLeadAllowance || 0)) - currentTotal),
+      continuityPreserved: upcoming.planId === 'starter'
+        && upcoming.billingCycle === 'monthly'
+        && Math.max(1, Number(upcoming.renewalStreak || 1)) === effectiveRenewalStreak + 1,
+      graceDays: Math.max(0, Number(upcoming.continuityGraceDays || 0)),
+      renewBy: null,
+      projectedPeriodStart: upcoming.periodStart,
+    }
+  } else if (monthlyLeadAllowance.planId === 'starter' && monthlyLeadAllowance.billingCycle === 'monthly' && sourceBenefitPeriodId) {
+    const latestStarter: any = await SubscriptionPlanService.getLatestPurchasablePlan('starter')
+    if (latestStarter) {
+      const now = new Date()
+      const previousEnd = new Date(monthlyLeadAllowance.periodEnd || monthlyLeadAllowance.previousPeriodEnd)
+      const projectedStart = previousEnd.getTime() > now.getTime() ? previousEnd : now
+      const projected = calculateBenefitPeriodAllowance({
+        planId: 'starter',
+        version: Number(latestStarter.version || 1),
+        baseMonthlyLeadAllowance: Number(latestStarter.baseMonthlyLeadAllowance || 0),
+        renewalLeadBonus: Number(latestStarter.renewalLeadBonus || 0),
+        renewalBonusEnabled: Boolean(latestStarter.renewalBonusEnabled),
+        maxRenewalLeadBonus: Number(latestStarter.maxRenewalLeadBonus || 0),
+        continuityGraceDays: Number(latestStarter.continuityGraceDays || 0),
+      }, 'monthly', projectedStart, {
+        _id: sourceBenefitPeriodId,
+        planId: 'starter',
+        billingCycle: 'monthly',
+        periodEnd: previousEnd,
+        renewalStreak: effectiveRenewalStreak,
+        renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,
+      })
+      const currentTotal = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
+      const graceDays = Math.max(0, Number(latestStarter.continuityGraceDays || 0))
+      const renewBy = new Date(previousEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
+      nextRenewal = {
+        alreadyConfirmed: false,
+        paymentNumber: null,
+        planId: 'starter',
+        planVersion: Number(latestStarter.version || 1),
+        projectedRenewalStreak: projected.renewalStreak,
+        baseLeadAllowance: projected.baseLeadAllowance,
+        bonusLeadAllowance: projected.bonusLeadAllowance,
+        totalLeadAllowance: projected.totalLeadAllowance,
+        loyaltyStep: Number(latestStarter.renewalLeadBonus || 0),
+        allowanceChange: projected.totalLeadAllowance - currentTotal,
+        additionalLeadAllowance: Math.max(0, projected.totalLeadAllowance - currentTotal),
+        continuityPreserved: projected.renewalStreak === effectiveRenewalStreak + 1,
+        graceDays,
+        renewBy,
+        projectedPeriodStart: projectedStart,
+      }
+    }
+  }
+
+  const leadAllowance = {
+    mode: monthlyLeadAllowance.mode,
+    status: monthlyLeadAllowance.periodInactive
+      ? 'inactive'
+      : (monthlyLeadAllowance.legacyFallback ? 'legacy' : 'active'),
+    benefitPeriodId: monthlyLeadAllowance.benefitPeriodId,
+    billingCycle: monthlyLeadAllowance.billingCycle || null,
+    planId: monthlyLeadAllowance.planId,
+    planVersion: monthlyLeadAllowance.planVersion,
+    used: allowanceUsed,
+    limit: allowanceLimit,
+    percentage: allowancePercent,
+    remaining: Math.max(0, allowanceLimit - allowanceUsed),
+    baseAllowance: Math.max(0, Number(monthlyLeadAllowance.baseLeadAllowance || 0)),
+    loyaltyBonus: Math.max(0, Number(monthlyLeadAllowance.bonusLeadAllowance || 0)),
+    renewalStreak: effectiveRenewalStreak,
+    grantedRenewalStreak: Math.max(1, Number(monthlyLeadAllowance.renewalStreak || 1)),
+    renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,
+    periodStart: monthlyLeadAllowance.periodStart || null,
+    periodEnd: monthlyLeadAllowance.periodEnd || null,
+    legacyFallback: Boolean(monthlyLeadAllowance.legacyFallback),
+    periodInactive: Boolean(monthlyLeadAllowance.periodInactive),
+    nextRenewal,
+  }
 
   return {
     plan: org.subscription?.plan || 'starter',
@@ -62,6 +168,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
       percentage: teamMembersPercent,
     },
     leads: { used: currentLeads, limit: maxLeads, percentage: leadsPercent },
+    leadAllowance,
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
     features: {
@@ -71,7 +178,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
       smsAutomation: limits.hasSmsAutomation,
       premiumTemplates: limits.hasPremiumTemplates,
     },
-    isApproachingLimit: propertiesPercent >= 80 || teamMembersPercent >= 80 || leadsPercent >= 80,
+    isApproachingLimit: propertiesPercent >= 80 || teamMembersPercent >= 80 || leadsPercent >= 80 || allowancePercent >= 80,
   }
 }
 
