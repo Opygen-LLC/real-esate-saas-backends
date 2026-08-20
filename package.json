@@ -73,7 +73,8 @@
     "migrate:phase8-broker-visibility": "ts-node --transpile-only src/app/db/migratePhase8LicensedBrokerVisibility.ts",
     "migrate:onboarding-four-steps": "ts-node --transpile-only src/app/db/migrateOnboardingToFourSteps.ts",
     "reconcile:phase8-entitlements": "ts-node --transpile-only src/app/db/reconcilePhase8ResourceEntitlements.ts",
-    "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts"
+    "migrate:starter-lead-entitlement": "ts-node --transpile-only src/app/db/migrateStarterLeadEntitlement.ts",
+    "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts"
   },
   "keywords": [
     "real-estate",

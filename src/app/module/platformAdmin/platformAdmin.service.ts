@@ -23,6 +23,7 @@ import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
+import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
@@ -167,6 +168,7 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
 }
 
 const getPaymentLedger = async (query: any) => SubscriptionPaymentService.getPaymentLedger(query)
+const getBenefitPeriodHistory = async (query: any) => SubscriptionBenefitPeriodService.getHistory(query)
 
 const recordManualPayment = async (input: any, actor: { id: string; requestId?: string; ip?: string }) => {
   const result = await SubscriptionPaymentService.recordPayment(input, actor)
@@ -472,4 +474,4 @@ const endImpersonation = async (token: string, _actorId?: string, requestId?: st
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getPaymentLedger, getBenefitPeriodHistory, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

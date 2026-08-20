@@ -13,7 +13,8 @@ import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { calculateSubscriptionCharge } from '../billing/pricing'
 import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashCheckoutUrl } from './bkashPayment.verification'
 import { EntitlementService } from '../entitlement/entitlement.service'
-import { publishTeamSeatReconciliation, reconcileTeamSeats } from '../entitlement/teamSeatReconciliation.service'
+import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
+import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 
 type CreatePaymentInput = {
   organizationId: string
@@ -166,7 +167,7 @@ const verifyGatewayPayment = async (paymentId: string): Promise<BkashGatewayPaym
 }
 
 const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewayPayment) => {
-  let reconciliation: Awaited<ReturnType<typeof reconcileTeamSeats>> | null = null
+  let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
 
   await EntitlementService.withTeamMemberQuotaGuard(attempt.organizationId, async (session) => {
     const organizationQuery = Organization.findOne({ organizationId: attempt.organizationId })
@@ -175,14 +176,20 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
     const now = new Date()
-    const previousMaxTeamMembers = Number(organization.subscription?.maxAgents || 0)
+    const previousSubscription = organization.subscription?.toObject?.() || { ...(organization.subscription || {}) }
     const currentPeriodEnd = organization.subscription?.currentPeriodEnd
     const isRenewal =
       organization.subscription?.plan === attempt.planId &&
       currentPeriodEnd instanceof Date &&
       currentPeriodEnd > now
-    const periodEnd = new Date(isRenewal ? currentPeriodEnd : now)
+    const periodStart = new Date(isRenewal ? currentPeriodEnd : now)
+    const periodEnd = new Date(periodStart)
     periodEnd.setMonth(periodEnd.getMonth() + (attempt.billingCycle === 'yearly' ? 12 : 1))
+
+    const planQuery = SubscriptionPlan.findOne({ planId: attempt.planId, version: attempt.planVersion || 1 })
+    if (session) planQuery.session(session)
+    const plan: any = await planQuery.lean()
+    if (!plan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
 
     organization.subscription = {
       ...(organization.subscription?.toObject?.() || organization.subscription || {}),
@@ -199,12 +206,34 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     }
     await organization.save(session ? { session } : undefined)
 
-    reconciliation = await reconcileTeamSeats(attempt.organizationId, Number(attempt.maxAgents || 0), {
+    reconciliation = await reconcileOrganizationEntitlements(attempt.organizationId, previousSubscription, {
+      planId: attempt.planId,
+      version: attempt.planVersion || 1,
+      maxAgents: attempt.maxAgents,
+      maxProperties: attempt.maxProperties,
+    }, {
       session,
       actorId: attempt.initiatedBy || 'system:bkash',
       reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
-      previousMaxTeamMembers,
     })
+
+    const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
+      organizationId: attempt.organizationId,
+      paymentSource: 'bkash',
+      paymentNumber: attempt.paymentId || attempt.invoiceNumber,
+      billingCycle: attempt.billingCycle,
+      periodStart,
+      periodEnd,
+      plan: {
+        planId: plan.planId,
+        version: plan.version,
+        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
+        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
+        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
+        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
+        continuityGraceDays: Number(plan.continuityGraceDays || 0),
+      },
+    }, session)
 
     const tax = attempt.taxSnapshot
     const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,
@@ -235,10 +264,10 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     )
     await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
       action: 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
-      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle, teamSeatReconciliation: reconciliation } }, session)
+      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle, subscriptionEntitlementReconciliation: reconciliation, teamSeatReconciliation: reconciliation?.teamSeats || null, benefitPeriodId: String((benefitPeriodResult.period as any)._id), benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak, benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance } }, session)
   })
 
-  await publishTeamSeatReconciliation(reconciliation)
+  await publishSubscriptionEntitlementReconciliation(reconciliation)
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {

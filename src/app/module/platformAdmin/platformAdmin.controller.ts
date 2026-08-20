@@ -17,6 +17,10 @@ const paymentLedger = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getPaymentLedger(req.query)
   sendResponse(res, { statusCode: 200, success: true, message: 'Manual subscription payment ledger fetched', data: result.data, meta: result.meta as any })
 })
+const benefitPeriodHistory = catchAsync(async (req: Request, res: Response) => {
+  const result = await PlatformAdminService.getBenefitPeriodHistory(req.query)
+  sendResponse(res, { statusCode: 200, success: true, message: 'Subscription benefit-period history fetched', data: result.data, meta: result.meta as any })
+})
 const recordManualPayment = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 201, success: true, message: 'Manual subscription payment recorded and is waiting for confirmation', data: await PlatformAdminService.recordManualPayment(req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
 const decideManualPayment = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: req.body.status === 'confirmed' ? 'Payment confirmed and subscription activated' : 'Payment rejected', data: await PlatformAdminService.decideManualPayment(req.params.paymentId, req.body, { id: req.user!._id!, requestId: req.requestId, ip: req.ip }) }))
 const revenue = catchAsync(async (_req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Revenue dashboard fetched from confirmed manual subscription payments', data: await PlatformAdminService.getRevenueDashboard() }))
@@ -53,4 +57,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, paymentLedger, benefitPeriodHistory, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }
