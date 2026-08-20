@@ -10,7 +10,11 @@ const notificationSchema = new Schema({
   entityId: { type: String, required: true },
   leadId: { type: Schema.Types.ObjectId, ref: 'Lead' },
   readAt: Date,
+  dismissedAt: Date,
 }, { timestamps: true })
+
 notificationSchema.index({ organizationId: 1, userId: 1, createdAt: -1 })
+notificationSchema.index({ organizationId: 1, userId: 1, dismissedAt: 1, createdAt: -1, _id: -1 }, { name: 'tenant_user_dismissed_created' })
 notificationSchema.index({ jobId: 1, userId: 1 }, { unique: true })
+
 export const Notification = model('Notification', notificationSchema)

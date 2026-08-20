@@ -33,6 +33,7 @@
     "test:smtp": "node scripts/verify-smtp.mjs",
     "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
     "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",
+    "migrate:phase2-notifications": "ts-node --transpile-only src/app/db/migratePhase2NotificationLifecycle.ts",
     "migrate:phase-0-media": "ts-node --transpile-only src/app/db/migratePhase0PropertyMedia.ts",
     "migrate:phase-1-manual-subscriptions": "ts-node --transpile-only src/app/db/migratePhase1ManualSubscriptions.ts",
     "migrate:phase-3-agency-publishing": "ts-node --transpile-only src/app/db/migratePhase3AgencyPublishing.ts",
