@@ -151,6 +151,16 @@ const getPlanById = async (planId: string, version?: number): Promise<ISubscript
   return SubscriptionPlan.findOne({ planId, ...planWindowFilter(new Date()) }).sort({ version: -1 })
 }
 
+const getLatestPurchasablePlan = async (planId: string): Promise<ISubscriptionPlan | null> => {
+  await ensureDefaults()
+  const now = new Date()
+  return SubscriptionPlan.findOne({
+    planId,
+    isCurrent: true,
+    ...planWindowFilter(now),
+  }).sort({ version: -1 })
+}
+
 const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknown; page?: unknown; limit?: unknown; sortBy?: unknown; sortOrder?: unknown } = {}) => {
   await ensureDefaults()
   const page = Math.max(1, Number(query.page || 1))
@@ -349,6 +359,7 @@ const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migrat
 export const SubscriptionPlanService = {
   getAllPlans,
   getPlanById,
+  getLatestPurchasablePlan,
   getAllPlanVersions,
   createPlan,
   createVersion,

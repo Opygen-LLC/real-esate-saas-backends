@@ -5,6 +5,7 @@ import ApiError from '../../../errors/ApiError'
 import { Billing } from '../billing/billing.model'
 import { Organization } from '../organization/organization.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 import { BkashPaymentClient } from './bkashPayment.client'
 import { BkashGatewayPayment, IBkashPayment } from './bkashPayment.interface'
 import { BkashPayment } from './bkashPayment.model'
@@ -42,7 +43,7 @@ const createPayment = async (input: CreatePaymentInput) => {
 
   const [organization, plan] = await Promise.all([
     Organization.findOne({ organizationId: input.organizationId }),
-    SubscriptionPlan.findOne({ planId: input.planId, isActive: true, effectiveFrom: { $lte: new Date() }, $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gt: new Date() } }] }).sort({ version: -1 }),
+    SubscriptionPlanService.getLatestPurchasablePlan(input.planId),
   ])
 
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')

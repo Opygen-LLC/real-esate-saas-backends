@@ -9,6 +9,7 @@ import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.servi
 import { Organization } from '../organization/organization.model'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
@@ -34,6 +35,12 @@ const resolvePlan = async (planId: string, version?: number, session?: ClientSes
   const plan: any = await finder.lean()
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
   return plan
+}
+
+const resolveLatestPurchasablePlan = async (planId: string) => {
+  const plan: any = await SubscriptionPlanService.getLatestPurchasablePlan(planId)
+  if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan not found')
+  return typeof plan.toObject === 'function' ? plan.toObject() : plan
 }
 
 const priceFor = (plan: any, billingCycle: 'monthly' | 'yearly') => Number(billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly)
@@ -69,7 +76,7 @@ const commercialTransaction = async <T>(work: (session?: ClientSession) => Promi
 const createChangeRequest = async (organizationId: string, requestedBy: string, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) => {
   const [org, plan] = await Promise.all([
     Organization.findOne({ organizationId, isBlocked: { $ne: true } }).lean() as any,
-    resolvePlan(input.planId),
+    resolveLatestPurchasablePlan(input.planId),
   ])
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   if (org.subscription?.plan === plan.planId && Number(org.subscription?.planVersion || 1) === Number(plan.version) && ['active', 'grace', 'cancel_at_period_end'].includes(org.subscription?.status)) {
