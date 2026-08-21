@@ -23,7 +23,8 @@ services:
       minio-init:
         condition: service_completed_successfully
       clamav:
-        condition: service_healthy
+        condition: service_started
+
     networks:
       - app_network
 
@@ -32,8 +33,8 @@ services:
     command: ["server", "/data", "--console-address", ":9001"]
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID}
-      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY}
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - minio_data:/data
     ports:
@@ -54,17 +55,26 @@ services:
       minio:
         condition: service_healthy
     environment:
-      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
-      OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID}
-      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-realestate-saas}
+      OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+
     volumes:
       - ./ops/minio-cors.xml:/config/minio-cors.xml:ro
     entrypoint: ["/bin/sh", "-c"]
     command: >-
-      mc alias set local http://minio:9000 "$$OBJECT_STORAGE_ACCESS_KEY_ID" "$$OBJECT_STORAGE_SECRET_ACCESS_KEY" &&
-      mc mb --ignore-existing "local/$$OBJECT_STORAGE_BUCKET" &&
-      mc anonymous set download "local/$$OBJECT_STORAGE_BUCKET" &&
-      mc cors set "local/$$OBJECT_STORAGE_BUCKET" /config/minio-cors.xml
+      KEY="$${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}" &&
+      SECRET="$${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}" &&
+      BUCKET="$${OBJECT_STORAGE_BUCKET:-realestate-saas}" &&
+      [ -z "$$KEY" ] && KEY="minioadmin" ;
+      [ -z "$$SECRET" ] && SECRET="minioadmin" ;
+      [ -z "$$BUCKET" ] && BUCKET="realestate-saas" ;
+      mc alias set local http://minio:9000 "$$KEY" "$$SECRET" &&
+      mc mb --ignore-existing "local/$$BUCKET" &&
+      mc anonymous set download "local/$$BUCKET" &&
+      mc cors set "local/$$BUCKET" /config/minio-cors.xml
+
+
     restart: "no"
     networks:
       - app_network
