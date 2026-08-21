@@ -1,0 +1,22 @@
+{
+  "migrationName": "lead-subscription-locking-v1",
+  "generatedAt": "2026-08-21T09:21:14.817Z",
+  "backup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/lead-subscription-locking-v1-leads-2026-08-21T09-21-14-490Z.jsonl",
+    "count": 69,
+    "sha256": "026627096787980faa81b2c925f64a934e36894f7c13d4e424e9e58b80bda828"
+  },
+  "leadsBackfilled": 69,
+  "index": {
+    "name": "lead_tenant_lock_created",
+    "key": {
+      "organizationId": 1,
+      "isLocked": 1,
+      "createdAt": -1,
+      "_id": -1
+    }
+  },
+  "destructiveDataMutation": false,
+  "planMutation": false,
+  "note": "Existing Leads are initialized as accessible. Active-capacity reconciliation applies locks at plan transitions and request-time entitlement boundaries; grandfathered credit plans remain accessible."
+}
