@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
-import sharp from 'sharp'
+import sharp, { type Metadata } from 'sharp'
 import { isIP } from 'net'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
@@ -292,7 +292,7 @@ const uploadAssetBuffer = async (
   if (!ALLOWED_ASSET_MIME_TYPES.has(mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
   if (file.buffer.length > 20 * 1024 * 1024) throw new ApiError(413, 'Property photos must be 20 MB or smaller')
 
-  let metadata: sharp.Metadata
+  let metadata: Metadata
   try {
     metadata = await sharp(file.buffer, { failOn: 'error' }).metadata()
   } catch {
