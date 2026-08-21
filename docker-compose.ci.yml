@@ -50,11 +50,14 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    volumes:
+      - ./ops/minio-cors.xml:/config/minio-cors.xml:ro
     entrypoint: ["/bin/sh", "-c"]
     command: >-
       mc alias set ci http://minio:9000 phase7minio phase7-minio-secret-123456 &&
       mc mb --ignore-existing ci/real-estate-media &&
-      mc anonymous set download ci/real-estate-media
+      mc anonymous set download ci/real-estate-media &&
+      mc cors set ci/real-estate-media /config/minio-cors.xml
 
   clamav:
     image: clamav/clamav:1.4.4

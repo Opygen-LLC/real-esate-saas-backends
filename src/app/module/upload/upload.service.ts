@@ -9,22 +9,18 @@ export interface IUploadResult {
   sizeBytes: number
 }
 
-const compressImage = async (buffer: Buffer, mimetype: string): Promise<Buffer> => {
+const sanitizeImage = async (buffer: Buffer, mimetype: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> => {
+  const normalizedType = mimetype.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimetype.toLowerCase()
   try {
-    const normalizedType = mimetype.toLowerCase()
-    if (normalizedType === 'image/jpeg' || normalizedType === 'image/jpg') {
-      return await sharp(buffer)
-        .jpeg({ quality: 80, mozjpeg: true })
-        .toBuffer()
-    } else if (normalizedType === 'image/png') {
-      return await sharp(buffer)
-        .png({ quality: 80, compressionLevel: 8 })
-        .toBuffer()
-    }
-    return buffer
-  } catch (_err) {
-    // If sharp fails to parse format, fallback to original buffer safely
-    return buffer
+    const image = sharp(buffer, { failOn: 'error' }).rotate()
+    if (normalizedType === 'image/jpeg') return { buffer: await image.jpeg({ quality: 82, mozjpeg: true }).toBuffer(), contentType: 'image/jpeg', extension: 'jpg' }
+    if (normalizedType === 'image/png') return { buffer: await image.png({ compressionLevel: 8 }).toBuffer(), contentType: 'image/png', extension: 'png' }
+    if (normalizedType === 'image/webp') return { buffer: await image.webp({ quality: 82 }).toBuffer(), contentType: 'image/webp', extension: 'webp' }
+    if (normalizedType === 'image/avif') return { buffer: await image.avif({ quality: 72 }).toBuffer(), contentType: 'image/avif', extension: 'avif' }
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported image format')
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError(httpStatus.BAD_REQUEST, 'The uploaded file is not a valid image')
   }
 }
 
@@ -33,18 +29,18 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
     throw new ApiError(httpStatus.BAD_REQUEST, 'No file buffer available for upload')
   }
 
-  const compressedBuffer = await compressImage(file.buffer, file.mimetype)
+  const sanitized = await sanitizeImage(file.buffer, file.mimetype)
 
-  const sanitizedOriginalName = file.originalname ? file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_') : 'image.jpg'
-  const uniqueFileName = `uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${sanitizedOriginalName}`
+  const originalStem = (file.originalname || 'image').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100) || 'image'
+  const uniqueFileName = `uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${originalStem}.${sanitized.extension}`
   const blob = bucket.file(uniqueFileName)
 
   return new Promise((resolve, reject) => {
     const blobStream = blob.createWriteStream({
       resumable: false,
-      contentType: file.mimetype,
+      contentType: sanitized.contentType,
       metadata: {
-        contentType: file.mimetype,
+        contentType: sanitized.contentType,
       },
     })
 
@@ -54,10 +50,10 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
 
     blobStream.on('finish', () => {
       const publicUrl = `https://storage.googleapis.com/${storageConfig.bucketName}/${blob.name}`
-      resolve({ publicUrl, sizeBytes: compressedBuffer.length })
+      resolve({ publicUrl, sizeBytes: sanitized.buffer.length })
     })
 
-    blobStream.end(compressedBuffer)
+    blobStream.end(sanitized.buffer)
   })
 }
 

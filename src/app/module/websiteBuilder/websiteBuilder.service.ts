@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
+import sharp from 'sharp'
 import { isIP } from 'net'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
@@ -263,6 +264,67 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
   )
   await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
   return asset
+}
+
+
+const MIME_FROM_SHARP_FORMAT: Record<string, string> = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  heif: 'image/avif',
+}
+
+/**
+ * Server-proxied upload path for property media. This is intentionally part of
+ * the WebsiteAsset/WebsiteUploadIntent lifecycle so ownership checks, storage
+ * accounting, malware scanning, draft cleanup and create-time claiming stay
+ * identical to presigned browser uploads.
+ */
+const uploadAssetBuffer = async (
+  organizationId: string,
+  file: Express.Multer.File,
+  userId?: string,
+  options: AssetLifecycleOptions = {},
+) => {
+  const mimeType = String(file?.mimetype || '').toLowerCase()
+  if (!file?.buffer?.length) throw new ApiError(400, 'No property photo was uploaded')
+  if (!ALLOWED_ASSET_MIME_TYPES.has(mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
+  if (file.buffer.length > 20 * 1024 * 1024) throw new ApiError(413, 'Property photos must be 20 MB or smaller')
+
+  let metadata: sharp.Metadata
+  try {
+    metadata = await sharp(file.buffer, { failOn: 'error' }).metadata()
+  } catch {
+    throw new ApiError(400, 'The uploaded file is not a valid image')
+  }
+  const detectedMime = metadata.format ? MIME_FROM_SHARP_FORMAT[metadata.format] : undefined
+  if (detectedMime && detectedMime !== mimeType) throw new ApiError(400, 'Uploaded image content does not match its file type')
+
+  const signed: any = await presignAsset(organizationId, {
+    filename: file.originalname || 'property-image',
+    mimeType,
+    size: file.buffer.length,
+  }, options)
+  const objectKeys = [signed.original.key, ...(signed.requiredVariants || []).map((variant: any) => variant.key)]
+
+  try {
+    await ObjectStorageService.putBuffer(signed.original.key, file.buffer, mimeType)
+    const altText = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
+    return await completeAsset(organizationId, {
+      key: signed.original.key,
+      originalName: file.originalname || 'property-image',
+      mimeType,
+      width: metadata.width,
+      height: metadata.height,
+      altText,
+      variants: [],
+    }, userId)
+  } catch (error) {
+    await Promise.allSettled(objectKeys.map((key: string) => ObjectStorageService.remove(key)))
+    await WebsiteUploadIntent.deleteOne({ organizationId, key: signed.original.key, status: 'pending' }).catch(() => undefined)
+    throw error
+  }
 }
 
 
@@ -615,4 +677,4 @@ const getSitemap = async (identifier: string) => {
 const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
 const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

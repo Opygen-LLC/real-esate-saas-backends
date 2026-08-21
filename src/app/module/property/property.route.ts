@@ -5,6 +5,7 @@ import validateRequest from '../../middlewares/validateRequest'
 import { PropertyController } from './property.controller'
 import { PropertyValidation } from './property.validation'
 import { propertyImportUpload } from './propertyImport.middleware'
+import { propertyImageUpload } from './propertyMedia.middleware'
 
 const router = express.Router()
 
@@ -24,6 +25,7 @@ router.get('/export/xlsx', authMiddlewares.requirePermission('properties.read'),
 
 // Property media uses property permissions while reusing the hardened storage pipeline.
 router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
+router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), propertyImageUpload, PropertyController.uploadPropertyImage)
 router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
 router.post('/assets/import-url', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.importImageUrlZodSchema), PropertyController.importPropertyImageUrl)
 router.delete('/assets/session/:sessionId/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.deleteDraftAssetZodSchema), PropertyController.deletePropertyDraftAsset)

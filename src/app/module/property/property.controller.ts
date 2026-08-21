@@ -131,6 +131,18 @@ const presignPropertyImage = catchAsync(async (req: Request, res: Response) => {
   const data = await WebsiteBuilderService.presignAsset(requireTenant(req), assetPayload, uploadSessionId ? { context: 'property-draft', uploadSessionId } : {})
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Property image upload prepared', data })
 })
+const uploadPropertyImage = catchAsync(async (req: Request, res: Response) => {
+  if (!req.file) throw new ApiError(httpStatus.BAD_REQUEST, 'No property photo was uploaded')
+  const uploadSessionId = String(req.body?.uploadSessionId || '').trim()
+  const data = await WebsiteBuilderService.uploadAssetBuffer(
+    requireTenant(req),
+    req.file,
+    req.user?._id,
+    uploadSessionId ? { context: 'property-draft', uploadSessionId } : {},
+  )
+  sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image uploaded and queued for verification', data })
+})
+
 const completePropertyImage = catchAsync(async (req: Request, res: Response) => {
   const data = await WebsiteBuilderService.completeAsset(requireTenant(req), req.body, req.user?._id)
   sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image uploaded and queued for verification', data })
@@ -351,6 +363,7 @@ export const PropertyController = {
   createProperty,
   importPropertyImageUrl,
   presignPropertyImage,
+  uploadPropertyImage,
   completePropertyImage,
   getPropertyImageAsset,
   deletePropertyDraftAsset,
