@@ -137,6 +137,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
         default: 'trial',
       },
       planVersion: { type: Number, default: 1, min: 1 },
+      revision: { type: Number, default: 0, min: 0 },
       status: {
         type: String,
         enum: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended'],
@@ -163,6 +164,13 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       cancelAtPeriodEnd: { type: Boolean, default: false },
       reminderSentAt: { type: Date, default: null },
       source: { type: String, enum: ['trial', 'bkash', 'manual_payment', 'manual_admin', 'migration'], default: 'trial' },
+      scheduledPlan: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise', null], default: null },
+      scheduledPlanVersion: { type: Number, min: 1, default: null },
+      scheduledBillingCycle: { type: String, enum: ['monthly', 'yearly', null], default: null },
+      scheduledEffectiveAt: { type: Date, default: null },
+      scheduledChangeRequestId: { type: Schema.Types.ObjectId, ref: 'SubscriptionChangeRequest', default: null },
+      scheduledBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+      scheduledSource: { type: String, enum: ['bkash', 'manual_payment', 'manual_admin', null], default: null },
     },
     socialLinks: {
       facebook: { type: String, default: '' },
@@ -244,6 +252,13 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
 )
 
 organizationSchema.index({ sub_domain: 1 }, { unique: true })
+organizationSchema.index(
+  { 'subscription.scheduledEffectiveAt': 1, organizationId: 1 },
+  {
+    name: 'subscription_due_schedule',
+    partialFilterExpression: { 'subscription.scheduledEffectiveAt': { $type: 'date' } },
+  },
+)
 organizationSchema.index(
   { ownerId: 1 },
   { unique: true, partialFilterExpression: { ownerId: { $type: 'objectId' } }, name: 'organization_owner_unique' },

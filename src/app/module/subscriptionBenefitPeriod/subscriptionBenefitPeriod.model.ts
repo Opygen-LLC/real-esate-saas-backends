@@ -8,6 +8,8 @@ const subscriptionBenefitPeriodSchema = new Schema<ISubscriptionBenefitPeriod>(
     paymentNumber: { type: String, required: true, trim: true },
     planId: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise'], required: true, index: true },
     planVersion: { type: Number, required: true, min: 1 },
+    // Missing historical rows are interpreted as paid-period credits for grandfathering.
+    leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: 'paid_period_credits' },
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'one-time'], required: true },
     periodStart: { type: Date, required: true, index: true },
     periodEnd: { type: Date, required: true, index: true },

@@ -47,9 +47,11 @@ describe('Phase 14 Starter vNext migration and purchase policy', () => {
     expect(paymentService).toContain('resolvePlan(payment.planId, payment.planVersion, session)')
   })
 
-  it('makes new bKash purchases resolve the same latest current plan version', () => {
+  it('keeps same-plan bKash renewals grandfathered while new/different-plan purchases use the current catalog', () => {
     const bkash = read('src/app/module/bkashPayment/bkashPayment.service.ts')
-    expect(bkash).toContain('SubscriptionPlanService.getLatestPurchasablePlan(input.planId)')
+    expect(bkash).toContain('resolveCheckoutPlan')
+    expect(bkash).toContain('SubscriptionPlanService.getLatestPurchasablePlan(requestedPlanId)')
+    expect(bkash).toContain('Number(organization.subscription.planVersion)')
     expect(bkash).toContain('planVersion: plan.version || 1')
   })
 })

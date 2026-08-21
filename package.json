@@ -78,7 +78,9 @@
     "migrate:subscription-benefit-periods": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitPeriods.ts",
     "migrate:continuous-subscription": "ts-node --transpile-only src/app/db/migrateContinuousSubscriptionPolicy.ts",
     "migrate:lead-allowance-reservations": "ts-node --transpile-only src/app/db/migrateLeadAllowanceReservations.ts",
-    "migrate:subscription-benefit-streak-adjustments": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitStreakAdjustments.ts"
+    "migrate:subscription-benefit-streak-adjustments": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitStreakAdjustments.ts",
+    "migrate:subscription-tier-rollover-v2": "ts-node --transpile-only src/app/db/migrateSubscriptionTierRolloverV2.ts",
+    "migrate:subscription-deferred-downgrades": "ts-node --transpile-only src/app/db/migrateDeferredSubscriptionSchedules.ts"
   },
   "keywords": [
     "real-estate",

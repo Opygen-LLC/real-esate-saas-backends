@@ -68,48 +68,51 @@ const getSubscriptionUsage = async (organizationId: string) => {
       loyaltyStep: Math.max(0, Number(upcoming.renewalLeadBonus || 0)),
       allowanceChange: Math.max(0, Number(upcoming.totalLeadAllowance || 0)) - currentTotal,
       additionalLeadAllowance: Math.max(0, Math.max(0, Number(upcoming.totalLeadAllowance || 0)) - currentTotal),
-      continuityPreserved: upcoming.planId === 'starter'
-        && upcoming.billingCycle === 'monthly'
+      continuityPreserved: upcoming.billingCycle === 'monthly'
+        && upcoming.renewalBonusEnabled === true
         && Math.max(1, Number(upcoming.renewalStreak || 1)) === effectiveRenewalStreak + 1,
       graceDays: Math.max(0, Number(upcoming.continuityGraceDays || 0)),
       renewBy: null,
       projectedPeriodStart: upcoming.periodStart,
     }
-  } else if (monthlyLeadAllowance.planId === 'starter' && monthlyLeadAllowance.billingCycle === 'monthly' && sourceBenefitPeriodId) {
-    const latestStarter: any = await SubscriptionPlanService.getLatestPurchasablePlan('starter')
-    if (latestStarter) {
+  } else if (monthlyLeadAllowance.billingCycle === 'monthly' && monthlyLeadAllowance.renewalBonusEnabled === true && sourceBenefitPeriodId) {
+    // Grandfathering invariant: project renewal from the tenant's assigned immutable plan
+    // version, never from the latest catalog version.
+    const assignedPlan: any = await SubscriptionPlanService.getPlanById(monthlyLeadAllowance.planId, Number(monthlyLeadAllowance.planVersion || 1))
+    if (assignedPlan) {
       const now = new Date()
       const previousEnd = new Date(monthlyLeadAllowance.periodEnd || monthlyLeadAllowance.previousPeriodEnd)
       const projectedStart = previousEnd.getTime() > now.getTime() ? previousEnd : now
       const projected = calculateBenefitPeriodAllowance({
-        planId: 'starter',
-        version: Number(latestStarter.version || 1),
-        baseMonthlyLeadAllowance: Number(latestStarter.baseMonthlyLeadAllowance || 0),
-        renewalLeadBonus: Number(latestStarter.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(latestStarter.renewalBonusEnabled),
-        maxRenewalLeadBonus: Number(latestStarter.maxRenewalLeadBonus || 0),
-        continuityGraceDays: Number(latestStarter.continuityGraceDays || 0),
+        planId: assignedPlan.planId,
+        version: Number(assignedPlan.version || 1),
+        leadAllowanceModel: assignedPlan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+        baseMonthlyLeadAllowance: Number(assignedPlan.baseMonthlyLeadAllowance || 0),
+        renewalLeadBonus: Number(assignedPlan.renewalLeadBonus || 0),
+        renewalBonusEnabled: Boolean(assignedPlan.renewalBonusEnabled),
+        maxRenewalLeadBonus: Number(assignedPlan.maxRenewalLeadBonus || 0),
+        continuityGraceDays: Number(assignedPlan.continuityGraceDays || 0),
       }, 'monthly', projectedStart, {
         _id: sourceBenefitPeriodId,
-        planId: 'starter',
+        planId: assignedPlan.planId,
         billingCycle: 'monthly',
         periodEnd: previousEnd,
         renewalStreak: effectiveRenewalStreak,
         renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,
       })
       const currentTotal = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
-      const graceDays = Math.max(0, Number(latestStarter.continuityGraceDays || 0))
+      const graceDays = Math.max(0, Number(assignedPlan.continuityGraceDays || 0))
       const renewBy = new Date(previousEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
       nextRenewal = {
         alreadyConfirmed: false,
         paymentNumber: null,
-        planId: 'starter',
-        planVersion: Number(latestStarter.version || 1),
+        planId: assignedPlan.planId,
+        planVersion: Number(assignedPlan.version || 1),
         projectedRenewalStreak: projected.renewalStreak,
         baseLeadAllowance: projected.baseLeadAllowance,
         bonusLeadAllowance: projected.bonusLeadAllowance,
         totalLeadAllowance: projected.totalLeadAllowance,
-        loyaltyStep: Number(latestStarter.renewalLeadBonus || 0),
+        loyaltyStep: Number(assignedPlan.renewalLeadBonus || 0),
         allowanceChange: projected.totalLeadAllowance - currentTotal,
         additionalLeadAllowance: Math.max(0, projected.totalLeadAllowance - currentTotal),
         continuityPreserved: projected.renewalStreak === effectiveRenewalStreak + 1,
@@ -127,6 +130,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
       : (monthlyLeadAllowance.legacyFallback ? 'legacy' : 'active'),
     benefitPeriodId: monthlyLeadAllowance.benefitPeriodId,
     billingCycle: monthlyLeadAllowance.billingCycle || null,
+    leadAllowanceModel: monthlyLeadAllowance.leadAllowanceModel || 'paid_period_credits',
     planId: monthlyLeadAllowance.planId,
     planVersion: monthlyLeadAllowance.planVersion,
     used: allowanceUsed,
@@ -145,11 +149,25 @@ const getSubscriptionUsage = async (organizationId: string) => {
     nextRenewal,
   }
 
+  const scheduledPlan = org.subscription?.scheduledPlan || null
+  const scheduledPlanVersion = org.subscription?.scheduledPlanVersion || null
+  const scheduledBillingCycle = org.subscription?.scheduledBillingCycle || null
+  const scheduledEffectiveAt = org.subscription?.scheduledEffectiveAt || null
+  const scheduledChangeRequestId = org.subscription?.scheduledChangeRequestId ? String(org.subscription.scheduledChangeRequestId) : null
+  const changeType = scheduledPlan ? 'downgrade' : (pendingChangeRequest?.changeType || null)
+
   return {
     plan: org.subscription?.plan || 'starter',
+    currentPlan: org.subscription?.plan || 'starter',
     planVersion: org.subscription?.planVersion || 1,
     status: org.subscription?.status || 'trialing',
     currentPeriodEnd: org.subscription?.currentPeriodEnd,
+    scheduledPlan,
+    scheduledPlanVersion,
+    scheduledBillingCycle,
+    scheduledEffectiveAt,
+    scheduledChangeRequestId,
+    changeType,
     pendingChangeRequest,
     properties: { used: currentProperties, limit: maxProperties, percentage: propertiesPercent },
     maxTeamMembers,
@@ -186,6 +204,10 @@ const cancelSubscription = async (organizationId: string) => {
   const org = await Organization.findOne({ organizationId })
   if (!org) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  }
+
+  if (org.subscription?.scheduledPlan) {
+    throw new ApiError(httpStatus.CONFLICT, 'A paid downgrade is already scheduled. Subscription cancellation requires an explicit billing adjustment/refund workflow first.')
   }
 
   if (org.subscription) {

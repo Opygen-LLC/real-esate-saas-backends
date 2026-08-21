@@ -9,6 +9,7 @@ export const subscriptionChangeRequestInputSchema = z.object({
   billingCycle: z.enum(['monthly', 'yearly']),
   amount: z.number().finite().nonnegative().max(1_000_000_000),
   currency: z.literal('BDT').default('BDT'),
+  changeType: z.enum(['upgrade', 'downgrade', 'version_change']).optional(),
   requestedBy: z.string().trim().min(1).max(120),
 }).strict().refine(
   value => value.currentPlan !== value.requestedPlan || value.currentPlanVersion !== value.requestedPlanVersion,

@@ -1,4 +1,5 @@
 export type SubscriptionPlanId = 'starter' | 'professional' | 'agency' | 'enterprise'
+export type LeadAllowanceModel = 'paid_period_credits' | 'active_capacity'
 
 export interface ISubscriptionPlan {
   planId: SubscriptionPlanId
@@ -12,6 +13,7 @@ export interface ISubscriptionPlan {
   maxAgents: number
   maxProperties: number
   maxLeads: number
+  leadAllowanceModel: LeadAllowanceModel
   baseMonthlyLeadAllowance: number
   renewalLeadBonus: number
   renewalBonusEnabled: boolean

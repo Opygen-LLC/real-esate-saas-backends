@@ -15,6 +15,7 @@ import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
+import { SubscriptionScheduleService, classifySubscriptionChange } from '../subscription/subscriptionSchedule.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const serial = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(10).toString('hex').toUpperCase()}`
@@ -45,6 +46,24 @@ const resolveLatestPurchasablePlan = async (planId: string) => {
 
 const priceFor = (plan: any, billingCycle: 'monthly' | 'yearly') => Number(billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly)
 
+const PAID_RENEWAL_STATUSES = new Set(['active', 'grace', 'cancel_at_period_end'])
+
+const resolveDirectPaymentPlan = async (
+  organization: any,
+  planId: string,
+  requestedVersion?: number,
+  session?: ClientSession,
+) => {
+  if (requestedVersion) return resolvePlan(planId, requestedVersion, session)
+  const isGrandfatheredRenewal = organization?.subscription?.plan === planId
+    && Number(organization?.subscription?.planVersion || 0) > 0
+    && PAID_RENEWAL_STATUSES.has(String(organization?.subscription?.status || ''))
+  if (isGrandfatheredRenewal) {
+    return resolvePlan(planId, Number(organization.subscription.planVersion), session)
+  }
+  return resolvePlan(planId, undefined, session)
+}
+
 const fallbackPlanName = (planId: string) => String(planId || '')
   .replace(/[_-]+/g, ' ')
   .replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -54,6 +73,7 @@ const toChangeRequestContract = (request: any, requestedPlanName?: string) => {
   return {
     ...plain,
     requestedPlanName: String(requestedPlanName || plain.requestedPlanName || fallbackPlanName(plain.requestedPlan)).trim(),
+    changeType: plain.changeType || classifySubscriptionChange(String(plain.currentPlan || 'trial'), String(plain.requestedPlan || 'starter')),
   }
 }
 
@@ -82,24 +102,28 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
   if (org.subscription?.plan === plan.planId && Number(org.subscription?.planVersion || 1) === Number(plan.version) && ['active', 'grace', 'cancel_at_period_end'].includes(org.subscription?.status)) {
     throw new ApiError(httpStatus.CONFLICT, 'This is already your current subscription plan')
   }
-  const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
+  if (org.subscription?.scheduledPlan) {
+    throw new ApiError(httpStatus.CONFLICT, 'A paid downgrade is already scheduled. Wait until it applies, or use an explicit billing adjustment/refund workflow before requesting another change.')
+  }
+  const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (existing) throw new ApiError(httpStatus.CONFLICT, `A subscription request is already open (${existing.requestNumber}). Complete or cancel it first.`)
+  const changeType = classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId))
   let request: any
   try {
     request = await SubscriptionChangeRequest.create({
       requestNumber: serial('REQ'), organizationId,
       currentPlan: org.subscription?.plan || 'trial', currentPlanVersion: Number(org.subscription?.planVersion || 1),
       requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle,
-      amount: priceFor(plan, input.billingCycle), currency: 'BDT', status: 'pending_payment', requestedBy,
+      amount: priceFor(plan, input.billingCycle), currency: 'BDT', changeType, status: 'pending_payment', requestedBy,
     })
   } catch (error: any) {
     if (Number(error?.code) !== 11000) throw error
-    const concurrent: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
+    const concurrent: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } }).sort({ createdAt: -1, _id: -1 }).lean()
     throw new ApiError(httpStatus.CONFLICT, concurrent?.requestNumber
       ? `A subscription request is already open (${concurrent.requestNumber}). Complete or cancel it first.`
       : 'A subscription request is already open. Complete or cancel it first.')
   }
-  await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount, currency: request.currency } })
+  await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'agency_owner', action: 'subscription.change_requested', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency requested a manual subscription plan change', metadata: { requestNumber: request.requestNumber, requestedPlan: plan.planId, requestedPlanName: plan.name || fallbackPlanName(plan.planId), requestedPlanVersion: plan.version, billingCycle: input.billingCycle, amount: request.amount, currency: request.currency, changeType } })
   RealtimeService.emitRole('super-admin', {
     type: 'platform.notification.changed',
     action: 'created',
@@ -111,6 +135,7 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
       requestedPlan: plan.planId,
       requestedPlanVersion: plan.version,
       billingCycle: input.billingCycle,
+      changeType,
     },
   })
   return toChangeRequestContract(request, plan.name)
@@ -139,7 +164,7 @@ const getChangeRequests = async (organizationId: string) => {
 const cancelChangeRequest = async (organizationId: string, requestId: string, actorId: string) => {
   const request: any = await SubscriptionChangeRequest.findOne({ _id: requestId, organizationId })
   if (!request) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription request not found')
-  if (request.status !== 'pending_payment') throw new ApiError(httpStatus.CONFLICT, 'Only requests waiting for payment can be cancelled')
+  if (request.status !== 'pending_payment') throw new ApiError(httpStatus.CONFLICT, 'Only requests waiting for payment can be cancelled. A paid scheduled downgrade requires an explicit billing adjustment/refund workflow.')
   request.status = 'cancelled'; request.reviewedBy = actorId; request.reviewedAt = new Date(); await request.save()
   await writeAudit({ organizationId, actorId, actorRole: 'agency_owner', action: 'subscription.change_cancelled', entityType: 'subscriptionChangeRequest', entityId: String(request._id), reason: 'Agency cancelled the pending subscription request', metadata: { requestNumber: request.requestNumber } })
   RealtimeService.emitRole('super-admin', {
@@ -153,7 +178,7 @@ const cancelChangeRequest = async (organizationId: string, requestId: string, ac
 }
 
 const getTenantPendingState = async (organizationId: string) => {
-  const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted'] } }).sort({ createdAt: -1, _id: -1 }).lean()
+  const request: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (!request) return null
   const [payment, plan] = await Promise.all([
     request.paymentId ? SubscriptionPayment.findOne({ paymentNumber: request.paymentId }).lean() : null,
@@ -190,6 +215,9 @@ const recordPayment = async (input: {
     if (session) orgQuery.session(session)
     const org: any = await orgQuery
     if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+    if (org.subscription?.scheduledPlan && !input.changeRequestId) {
+      throw new ApiError(httpStatus.CONFLICT, 'This organization already has a paid scheduled downgrade. Wait until it applies, or use an explicit billing adjustment/refund workflow before recording another direct subscription change.')
+    }
 
     let request: any = null
     let plan: any
@@ -208,7 +236,9 @@ const recordPayment = async (input: {
       amount = Number(request.amount)
     } else {
       if (!input.planId) throw new ApiError(httpStatus.BAD_REQUEST, 'Plan is required')
-      plan = await resolvePlan(input.planId, input.planVersion, session)
+      // Direct same-family renewals stay pinned to the tenant's immutable assigned version.
+      // Supplying planVersion explicitly or using a change request is an explicit commercial update.
+      plan = await resolveDirectPaymentPlan(org, input.planId, input.planVersion, session)
       billingCycle = input.billingCycle || 'monthly'
       amount = priceFor(plan, billingCycle)
     }
@@ -260,33 +290,58 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         await request.save(session ? { session } : undefined)
       }
       await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_rejected', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Payment rejected', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber } }, session)
-      return { organizationId: payment.organizationId, entitlementReconciliation: null }
+      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: null, changeType: request?.changeType || null }
     }
 
     const plan = await resolvePlan(payment.planId, payment.planVersion, session)
     const now = new Date()
     const samePlan = org.subscription?.plan === plan.planId
     const existingEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
-    const start = samePlan && existingEnd && existingEnd > now ? existingEnd : now
+    const changeType = request?.changeType || classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId))
+    const deferredDowngrade = changeType === 'downgrade' && Boolean(existingEnd && existingEnd > now)
+    const start = deferredDowngrade && existingEnd
+      ? existingEnd
+      : samePlan && existingEnd && existingEnd > now
+        ? existingEnd
+        : now
     const end = periodEnd(start, payment.billingCycle)
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
-    org.subscription = {
-      ...(org.subscription?.toObject?.() || org.subscription || {}), plan: plan.planId, planVersion: plan.version, status: 'active',
-      currentPeriodEnd: end, lastPaymentDate: payment.paidAt || now, trialEndsAt: null, gracePeriodEnd: null,
-      cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_payment', maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
+    let entitlementReconciliation: Awaited<ReturnType<typeof reconcileOrganizationEntitlements>> | null = null
+
+    if (deferredDowngrade) {
+      await SubscriptionScheduleService.scheduleDowngradeOnOrganization(org, {
+        planId: plan.planId,
+        planVersion: Number(plan.version),
+        billingCycle: payment.billingCycle,
+        effectiveAt: start,
+        changeRequestId: request?._id || null,
+        scheduledBy: request?.requestedBy || actor.id,
+        source: 'manual_payment',
+        paidAt: payment.paidAt || now,
+      }, session)
+    } else {
+      if (org.subscription?.scheduledPlan) {
+        throw new ApiError(httpStatus.CONFLICT, 'Another paid subscription change is already scheduled. Wait until it applies, or use an explicit billing adjustment/refund workflow before confirming a different plan.')
+      }
+      org.subscription = {
+        ...(org.subscription?.toObject?.() || org.subscription || {}), plan: plan.planId, planVersion: plan.version, status: 'active',
+        currentPeriodEnd: end, lastPaymentDate: payment.paidAt || now, trialEndsAt: null, gracePeriodEnd: null,
+        cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_payment', maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
+        revision: Math.max(0, Number(org.subscription?.revision || 0)) + 1,
+      }
+      await org.save(session ? { session } : undefined)
+      entitlementReconciliation = await reconcileOrganizationEntitlements(payment.organizationId, previous, plan, {
+        session,
+        actorId: actor.id,
+        reason: `Subscription changed to ${plan.planId} v${plan.version}`,
+      })
     }
-    await org.save(session ? { session } : undefined)
-    const entitlementReconciliation = await reconcileOrganizationEntitlements(payment.organizationId, previous, plan, {
-      session,
-      actorId: actor.id,
-      reason: `Subscription changed to ${plan.planId} v${plan.version}`,
-    })
+
     payment.status = 'confirmed'; payment.confirmedBy = actor.id; payment.confirmedAt = now; payment.rejectedReason = ''; payment.periodStart = start; payment.periodEnd = end
-    // Only confirmations performed by the new lifecycle are eligible for the one-time customer success modal.
-    // This intentionally prevents legacy confirmed payments from replaying after deployment.
     payment.confirmationNoticeEligible = true
     payment.customerAcknowledgedBy = []
     await payment.save(session ? { session } : undefined)
+
     const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
       organizationId: payment.organizationId,
       paymentSource: 'manual_payment',
@@ -297,6 +352,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       plan: {
         planId: plan.planId,
         version: plan.version,
+        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
         baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
         renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
         renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
@@ -304,30 +360,62 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         continuityGraceDays: Number(plan.continuityGraceDays || 0),
       },
     }, session)
+
     if (request) {
-      request.status = 'approved'; request.reviewedBy = actor.id; request.reviewedAt = now; request.rejectionReason = ''
+      request.status = deferredDowngrade ? 'scheduled' : 'approved'
+      request.changeType = changeType
+      request.scheduledEffectiveAt = deferredDowngrade ? start : null
+      request.appliedAt = null
+      request.reviewedBy = actor.id; request.reviewedAt = now; request.rejectionReason = ''
       await request.save(session ? { session } : undefined)
     }
-    await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_confirmed', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Manual subscription payment confirmed', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber, receiptNumber: payment.receiptNumber, previousSubscription: previous, currentSubscription: org.subscription?.toObject?.() || org.subscription, subscriptionEntitlementReconciliation: entitlementReconciliation, teamSeatReconciliation: entitlementReconciliation.teamSeats, benefitPeriodId: String((benefitPeriodResult.period as any)._id), benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak, benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance } }, session)
-    return { organizationId: payment.organizationId, entitlementReconciliation }
+
+    await writeAudit({
+      organizationId: payment.organizationId,
+      actorId: actor.id,
+      actorRole: 'super-admin',
+      action: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.payment_confirmed',
+      entityType: 'subscriptionPayment',
+      entityId: String(payment._id),
+      reason: decision.reason || (deferredDowngrade ? 'Manual subscription downgrade payment confirmed and deferred to the current billing boundary' : 'Manual subscription payment confirmed'),
+      requestId: actor.requestId,
+      ip: actor.ip,
+      metadata: {
+        paymentNumber,
+        receiptNumber: payment.receiptNumber,
+        changeType,
+        deferredDowngrade,
+        scheduledEffectiveAt: deferredDowngrade ? start : null,
+        previousSubscription: previous,
+        currentSubscription: org.subscription?.toObject?.() || org.subscription,
+        subscriptionEntitlementReconciliation: entitlementReconciliation,
+        teamSeatReconciliation: entitlementReconciliation?.teamSeats || null,
+        benefitPeriodId: String((benefitPeriodResult.period as any)._id),
+        benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak,
+        benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance,
+      },
+    }, session)
+
+    return { organizationId: payment.organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt: deferredDowngrade ? start : null, changeType }
   })
-  const { organizationId, entitlementReconciliation } = transactionResult
+
+  const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType } = transactionResult
   await CacheInvalidationService.invalidateTenant(organizationId)
   await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
   const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
   if (decision.status === 'confirmed' && result) {
-    // Emit only after the commercial transaction has committed and tenant caches have been invalidated.
-    // The payload deliberately excludes amount, method, reference, notes and proof metadata.
     RealtimeService.emitOrganization(organizationId, {
       type: 'subscription.changed',
-      action: 'confirmed',
+      action: deferredDowngrade ? 'scheduled' : 'confirmed',
       entityId: result.paymentNumber,
-      eventType: 'subscription.payment_confirmed',
+      eventType: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.payment_confirmed',
       payload: {
         paymentNumber: result.paymentNumber,
         receiptNumber: result.receiptNumber,
         plan: result.planId,
         billingCycle: result.billingCycle,
+        changeType,
+        scheduledEffectiveAt: scheduledEffectiveAt ? new Date(scheduledEffectiveAt).toISOString() : null,
         periodStart: result.periodStart ? new Date(result.periodStart).toISOString() : null,
         periodEnd: result.periodEnd ? new Date(result.periodEnd).toISOString() : null,
       },

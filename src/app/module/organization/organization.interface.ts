@@ -7,6 +7,7 @@ export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'sk
 export interface ISubscription {
   plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
   planVersion?: number
+  revision?: number
   status: SubscriptionStatus
   currentPeriodEnd: Date | null
   lastPaymentDate: Date | null
@@ -17,6 +18,13 @@ export interface ISubscription {
   cancelAtPeriodEnd?: boolean
   reminderSentAt?: Date | null
   source?: 'trial' | 'bkash' | 'manual_payment' | 'manual_admin' | 'migration'
+  scheduledPlan?: 'starter' | 'professional' | 'agency' | 'enterprise' | null
+  scheduledPlanVersion?: number | null
+  scheduledBillingCycle?: 'monthly' | 'yearly' | null
+  scheduledEffectiveAt?: Date | null
+  scheduledChangeRequestId?: mongoose.Types.ObjectId | string | null
+  scheduledBy?: mongoose.Types.ObjectId | string | null
+  scheduledSource?: 'bkash' | 'manual_payment' | 'manual_admin' | null
 }
 
 export interface IPlatformAccess {

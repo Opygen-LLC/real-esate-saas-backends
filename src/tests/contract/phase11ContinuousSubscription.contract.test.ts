@@ -10,13 +10,12 @@ describe('Phase 11 continuous subscription policy', () => {
     const service = read('src/app/module/subscriptionBenefitPeriod/subscriptionBenefitPeriod.service.ts')
     expect(service).toContain('findPreviousConfirmedBenefitPeriod')
     expect(service).toContain('SubscriptionBenefitPeriod.findOne({ organizationId })')
-    expect(service).toContain(".sort({ createdAt: -1, _id: -1 })")
+    expect(service).toContain('.sort({ createdAt: -1, _id: -1 })')
     expect(service).not.toContain("planId: input.plan.planId,\n      billingCycle: 'monthly'")
   })
 
-  it('requires same Starter plan family, monthly billing, completed prior period, and configured grace', () => {
+  it('requires same plan family, monthly billing, completed prior period, and configured grace', () => {
     const service = read('src/app/module/subscriptionBenefitPeriod/subscriptionBenefitPeriod.service.ts')
-    expect(service).toContain("plan.planId !== 'starter'")
     expect(service).toContain("billingCycle !== 'monthly'")
     expect(service).toContain('previous.planId !== plan.planId')
     expect(service).toContain("previous.billingCycle !== 'monthly'")
@@ -24,13 +23,20 @@ describe('Phase 11 continuous subscription policy', () => {
     expect(service).toContain('previousEnd + graceDays * DAY_MS')
   })
 
-  it('keeps renewal bonuses Starter-monthly-only even if another plan payload attempts to enable them', () => {
+  it('makes renewal growth generic and plan-driven instead of Starter-only', () => {
     const benefitService = read('src/app/module/subscriptionBenefitPeriod/subscriptionBenefitPeriod.service.ts')
     const planService = read('src/app/module/subscriptionPlan/subscriptionPlan.service.ts')
-    expect(benefitService).toContain("plan.planId === 'starter'")
-    expect(benefitService).toContain("billingCycle === 'monthly'")
-    expect(planService).toContain("if (plan.planId !== 'starter')")
-    expect(planService).toContain('renewalBonusEnabled: false')
+    expect(benefitService).toContain('Boolean(plan.renewalBonusEnabled)')
+    expect(benefitService).toContain('renewalLeadBonus > 0')
+    expect(benefitService).not.toContain("plan.planId === 'starter'")
+    expect(planService).not.toContain("if (plan.planId !== 'starter')")
+  })
+
+  it('keeps new active-capacity yearly plans at base while preserving grandfathered credit versions', () => {
+    const service = read('src/app/module/subscriptionBenefitPeriod/subscriptionBenefitPeriod.service.ts')
+    expect(service).toContain("leadAllowanceModel === 'active_capacity'")
+    expect(service).toContain("billingCycle === 'yearly' ? baseMonthly * 12 : baseMonthly")
+    expect(service).toContain('maxRenewalLeadBonus === 0 ? uncappedBonus')
   })
 
   it('calculates continuity only from confirmed paid activation paths', () => {

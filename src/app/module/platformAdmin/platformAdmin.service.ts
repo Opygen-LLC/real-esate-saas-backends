@@ -70,7 +70,7 @@ const getTenantHealth = async (query: any) => {
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus entitlementStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
     SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
-    SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted'] } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
+    SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
     groupCounts(OperationsJob, ids, { status: 'failed' }),
     groupCounts(MetaEvent, ids, { status: 'dead' }),
   ])
@@ -195,7 +195,7 @@ const getSubscriptionRequests = async (query: any) => {
   // Summary cards follow search/plan/cycle filters but intentionally ignore the status tab.
   const summaryFilter = { ...filter }
   const status = String(query.status || 'open')
-  if (status === 'open') filter.status = { $in: ['pending_payment', 'payment_submitted'] }
+  if (status === 'open') filter.status = { $in: ['pending_payment', 'payment_submitted', 'scheduled'] }
   else if (status !== 'all') filter.status = status
 
   const [requests, total, statusSummary] = await Promise.all([
@@ -382,6 +382,7 @@ const changeTenantSubscription = async (
     const org: any = await orgQuery
     if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
     if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before changing its subscription')
+    if (org.subscription?.scheduledPlan) throw new ApiError(httpStatus.CONFLICT, 'A paid subscription downgrade is already scheduled. Resolve its billing adjustment/refund before overriding the tenant subscription.')
 
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
     const now = new Date()
@@ -435,6 +436,7 @@ const manageTenantTrial = async (
     const org: any = await orgQuery
     if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
     if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before changing its trial')
+    if (org.subscription?.scheduledPlan) throw new ApiError(httpStatus.CONFLICT, 'A paid subscription downgrade is already scheduled. Resolve its billing adjustment/refund before changing trial state.')
     if (org.subscription?.plan !== 'trial') throw new ApiError(httpStatus.CONFLICT, 'This agency is on a paid plan. Use Manage plan to switch it to Trial first.')
 
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }

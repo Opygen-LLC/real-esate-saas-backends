@@ -29,7 +29,7 @@ const subscriptionRequestQuery = z.object({ query: z.object({
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   search: z.string().trim().max(200).optional(),
-  status: z.enum(['open', 'all', 'pending_payment', 'payment_submitted', 'approved', 'rejected', 'cancelled']).optional(),
+  status: z.enum(['open', 'all', 'pending_payment', 'payment_submitted', 'scheduled', 'approved', 'applied', 'rejected', 'cancelled']).optional(),
   planId: z.enum(['starter', 'professional', 'agency', 'enterprise']).optional(),
   billingCycle: z.enum(['monthly', 'yearly']).optional(),
 }) })

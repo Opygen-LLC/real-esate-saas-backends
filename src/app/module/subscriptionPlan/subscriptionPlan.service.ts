@@ -11,10 +11,11 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 
 type LeadAllowanceConfig = Pick<ISubscriptionPlan,
-  'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
+  'leadAllowanceModel' | 'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
 >
 
 const starterLeadAllowanceDefaults: LeadAllowanceConfig = {
+  leadAllowanceModel: 'paid_period_credits',
   baseMonthlyLeadAllowance: 200,
   renewalLeadBonus: 50,
   renewalBonusEnabled: true,
@@ -23,6 +24,7 @@ const starterLeadAllowanceDefaults: LeadAllowanceConfig = {
 }
 
 const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig => ({
+  leadAllowanceModel: 'paid_period_credits',
   baseMonthlyLeadAllowance: Math.max(0, Number(maxLeads || 0)),
   renewalLeadBonus: 0,
   renewalBonusEnabled: false,
@@ -31,26 +33,15 @@ const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig =>
 })
 
 const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T & LeadAllowanceConfig => {
+  // Preserve legacy Starter fallbacks for old documents that pre-date the loyalty fields,
+  // but never force Professional/Agency bonuses to zero when the immutable plan version
+  // explicitly enables them.
   const fallback = plan.planId === 'starter' ? starterLeadAllowanceDefaults : neutralLeadAllowanceDefaults(plan.maxLeads)
-  const baseMonthlyLeadAllowance = Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance)
-
-  // Phase 11 policy: consecutive-renewal loyalty applies only to monthly Starter subscriptions.
-  // Keep the base paid-period allowance available to every plan, but fail closed for loyalty
-  // fields on other plan families until a separate commercial policy is introduced for them.
-  if (plan.planId !== 'starter') {
-    return {
-      ...plan,
-      baseMonthlyLeadAllowance,
-      renewalLeadBonus: 0,
-      renewalBonusEnabled: false,
-      maxRenewalLeadBonus: 0,
-      continuityGraceDays: 0,
-    }
-  }
-
+  const leadAllowanceModel = plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
   return {
     ...plan,
-    baseMonthlyLeadAllowance,
+    leadAllowanceModel,
+    baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
     renewalLeadBonus: Number(plan.renewalLeadBonus ?? fallback.renewalLeadBonus),
     renewalBonusEnabled: Boolean(plan.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
     maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
@@ -80,8 +71,10 @@ const validateLeadAllowanceConfig = (plan: Partial<ISubscriptionPlan>) => {
   if (enabled && bonus < 1) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Renewal lead bonus must be at least 1 when renewal bonus is enabled')
   }
-  if (enabled && cap < bonus) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum renewal lead bonus must be at least the per-renewal bonus')
+  // maxRenewalLeadBonus=0 is the explicit unlimited sentinel for cumulative plans.
+  // Positive caps retain the historical capped-bonus behavior.
+  if (enabled && cap > 0 && cap < bonus) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum renewal lead bonus must be 0 (unlimited) or at least the per-renewal bonus')
   }
 }
 

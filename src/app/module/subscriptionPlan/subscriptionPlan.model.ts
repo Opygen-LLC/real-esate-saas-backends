@@ -19,6 +19,9 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     maxAgents: { type: Number, default: 3, min: 0 },
     maxProperties: { type: Number, default: 100, min: 0 },
     maxLeads: { type: Number, default: 500, min: 0 },
+    // Historical plan versions default to paid-period credits. New cumulative-capacity
+    // versions opt in explicitly so grandfathered tenants keep their original semantics.
+    leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: 'paid_period_credits' },
     baseMonthlyLeadAllowance: { type: Number, default: 0, min: 0 },
     renewalLeadBonus: { type: Number, default: 0, min: 0 },
     renewalBonusEnabled: { type: Boolean, default: false },

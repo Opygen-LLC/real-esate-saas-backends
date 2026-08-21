@@ -16,6 +16,25 @@ import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashChe
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
+import { SubscriptionScheduleService, classifySubscriptionChange } from '../subscription/subscriptionSchedule.service'
+import { RealtimeService } from '../realtime/realtime.service'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+
+
+const PAID_RENEWAL_STATUSES = new Set(['active', 'grace', 'cancel_at_period_end'])
+const isoDateOrNull = (value: Date | null) => value ? value.toISOString() : null
+
+const resolveCheckoutPlan = async (organization: any, requestedPlanId: IBkashPayment['planId']) => {
+  const isGrandfatheredRenewal = organization?.subscription?.plan === requestedPlanId
+    && Number(organization?.subscription?.planVersion || 0) > 0
+    && PAID_RENEWAL_STATUSES.has(String(organization?.subscription?.status || ''))
+  if (isGrandfatheredRenewal) {
+    const assigned = await SubscriptionPlanService.getPlanById(requestedPlanId, Number(organization.subscription.planVersion))
+    if (!assigned) throw new ApiError(httpStatus.CONFLICT, 'Your assigned subscription plan version no longer exists')
+    return assigned
+  }
+  return SubscriptionPlanService.getLatestPurchasablePlan(requestedPlanId)
+}
 
 type CreatePaymentInput = {
   organizationId: string
@@ -41,12 +60,14 @@ const createPayment = async (input: CreatePaymentInput) => {
     }
   }
 
-  const [organization, plan] = await Promise.all([
-    Organization.findOne({ organizationId: input.organizationId }),
-    SubscriptionPlanService.getLatestPurchasablePlan(input.planId),
-  ])
-
+  const organization: any = await Organization.findOne({ organizationId: input.organizationId })
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (organization.subscription?.scheduledPlan) {
+    throw new ApiError(httpStatus.CONFLICT, 'A paid subscription downgrade is already scheduled. Wait until it applies, or use an explicit billing adjustment/refund workflow before starting another checkout.')
+  }
+  // A normal same-plan renewal is priced and snapshotted from the tenant's assigned
+  // immutable version. Selecting a different plan family is an explicit catalog change.
+  const plan: any = await resolveCheckoutPlan(organization, input.planId)
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan not found')
   if (plan.currency !== 'BDT') {
     throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not configured for BDT payments')
@@ -169,6 +190,8 @@ const verifyGatewayPayment = async (paymentId: string): Promise<BkashGatewayPaym
 
 const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewayPayment) => {
   let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
+  let deferredDowngrade = false
+  let scheduledEffectiveAt: Date | null = null
 
   await EntitlementService.withTeamMemberQuotaGuard(attempt.organizationId, async (session) => {
     const organizationQuery = Organization.findOne({ organizationId: attempt.organizationId })
@@ -178,45 +201,66 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
 
     const now = new Date()
     const previousSubscription = organization.subscription?.toObject?.() || { ...(organization.subscription || {}) }
-    const currentPeriodEnd = organization.subscription?.currentPeriodEnd
-    const isRenewal =
-      organization.subscription?.plan === attempt.planId &&
-      currentPeriodEnd instanceof Date &&
-      currentPeriodEnd > now
-    const periodStart = new Date(isRenewal ? currentPeriodEnd : now)
+    const currentPeriodEnd = organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null
+    const samePlan = organization.subscription?.plan === attempt.planId
+    const changeType = classifySubscriptionChange(String(organization.subscription?.plan || 'trial'), String(attempt.planId))
+    deferredDowngrade = changeType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
+    const periodStart = new Date(deferredDowngrade && currentPeriodEnd
+      ? currentPeriodEnd
+      : samePlan && currentPeriodEnd && currentPeriodEnd > now
+        ? currentPeriodEnd
+        : now)
     const periodEnd = new Date(periodStart)
-    periodEnd.setMonth(periodEnd.getMonth() + (attempt.billingCycle === 'yearly' ? 12 : 1))
+    if (attempt.billingCycle === 'yearly') periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 1)
+    else periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1)
 
     const planQuery = SubscriptionPlan.findOne({ planId: attempt.planId, version: attempt.planVersion || 1 })
     if (session) planQuery.session(session)
     const plan: any = await planQuery.lean()
     if (!plan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
 
-    organization.subscription = {
-      ...(organization.subscription?.toObject?.() || organization.subscription || {}),
-      plan: attempt.planId,
-      planVersion: attempt.planVersion || 1,
-      status: 'active',
-      currentPeriodEnd: periodEnd,
-      lastPaymentDate: now,
-      maxProperties: attempt.maxProperties,
-      maxAgents: attempt.maxAgents,
-      gracePeriodEnd: null,
-      cancelAtPeriodEnd: false,
-      source: 'bkash',
-    }
-    await organization.save(session ? { session } : undefined)
+    if (deferredDowngrade) {
+      scheduledEffectiveAt = periodStart
+      await SubscriptionScheduleService.scheduleDowngradeOnOrganization(organization, {
+        planId: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        billingCycle: attempt.billingCycle,
+        effectiveAt: periodStart,
+        scheduledBy: attempt.initiatedBy || null,
+        source: 'bkash',
+        paidAt: now,
+      }, session)
+    } else {
+      if (organization.subscription?.scheduledPlan) {
+        throw new ApiError(httpStatus.CONFLICT, 'Another paid subscription change is already scheduled. Wait until it applies, or use an explicit billing adjustment/refund workflow before activating a different plan.')
+      }
+      organization.subscription = {
+        ...(organization.subscription?.toObject?.() || organization.subscription || {}),
+        plan: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        status: 'active',
+        currentPeriodEnd: periodEnd,
+        lastPaymentDate: now,
+        maxProperties: attempt.maxProperties,
+        maxAgents: attempt.maxAgents,
+        gracePeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        source: 'bkash',
+        revision: Math.max(0, Number(organization.subscription?.revision || 0)) + 1,
+      }
+      await organization.save(session ? { session } : undefined)
 
-    reconciliation = await reconcileOrganizationEntitlements(attempt.organizationId, previousSubscription, {
-      planId: attempt.planId,
-      version: attempt.planVersion || 1,
-      maxAgents: attempt.maxAgents,
-      maxProperties: attempt.maxProperties,
-    }, {
-      session,
-      actorId: attempt.initiatedBy || 'system:bkash',
-      reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
-    })
+      reconciliation = await reconcileOrganizationEntitlements(attempt.organizationId, previousSubscription, {
+        planId: attempt.planId,
+        version: attempt.planVersion || 1,
+        maxAgents: attempt.maxAgents,
+        maxProperties: attempt.maxProperties,
+      }, {
+        session,
+        actorId: attempt.initiatedBy || 'system:bkash',
+        reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
+      })
+    }
 
     const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
       organizationId: attempt.organizationId,
@@ -228,6 +272,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       plan: {
         planId: plan.planId,
         version: plan.version,
+        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
         baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
         renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
         renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
@@ -264,11 +309,29 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       { upsert: true, new: true, ...(session ? { session } : {}) }
     )
     await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
-      action: 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
-      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle, subscriptionEntitlementReconciliation: reconciliation, teamSeatReconciliation: reconciliation?.teamSeats || null, benefitPeriodId: String((benefitPeriodResult.period as any)._id), benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak, benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance } }, session)
+      action: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
+      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle,
+        changeType, deferredDowngrade, scheduledEffectiveAt, subscriptionEntitlementReconciliation: reconciliation,
+        teamSeatReconciliation: reconciliation?.teamSeats || null, benefitPeriodId: String((benefitPeriodResult.period as any)._id),
+        benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak, benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance } }, session)
   })
 
+  await CacheInvalidationService.invalidateTenant(attempt.organizationId)
   await publishSubscriptionEntitlementReconciliation(reconciliation)
+  if (deferredDowngrade) {
+    RealtimeService.emitOrganization(attempt.organizationId, {
+      type: 'subscription.changed',
+      action: 'scheduled',
+      entityId: attempt.paymentId || attempt.invoiceNumber,
+      eventType: 'subscription.downgrade_scheduled',
+      payload: {
+        plan: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        billingCycle: attempt.billingCycle,
+        scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
+      },
+    })
+  }
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {

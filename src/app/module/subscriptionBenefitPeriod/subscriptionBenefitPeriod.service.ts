@@ -2,17 +2,20 @@ import httpStatus from 'http-status'
 import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Organization } from '../organization/organization.model'
-import type { SubscriptionPlanId } from '../subscriptionPlan/subscriptionPlan.interface'
+import type { LeadAllowanceModel, SubscriptionPlanId } from '../subscriptionPlan/subscriptionPlan.interface'
 import { SubscriptionBenefitPeriod } from './subscriptionBenefitPeriod.model'
 import { SubscriptionBenefitStreakAdjustment } from './subscriptionBenefitAdjustment.model'
 import { writeAudit } from '../audit/audit.service'
 import type { BenefitBillingCycle, BenefitPaymentSource } from './subscriptionBenefitPeriod.interface'
+import { Lead } from '../lead/lead.model'
+import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface BenefitPlanSnapshot {
   planId: SubscriptionPlanId
   version: number
+  leadAllowanceModel?: LeadAllowanceModel
   baseMonthlyLeadAllowance: number
   renewalLeadBonus: number
   renewalBonusEnabled: boolean
@@ -44,6 +47,7 @@ export interface BenefitAllowanceCalculation {
   baseLeadAllowance: number
   bonusLeadAllowance: number
   totalLeadAllowance: number
+  leadAllowanceModel: LeadAllowanceModel
   renewalBonusEnabled: boolean
   renewalLeadBonus: number
   maxRenewalLeadBonus: number
@@ -52,14 +56,14 @@ export interface BenefitAllowanceCalculation {
 
 const integer = (value: unknown): number => Math.max(0, Math.trunc(Number(value || 0)))
 
-const isConsecutiveStarterMonthlyPeriod = (
+const isConsecutiveMonthlyPeriod = (
   plan: BenefitPlanSnapshot,
   billingCycle: BenefitBillingCycle,
   previous: PreviousBenefitPeriodSnapshot | null,
   currentStart: Date,
   graceDays: number,
 ): boolean => {
-  if (plan.planId !== 'starter' || billingCycle !== 'monthly') return false
+  if (billingCycle !== 'monthly' || plan.renewalBonusEnabled !== true) return false
   if (!previous || previous.planId !== plan.planId || previous.billingCycle !== 'monthly') return false
   if (previous.renewalBonusEnabled !== true) return false
 
@@ -86,28 +90,36 @@ export const calculateBenefitPeriodAllowance = (
   const maxRenewalLeadBonus = integer(plan.maxRenewalLeadBonus)
   const continuityGraceDays = Math.min(31, integer(plan.continuityGraceDays))
 
-  // Phase 11 intentionally limits the loyalty program to paid monthly Starter renewals.
-  // Other plans can still snapshot a base paid-period allowance, but they cannot earn this streak bonus.
-  const starterMonthlyBonusConfigured = plan.planId === 'starter'
-    && billingCycle === 'monthly'
+  // Renewal growth is plan-driven for every paid tier. It remains monthly-only: yearly
+  // purchases start with the tier's base active capacity and do not advance the monthly streak.
+  const monthlyBonusConfigured = billingCycle === 'monthly'
     && Boolean(plan.renewalBonusEnabled)
     && renewalLeadBonus > 0
 
-  // The commercial field is explicitly monthly. A yearly paid period receives twelve
-  // monthly base allocations as one immutable period snapshot; loyalty streaks remain monthly-only.
-  const baseLeadAllowance = billingCycle === 'yearly' ? baseMonthly * 12 : baseMonthly
-  const consecutive = starterMonthlyBonusConfigured
-    && isConsecutiveStarterMonthlyPeriod(plan, billingCycle, previous, periodStart, continuityGraceDays)
-  const renewalStreak = consecutive ? Math.max(1, integer(previous?.renewalStreak)) + 1 : 1
-  const uncappedBonus = starterMonthlyBonusConfigured ? Math.max(0, renewalStreak - 1) * renewalLeadBonus : 0
-  const bonusLeadAllowance = starterMonthlyBonusConfigured ? Math.min(uncappedBonus, maxRenewalLeadBonus) : 0
+  const leadAllowanceModel: LeadAllowanceModel = plan.leadAllowanceModel === 'active_capacity'
+    ? 'active_capacity'
+    : 'paid_period_credits'
 
+  // New active-capacity versions use one live CRM ceiling, so yearly billing starts at the
+  // same base capacity as monthly. Grandfathered paid-period-credit versions preserve their
+  // historical twelve-month credit grant exactly as before.
+  const baseLeadAllowance = leadAllowanceModel === 'active_capacity'
+    ? baseMonthly
+    : (billingCycle === 'yearly' ? baseMonthly * 12 : baseMonthly)
+  const consecutive = monthlyBonusConfigured
+    && isConsecutiveMonthlyPeriod(plan, billingCycle, previous, periodStart, continuityGraceDays)
+  const renewalStreak = consecutive ? Math.max(1, integer(previous?.renewalStreak)) + 1 : 1
+  const uncappedBonus = monthlyBonusConfigured ? Math.max(0, renewalStreak - 1) * renewalLeadBonus : 0
+  const bonusLeadAllowance = monthlyBonusConfigured
+    ? (maxRenewalLeadBonus === 0 ? uncappedBonus : Math.min(uncappedBonus, maxRenewalLeadBonus))
+    : 0
   return {
     renewalStreak,
     baseLeadAllowance,
     bonusLeadAllowance,
     totalLeadAllowance: baseLeadAllowance + bonusLeadAllowance,
-    renewalBonusEnabled: starterMonthlyBonusConfigured,
+    leadAllowanceModel,
+    renewalBonusEnabled: monthlyBonusConfigured,
     renewalLeadBonus,
     maxRenewalLeadBonus,
     continuityGraceDays,
@@ -146,7 +158,7 @@ const applyLatestSupportStreakAdjustment = async (
   previous: PreviousBenefitPeriodSnapshot | null,
   session?: ClientSession,
 ): Promise<PreviousBenefitPeriodSnapshot | null> => {
-  if (!previous?._id || previous.planId !== 'starter' || previous.billingCycle !== 'monthly') return previous
+  if (!previous?._id || previous.billingCycle !== 'monthly' || previous.renewalBonusEnabled !== true) return previous
   const query = SubscriptionBenefitStreakAdjustment.findOne({
     organizationId,
     benefitPeriodId: String(previous._id),
@@ -306,9 +318,13 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
   const currentRenewalStreak = adjustment
     ? Math.max(1, integer(adjustment.adjustedRenewalStreak))
     : grantedRenewalStreak
-  const remainingLeadAllowance = Math.max(0, integer(period.totalLeadAllowance) - integer(period.usedLeadAllowance))
-  const eligibleForStreakAdjustment = period.planId === 'starter'
-    && period.billingCycle === 'monthly'
+  const activeCapacityUsed = period.leadAllowanceModel === 'active_capacity'
+    ? await (session
+      ? Lead.countDocuments({ organizationId: normalizedOrganizationId, ...activePipelineLeadFilter() }).session(session)
+      : Lead.countDocuments({ organizationId: normalizedOrganizationId, ...activePipelineLeadFilter() }))
+    : integer(period.usedLeadAllowance)
+  const remainingLeadAllowance = Math.max(0, integer(period.totalLeadAllowance) - integer(activeCapacityUsed))
+  const eligibleForStreakAdjustment = period.billingCycle === 'monthly'
     && period.renewalBonusEnabled === true
 
   return {
@@ -323,6 +339,7 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
       status: benefitPeriodStatus(period.periodStart, period.periodEnd),
       grantedRenewalStreak,
       currentRenewalStreak,
+      usedLeadAllowance: activeCapacityUsed,
       remainingLeadAllowance,
     },
     adjustment: adjustment || null,
@@ -357,8 +374,8 @@ const adjustRenewalStreak = async (
   const [organization, period]: any[] = await Promise.all([organizationQuery, periodQuery])
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   if (!period) throw new ApiError(httpStatus.CONFLICT, 'This tenant has no paid benefit period to adjust')
-  if (period.planId !== 'starter' || period.billingCycle !== 'monthly' || period.renewalBonusEnabled !== true) {
-    throw new ApiError(httpStatus.CONFLICT, 'Renewal streak adjustments are available only for Starter monthly loyalty periods')
+  if (period.billingCycle !== 'monthly' || period.renewalBonusEnabled !== true) {
+    throw new ApiError(httpStatus.CONFLICT, 'Renewal streak adjustments are available only for monthly plans with renewal growth enabled')
   }
 
   const latestAdjustment: any = await getLatestStreakAdjustment(normalizedOrganizationId, String(period._id), session)

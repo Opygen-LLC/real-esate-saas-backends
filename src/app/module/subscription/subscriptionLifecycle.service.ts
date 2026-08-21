@@ -2,9 +2,12 @@ import { sendSms } from '../../helpers/sendOtp'
 import { writeAudit } from '../audit/audit.service'
 import { Organization } from '../organization/organization.model'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
+import { SubscriptionScheduleService } from './subscriptionSchedule.service'
 
-export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number }> => {
+export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number; scheduledChanges: Awaited<ReturnType<typeof SubscriptionScheduleService.processDueChanges>> }> => {
   const now = new Date()
+  // Apply paid deferred downgrades before expiry/grace logic sees the old period boundary.
+  const scheduledChanges = await SubscriptionScheduleService.processDueChanges(100, now)
   const trialPolicy = await getTrialPolicy()
   const graceMs = trialPolicy.gracePeriodDays * 24 * 60 * 60 * 1000
   const reminderMs = trialPolicy.reminderDaysBeforeExpiry * 24 * 60 * 60 * 1000
@@ -30,5 +33,5 @@ export const reconcileSubscriptions = async (): Promise<{ transitioned: number; 
       subscription.reminderSentAt = now; await org.save(); reminders += 1
     }
   }
-  return { transitioned, reminders }
+  return { transitioned, reminders, scheduledChanges }
 }
