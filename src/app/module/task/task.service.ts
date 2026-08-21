@@ -7,6 +7,7 @@ import { CrmService } from '../crm/crm.service'
 import { crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Lead } from '../lead/lead.model'
+import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone } from '../lead/leadFollowUpTime'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { User } from '../user/user.model'
@@ -67,11 +68,11 @@ const normalizeDueFields = (payload: Partial<ITask>, existing?: ITask): Partial<
 const assertTaskRelations = async (organizationId: string, task: Partial<ITask>, access?: CrmAccessContext) => {
   const checks: Promise<unknown>[] = []
   if (task.linkedLead) {
-    checks.push(
-      Lead.exists({ _id: task.linkedLead, organizationId, ...crmMutationOwnerFilter('assignedAgent', access) }).then((lead) => {
-        if (!lead) throw new ApiError(400, 'Linked lead must belong to this agency')
-      }),
-    )
+    checks.push((async () => {
+      const lead = await Lead.exists({ _id: task.linkedLead, organizationId, ...crmMutationOwnerFilter('assignedAgent', access) })
+      if (!lead) throw new ApiError(400, 'Linked lead must belong to this agency')
+      await LeadEntitlementService.assertLeadAccessible(organizationId, String(task.linkedLead))
+    })())
   }
   if (task.assignedAgent) {
     checks.push(

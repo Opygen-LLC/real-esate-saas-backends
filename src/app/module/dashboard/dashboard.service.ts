@@ -24,7 +24,25 @@ const globalSearch = async (organizationId: string, query: string, access: CrmAc
   const jobs: Array<Promise<any[]>> = []
 
   if (can('properties.read')) jobs.push(Property.find({ organizationId, $or: [{ title: regex }, { city: regex }, { address: regex }, { 'bangladeshAddress.area': regex }, { 'bangladeshAddress.district': regex }] }).select('_id title city address status price').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'property', id: String(row._id), title: row.title, subtitle: [row.city || row.address, row.status].filter(Boolean).join(' · '), href: `/dashboard/admin/properties/${row._id}` }))))
-  if (can('leads.read')) jobs.push(Lead.find({ organizationId, isConverted: { $ne: true }, ...crmReadOwnerFilter('assignedAgent', access), $or: [{ name: regex }, { email: regex }, { phone: regex }, { locationPreference: regex }] }).select('_id name email phone leadStatus').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'lead', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '), href: `/dashboard/admin/leads?lead=${row._id}` }))))
+  if (can('leads.read')) jobs.push(Lead.find({
+    organizationId,
+    isConverted: { $ne: true },
+    ...crmReadOwnerFilter('assignedAgent', access),
+    $or: [
+      { name: regex },
+      { locationPreference: regex },
+      { isLocked: { $ne: true }, email: regex },
+      { isLocked: { $ne: true }, phone: regex },
+    ],
+  }).select('_id name email phone leadStatus isLocked lockReason').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({
+    kind: 'lead',
+    id: String(row._id),
+    title: row.name,
+    subtitle: row.isLocked === true && row.lockReason === 'subscription_limit'
+      ? ['Locked by plan', row.leadStatus].filter(Boolean).join(' · ')
+      : [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '),
+    href: `/dashboard/admin/leads?lead=${row._id}`,
+  }))))
   if (can('contacts.read')) jobs.push(Contact.find({ organizationId, ...crmReadOwnerFilter('assignedTo', access), ...visibleContactRelationshipFilter, $or: [{ name: regex }, { email: regex }, { phone: regex }, { company: regex }] }).select('_id name email phone type').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'contact', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.type].filter(Boolean).join(' · '), href: `/dashboard/admin/contacts?contact=${row._id}` }))))
   if (can('users.read')) jobs.push(User.find({ organizationId, status: { $ne: 'blocked' }, $or: [{ name: regex }, { email: regex }, { phoneNumber: regex }] }).select('_id name email phoneNumber userRole').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'team', id: String(row._id), title: row.name, subtitle: [row.email || row.phoneNumber, String(row.userRole || '').replace(/_/g, ' ')].filter(Boolean).join(' · '), href: `/dashboard/admin/team?user=${row._id}` }))))
 

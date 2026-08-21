@@ -21,6 +21,10 @@ const specs = [
   { file: 'migrateWebsiteSubmissions.js', args: ['--apply'] },
   { file: 'migratePropertyDraftAssets.js', args: ['--apply', '--confirm=PHASE7-PROPERTY-DRAFT-ASSETS'] },
   { file: 'migratePhase9DomainLifecycle.js', args: ['--apply', '--confirm=PHASE9-DOMAIN-LIFECYCLE'] },
+  { file: 'migrateSubscriptionTierRolloverV2.js', args: ['--apply'] },
+  { file: 'migrateDeferredSubscriptionSchedules.js', args: ['--apply'] },
+  { file: 'migrateLeadSubscriptionLocking.js', args: ['--apply'] },
+  { file: 'migrateSubscriptionLeadReleaseV1.js', args: ['--apply'] },
 ].map((spec) => ({ ...spec, file: path.resolve('dist/app/db', spec.file) }))
 
 const runMigration = (spec) => {
@@ -38,11 +42,16 @@ const seedLegacyFixtures = async (db) => {
   }))
   await db.collection('organizations').insertOne({
     organizationId: 'phase7-migration-org', agencyName: 'Migration Realty', email: 'migration@example.com', phone: '+8801711111111',
-    subscription: { plan: 'starter', status: 'active', source: 'bkash' }, websiteStatus: 'published',
+    subscription: { plan: 'starter', planVersion: 1, status: 'active', source: 'bkash' }, websiteStatus: 'published',
   })
   await db.collection('billings').insertOne({
     organizationId: 'phase7-migration-org', serviceType: 'subscription', status: 'paid', plan: 'starter', planVersion: 1,
     billingCycle: 'monthly', amount: 500, currency: 'BDT', paymentMethod: 'bKash', invoiceId: 'LEGACY-INV-1', transactionId: 'LEGACY-TRX-1',
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  })
+  await db.collection('leads').insertOne({
+    organizationId: 'phase7-migration-org', name: 'Legacy lead', phone: '+8801712345678', normalizedPhone: '+8801712345678',
+    email: 'legacy-lead@example.test', normalizedEmail: 'legacy-lead@example.test', leadStatus: 'New',
     createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
   })
   await db.collection('properties').insertOne({
@@ -87,6 +96,26 @@ const assertPostMigration = async (db) => {
 
   const org = await db.collection('organizations').findOne({ organizationId: 'phase7-migration-org' })
   if (org?.subscription?.source === 'bkash') throw new Error('Legacy automated payment source was not normalized')
+  if (org?.subscription?.plan !== 'starter' || Number(org?.subscription?.planVersion) !== 1) throw new Error('Subscription release migration changed the grandfathered tenant plan/version assignment')
+  const targetPlans = [
+    ['starter', 6, 500, 5000, 200, 50],
+    ['professional', 4, 1000, 10000, 800, 100],
+    ['agency', 4, 1500, 15000, 2000, 200],
+  ]
+  for (const [planId, version, monthly, yearly, base, bonus] of targetPlans) {
+    const plan = await db.collection('subscriptionplans').findOne({ planId, version })
+    if (!plan || plan.isCurrent !== true || plan.isActive !== true || plan.grandfatherExisting !== true) throw new Error(`${planId} v${version} is not the current active grandfather-safe release version`)
+    if (Number(plan.priceMonthly) !== monthly || Number(plan.priceYearly) !== yearly || Number(plan.maxLeads) !== base || Number(plan.baseMonthlyLeadAllowance) !== base || Number(plan.renewalLeadBonus) !== bonus || Number(plan.maxRenewalLeadBonus) !== 0 || plan.leadAllowanceModel !== 'active_capacity') {
+      throw new Error(`${planId} v${version} commercial release policy is incorrect`)
+    }
+    if (await db.collection('subscriptionplans').countDocuments({ planId, version: { $ne: version }, isCurrent: true })) throw new Error(`${planId} has a historical version still marked current`)
+    if (!(await db.collection('subscriptionplans').findOne({ planId, version: 1 }))?.isActive) throw new Error(`${planId} historical v1 was archived instead of remaining active for grandfathered tenants`)
+  }
+  const legacyLead = await db.collection('leads').findOne({ organizationId: 'phase7-migration-org' })
+  if (!legacyLead || legacyLead.isLocked !== false) throw new Error('Existing Lead was not backfilled as accessible')
+  if (await db.collection('leads').countDocuments({ organizationId: 'phase7-migration-org' }) !== 1) throw new Error('Lead was deleted during subscription release migration')
+  const leadIndexes = await db.collection('leads').indexes()
+  if (!leadIndexes.some((index) => index.name === 'lead_tenant_lock_created')) throw new Error('Lead subscription-lock index was not installed')
   const payment = await db.collection('subscriptionpayments').findOne({ organizationId: 'phase7-migration-org', status: 'confirmed' })
   if (!payment?.paymentNumber || !payment?.receiptNumber) throw new Error('Legacy subscription billing was not imported into the manual payment ledger')
 
@@ -142,7 +171,7 @@ try {
   if (!backupFiles.some((name) => name.endsWith('.sha256')) || !backupFiles.some((name) => name.includes('manifest'))) {
     throw new Error('Destructive migrations did not produce backup checksums/manifests')
   }
-  console.log('Phase 7 migration verification passed twice with legacy fixtures and post-migration invariants.')
+  console.log('Migration verification passed twice, including subscription tier rollover, deferred downgrade, Lead locking and final release invariants.')
 } finally {
   try {
     if (!mongoose.connection.readyState) await mongoose.connect(databaseUrl, { serverSelectionTimeoutMS: 5_000 })

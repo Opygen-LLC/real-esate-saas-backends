@@ -11,6 +11,7 @@ import {
 import { DomainEvent } from '../domainEvent/domainEvent.model'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { LeadLifecycleService } from '../lead/leadLifecycle.service'
+import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { Lead } from '../lead/lead.model'
 import { userRefPopulate } from '../user/userProfile.service'
 import {
@@ -62,6 +63,7 @@ const createActivity = async (
     ...crmMutationOwnerFilter('assignedAgent', access),
   })
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, String(payload.leadId))
 
   const actorId = payload.agentId ? String(payload.agentId) : undefined
   const eventType = `activity.${type}`
@@ -107,6 +109,7 @@ const createLeadNote = async (
     ...crmMutationOwnerFilter('assignedAgent', access),
   }).select('_id convertedContactId')
   if (!lead) throw new ApiError(404, 'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
 
   const event: any = await DomainEventService.emit({
     organizationId,
@@ -186,6 +189,7 @@ const getActivitiesByLead = async (
     ...crmReadOwnerFilter('assignedAgent', access),
   })
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
   const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
   const [result, total] = await Promise.all([
     Activity.find({ organizationId, leadId })
@@ -327,6 +331,7 @@ const getLeadHistory = async (
     ...crmReadOwnerFilter('assignedAgent', access),
   })
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
   return getHistoryPage(organizationId, { leadId }, paginationOptions)
 }
 

@@ -18,6 +18,7 @@ export interface SubscriptionEntitlementInput {
   maxTeamMembers?: number
   maxProperties?: number
   maxLeads?: number
+  leadAllowanceModel?: 'active_capacity' | 'paid_period_credits'
   maxStorageMb?: number
   hasCustomDomain?: boolean
   hasAdvancedAnalytics?: boolean
@@ -63,6 +64,7 @@ const resolveCatalogPolicy = async (input: SubscriptionEntitlementInput | null |
       maxAgents: Number(policy.maxAgents || 0),
       maxProperties: Number(policy.maxProperties || 0),
       maxLeads: Number(policy.maxLeads || 0),
+      leadAllowanceModel: 'paid_period_credits' as const,
       maxStorageMb: Number(policy.maxStorageMb || 0),
       hasCustomDomain: Boolean(policy.hasCustomDomain),
       hasAdvancedAnalytics: Boolean(policy.hasAdvancedAnalytics),
@@ -96,6 +98,9 @@ export const resolveSubscriptionEntitlementSnapshot = async (
     maxTeamMembers: Math.max(1, maxTeamMembers),
     maxProperties: finiteNonNegative(input?.maxProperties ?? catalog?.maxProperties ?? fallback?.maxProperties) ?? 0,
     maxLeads: finiteNonNegative(input?.maxLeads ?? catalog?.maxLeads ?? fallback?.maxLeads) ?? 0,
+    leadAllowanceModel: (input?.leadAllowanceModel ?? catalog?.leadAllowanceModel ?? fallback?.leadAllowanceModel) === 'active_capacity'
+      ? 'active_capacity'
+      : 'paid_period_credits',
     maxStorageMb: finiteNonNegative(input?.maxStorageMb ?? catalog?.maxStorageMb ?? fallback?.maxStorageMb) ?? 0,
     hasCustomDomain: booleanOrUndefined(input?.hasCustomDomain) ?? booleanOrUndefined(catalog?.hasCustomDomain) ?? fallback?.hasCustomDomain ?? false,
     hasAdvancedAnalytics: booleanOrUndefined(input?.hasAdvancedAnalytics) ?? booleanOrUndefined(catalog?.hasAdvancedAnalytics) ?? fallback?.hasAdvancedAnalytics ?? false,

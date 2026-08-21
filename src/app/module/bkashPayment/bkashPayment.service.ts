@@ -219,6 +219,25 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     const plan: any = await planQuery.lean()
     if (!plan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
 
+    const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
+      organizationId: attempt.organizationId,
+      paymentSource: 'bkash',
+      paymentNumber: attempt.paymentId || attempt.invoiceNumber,
+      billingCycle: attempt.billingCycle,
+      periodStart,
+      periodEnd,
+      plan: {
+        planId: plan.planId,
+        version: plan.version,
+        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
+        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
+        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
+        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
+        continuityGraceDays: Number(plan.continuityGraceDays || 0),
+      },
+    }, session)
+
     if (deferredDowngrade) {
       scheduledEffectiveAt = periodStart
       await SubscriptionScheduleService.scheduleDowngradeOnOrganization(organization, {
@@ -250,36 +269,20 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       }
       await organization.save(session ? { session } : undefined)
 
+      const effective = await EntitlementService.resolve(attempt.organizationId, session)
       reconciliation = await reconcileOrganizationEntitlements(attempt.organizationId, previousSubscription, {
         planId: attempt.planId,
         version: attempt.planVersion || 1,
         maxAgents: attempt.maxAgents,
         maxProperties: attempt.maxProperties,
+        maxLeads: Number(effective.limits.maxLeads || 0),
+        leadAllowanceModel: effective.limits.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
       }, {
         session,
         actorId: attempt.initiatedBy || 'system:bkash',
         reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
       })
     }
-
-    const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
-      organizationId: attempt.organizationId,
-      paymentSource: 'bkash',
-      paymentNumber: attempt.paymentId || attempt.invoiceNumber,
-      billingCycle: attempt.billingCycle,
-      periodStart,
-      periodEnd,
-      plan: {
-        planId: plan.planId,
-        version: plan.version,
-        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
-        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
-        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
-        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
-        continuityGraceDays: Number(plan.continuityGraceDays || 0),
-      },
-    }, session)
 
     const tax = attempt.taxSnapshot
     const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,

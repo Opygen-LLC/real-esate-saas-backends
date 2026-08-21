@@ -22,6 +22,9 @@ export interface ISubscriptionBenefitPeriod {
   renewalLeadBonus: number
   maxRenewalLeadBonus: number
   continuityGraceDays: number
+  voidedAt?: Date | null
+  voidedBy?: string | null
+  voidReason?: string | null
   createdAt?: Date
   updatedAt?: Date
 }

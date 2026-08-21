@@ -5,6 +5,7 @@ import { DomainRecord } from '../domain/domain.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { Organization } from '../organization/organization.model'
+import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { Property } from '../property/property.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
@@ -16,6 +17,7 @@ export interface ResourceEntitlementSnapshot {
   planVersion: number
   maxProperties: number
   maxLeads: number
+  leadAllowanceModel?: 'active_capacity' | 'paid_period_credits'
   maxStorageMb: number
   hasCustomDomain: boolean
   hasAdvancedAnalytics: boolean
@@ -34,7 +36,7 @@ export interface ResourceEntitlementReconciliationResult {
     unlockedPropertyIds: string[]
     subscriptionLockedCount: number
   }
-  leads: { limit: number; used: number; overCapacityBy: number; preserved: true }
+  leads: { limit: number; used: number; accessible: number; subscriptionLockedCount: number; lockedCount: number; unlockedCount: number; overCapacityBy: number; preserved: true }
   premiumTemplates: { entitled: boolean; blocked: boolean; preserved: true }
   customDomain: { entitled: boolean; suspended: boolean; domain: string | null; preserved: true }
   advancedAnalytics: { entitled: boolean; dataPreserved: true }
@@ -134,6 +136,15 @@ const reconcileProperties = async (
   return { limit, used, lockedPropertyIds, unlockedPropertyIds, subscriptionLockedCount }
 }
 
+const reconcileLeads = async (
+  organizationId: string,
+  current: ResourceEntitlementSnapshot,
+  session?: ClientSession,
+  actorId = 'system',
+) => current.leadAllowanceModel === 'active_capacity'
+  ? LeadEntitlementService.reconcileLeadCapacity(organizationId, current.maxLeads, session, actorId)
+  : LeadEntitlementService.releaseSubscriptionLeadLocks(organizationId, current.maxLeads, session)
+
 const documentUsesPremiumTemplate = (document: any) => PREMIUM_TEMPLATE_IDS.has(String(document?.template?.id || ''))
 
 const tenantUsesPremiumTemplate = async (organizationId: string, session?: ClientSession) => {
@@ -158,12 +169,7 @@ export const reconcileResourceEntitlements = async (
   if (!organization) throw new Error(`Organization ${organizationId} not found while reconciling resource entitlements`)
 
   const properties = await reconcileProperties(organizationId, previous, current, session, actorId)
-
-  const { Lead } = await import('../lead/lead.model')
-  const { activePipelineLeadFilter } = await import('../lead/leadStatus.contract')
-  const leadCountQuery = Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() })
-  if (session) leadCountQuery.session(session)
-  const leadsUsed = await leadCountQuery
+  const leads = await reconcileLeads(organizationId, current, session, actorId)
 
   const premiumInUse = await tenantUsesPremiumTemplate(organizationId, session)
   const premiumBlocked = !current.hasPremiumTemplates && premiumInUse
@@ -238,7 +244,7 @@ export const reconcileResourceEntitlements = async (
   const result: ResourceEntitlementReconciliationResult = {
     organizationId,
     properties,
-    leads: { limit: current.maxLeads, used: leadsUsed, overCapacityBy: Math.max(0, leadsUsed - current.maxLeads), preserved: true },
+    leads,
     premiumTemplates: { entitled: current.hasPremiumTemplates, blocked: premiumBlocked, preserved: true },
     customDomain: { entitled: current.hasCustomDomain, suspended: domainSuspended, domain: domain?.domain || null, preserved: true },
     advancedAnalytics: { entitled: current.hasAdvancedAnalytics, dataPreserved: true },
@@ -250,6 +256,8 @@ export const reconcileResourceEntitlements = async (
 
   const changed = properties.lockedPropertyIds.length > 0
     || properties.unlockedPropertyIds.length > 0
+    || leads.lockedCount > 0
+    || leads.unlockedCount > 0
     || previous.hasCustomDomain !== current.hasCustomDomain
     || previous.hasAdvancedAnalytics !== current.hasAdvancedAnalytics
     || previous.hasWhatsAppIntegration !== current.hasWhatsAppIntegration
@@ -281,6 +289,18 @@ export const publishResourceEntitlementReconciliation = async (result?: Resource
   await CacheInvalidationService.invalidateTenant(result.organizationId)
   for (const propertyId of [...result.properties.lockedPropertyIds, ...result.properties.unlockedPropertyIds]) {
     RealtimeService.emitOrganization(result.organizationId, { type: 'property.changed', action: 'updated', entityId: propertyId })
+  }
+  if (result.leads.lockedCount > 0 || result.leads.unlockedCount > 0) {
+    RealtimeService.emitOrganization(result.organizationId, {
+      type: 'lead.changed',
+      action: 'entitlements_reconciled',
+      entityId: result.organizationId,
+      payload: {
+        limit: result.leads.limit,
+        accessible: result.leads.accessible,
+        locked: result.leads.subscriptionLockedCount,
+      },
+    })
   }
   RealtimeService.emitOrganization(result.organizationId, { type: 'subscription.changed', action: 'updated', entityId: result.organizationId })
 }

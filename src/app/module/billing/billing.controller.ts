@@ -31,6 +31,18 @@ const cancelChangeRequest = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription request cancelled', data: result })
 })
 
+const cancelScheduledDowngrade = catchAsync(async (req: Request, res: Response) => {
+  const result = await BillingService.cancelScheduledDowngrade(requireTenant(req), req.user!._id!)
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.financialAdjustmentRequired
+      ? 'Scheduled downgrade cancelled. The active plan is unchanged; the confirmed payment remains in the billing ledger for support adjustment.'
+      : 'Scheduled downgrade cancelled. The active plan is unchanged.',
+    data: result,
+  })
+})
+
 const cancelSubscription = catchAsync(async (req: Request, res: Response) => {
   const result = await BillingService.cancelSubscription(requireTenant(req))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription will cancel at the end of the current period', data: result })
@@ -57,4 +69,4 @@ const getInvoiceReceipt = catchAsync(async (req: Request, res: Response) => {
   res.status(httpStatus.OK).send(receipt.buffer)
 })
 
-export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }
+export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelScheduledDowngrade, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }

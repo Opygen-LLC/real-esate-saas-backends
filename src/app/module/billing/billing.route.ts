@@ -14,6 +14,7 @@ router.patch('/history/:paymentNumber/acknowledge', authMiddlewares.requirePermi
 router.get('/change-requests', authMiddlewares.requirePermission('billing.manage'), BillingController.getChangeRequests)
 router.post('/change-plan', authMiddlewares.requirePermission('billing.manage'), validateRequest(z.object({ body: agencySubscriptionChangeRequestSchema })), BillingController.changeSubscriptionPlan)
 router.post('/change-requests/:id/cancel', authMiddlewares.requirePermission('billing.manage'), validateRequest(z.object({ params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/) }) })), BillingController.cancelChangeRequest)
+router.post('/scheduled-change/cancel', authMiddlewares.requirePermission('billing.manage'), BillingController.cancelScheduledDowngrade)
 router.post('/cancel', authMiddlewares.requirePermission('billing.manage'), BillingController.cancelSubscription)
 router.get('/history/:id/receipt', authMiddlewares.requirePermission('billing.manage'), BillingController.getInvoiceReceipt)
 

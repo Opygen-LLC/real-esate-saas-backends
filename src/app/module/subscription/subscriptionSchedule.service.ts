@@ -9,6 +9,7 @@ import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import {
   publishSubscriptionEntitlementReconciliation,
   reconcileOrganizationEntitlements,
@@ -262,6 +263,124 @@ const applyDueChange = async (
   return result
 }
 
+const cancelScheduledChange = async (
+  organizationId: string,
+  options: { actorId: string; reason?: string } = { actorId: 'system:subscription-schedule' },
+) => {
+  const now = new Date()
+  const result = await runTransaction(async (session) => {
+    const organizationQuery = Organization.findOne({
+      organizationId,
+      'subscription.scheduledPlan': { $in: ['starter', 'professional', 'agency', 'enterprise'] },
+      'subscription.scheduledEffectiveAt': { $gt: now },
+    })
+    if (session) organizationQuery.session(session)
+    const organization: any = await organizationQuery
+    if (!organization) throw new ApiError(httpStatus.CONFLICT, 'No future scheduled subscription downgrade is available to cancel')
+
+    const subscription: any = organization.subscription || {}
+    const scheduledPlan = String(subscription.scheduledPlan || '') as PaidPlanId
+    const scheduledPlanVersion = Number(subscription.scheduledPlanVersion || 0)
+    const scheduledEffectiveAt = subscription.scheduledEffectiveAt ? new Date(subscription.scheduledEffectiveAt) : null
+    const scheduledChangeRequestId = subscription.scheduledChangeRequestId || null
+    const scheduledSource = String(subscription.scheduledSource || 'manual_payment')
+    const expectedRevision = Math.max(0, Number(subscription.revision || 0))
+    if (!scheduledPlan || !scheduledPlanVersion || !scheduledEffectiveAt) {
+      throw new ApiError(httpStatus.CONFLICT, 'Scheduled subscription state is incomplete and cannot be cancelled safely')
+    }
+
+    let request: any = null
+    if (scheduledChangeRequestId) {
+      const requestQuery = SubscriptionChangeRequest.findOne({ _id: scheduledChangeRequestId, organizationId })
+      if (session) requestQuery.session(session)
+      request = await requestQuery
+      if (!request || request.status !== 'scheduled') throw new ApiError(httpStatus.CONFLICT, 'The scheduled subscription request is no longer cancellable')
+    }
+
+    const reason = String(options.reason || 'Agency cancelled the scheduled downgrade before its billing boundary').trim()
+    const voidedBenefitPeriod: any = await SubscriptionBenefitPeriodService.voidScheduledBenefitPeriod({
+      organizationId,
+      planId: scheduledPlan,
+      planVersion: scheduledPlanVersion,
+      periodStart: scheduledEffectiveAt,
+      actorId: options.actorId,
+      reason,
+    }, session)
+
+    const updatedOrganizationQuery = Organization.findOneAndUpdate(
+      {
+        _id: organization._id,
+        'subscription.revision': expectedRevision,
+        'subscription.scheduledPlan': scheduledPlan,
+        'subscription.scheduledPlanVersion': scheduledPlanVersion,
+        'subscription.scheduledEffectiveAt': scheduledEffectiveAt,
+      },
+      {
+        $set: {
+          'subscription.scheduledPlan': null,
+          'subscription.scheduledPlanVersion': null,
+          'subscription.scheduledBillingCycle': null,
+          'subscription.scheduledEffectiveAt': null,
+          'subscription.scheduledChangeRequestId': null,
+          'subscription.scheduledBy': null,
+          'subscription.scheduledSource': null,
+        },
+        $inc: { 'subscription.revision': 1 },
+      },
+      { new: true, ...(session ? { session } : {}) },
+    )
+    const updatedOrganization: any = await updatedOrganizationQuery
+    if (!updatedOrganization) throw new ApiError(httpStatus.CONFLICT, 'Scheduled subscription changed concurrently; refresh billing and try again')
+
+    if (request) {
+      request.status = 'cancelled'
+      request.reviewedBy = options.actorId
+      request.reviewedAt = now
+      request.scheduledEffectiveAt = null
+      await request.save(session ? { session } : undefined)
+    }
+
+    await writeAudit({
+      organizationId,
+      actorId: options.actorId,
+      actorRole: 'agency_owner',
+      action: 'subscription.scheduled_change_cancelled',
+      entityType: 'organization',
+      entityId: String(updatedOrganization._id),
+      reason,
+      metadata: {
+        scheduledPlan,
+        scheduledPlanVersion,
+        scheduledEffectiveAt,
+        changeRequestId: scheduledChangeRequestId ? String(scheduledChangeRequestId) : null,
+        voidedBenefitPeriodId: voidedBenefitPeriod?._id ? String(voidedBenefitPeriod._id) : null,
+        scheduledSource,
+        financialAdjustmentRequired: scheduledSource === 'bkash' || scheduledSource === 'manual_payment',
+        activePlanUnchanged: true,
+      },
+    }, session)
+
+    return {
+      cancelled: true as const,
+      organizationId,
+      activePlan: String(updatedOrganization.subscription?.plan || 'trial'),
+      cancelledPlan: scheduledPlan,
+      cancelledPlanVersion: scheduledPlanVersion,
+      financialAdjustmentRequired: scheduledSource === 'bkash' || scheduledSource === 'manual_payment',
+    }
+  })
+
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  RealtimeService.emitOrganization(organizationId, {
+    type: 'subscription.changed',
+    action: 'scheduled_change_cancelled',
+    entityId: organizationId,
+    eventType: 'subscription.scheduled_change_cancelled',
+    payload: result,
+  })
+  return result
+}
+
 const processDueChanges = async (limit = 50, now = new Date()) => {
   const capped = Math.max(1, Math.min(500, Math.trunc(Number(limit || 50))))
   const due: any[] = await Organization.find({
@@ -293,5 +412,6 @@ export const SubscriptionScheduleService = {
   isSubscriptionDowngrade,
   scheduleDowngradeOnOrganization,
   applyDueChange,
+  cancelScheduledChange,
   processDueChanges,
 }

@@ -124,6 +124,7 @@ const resolve = async (organizationId: string, session?: ClientSession) => {
       leadAllowanceModel: 'active_capacity',
       periodStart: { $lte: now },
       periodEnd: { $gt: now },
+      $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }],
     }).sort({ periodStart: -1, _id: -1 }).select('totalLeadAllowance').lean()
     const benefit: any = await withSession(benefitQuery, session)
     effectiveLeadLimit = Math.max(0, Number(benefit?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
@@ -192,6 +193,26 @@ const countLimitedResourceUsage = async (
   return withSession(Lead.countDocuments({ organizationId, ...activePipelineLeadFilter() }), session)
 }
 
+const countAccessibleLeadCapacityUsage = async (organizationId: string, session?: ClientSession): Promise<number> =>
+  withSession(Lead.countDocuments({ organizationId, isLocked: { $ne: true } }), session)
+
+const synchronizeActiveLeadCapacityUsage = async (
+  organizationId: string,
+  limit: number,
+  session?: ClientSession,
+): Promise<number> => {
+  // Dynamic import avoids a static EntitlementService <-> LeadEntitlementService cycle.
+  const { LeadEntitlementService } = await import('../lead/leadEntitlement.service')
+  const reconciliation = await LeadEntitlementService.reconcileLeadCapacity(
+    organizationId,
+    limit,
+    session,
+    'system:lead-capacity-boundary',
+  )
+  if (!session) await LeadEntitlementService.publishCapacityChange(organizationId, reconciliation)
+  return reconciliation.accessible
+}
+
 const countReservedTeamMembers = async (organizationId: string, session?: ClientSession): Promise<number> => withSession(
   TeamInvitation.countDocuments({ organizationId, status: 'pending', expiresAt: { $gt: new Date() } }),
   session,
@@ -221,11 +242,14 @@ const getPropertyQuotaSnapshot = async (organizationId: string, session?: Client
 
 const getUsageSnapshot = async (organizationId: string) => {
   const resolved = await resolve(organizationId)
+  const leadUsage = resolved.limits.leadAllowanceModel === 'active_capacity'
+    ? synchronizeActiveLeadCapacityUsage(organizationId, Number(resolved.limits.maxLeads || 0))
+    : countLimitedResourceUsage(organizationId, 'leads')
   const [properties, teamMembersUsed, teamMembersReserved, leads] = await Promise.all([
     countLimitedResourceUsage(organizationId, 'properties'),
     countLimitedResourceUsage(organizationId, 'teamMembers', undefined, resolved.organization.ownerId),
     countReservedTeamMembers(organizationId),
-    countLimitedResourceUsage(organizationId, 'leads'),
+    leadUsage,
   ])
   const teamMemberQuota = buildTeamMemberQuotaContract(
     Number(resolved.limits.maxTeamMembers || 0),
@@ -279,7 +303,9 @@ const assertLimit = async (organizationId: string, resource: LimitedResource, in
   }
 
   const { organization, limits } = await resolve(organizationId, session)
-  const usage = await countLimitedResourceUsage(organizationId, resource, session)
+  const usage = resource === 'leads' && limits.leadAllowanceModel === 'active_capacity'
+    ? await synchronizeActiveLeadCapacityUsage(organizationId, Number(limits.maxLeads || 0), session)
+    : await countLimitedResourceUsage(organizationId, resource, session)
   const maximum = limits.maxLeads
 
   if (wouldExceedEntitlementLimit(usage, maximum, increment)) {
@@ -553,13 +579,14 @@ const activeBenefitPeriod = async (organizationId: string, session?: ClientSessi
     organizationId,
     periodStart: { $lte: now },
     periodEnd: { $gt: now },
+    $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }],
   }).sort({ periodStart: -1, _id: -1 })
   if (session) query.session(session)
   return query
 }
 
 const latestBenefitPeriod = async (organizationId: string, session?: ClientSession) => {
-  const query = SubscriptionBenefitPeriod.findOne({ organizationId }).sort({ periodEnd: -1, _id: -1 })
+  const query = SubscriptionBenefitPeriod.findOne({ organizationId, $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }] }).sort({ periodEnd: -1, _id: -1 })
   if (session) query.session(session)
   return query
 }
@@ -623,11 +650,11 @@ const reserveLeadAllowance = async (
       benefitPeriodId = String(benefit._id)
       limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
       if (benefit.leadAllowanceModel === 'active_capacity') {
-        const [pipelineUsed, outstanding] = await Promise.all([
-          countLimitedResourceUsage(organizationId, 'leads', session),
+        const [accessibleUsed, outstanding] = await Promise.all([
+          synchronizeActiveLeadCapacityUsage(organizationId, limit, session),
           outstandingLeadReservationUnits(organizationId, session, { mode: 'benefit_period', benefitPeriodId: benefit._id }),
         ])
-        used = pipelineUsed + outstanding
+        used = accessibleUsed + outstanding
       } else {
         // Grandfathered benefit periods retain the historical paid-period credit counter.
         used = Math.max(0, Number(benefit.usedLeadAllowance || 0))
@@ -794,7 +821,7 @@ const getMonthlyLeadAllowanceSnapshot = async (organizationId: string) => {
     const limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
     const used = benefit.leadAllowanceModel === 'active_capacity'
       ? (await Promise.all([
-        countLimitedResourceUsage(organizationId, 'leads'),
+        synchronizeActiveLeadCapacityUsage(organizationId, limit),
         outstandingLeadReservationUnits(organizationId, undefined, { mode: 'benefit_period', benefitPeriodId: benefit._id }),
       ])).reduce((sum, value) => sum + value, 0)
       : Math.max(0, Number(benefit.usedLeadAllowance || 0))

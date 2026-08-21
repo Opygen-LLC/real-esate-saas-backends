@@ -3,6 +3,7 @@ import type { LeadStatus } from './leadStatus.contract'
 
 export type ILeadStatus = LeadStatus
 export type ILeadSource = 'Website'|'WhatsApp'|'Facebook'|'Instagram'|'Google'|'Referral'|'WalkIn'|'Portal'|'Phone'|'Email'|'Ad'|'Other'
+export type ILeadLockReason = 'subscription_limit'
 
 export interface ILeadListActivityProjection {
   id: string
@@ -54,6 +55,12 @@ export interface ILead {
   bedrooms?:number
   leadStatus:ILeadStatus
   assignedAgent?:mongoose.Types.ObjectId|string
+
+  /** Subscription capacity lock. Server controlled; locked records are preserved, never purged. */
+  isLocked:boolean
+  lockReason?:ILeadLockReason
+  lockedAt?:Date
+  lockedBy?:string
 
   /** Monthly lead allowance audit fields. Server controlled. */
   leadAllowanceReservationId?: string

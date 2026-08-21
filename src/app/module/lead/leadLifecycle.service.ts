@@ -11,6 +11,7 @@ import { DomainEventService, type DomainEventInput } from '../domainEvent/domain
 import { TaskService } from '../task/task.service'
 import { User } from '../user/user.model'
 import { Lead } from './lead.model'
+import { LeadEntitlementService } from './leadEntitlement.service'
 import {
   LEAD_CONVERSION_STATUS,
   LEAD_STATUS,
@@ -126,6 +127,9 @@ const loadMutableLead = async (
   })
   const lead: any = await queryWithSession(query as any, session)
   if (!lead) throw new ApiError(404, 'Lead not found')
+  // Defense in depth for lifecycle callers that bypass LeadService. When called
+  // inside a transaction this re-checks the persisted lock state in the same session.
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId, session)
   return lead
 }
 

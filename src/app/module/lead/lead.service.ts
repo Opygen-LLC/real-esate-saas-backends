@@ -23,6 +23,7 @@ import { ILead, ILeadFilter } from './lead.interface'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone, getWeekBoundsInTimeZone } from './leadFollowUpTime'
 import { Lead } from './lead.model'
 import { LeadLifecycleService } from './leadLifecycle.service'
+import { LeadEntitlementService } from './leadEntitlement.service'
 import type { PublicLeadCaptureInput } from './lead.validation'
 import {
   LEAD_STATUS,
@@ -40,7 +41,7 @@ const scoreLead=(lead:Partial<ILead>)=>{let score=10;const reasons:string[]=['Ba
 const prepareLeadMutationPayload=(payload:Partial<ILead>,actorId?:string)=>{
   const prepared:any={...payload}
   // Server-owned lifecycle/audit fields are never accepted from callers.
-  for(const field of ['createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId','leadAllowanceReservationId','benefitPeriodId','leadAllowanceConsumedAt']) delete prepared[field]
+  for(const field of ['createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId','leadAllowanceReservationId','benefitPeriodId','leadAllowanceConsumedAt','isLocked','lockReason','lockedAt','lockedBy']) delete prepared[field]
   if(prepared.followUpDate!==undefined){const value=new Date(prepared.followUpDate);if(Number.isNaN(value.getTime()))throw new ApiError(400,'Invalid follow-up date');prepared.followUpDate=value}
   else if(prepared.nextFollowUp!==undefined){const value=new Date(prepared.nextFollowUp);if(Number.isNaN(value.getTime()))throw new ApiError(400,'Invalid follow-up date');prepared.followUpDate=value}
   // Keep the legacy schema field readable, but stop writing new canonical state into it.
@@ -50,7 +51,7 @@ const prepareLeadMutationPayload=(payload:Partial<ILead>,actorId?:string)=>{
 }
 
 const assertGenericLeadPatchFields=(payload:Partial<ILead>)=>{
-  const protectedFields=['leadStatus','assignedAgent','followUpDate','nextFollowUp','createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId','lostReason','notes']
+  const protectedFields=['leadStatus','assignedAgent','followUpDate','nextFollowUp','createdBy','updatedBy','convertedAt','convertedBy','convertedContactId','isConverted','firstContactedAt','contactId','lostReason','notes','isLocked','lockReason','lockedAt','lockedBy']
   const supplied=protectedFields.filter((field)=>Object.prototype.hasOwnProperty.call(payload,field))
   if(supplied.length)throw new ApiError(400,`Protected lead fields must use dedicated lifecycle endpoints: ${supplied.join(', ')}`)
 }
@@ -189,6 +190,11 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
   }
   if(duplicates.length){
     if(options.duplicatePolicy==='reject')throw new ApiError(409,'A lead with the same phone or email already exists in this agency')
+    // Duplicate capture must not become a backdoor for mutating or deleting a
+    // subscription-locked record during identity consolidation.
+    for (const duplicate of duplicates) {
+      await LeadEntitlementService.assertLeadAccessible(organizationId, String(duplicate._id))
+    }
     const target=duplicates[0]
     if(duplicates.length>1){
       for(const duplicate of duplicates.slice(1)){
@@ -268,6 +274,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
       if(options.duplicatePolicy==='reject')throw new ApiError(409,'A lead with the same phone or email already exists in this agency')
       const after:any=(await findDuplicates(organizationId,normalizedPhone,normalizedEmail))[0]
       if(after){
+        await LeadEntitlementService.assertLeadAccessible(organizationId, String(after._id))
         const merged=await mergeInto(after,prepared,{source:String(prepared.source||'Unknown'),actorId:creatorAgentId})
         await appendInitialNote(merged)
         const lead = await finalizeLifecycle(merged,false)
@@ -323,7 +330,14 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
   if(Object.keys(ownerScope).length)conditions.push(ownerScope)
   if(searchTerm){
     const escaped=String(searchTerm).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
-    conditions.push({$or:['name','email','phone','locationPreference','attribution.utmCampaign'].map(field=>({[field]:{$regex:escaped,$options:'i'}}))})
+    const regex={$regex:escaped,$options:'i'}
+    conditions.push({$or:[
+      {name:regex},
+      {locationPreference:regex},
+      {'attribution.utmCampaign':regex},
+      {$and:[{isLocked:{$ne:true}},{email:regex}]},
+      {$and:[{isLocked:{$ne:true}},{phone:regex}]},
+    ]})
   }
   if(leadStatus){
     const statusValues=leadStatusFilterValues(leadStatus)
@@ -369,6 +383,8 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
 }
 
 const getAllLeads=async(filters:ILeadFilter,paginationOptions:IPaginationOptions,access?:CrmAccessContext):Promise<IGenericResponse<ILead[]>>=>{
+  const organizationId=String(filters.organizationId||'')
+  if(organizationId)await LeadEntitlementService.ensureCurrentLeadCapacity(organizationId)
   const where=buildLeadWhere(filters,access)
   const{page,limit,skip,sortBy,sortOrder}=paginationHelper.calculatePagination(paginationOptions)
   const pageResult=await readLeadListPage<ILead>({match:where,skip,limit,sortBy,sortOrder})
@@ -382,6 +398,7 @@ const getTodayFollowUps=async(
   access?:CrmAccessContext,
   referenceDate:Date=new Date(),
 )=>{
+  await LeadEntitlementService.ensureCurrentLeadCapacity(organizationId)
   const bounds=getDayBoundsInTimeZone(referenceDate,CRM_FOLLOW_UP_TIME_ZONE)
   const{page,limit,skip}=paginationHelper.calculatePagination({
     ...paginationOptions,
@@ -413,14 +430,74 @@ const getTodayFollowUps=async(
   }
 }
 
-const getLeadById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result=await Lead.findOne({_id:id,organizationId,...crmReadOwnerFilter('assignedAgent',access)}).populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL')).populate(userRefPopulate('createdBy','name email userRole profileImgURL')).populate(userRefPopulate('updatedBy','name email userRole profileImgURL')).populate('propertyInterest','title price images city propertyType bedrooms bathrooms').populate('contactId','name email phone address company tags');if(!result)throw new ApiError(404,'Lead not found');return result}
-const updateLead=async(organizationId:string,id:string,payload:Partial<ILead>,actorId?:string,access?:CrmAccessContext)=>{assertGenericLeadPatchFields(payload);const ownerFilter=crmMutationOwnerFilter('assignedAgent',access);const current:any=await Lead.findOne({_id:id,organizationId,...ownerFilter});if(!current)throw new ApiError(404,'Lead not found');const prepared:any=prepareLeadMutationPayload(payload,actorId);if(prepared.phone){prepared.phone=normalizePhone(prepared.phone);prepared.normalizedPhone=prepared.phone}if(prepared.email!==undefined)prepared.normalizedEmail=normalizeOptionalEmail(prepared.email);const scored=scoreLead({...current.toObject(),...prepared});prepared.leadScore=scored.score;prepared.scoreReasons=scored.reasons;const result=await Lead.findOneAndUpdate({_id:id,organizationId,...ownerFilter},prepared,{new:true,runValidators:true}).populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole')).populate('propertyInterest','title price images city');await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:id,eventType:'lead.updated',leadId:id,actorId,payload:{summary:'Lead profile fields updated',fields:Object.keys(prepared)}});return result}
-const updateLeadStatus=async(organizationId:string,id:string,leadStatus:string,lostReason?:string,agentId?:string,access?:CrmAccessContext,reason?:string)=>LeadLifecycleService.changeStatus(organizationId,id,leadStatus,{lostReason,reason,actorId:agentId,access})
-const assignAgent=async(organizationId:string,id:string,assignedAgent:string,_agentName?:string,actorId?:string,access?:CrmAccessContext)=>LeadLifecycleService.assignLead(organizationId,id,assignedAgent,{actorId,access,reason:'Manual override'})
-const scheduleFollowUp=async(organizationId:string,id:string,followUpDate:string|Date,actorId?:string,access?:CrmAccessContext,reason?:string,title?:string,priority?:'low'|'medium'|'high'|'urgent')=>LeadLifecycleService.scheduleFollowUp(organizationId,id,followUpDate,{actorId,access,reason,title,priority})
-const recordFirstResponse=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext)=>LeadLifecycleService.recordContact(organizationId,id,{actorId,access,channel:'manual'})
-const reengage=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext,reason?:string)=>LeadLifecycleService.reengage(organizationId,id,{actorId,access,reason})
-const deleteLead=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext)=>{const result:any=await Lead.findOneAndDelete({_id:id,organizationId,...crmMutationOwnerFilter('assignedAgent',access)});if(!result)throw new ApiError(404,'Lead not found');await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:id,eventType:'lead.deleted',actorId,payload:{summary:`Lead deleted: ${result.name}`,leadName:result.name,source:result.source,leadStatus:result.leadStatus}});return result}
+const getLeadById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{
+  const result=await Lead.findOne({_id:id,organizationId,...crmReadOwnerFilter('assignedAgent',access)})
+    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
+    .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
+    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
+    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms')
+    .populate('contactId','name email phone address company tags')
+  if(!result)throw new ApiError(404,'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return result
+}
+
+const updateLead=async(organizationId:string,id:string,payload:Partial<ILead>,actorId?:string,access?:CrmAccessContext)=>{
+  assertGenericLeadPatchFields(payload)
+  const ownerFilter=crmMutationOwnerFilter('assignedAgent',access)
+  const current:any=await Lead.findOne({_id:id,organizationId,...ownerFilter})
+  if(!current)throw new ApiError(404,'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  const prepared:any=prepareLeadMutationPayload(payload,actorId)
+  if(prepared.phone){prepared.phone=normalizePhone(prepared.phone);prepared.normalizedPhone=prepared.phone}
+  if(prepared.email!==undefined)prepared.normalizedEmail=normalizeOptionalEmail(prepared.email)
+  const scored=scoreLead({...current.toObject(),...prepared})
+  prepared.leadScore=scored.score
+  prepared.scoreReasons=scored.reasons
+  const result=await Lead.findOneAndUpdate({_id:id,organizationId,...ownerFilter,isLocked:{$ne:true}},prepared,{new:true,runValidators:true})
+    .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole'))
+    .populate('propertyInterest','title price images city')
+  if(!result) {
+    await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+    throw new ApiError(404,'Lead not found')
+  }
+  await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:id,eventType:'lead.updated',leadId:id,actorId,payload:{summary:'Lead profile fields updated',fields:Object.keys(prepared)}})
+  return result
+}
+
+const updateLeadStatus=async(organizationId:string,id:string,leadStatus:string,lostReason?:string,agentId?:string,access?:CrmAccessContext,reason?:string)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.changeStatus(organizationId,id,leadStatus,{lostReason,reason,actorId:agentId,access})
+}
+const assignAgent=async(organizationId:string,id:string,assignedAgent:string,_agentName?:string,actorId?:string,access?:CrmAccessContext)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.assignLead(organizationId,id,assignedAgent,{actorId,access,reason:'Manual override'})
+}
+const scheduleFollowUp=async(organizationId:string,id:string,followUpDate:string|Date,actorId?:string,access?:CrmAccessContext,reason?:string,title?:string,priority?:'low'|'medium'|'high'|'urgent')=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.scheduleFollowUp(organizationId,id,followUpDate,{actorId,access,reason,title,priority})
+}
+const recordFirstResponse=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.recordContact(organizationId,id,{actorId,access,channel:'manual'})
+}
+const reengage=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext,reason?:string)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.reengage(organizationId,id,{actorId,access,reason})
+}
+const deleteLead=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext)=>{
+  const ownerFilter=crmMutationOwnerFilter('assignedAgent',access)
+  const visible=await Lead.exists({_id:id,organizationId,...ownerFilter})
+  if(!visible)throw new ApiError(404,'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  const result:any=await Lead.findOneAndDelete({_id:id,organizationId,...ownerFilter,isLocked:{$ne:true}})
+  if(!result){
+    await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+    throw new ApiError(404,'Lead not found')
+  }
+  await DomainEventService.emit({organizationId,aggregateType:'lead',aggregateId:id,eventType:'lead.deleted',actorId,payload:{summary:`Lead deleted: ${result.name}`,leadName:result.name,source:result.source,leadStatus:result.leadStatus}})
+  return result
+}
 
 const MAX_EXPORT_ROWS = 50_000
 const LEAD_EXPORT_COLUMNS: CrmExportColumn[] = [
@@ -467,6 +544,7 @@ const getLeadExportRows = async (
   // buildLeadWhere is the exact same server-side filter + workspace scope used by
   // GET /lead, so an export cannot widen the records visible in the Lead Pipeline.
   const where = buildLeadWhere({ ...filters, organizationId }, access)
+  await LeadEntitlementService.assertExportContainsNoLockedLeads(organizationId, where)
   const total = await Lead.countDocuments(where)
   if (total > MAX_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
 

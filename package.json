@@ -43,7 +43,7 @@
     "verify:phase5-finance": "node scripts/verify-phase5-finance.mjs",
     "verify:phase7-architecture": "node scripts/verify-phase7-architecture.mjs",
     "test:journey": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase7ReleaseJourney.integration.test.ts",
-    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase10 && pnpm test:integration && pnpm test:migrations && pnpm verify:phase10 && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance",
+    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase10 && pnpm test:integration && pnpm test:migrations && pnpm verify:phase10 && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance && pnpm verify:subscription-release && pnpm test:subscription-release",
     "migrate:user-auth-architecture": "ts-node --transpile-only src/app/db/migratePhase1UserAuthArchitecture.ts",
     "verify:phase1-user-auth": "node scripts/verify-phase1-user-auth-architecture.mjs",
     "migrate:phase2-property-correctness": "ts-node --transpile-only src/app/db/migratePhase2PropertyCorrectness.ts",
@@ -80,7 +80,15 @@
     "migrate:lead-allowance-reservations": "ts-node --transpile-only src/app/db/migrateLeadAllowanceReservations.ts",
     "migrate:subscription-benefit-streak-adjustments": "ts-node --transpile-only src/app/db/migrateSubscriptionBenefitStreakAdjustments.ts",
     "migrate:subscription-tier-rollover-v2": "ts-node --transpile-only src/app/db/migrateSubscriptionTierRolloverV2.ts",
-    "migrate:subscription-deferred-downgrades": "ts-node --transpile-only src/app/db/migrateDeferredSubscriptionSchedules.ts"
+    "migrate:subscription-deferred-downgrades": "ts-node --transpile-only src/app/db/migrateDeferredSubscriptionSchedules.ts",
+    "migrate:lead-subscription-locking": "ts-node --transpile-only src/app/db/migrateLeadSubscriptionLocking.ts",
+    "migrate:subscription-release": "ts-node --transpile-only src/app/db/migrateSubscriptionLeadReleaseV1.ts",
+    "test:subscription-release": "pnpm test:subscription-release:unit && pnpm test:subscription-release:contract && pnpm test:subscription-release:integration && pnpm test:subscription-release:security",
+    "verify:subscription-release": "node scripts/verify-subscription-release.mjs",
+    "test:subscription-release:unit": "vitest run src/tests/subscriptionRelease/subscriptionTierRollover.unit.test.ts",
+    "test:subscription-release:contract": "vitest run src/tests/subscriptionRelease/subscriptionTierRollover.contract.test.ts",
+    "test:subscription-release:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/subscriptionRelease/subscriptionDowngrade.integration.test.ts src/tests/subscriptionRelease/leadLocking.integration.test.ts",
+    "test:subscription-release:security": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/subscriptionRelease/leadLocking.security.test.ts"
   },
   "keywords": [
     "real-estate",

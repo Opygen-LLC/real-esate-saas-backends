@@ -1,6 +1,7 @@
 import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
+import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { User } from '../user/user.model'
 import { listUsersWithProfiles } from '../user/userReadModel.service'
 import { CrmConfig, LeadAssignmentAudit } from './crm.model'
@@ -135,6 +136,7 @@ const recordAssignment = async (input: { organizationId: string; leadId: string;
 const getAssignmentHistory = async (organizationId: string, leadId: string, access?: CrmAccessContext) => {
   const visibleLead = await Lead.exists({ _id: leadId, organizationId, ...crmReadOwnerFilter('assignedAgent', access) })
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
   return LeadAssignmentAudit.find({ organizationId, leadId })
     .populate('previousAgentId assignedAgentId actorId', 'name email').sort({ createdAt: -1 }).lean()
 }

@@ -22,6 +22,9 @@ const subscriptionBenefitPeriodSchema = new Schema<ISubscriptionBenefitPeriod>(
     renewalLeadBonus: { type: Number, required: true, min: 0, default: 0 },
     maxRenewalLeadBonus: { type: Number, required: true, min: 0, default: 0 },
     continuityGraceDays: { type: Number, required: true, min: 0, max: 31, default: 0 },
+    voidedAt: { type: Date, default: null },
+    voidedBy: { type: String, default: null },
+    voidReason: { type: String, default: null },
   },
   { timestamps: true, toJSON: { virtuals: true } },
 )

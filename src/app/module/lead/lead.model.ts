@@ -23,6 +23,11 @@ const leadSchema = new Schema<ILead, LeadModel>({
   benefitPeriodId:{type:Schema.Types.ObjectId,ref:'SubscriptionBenefitPeriod',index:true},
   leadAllowanceConsumedAt:{type:Date,index:true},
 
+  isLocked:{type:Boolean,default:false,required:true},
+  lockReason:{type:String,enum:['subscription_limit'],default:null},
+  lockedAt:{type:Date,default:null},
+  lockedBy:{type:String,default:null},
+
   createdBy:{type:Schema.Types.ObjectId,ref:'User',index:true},
   updatedBy:{type:Schema.Types.ObjectId,ref:'User'},
   followUpDate:{type:Date,index:true},
@@ -58,6 +63,7 @@ leadSchema.index({organizationId:1,normalizedEmail:1},{unique:true,partialFilter
 
 leadSchema.index({organizationId:1,leadAllowanceReservationId:1},{name:'lead_tenant_allowance_reservation'})
 leadSchema.index({organizationId:1,benefitPeriodId:1,createdAt:-1},{name:'lead_tenant_benefit_period_created'})
+leadSchema.index({organizationId:1,isLocked:1,createdAt:-1,_id:-1},{name:'lead_tenant_lock_created'})
 
 // Phase 1 canonical CRM access paths.
 leadSchema.index({organizationId:1,isConverted:1,leadStatus:1},{name:'lead_tenant_converted_status'})

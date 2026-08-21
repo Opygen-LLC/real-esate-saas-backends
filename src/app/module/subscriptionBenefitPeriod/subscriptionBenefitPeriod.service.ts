@@ -11,6 +11,7 @@ import { Lead } from '../lead/lead.model'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const nonVoidedFilter = () => ({ $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }] })
 
 export interface BenefitPlanSnapshot {
   planId: SubscriptionPlanId
@@ -146,6 +147,7 @@ const findPreviousConfirmedBenefitPeriod = async (
   // Continuity follows the actual sequence of confirmed paid subscription periods.
   // Searching across every plan family is deliberate: Starter -> Professional -> Starter must reset.
   const query = SubscriptionBenefitPeriod.findOne({ organizationId })
+    .where(nonVoidedFilter())
     .sort({ createdAt: -1, _id: -1 })
     .select('planId billingCycle periodEnd renewalStreak renewalBonusEnabled')
     .lean()
@@ -277,6 +279,7 @@ const getUpcomingBenefitPeriod = async (organizationId: string, session?: Client
   const query = SubscriptionBenefitPeriod.findOne({
     organizationId: String(organizationId || '').trim(),
     periodStart: { $gt: new Date() },
+    ...nonVoidedFilter(),
   }).sort({ periodStart: 1, _id: 1 }).lean()
   if (session) query.session(session)
   return query
@@ -289,7 +292,7 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
   const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId })
     .select('organizationId agencyName email subscription.plan subscription.planVersion subscription.status subscription.currentPeriodEnd')
     .lean()
-  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId })
+  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId, ...nonVoidedFilter() })
     .sort({ createdAt: -1, _id: -1 })
     .lean()
   if (session) {
@@ -365,7 +368,7 @@ const adjustRenewalStreak = async (
   }
 
   const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId }).select('organizationId')
-  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId })
+  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId, ...nonVoidedFilter() })
     .sort({ createdAt: -1, _id: -1 })
   if (session) {
     organizationQuery.session(session)
@@ -427,6 +430,33 @@ const adjustRenewalStreak = async (
   return adjustment
 }
 
+const voidScheduledBenefitPeriod = async (input: {
+  organizationId: string
+  planId: SubscriptionPlanId
+  planVersion: number
+  periodStart: Date
+  actorId: string
+  reason: string
+}, session?: ClientSession) => {
+  const periodStart = new Date(input.periodStart)
+  const query = SubscriptionBenefitPeriod.findOne({
+    organizationId: input.organizationId,
+    planId: input.planId,
+    planVersion: input.planVersion,
+    periodStart,
+    ...nonVoidedFilter(),
+  }).sort({ createdAt: -1, _id: -1 })
+  if (session) query.session(session)
+  const period: any = await query
+  if (!period) return null
+  if (periodStart.getTime() <= Date.now()) throw new ApiError(httpStatus.CONFLICT, 'A benefit period that has already started cannot be voided as a cancelled future schedule')
+  period.voidedAt = new Date()
+  period.voidedBy = input.actorId
+  period.voidReason = input.reason
+  await period.save(session ? { session } : undefined)
+  return period
+}
+
 export const SubscriptionBenefitPeriodService = {
   createForPaidSubscription,
   getHistory,
@@ -434,4 +464,5 @@ export const SubscriptionBenefitPeriodService = {
   getEffectiveRenewalStreakForPeriod,
   getUpcomingBenefitPeriod,
   adjustRenewalStreak,
+  voidScheduledBenefitPeriod,
 }

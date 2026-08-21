@@ -9,6 +9,8 @@ import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionP
 import { SubscriptionReceiptPdfService, type GeneratedReceiptPdf } from './subscriptionReceiptPdf.service'
 import { SubscriptionBenefitPeriodService, calculateBenefitPeriodAllowance } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
+import { Lead } from '../lead/lead.model'
+import { SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
 
 const createBillingRecord = async (payload: Partial<IBilling>): Promise<IBilling> => {
   if (!payload.invoiceId) {
@@ -36,6 +38,10 @@ const getSubscriptionUsage = async (organizationId: string) => {
   const { organization: org, limits, usage, teamMemberQuota } = resolved
   const currentProperties = usage.properties
   const currentLeads = usage.leads
+  const lockedLeads = limits.leadAllowanceModel === 'active_capacity'
+    ? await Lead.countDocuments({ organizationId, isLocked: true, lockReason: 'subscription_limit' })
+    : 0
+  const totalLeadRecords = currentLeads + lockedLeads
   const maxProperties = Number(limits.maxProperties || 0)
   const maxTeamMembers = Number(teamMemberQuota.maxTeamMembers || 0)
   const maxLeads = Number(limits.maxLeads || 0)
@@ -185,7 +191,16 @@ const getSubscriptionUsage = async (organizationId: string) => {
       limit: maxTeamMembers,
       percentage: teamMembersPercent,
     },
-    leads: { used: currentLeads, limit: maxLeads, percentage: leadsPercent },
+    leads: {
+      used: currentLeads,
+      accessible: currentLeads,
+      locked: lockedLeads,
+      total: totalLeadRecords,
+      limit: maxLeads,
+      remaining: Math.max(0, maxLeads - currentLeads),
+      overCapacityBy: lockedLeads,
+      percentage: leadsPercent,
+    },
     leadAllowance,
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
@@ -199,6 +214,12 @@ const getSubscriptionUsage = async (organizationId: string) => {
     isApproachingLimit: propertiesPercent >= 80 || teamMembersPercent >= 80 || leadsPercent >= 80 || allowancePercent >= 80,
   }
 }
+
+const cancelScheduledDowngrade = async (organizationId: string, actorId: string) =>
+  SubscriptionScheduleService.cancelScheduledChange(organizationId, {
+    actorId,
+    reason: 'Agency owner cancelled the scheduled downgrade before its billing boundary',
+  })
 
 const cancelSubscription = async (organizationId: string) => {
   const org = await Organization.findOne({ organizationId })
@@ -276,6 +297,7 @@ export const BillingService = {
   createBillingRecord,
   getBillingHistory,
   getSubscriptionUsage,
+  cancelScheduledDowngrade,
   cancelSubscription,
   getInvoiceReceipt,
 }

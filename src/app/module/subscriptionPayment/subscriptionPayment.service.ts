@@ -13,6 +13,7 @@ import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.se
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
+import { EntitlementService } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionScheduleService, classifySubscriptionChange } from '../subscription/subscriptionSchedule.service'
@@ -308,6 +309,25 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
     let entitlementReconciliation: Awaited<ReturnType<typeof reconcileOrganizationEntitlements>> | null = null
 
+    const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
+      organizationId: payment.organizationId,
+      paymentSource: 'manual_payment',
+      paymentNumber: payment.paymentNumber,
+      billingCycle: payment.billingCycle,
+      periodStart: start,
+      periodEnd: end,
+      plan: {
+        planId: plan.planId,
+        version: plan.version,
+        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
+        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
+        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
+        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
+        continuityGraceDays: Number(plan.continuityGraceDays || 0),
+      },
+    }, session)
+
     if (deferredDowngrade) {
       await SubscriptionScheduleService.scheduleDowngradeOnOrganization(org, {
         planId: plan.planId,
@@ -330,7 +350,12 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         revision: Math.max(0, Number(org.subscription?.revision || 0)) + 1,
       }
       await org.save(session ? { session } : undefined)
-      entitlementReconciliation = await reconcileOrganizationEntitlements(payment.organizationId, previous, plan, {
+      const effective = await EntitlementService.resolve(payment.organizationId, session)
+      entitlementReconciliation = await reconcileOrganizationEntitlements(payment.organizationId, previous, {
+        ...(plan.toObject?.() || plan),
+        maxLeads: Number(effective.limits.maxLeads || 0),
+        leadAllowanceModel: effective.limits.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+      }, {
         session,
         actorId: actor.id,
         reason: `Subscription changed to ${plan.planId} v${plan.version}`,
@@ -341,25 +366,6 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     payment.confirmationNoticeEligible = true
     payment.customerAcknowledgedBy = []
     await payment.save(session ? { session } : undefined)
-
-    const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
-      organizationId: payment.organizationId,
-      paymentSource: 'manual_payment',
-      paymentNumber: payment.paymentNumber,
-      billingCycle: payment.billingCycle,
-      periodStart: start,
-      periodEnd: end,
-      plan: {
-        planId: plan.planId,
-        version: plan.version,
-        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
-        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
-        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
-        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
-        continuityGraceDays: Number(plan.continuityGraceDays || 0),
-      },
-    }, session)
 
     if (request) {
       request.status = deferredDowngrade ? 'scheduled' : 'approved'
