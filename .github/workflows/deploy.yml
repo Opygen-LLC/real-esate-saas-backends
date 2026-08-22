@@ -65,8 +65,10 @@ jobs:
             
             # Verify health status
             echo "🧪 Verifying container health..."
-            sleep 5
-            curl -f http://localhost:5000/health || curl -f http://localhost/ready
+            sleep 15
+            curl -f http://localhost:5000/health || curl -f http://34.131.86.177/health || curl -f http://127.0.0.1:5000/health
+
+
             
             echo "----------------------------------------"
             echo "✅ GCP Production Deployment Complete!"
