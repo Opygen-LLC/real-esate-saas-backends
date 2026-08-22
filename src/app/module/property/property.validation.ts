@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS } from './property.constants'
 import { normalizeBangladeshDigits } from './property.normalization'
 
 
@@ -88,6 +88,7 @@ const fields = {
   developerName: z.string().max(160).optional(), handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
   images: propertyImages.optional(), mediaLinks: mediaLinks.optional(),
   amenities: z.array(z.string().max(100)).max(100).optional(), features: z.array(z.string().max(100)).max(100).optional(),
+  hiddenPublicFields: z.array(z.enum(PUBLIC_PROPERTY_FIELDS)).max(PUBLIC_PROPERTY_FIELDS.length).refine((items) => new Set(items).size === items.length, 'Hidden public fields must be unique').optional(),
   agentId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), ownerId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), isFeatured: z.boolean().optional(),
 }
 

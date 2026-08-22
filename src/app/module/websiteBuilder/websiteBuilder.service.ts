@@ -13,6 +13,8 @@ import { ALLOWED_ASSET_MIME_TYPES, assertSafeUrl, sanitizeCustomCss, sanitizeRic
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
+import { PUBLIC_PROPERTY_STATUSES } from '../property/property.constants'
+import { toPublicProperty } from '../property/publicProperty.serializer'
 import { DomainRecord } from '../domain/domain.model'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { WebsitePage } from './websitePage.model'
@@ -690,11 +692,57 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 const getSitemap = async (identifier: string) => {
   const org = assertPublicWebsite(await resolveOrganization(identifier))
   const base = await canonicalBase(org)
-  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }).select('_id updatedAt').lean()])
+  const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }
 
 const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
-const getPropertyShareCard = async (identifier: string, propertyId: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const property: any = await Property.findOne({ _id: propertyId, organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }).lean(); if (!property) throw new ApiError(404, 'Property not found'); const base = await canonicalBase(org); return { title: `${property.title} | ${org.agencyName}`, description: String(property.description || `${property.bedrooms || ''} bed property in ${property.city || 'Bangladesh'}`).replace(/<[^>]+>/g, '').slice(0, 180), image: property.images?.[0]?.url || org.logo || '', url: `${base}/properties/${property._id}`, type: 'website', structuredData: { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: property.title, url: `${base}/properties/${property._id}`, image: property.images?.map((i: any) => i.url).filter(Boolean) || [], offers: { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' } } } }
+const getPropertyShareCard = async (identifier: string, propertyId: string) => {
+  const org = assertPublicWebsite(await resolveOrganization(identifier))
+  const source: any = await Property.findOne({
+    _id: propertyId,
+    organizationId: org.organizationId,
+    status: { $in: [...PUBLIC_PROPERTY_STATUSES] },
+    quotaLocked: { $ne: true },
+  }).lean()
+  if (!source) throw new ApiError(404, 'Property not found')
+
+  const property: any = toPublicProperty(source)
+  const base = await canonicalBase(org)
+  const url = `${base}/properties/${property._id}`
+  const description = String(property.description || `${property.title} from ${org.agencyName}`)
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+  const structuredData: Record<string, any> = {
+    '@context': 'https://schema.org',
+    '@type': 'RealEstateListing',
+    name: property.title,
+    url,
+    image: property.images?.map((image: any) => image.url).filter(Boolean) || [],
+  }
+  if (property.description) structuredData.description = String(property.description).replace(/<[^>]+>/g, '').slice(0, 500)
+  if (property.price !== undefined) structuredData.offers = { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' }
+  if (property.area !== undefined) structuredData.floorSize = { '@type': 'QuantitativeValue', value: property.area, unitText: property.areaUnit || 'sqft' }
+  if (property.address || property.city || property.state || property.country) {
+    structuredData.address = {
+      '@type': 'PostalAddress',
+      ...(property.address ? { streetAddress: property.address } : {}),
+      ...(property.city ? { addressLocality: property.city } : {}),
+      ...(property.state ? { addressRegion: property.state } : {}),
+      ...(property.country ? { addressCountry: property.country } : {}),
+    }
+  }
+  return {
+    title: `${property.title} | ${org.agencyName}`,
+    description,
+    image: property.images?.[0]?.url || org.logo || '',
+    url,
+    type: 'website',
+    structuredData,
+  }
+}
+
 
 export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

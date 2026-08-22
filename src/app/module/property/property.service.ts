@@ -14,6 +14,7 @@ import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './publicProperty.serializer'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
@@ -299,10 +300,13 @@ const getPublicProperties = async (
   organizationId: string,
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
-): Promise<IGenericResponse<IProperty[]>> => getAllProperties(
-  { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
-  paginationOptions,
-)
+): Promise<IGenericResponse<PublicPropertyDto[]>> => {
+  const result = await getAllProperties(
+    { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
+    paginationOptions,
+  )
+  return { ...result, data: toPublicProperties(result.data as any[]) }
+}
 
 const getPropertyById = async (organizationId: string, id: string): Promise<IProperty | null> => {
   const result = await Property.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
@@ -310,16 +314,16 @@ const getPropertyById = async (organizationId: string, id: string): Promise<IPro
   return result
 }
 
-const getPropertyBySlug = async (organizationId: string, slug: string): Promise<IProperty | null> => {
+const getPropertyBySlug = async (organizationId: string, slug: string): Promise<PublicPropertyDto> => {
   const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
-  return result
+  return toPublicProperty(result)
 }
 
 const getPublicPropertyDetail = async (
   idOrSlug: string,
   organizationId: string,
-): Promise<{ property: IProperty; similarProperties: IProperty[] }> => {
+): Promise<{ property: PublicPropertyDto; similarProperties: PublicPropertyDto[] }> => {
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
   const tenantScope = { organizationId }
   const query = isObjectId
@@ -339,7 +343,7 @@ const getPublicPropertyDetail = async (
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
   }).limit(3).populate(userRefPopulate('agentId', 'name email userRole'))
 
-  return { property, similarProperties }
+  return { property: toPublicProperty(property), similarProperties: toPublicProperties(similarProperties as any[]) }
 }
 
 const updateProperty = async (

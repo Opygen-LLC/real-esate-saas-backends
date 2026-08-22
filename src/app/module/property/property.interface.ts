@@ -1,5 +1,5 @@
 import mongoose, { Model } from 'mongoose'
-import type { ApprovalAuthority, AreaUnit, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType } from './property.constants'
+import type { ApprovalAuthority, AreaUnit, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType, PublicPropertyField } from './property.constants'
 
 export type IPropertyTypeEnum = PropertyType
 export type IListingType = ListingType
@@ -84,6 +84,7 @@ export interface IProperty {
   mediaLinks?: IPropertyMediaLink[]
   amenities: string[]
   features?: string[]
+  hiddenPublicFields?: PublicPropertyField[]
   agentId?: mongoose.Types.ObjectId | string
   ownerId?: mongoose.Types.ObjectId | string
   publishedAt?: Date | null

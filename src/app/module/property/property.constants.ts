@@ -22,6 +22,33 @@ export const MUTATION_STATUSES = ['not_applicable', 'pending', 'completed'] as c
 export const PROPERTY_MEDIA_PROVIDERS = ['youtube', 'vimeo', 'matterport', 'kuula', 'other'] as const
 export const PROPERTY_MEDIA_TYPES = ['video', 'virtual_tour', '360'] as const
 
+
+export const PUBLIC_PROPERTY_FIELDS = [
+  'price',
+  'discount',
+  'description',
+  'address',
+  'location',
+  'map',
+  'bedrooms',
+  'bathrooms',
+  'area',
+  'landShare',
+  'yearBuilt',
+  'parking',
+  'furnished',
+  'serviceCharge',
+  'developer',
+  'handover',
+  'utilities',
+  'regulatory',
+  'amenities',
+  'features',
+  'agent',
+  'facing',
+  'roadWidth',
+] as const
+
 export type PropertyType = (typeof PROPERTY_TYPES)[number]
 export type ListingType = (typeof LISTING_TYPES)[number]
 export type PropertyStatus = (typeof PROPERTY_STATUSES)[number]
@@ -33,3 +60,4 @@ export type ApprovalAuthority = (typeof APPROVAL_AUTHORITIES)[number]
 export type MutationStatus = (typeof MUTATION_STATUSES)[number]
 export type PropertyMediaProvider = (typeof PROPERTY_MEDIA_PROVIDERS)[number]
 export type PropertyMediaType = (typeof PROPERTY_MEDIA_TYPES)[number]
+export type PublicPropertyField = (typeof PUBLIC_PROPERTY_FIELDS)[number]

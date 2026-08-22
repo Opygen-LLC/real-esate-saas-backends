@@ -17,6 +17,8 @@ import { Lead } from '../lead/lead.model'
 import { convertedStatusExpression } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
+import { PUBLIC_PROPERTY_STATUSES } from '../property/property.constants'
+import { toPublicProperties } from '../property/publicProperty.serializer'
 import { Viewing } from '../viewing/viewing.model'
 import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
 import { AgentProfile } from '../agentProfile/agentProfile.model'
@@ -217,7 +219,7 @@ const getPublicAgents = async (organizationId: string): Promise<any[]> => {
           { $match: { $expr: { $and: [
             { $eq: ['$agentId', '$$agentId'] },
             { $eq: ['$organizationId', '$$tenantId'] },
-            { $eq: ['$status', 'Available'] },
+            { $in: ['$status', [...PUBLIC_PROPERTY_STATUSES]] },
           ] } } },
           { $count: 'count' },
         ],
@@ -272,9 +274,10 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
           { $match: { $expr: { $and: [
             { $eq: ['$agentId', '$$agentId'] },
             { $eq: ['$organizationId', '$$tenantId'] },
-            { $eq: ['$status', 'Available'] },
+            { $in: ['$status', [...PUBLIC_PROPERTY_STATUSES]] },
+            { $ne: ['$quotaLocked', true] },
           ] } } },
-          { $project: { title: 1, price: 1, images: 1, city: 1, propertyType: 1, bedrooms: 1, bathrooms: 1, area: 1, areaUnit: 1, listingType: 1 } },
+          { $project: { title: 1, slug: 1, organizationId: 1, status: 1, price: 1, isDiscount: 1, discountedPrice: 1, currency: 1, images: 1, mediaLinks: 1, city: 1, state: 1, country: 1, address: 1, bangladeshAddress: 1, propertyType: 1, bedrooms: 1, bathrooms: 1, area: 1, areaUnit: 1, listingType: 1, hiddenPublicFields: 1, updatedAt: 1 } },
           { $sort: { updatedAt: -1, _id: -1 } },
         ],
         as: 'activeProperties',
@@ -283,7 +286,7 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
     { $limit: 1 },
   ])
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
-  return { agent: toPublicAgentDto(row), activeProperties: row.activeProperties || [] }
+  return { agent: toPublicAgentDto(row), activeProperties: toPublicProperties(row.activeProperties || []) }
 }
 
 const updatePublicBrokerProfile = async (

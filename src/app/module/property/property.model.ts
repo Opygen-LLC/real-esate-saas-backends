@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS } from './property.constants'
 
 const propertyMediaLinkSchema = new Schema(
   {
@@ -203,6 +203,11 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
     features: {
       type: [String],
+      default: [],
+    },
+    hiddenPublicFields: {
+      type: [String],
+      enum: PUBLIC_PROPERTY_FIELDS,
       default: [],
     },
     agentId: {
