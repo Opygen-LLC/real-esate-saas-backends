@@ -57,8 +57,10 @@ Some production features require real business/provider values and must not be b
 
 - In Super Admin → Platform Settings, publish a legally reviewed privacy-policy URL/version and mark the legal review approved. Until then public enquiries and public viewing requests intentionally return 503 instead of collecting consent against an unapproved policy.
 - Keep legacy gateway integrations disabled. Subscription changes use the manual payment ledger and super-admin confirmation workflow.
-- Set `DOMAIN_A_TARGET` and `DOMAIN_CNAME_TARGET` to the values shown for the actual Vercel project/domain configuration. Production intentionally has no DNS-target fallback.
-- Set `DOMAIN_PROVIDER=vercel`, `VERCEL_PROJECT_ID_OR_NAME`, `VERCEL_API_TOKEN`, and `VERCEL_TEAM_ID` when applicable. Vercel project-domain registration and certificate verification are handled directly through the Vercel API; `DOMAIN_TLS_PROVIDER_URL` is retired.
+- Set `DOMAIN_PROVIDER=vercel`, `PUBLIC_SITE_ORIGIN`, `VERCEL_PROJECT_ID_OR_NAME`, and a real `VERCEL_API_TOKEN`. Set `VERCEL_TEAM_ID` and `VERCEL_REQUIRE_TEAM_ID=true` when the project/token is team-scoped. Startup fails closed in production when these required values are missing or the token is an obvious placeholder.
+- Keep `WORKER_ENABLED=true` in production. Domain DNS/TLS retries, candidate promotion, and retired-domain cleanup depend on the durable operations worker. The production config refuses to boot with the worker disabled.
+- Do not publish generic `76.76.21.21` / `cname.vercel-dns.com` values as the tenant instructions. The Vercel provider calls `GET /v6/domains/{domain}/config?projectIdOrName=...&strict=true` for the apex and `www` host, persists the rank-1 recommended A/CNAME records, and displays those exact values in the dashboard. `DOMAIN_A_TARGET` / `DOMAIN_CNAME_TARGET` are development/emergency hints only.
+- `DOMAIN_REPLACEMENT_GRACE_HOURS` defaults to 168 hours. A live domain stays canonical while a replacement candidate verifies; after promotion the previous host remains registered as a permanent `308` redirect until the grace window expires, then the worker removes it from Vercel.
 - Set the object-storage endpoint/credentials/public origin and ClamAV host before enabling those customer-facing workflows.
 
 ## Diagnosing 502/503
@@ -74,7 +76,9 @@ docker compose -f docker-compose.production.yml logs --tail=300 api
 
 Common startup log messages now identify the failed dependency directly:
 
-- `Missing or insecure production configuration: DOMAIN_A_TARGET` / `DOMAIN_CNAME_TARGET` / `VERCEL_*` → custom-domain control plane is not configured for the actual Vercel project.
+- `Missing or insecure production configuration: DOMAIN_PROVIDER` / `PUBLIC_SITE_ORIGIN` / `VERCEL_*` → custom-domain control plane is not configured for the actual Vercel project.
+- `WORKER_ENABLED must be true in production...` → lifecycle retries/cutover cleanup would be disabled; enable the operations worker before booting the API.
+- `VERCEL_API_TOKEN must be a real production access token...` → replace the placeholder with a scoped Vercel token that can read the project and manage its domains.
 - `Production requires a MongoDB replica set or mongos...` → wrong Mongo topology/URL.
 - `Redis is enabled but unavailable during startup` → host/password/network mismatch.
 - `SMTP verification failed during startup...` → SMTP host, port, TLS mode, credentials, sender, firewall, or provider policy is wrong.
@@ -84,7 +88,7 @@ A registration response with code `EMAIL_DELIVERY_UNAVAILABLE` specifically mean
 ## Release procedure
 
 1. Build immutable backend/frontend images from committed lockfiles.
-2. Run the latest required migration once before routing production traffic to the new release.
+2. Run the latest required migration once before routing production traffic to the new release. For this phase run `pnpm migrate:domain-cutover --apply --confirm=PHASE3-DOMAIN-CUTOVER` after taking the normal database backup.
 3. Verify `/health`, `/ready`, and authenticated `/metrics` on every API replica.
 4. Warm plan/public-site caches and verify Redis hit counters.
 5. Exercise signup + OTP, login, dashboard, property publishing, public lead capture, manual subscription payment confirmation, enabled SMS, Meta CAPI, object upload/scan, and domain verification.

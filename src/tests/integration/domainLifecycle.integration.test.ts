@@ -2,10 +2,11 @@ import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const providerState = vi.hoisted(() => ({ providerVerified: false, tlsActive: false, publicActive: false }))
+const dnsState = vi.hoisted(() => ({ values: ['realestate-saas=phase9-domain-token'] }))
 
 vi.mock('dns/promises', () => ({
   default: {
-    resolveTxt: vi.fn(async () => [['realestate-saas=phase9-domain-token']]),
+    resolveTxt: vi.fn(async () => [dnsState.values]),
   },
 }))
 
@@ -75,6 +76,7 @@ suite('Phase 9 custom-domain lifecycle integration', () => {
   const otherOrganizationId = 'org_phase9_other'
   const domain = 'phase9-domain.example'
   const otherDomain = 'other-phase9-domain.example'
+  const replacementDomain = 'replacement-phase9-domain.example'
   let auth: Record<string, string>
 
   beforeAll(async () => {
@@ -215,6 +217,68 @@ suite('Phase 9 custom-domain lifecycle integration', () => {
     expect(freeSubdomain.body?.data?.organizationId).toBe(organizationId)
   })
 
+  it('stages a replacement without downtime, promotes atomically, and keeps the retired host as a 308 target during grace', async () => {
+    const staged = await request('/api/v1/domain/add', auth, { method: 'POST', body: JSON.stringify({ domain: replacementDomain }) })
+    expect(staged.response.status).toBe(200)
+    expect(staged.body?.data?.domain).toBe(domain)
+    expect(staged.body?.data?.candidate?.domain).toBe(replacementDomain)
+    expect(staged.body?.data?.replacementInProgress).toBe(true)
+    expect(staged.body?.data?.candidate).not.toHaveProperty('ownershipToken')
+
+    const candidateRecord = await DomainRecord.findOne({ organizationId }).lean()
+    const candidateToken = candidateRecord?.candidate?.ownershipToken
+    expect(candidateToken).toBeTruthy()
+
+    // Candidate ownership is not configured yet. The currently ACTIVE host must stay online.
+    dnsState.values = ['realestate-saas=phase9-domain-token']
+    const pending = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
+    expect(pending.body?.data?.domain).toBe(domain)
+    expect(pending.body?.data?.candidate?.lifecycleStatus).toBe('PENDING_DNS')
+    const stillLive = await request(`/api/v1/domain/resolve/${domain}`)
+    expect(stillLive.body?.data?.organizationId).toBe(organizationId)
+    expect(stillLive.body?.data?.redirectTo).toBeNull()
+
+    // Once the candidate passes ownership, routing, TLS and public-runtime checks, it is promoted.
+    dnsState.values = [`realestate-saas=${candidateToken}`]
+    const promoted = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
+    expect(promoted.body?.data?.domain).toBe(replacementDomain)
+    expect(promoted.body?.data?.candidate).toBeNull()
+    expect(promoted.body?.data?.lifecycleStatus).toBe('ACTIVE')
+    expect(promoted.body?.data?.retiredDomains).toEqual(expect.arrayContaining([expect.objectContaining({ domain })]))
+
+    const canonical = await request(`/api/v1/domain/resolve/${replacementDomain}`)
+    expect(canonical.body?.data?.organizationId).toBe(organizationId)
+    expect(canonical.body?.data?.redirectTo).toBeNull()
+
+    const retiredApex = await request(`/api/v1/domain/resolve/${domain}`)
+    expect(retiredApex.body?.data?.organizationId).toBe(organizationId)
+    expect(retiredApex.body?.data?.redirectTo).toBe(`https://${replacementDomain}`)
+
+    const retiredWww = await request(`/api/v1/domain/resolve/www.${domain}`)
+    expect(retiredWww.body?.data?.redirectTo).toBe(`https://${replacementDomain}`)
+
+    const org = await Organization.findOne({ organizationId }).lean()
+    expect(org?.domain).toBe(replacementDomain)
+    expect(org?.domain_Verify).toBe(true)
+  })
+
+  it('keeps subdomain aliases routable and removes expired retired-domain redirects on the lifecycle worker path', async () => {
+    const { SubdomainAlias } = await import('../../app/module/domain/subdomainAlias.model')
+    await SubdomainAlias.create({ alias: 'phase9-legacy', organizationId, canonicalSubdomain: 'phase9-domain' })
+    const alias = await request('/api/v1/domain/resolve-subdomain/phase9-legacy')
+    expect(alias.body?.data?.organizationId).toBe(organizationId)
+    expect(alias.body?.data?.isAlias).toBe(true)
+
+    await DomainRecord.updateOne(
+      { organizationId, 'retiredDomains.domain': domain },
+      { $set: { 'retiredDomains.$.retireAfter': new Date(Date.now() - 1000), nextCheckAt: new Date() } },
+    )
+    const cleanup = await request('/api/v1/domain/verify', auth, { method: 'POST', body: '{}' })
+    expect(cleanup.response.status).toBe(200)
+    const oldHost = await request(`/api/v1/domain/resolve/${domain}`)
+    expect(oldHost.body?.data).toBeNull()
+  })
+
   it('keeps custom hosts tenant-exact and exposes worker/provider queue health', async () => {
     const other = await request(`/api/v1/domain/resolve/${otherDomain}`)
     expect(other.body?.data?.organizationId).toBe(otherOrganizationId)
@@ -227,12 +291,19 @@ suite('Phase 9 custom-domain lifecycle integration', () => {
     expect(health.body?.data?.queue).toEqual(expect.objectContaining({ pending: expect.any(Number), processing: expect.any(Number), failed: expect.any(Number) }))
   })
 
-  it('fails closed for an old/wrong custom domain and reports suspension without cross-tenant routing', async () => {
+  it('fails closed for unknown hosts, preserves entitlement downgrade/reactivation, and reports tenant suspension', async () => {
     const wrong = await request('/api/v1/domain/resolve/old-phase9-domain.example')
     expect(wrong.body?.data).toBeNull()
 
+    await DomainRecord.updateOne({ organizationId }, { $set: { entitlementStatus: 'suspended' } })
+    const planSuspended = await request(`/api/v1/domain/resolve/${replacementDomain}`)
+    expect(planSuspended.body?.data).toBeNull()
+    await DomainRecord.updateOne({ organizationId }, { $set: { entitlementStatus: 'active' } })
+    const reactivated = await request(`/api/v1/domain/resolve/${replacementDomain}`)
+    expect(reactivated.body?.data?.organizationId).toBe(organizationId)
+
     await Organization.updateOne({ organizationId }, { $set: { isBlocked: true } })
-    const suspended = await request(`/api/v1/domain/resolve/${domain}`)
+    const suspended = await request(`/api/v1/domain/resolve/${replacementDomain}`)
     expect(suspended.body?.data?.organizationId).toBe(organizationId)
     expect(suspended.body?.data?.websiteStatus).toBe('suspended')
   })

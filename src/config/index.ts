@@ -147,12 +147,17 @@ process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'vercel')
-const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || '76.76.21.21'
-const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || 'cname.vercel-dns.com').replace(/\.$/, '')
-const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || 'realestate-saas'
-const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || 'realestate_saas_vercel_api_token_default_20bytes'
+// Static DNS targets are development/emergency hints only. Production uses the
+// ranked records returned by Vercel's domain configuration API per hostname.
+const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || (isProduction ? '' : '76.76.21.21')
+const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || (isProduction ? '' : 'cname.vercel-dns.com')).replace(/\.$/, '')
+const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || (isProduction ? '' : 'realestate-saas')
+const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || ''
 const vercelTeamId = process.env.VERCEL_TEAM_ID?.trim() || ''
+const vercelRequireTeamId = envBoolean('VERCEL_REQUIRE_TEAM_ID', false)
 const vercelApiBase = (process.env.VERCEL_API_BASE?.trim() || 'https://api.vercel.com').replace(/\/$/, '')
+const domainReplacementGraceHours = Math.max(1, Math.min(24 * 30, Number(process.env.DOMAIN_REPLACEMENT_GRACE_HOURS || 168)))
+const workerEnabled = envBoolean('WORKER_ENABLED', true)
 
 
 const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduction?: boolean; allowPrivateHttp?: boolean; allowPath?: boolean } = {}): string => {
@@ -185,11 +190,6 @@ const objectStorageAccessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim(
 const objectStorageSecretAccessKey = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || ''
 const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: true, allowPath: false })
 
-process.env.DOMAIN_A_TARGET = domainATarget
-process.env.DOMAIN_CNAME_TARGET = domainCnameTarget
-process.env.VERCEL_PROJECT_ID_OR_NAME = vercelProject
-process.env.VERCEL_API_TOKEN = vercelApiToken
-
 if (!['vercel'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must currently be vercel')
 if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
 if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget.includes('/'))) throw new Error('DOMAIN_CNAME_TARGET must be a hostname only')
@@ -204,6 +204,13 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
   requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+  requiredInProduction('PUBLIC_SITE_ORIGIN')
+  requiredInProduction('DOMAIN_PROVIDER')
+  requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
+  requiredInProduction('VERCEL_API_TOKEN', 20)
+  if (vercelRequireTeamId) requiredInProduction('VERCEL_TEAM_ID')
+  if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
+  if (/placeholder|change[-_ ]?me|default_20bytes/i.test(vercelApiToken)) throw new Error('VERCEL_API_TOKEN must be a real production access token, not a placeholder')
   requiredInProduction('OBJECT_STORAGE_ENDPOINT')
   requiredInProduction('OBJECT_STORAGE_BUCKET')
   requiredInProduction('OBJECT_STORAGE_REGION')
@@ -342,7 +349,9 @@ export default {
     vercel_project: vercelProject,
     vercel_api_token: vercelApiToken,
     vercel_team_id: vercelTeamId,
+    vercel_require_team_id: vercelRequireTeamId,
     vercel_api_base: vercelApiBase,
+    replacement_grace_ms: domainReplacementGraceHours * 60 * 60_000,
   },
   realtime: {
     enabled: realtimeEnabled,
@@ -399,7 +408,7 @@ export default {
     timeout_ms: Math.max(1000, Number(process.env.CALENDAR_SYNC_TIMEOUT_MS || 10000)),
   },
   runtime: {
-    worker_enabled: envBoolean('WORKER_ENABLED', true),
+    worker_enabled: workerEnabled,
     worker_poll_ms: Math.max(1000, Number(process.env.WORKER_POLL_MS || 5000)),
     worker_batch_size: Math.max(1, Math.min(200, Number(process.env.WORKER_BATCH_SIZE || 50))),
     shutdown_timeout_ms: Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS || 15000)),

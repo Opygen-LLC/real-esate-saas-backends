@@ -5,10 +5,10 @@ import { WebsiteCache } from '../websiteBuilder/websiteCache'
 
 type CacheEvent = { organizationId: string; aggregateType: string; eventType: string; payload?: Record<string, unknown> }
 
-const invalidateTenant = async (organizationId: string) => {
+const invalidateTenant = async (organizationId: string, extraIdentifiers: string[] = []) => {
   if (!organizationId || organizationId === '__platform__') return
   const org: any = await Organization.findOne({ organizationId }).select('organizationId sub_domain domain customDomain').lean()
-  const identifiers = [organizationId, org?.organizationId, org?.sub_domain, org?.domain, org?.customDomain].filter(Boolean).map(String)
+  const identifiers = Array.from(new Set([organizationId, org?.organizationId, org?.sub_domain, org?.domain, org?.customDomain, ...extraIdentifiers].filter(Boolean).map(String)))
   const pages = await WebsitePage.find({ organizationId }).select('_id slug').lean()
   await Promise.all([
     Cache.tenantPublic.del(...identifiers),

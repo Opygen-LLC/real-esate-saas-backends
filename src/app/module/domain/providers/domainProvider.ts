@@ -17,6 +17,8 @@ export type RequiredDnsRecord = {
   host: string
   value: string
   purpose: 'ownership' | 'routing' | 'provider_verification'
+  source?: 'opygen_ownership' | 'vercel_recommended' | 'vercel_project_verification' | 'development_fallback'
+  rank?: number
 }
 
 export type DomainProviderInput = {

@@ -18,6 +18,13 @@ const CHECK_PATH = '/.well-known/opygen-domain-check'
 const CHECK_HEADER = 'x-opygen-domain-check'
 const CHECK_VALUE = 'real-estate-saas'
 
+type VercelDomainConfig = {
+  configuredBy?: string | null
+  misconfigured?: boolean
+  recommendedIPv4?: Array<{ rank?: number; value?: string[] }>
+  recommendedCNAME?: Array<{ rank?: number; value?: string }>
+}
+
 const diagnostic = (
   check: DomainDiagnostic['check'],
   label: string,
@@ -47,6 +54,14 @@ const domainsApiUrl = (version: string, path: string) => {
   return url.toString()
 }
 
+const domainConfigUrl = (domain: string) => {
+  const url = new URL(`${config.domains.vercel_api_base.replace(/\/$/, '')}/v6/domains/${encodeURIComponent(domain)}/config`)
+  url.searchParams.set('projectIdOrName', config.domains.vercel_project)
+  url.searchParams.set('strict', 'true')
+  if (config.domains.vercel_team_id) url.searchParams.set('teamId', config.domains.vercel_team_id)
+  return url.toString()
+}
+
 const providerHeaders = () => ({
   authorization: `Bearer ${config.domains.vercel_api_token}`,
   'content-type': 'application/json',
@@ -56,16 +71,11 @@ const providerConfigured = () => Boolean(
   config.domains.provider === 'vercel'
   && config.domains.vercel_project
   && config.domains.vercel_api_token
-  && config.domains.a_target
-  && config.domains.cname_target,
+  && (!config.domains.vercel_require_team_id || config.domains.vercel_team_id),
 )
 
 const requireConfigured = () => {
   if (!providerConfigured()) throw new ApiError(503, 'Custom-domain provider is not fully configured')
-}
-
-const requireRoutingTargets = () => {
-  if (!config.domains.a_target || !config.domains.cname_target) throw new ApiError(503, 'Custom-domain DNS targets are not configured')
 }
 
 const providerFetch = async (service: string, url: string, init: RequestInit = {}, expectedStatuses?: number[]) => {
@@ -95,6 +105,65 @@ const getProjectDomain = async (domain: string) => {
   return response.json().catch(() => ({})) as Promise<Record<string, unknown>>
 }
 
+const getDomainConfig = async (domain: string): Promise<VercelDomainConfig> => {
+  const response = await providerFetch(
+    'vercel-domain-config',
+    domainConfigUrl(domain),
+    { method: 'GET' },
+    [200, 400, 404],
+  )
+  if (!response.ok) throw new ApiError(502, `Vercel domain configuration lookup failed for ${domain} (${response.status})`)
+  return response.json().catch(() => ({})) as Promise<VercelDomainConfig>
+}
+
+const selectRecommendedIPv4 = (payload: VercelDomainConfig): string[] => {
+  const rows = Array.isArray(payload.recommendedIPv4) ? payload.recommendedIPv4 : []
+  const sorted = [...rows].sort((a, b) => Number(a.rank ?? 999) - Number(b.rank ?? 999))
+  const bestRank = sorted.length ? Number(sorted[0]?.rank ?? 999) : null
+  if (bestRank === null) return []
+  return sorted
+    .filter((row) => Number(row.rank ?? 999) === bestRank)
+    .flatMap((row) => Array.isArray(row.value) ? row.value : [])
+    .map((value) => String(value || '').trim())
+    .filter((value) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value))
+}
+
+const selectRecommendedCname = (payload: VercelDomainConfig): string => {
+  const rows = Array.isArray(payload.recommendedCNAME) ? payload.recommendedCNAME : []
+  const sorted = [...rows].sort((a, b) => Number(a.rank ?? 999) - Number(b.rank ?? 999))
+  return normalizeTarget(String(sorted[0]?.value || ''))
+}
+
+const recommendedRouting = async (input: DomainProviderInput) => {
+  if (!providerConfigured() && !config.isProduction) {
+    if (!config.domains.a_target || !config.domains.cname_target) throw new ApiError(503, 'Development DNS routing targets are not configured')
+    return {
+      apexCandidates: [config.domains.a_target],
+      apexPreferred: config.domains.a_target,
+      cnamePreferred: normalizeTarget(config.domains.cname_target),
+      apexConfig: { misconfigured: false, configuredBy: 'development' } as VercelDomainConfig,
+      wwwConfig: { misconfigured: false, configuredBy: 'development' } as VercelDomainConfig,
+    }
+  }
+
+  const [apexConfig, wwwConfig] = await Promise.all([
+    getDomainConfig(input.domain),
+    getDomainConfig(`www.${input.domain}`),
+  ])
+  const apexCandidates = selectRecommendedIPv4(apexConfig)
+  const cnamePreferred = selectRecommendedCname(wwwConfig)
+  if (!apexCandidates.length || !cnamePreferred) {
+    throw new ApiError(502, 'Vercel did not return recommended DNS routing records for this project/domain')
+  }
+  return {
+    apexCandidates,
+    apexPreferred: apexCandidates[0],
+    cnamePreferred,
+    apexConfig,
+    wwwConfig,
+  }
+}
+
 const providerVerificationRecords = (input: DomainProviderInput, domains: Array<Record<string, unknown> | null>): RequiredDnsRecord[] => {
   const records: RequiredDnsRecord[] = []
   for (const projectDomain of domains) {
@@ -112,6 +181,7 @@ const providerVerificationRecords = (input: DomainProviderInput, domains: Array<
         host,
         value,
         purpose: 'provider_verification',
+        source: 'vercel_project_verification',
       })
     }
   }
@@ -133,8 +203,6 @@ const registerOne = async (domain: string) => {
   )
   if (response.ok) return response.json().catch(() => ({})) as Promise<Record<string, unknown>>
 
-  // Vercel may return a conflict for an idempotent re-add. Only accept that
-  // case when the domain is actually attached to this configured project.
   const existing = await getProjectDomain(domain)
   if (existing) return existing
   const payload = await response.json().catch(() => ({})) as any
@@ -219,21 +287,34 @@ export const VercelDomainProvider: DomainProvider = {
   name: 'vercel',
 
   async getRequiredDns(input): Promise<RequiredDnsRecord[]> {
-    requireRoutingTargets()
-    const baseRecords: RequiredDnsRecord[] = [
-      {
-        type: 'TXT',
-        name: `${config.domains.ownership_prefix}.${input.domain}`,
-        host: config.domains.ownership_prefix,
-        value: `realestate-saas=${input.ownershipToken}`,
-        purpose: 'ownership',
-      },
-      { type: 'A', name: input.domain, host: '@', value: config.domains.a_target, purpose: 'routing' },
-      { type: 'CNAME', name: `www.${input.domain}`, host: 'www', value: config.domains.cname_target, purpose: 'routing' },
+    const baseRecords: RequiredDnsRecord[] = [{
+      type: 'TXT',
+      name: `${config.domains.ownership_prefix}.${input.domain}`,
+      host: config.domains.ownership_prefix,
+      value: `realestate-saas=${input.ownershipToken}`,
+      purpose: 'ownership',
+      source: 'opygen_ownership',
+    }]
+
+    if (!providerConfigured() && !config.isProduction) {
+      const routing = await recommendedRouting(input)
+      return [
+        ...baseRecords,
+        { type: 'A', name: input.domain, host: '@', value: routing.apexPreferred, purpose: 'routing', source: 'development_fallback', rank: 1 },
+        { type: 'CNAME', name: `www.${input.domain}`, host: 'www', value: routing.cnamePreferred, purpose: 'routing', source: 'development_fallback', rank: 1 },
+      ]
+    }
+
+    const [routing, projectDomains] = await Promise.all([
+      recommendedRouting(input),
+      Promise.all([getProjectDomain(input.domain), getProjectDomain(`www.${input.domain}`)]),
+    ])
+    return [
+      ...baseRecords,
+      { type: 'A', name: input.domain, host: '@', value: routing.apexPreferred, purpose: 'routing', source: 'vercel_recommended', rank: 1 },
+      { type: 'CNAME', name: `www.${input.domain}`, host: 'www', value: routing.cnamePreferred, purpose: 'routing', source: 'vercel_recommended', rank: 1 },
+      ...providerVerificationRecords(input, projectDomains),
     ]
-    if (!providerConfigured() && !config.isProduction) return baseRecords
-    const projectDomains = await Promise.all([getProjectDomain(input.domain), getProjectDomain(`www.${input.domain}`)])
-    return [...baseRecords, ...providerVerificationRecords(input, projectDomains)]
   },
 
   async registerDomain(input) {
@@ -244,7 +325,7 @@ export const VercelDomainProvider: DomainProvider = {
   },
 
   async verifyRouting(input): Promise<DomainRoutingResult> {
-    requireRoutingTargets()
+    const routing = await recommendedRouting(input)
     const [addresses, cnames] = await Promise.all([
       resolveA(input.domain),
       resolveCname(`www.${input.domain}`),
@@ -253,8 +334,8 @@ export const VercelDomainProvider: DomainProvider = {
     const [apexProjectDomain, wwwProjectDomain] = manualDevelopment
       ? [{ verified: true, development: true }, { verified: true, development: true }]
       : await Promise.all([getProjectDomain(input.domain), getProjectDomain(`www.${input.domain}`)])
-    const apexOk = addresses.includes(config.domains.a_target)
-    const wwwOk = cnames.includes(normalizeTarget(config.domains.cname_target))
+    const apexOk = addresses.some((address) => routing.apexCandidates.includes(address))
+    const wwwOk = cnames.includes(routing.cnamePreferred)
     const registered = Boolean(apexProjectDomain && wwwProjectDomain)
     const providerVerified = Boolean((apexProjectDomain as any)?.verified && (wwwProjectDomain as any)?.verified)
     return {
@@ -263,8 +344,14 @@ export const VercelDomainProvider: DomainProvider = {
       registered,
       providerVerified,
       diagnostics: [
-        diagnostic('apex_a', 'A / apex routing', apexOk, { expected: config.domains.a_target, observed: addresses }),
-        diagnostic('www_cname', 'www routing', wwwOk, { expected: config.domains.cname_target, observed: cnames }),
+        diagnostic('apex_a', 'A / apex routing', apexOk, {
+          expected: { recommended: routing.apexCandidates, source: 'Vercel domain configuration API' },
+          observed: { addresses, configuredBy: routing.apexConfig.configuredBy ?? null, misconfigured: routing.apexConfig.misconfigured ?? null },
+        }),
+        diagnostic('www_cname', 'www routing', wwwOk, {
+          expected: { recommended: routing.cnamePreferred, source: 'Vercel domain configuration API' },
+          observed: { cnames, configuredBy: routing.wwwConfig.configuredBy ?? null, misconfigured: routing.wwwConfig.misconfigured ?? null },
+        }),
         diagnostic('hosting_registration', 'Hosting registration', registered && providerVerified, {
           expected: `Registered and verified on Vercel project ${config.domains.vercel_project}`,
           observed: {
@@ -286,9 +373,6 @@ export const VercelDomainProvider: DomainProvider = {
     if (!providerConfigured() && !config.isProduction) {
       return { status: 'provisioning', diagnostics: [diagnostic('tls_certificate', 'TLS certificate', false, { expected: 'Vercel-managed TLS', observed: 'development provider credentials not configured' })] }
     }
-    // Vercel provisions certificates automatically for project domains. Calling
-    // the verification endpoints is idempotent and advances any ownership
-    // challenge that has already been satisfied.
     const verifyOne = async (domain: string) => {
       const response = await providerFetch(
         'vercel-domain-verify',
@@ -328,7 +412,9 @@ export const VercelDomainProvider: DomainProvider = {
 
   async removeDomain(domain: string) {
     if (!providerConfigured()) return
-    await Promise.allSettled([removeOne(domain), removeOne(`www.${domain}`)])
+    const results = await Promise.allSettled([removeOne(domain), removeOne(`www.${domain}`)])
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (rejected) throw rejected.reason
   },
 
   async health(force = false): Promise<DomainProviderHealth> {

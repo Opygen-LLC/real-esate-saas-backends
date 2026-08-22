@@ -124,7 +124,7 @@ const resolveTxt = async (name: string) => {
   try { return (await dns.resolveTxt(name)).flat() } catch { return [] }
 }
 
-const ownershipDiagnostic = async (record: any): Promise<DomainDiagnostic> => {
+const ownershipDiagnostic = async (record: { domain: string; ownershipToken: string }): Promise<DomainDiagnostic> => {
   const txtName = `${config.domains.ownership_prefix}.${record.domain}`
   const observed = await resolveTxt(txtName)
   const expected = `realestate-saas=${record.ownershipToken}`
@@ -140,94 +140,83 @@ const ownershipDiagnostic = async (record: any): Promise<DomainDiagnostic> => {
   }
 }
 
+const publicLifecycleSlot = (source: any) => {
+  if (!source) return null
+  const raw = typeof source.toObject === 'function' ? source.toObject() : source
+  const { ownershipToken: _ownershipToken, ...safe } = raw
+  return { ...safe, lifecycleStatus: deriveLifecycle(raw) }
+}
+
 const publicDomainStatus = (record: any) => {
   if (!record) return null
   const source = typeof record.toObject === 'function' ? record.toObject() : record
+  const { ownershipToken: _ownershipToken, candidate: rawCandidate, ...safe } = source
+  const candidate = publicLifecycleSlot(rawCandidate)
   const lifecycleStatus = deriveLifecycle(source)
   return {
-    ...source,
+    ...safe,
     lifecycleStatus,
     canonicalHost: source.domain,
+    activeDomain: lifecycleStatus === 'ACTIVE' && source.tlsStatus === 'active' && source.publicRoutingStatus === 'active' ? source.domain : null,
+    candidate,
+    replacementInProgress: Boolean(candidate?.domain),
+    replacementGraceHours: Math.round(config.domains.replacement_grace_ms / 3_600_000),
     provider: source.provider || config.domains.provider,
     failureReason: source.failureReason || '',
   }
 }
 
-const add = async (organizationId: string, input: string) => {
-  await EntitlementService.assertFeature(organizationId, 'customDomain')
-  const domain = normalizeDomain(input)
-  const conflicting = await DomainRecord.findOne({ domain })
-  if (conflicting && conflicting.organizationId !== organizationId) throw new ApiError(409, 'This domain is already attached to another agency')
+const newLifecycleState = (input: {
+  domain: string
+  ownershipToken: string
+  provider: string
+  providerRequestId?: string
+  registered: boolean
+  requiredDns: unknown[]
+}) => ({
+  domain: input.domain,
+  ownershipToken: input.ownershipToken,
+  provider: input.provider,
+  lifecycleStatus: 'PENDING_DNS' as DomainLifecycleStatus,
+  providerRegistrationStatus: input.registered ? 'registered' : 'pending',
+  providerRegisteredAt: input.registered ? new Date() : null,
+  publicRoutingStatus: 'pending' as const,
+  status: 'pending' as const,
+  tlsStatus: 'not_started' as const,
+  providerRequestId: input.providerRequestId || '',
+  requiredDns: input.requiredDns,
+  diagnostics: [],
+  failureReason: '',
+  failureCount: 0,
+  lastCheckedAt: null,
+  nextCheckAt: new Date(),
+  ownershipVerifiedAt: null,
+  routingVerifiedAt: null,
+  tlsActiveAt: null,
+  activeAt: null,
+  verifiedAt: null,
+})
 
-  const current: any = await DomainRecord.findOne({ organizationId })
-  if (current?.domain === domain) return publicDomainStatus(current)
-
-  const ownershipToken = current?.ownershipToken || randomBytes(24).toString('base64url')
-  const provider = DomainProviderService.current()
-  const providerRegistration = await provider.registerDomain({ domain, organizationId, ownershipToken })
-  const dnsRecords = await provider.getRequiredDns({ domain, organizationId, ownershipToken })
-
-  let record: any
-  try {
-    record = await DomainRecord.findOneAndUpdate(
-      { organizationId },
-      {
-        $set: {
-          domain,
-          ownershipToken,
-          entitlementStatus: 'active',
-          entitlementSuspendedAt: null,
-          entitlementSuspendedReason: '',
-          provider: provider.name,
-          lifecycleStatus: 'PENDING_DNS',
-          providerRegistrationStatus: providerRegistration.registered ? 'registered' : 'pending',
-          providerRegisteredAt: providerRegistration.registered ? new Date() : null,
-          publicRoutingStatus: 'pending',
-          status: 'pending',
-          tlsStatus: 'not_started',
-          providerRequestId: providerRegistration.providerRequestId || '',
-          requiredDns: dnsRecords,
-          diagnostics: [],
-          failureReason: '',
-          failureCount: 0,
-          lastCheckedAt: null,
-          nextCheckAt: new Date(),
-          ownershipVerifiedAt: null,
-          routingVerifiedAt: null,
-          tlsActiveAt: null,
-          activeAt: null,
-          verifiedAt: null,
-        },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
-    )
-  } catch (error: any) {
-    if (error?.code === 11000) throw new ApiError(409, 'This domain is already attached to another agency')
-    throw error
-  }
-  if (!record) throw new ApiError(500, 'Failed to persist custom domain configuration')
-
-  await Organization.updateOne({ organizationId }, { $set: { domain, domain_Verify: false, domain_dns: dnsRecords } })
-  await CacheInvalidationService.invalidateTenant(organizationId)
-
-  if (current?.domain && current.domain !== domain) {
-    // The new domain is already registered before the old one is removed, so a
-    // provider outage cannot destroy the currently configured hostname first.
-    await provider.removeDomain(current.domain).catch(() => undefined)
-  }
-  return publicDomainStatus(record)
+const applyLifecycleResult = (target: any, result: any) => {
+  const fields = [
+    'requiredDns', 'lifecycleStatus', 'provider', 'providerRegistrationStatus', 'providerRegisteredAt',
+    'publicRoutingStatus', 'status', 'tlsStatus', 'diagnostics', 'failureReason', 'failureCount',
+    'lastCheckedAt', 'nextCheckAt', 'ownershipVerifiedAt', 'routingVerifiedAt', 'tlsActiveAt',
+    'activeAt', 'verifiedAt',
+  ]
+  for (const field of fields) target[field] = result[field]
 }
 
-const verifyRecord = async (record: any) => {
+const evaluateLifecycle = async (slot: any, organizationId: string) => {
   const provider = DomainProviderService.current()
   const now = new Date()
-  const input = { domain: record.domain, organizationId: record.organizationId, ownershipToken: record.ownershipToken }
-  const ownership = await ownershipDiagnostic(record)
+  const input = { domain: slot.domain, organizationId, ownershipToken: slot.ownershipToken }
+  const ownership = await ownershipDiagnostic(slot)
+  let requiredDns = Array.isArray(slot.requiredDns) ? slot.requiredDns : []
   try {
-    record.requiredDns = await provider.getRequiredDns(input)
+    requiredDns = await provider.getRequiredDns(input)
   } catch {
-    // Provider health/routing checks below will surface the outage. Retain the
-    // last-known DNS instructions so the dashboard remains useful meanwhile.
+    // Retain last-known provider recommendations during a transient provider outage.
   }
 
   let routing
@@ -252,19 +241,17 @@ const verifyRecord = async (record: any) => {
     }
   }
 
-  // Re-register idempotently if a provider-side domain was removed after the
-  // database record was created.
   if (ownership.ok && routing.apexOk && routing.wwwOk && !routing.registered) {
     try {
       const registration = await provider.registerDomain(input)
       if (registration.registered) {
-        record.providerRegistrationStatus = 'registered'
-        record.providerRegisteredAt = record.providerRegisteredAt || now
-        try { record.requiredDns = await provider.getRequiredDns(input) } catch { /* preserve last-known instructions */ }
+        slot.providerRegistrationStatus = 'registered'
+        slot.providerRegisteredAt = slot.providerRegisteredAt || now
+        try { requiredDns = await provider.getRequiredDns(input) } catch { /* retain last-known recommendations */ }
         routing = await provider.verifyRouting(input)
       }
     } catch (error) {
-      record.providerRegistrationStatus = 'failed'
+      slot.providerRegistrationStatus = 'failed'
       routing.diagnostics = [...routing.diagnostics, {
         check: 'hosting_registration',
         label: 'Hosting registration',
@@ -323,31 +310,201 @@ const verifyRecord = async (record: any) => {
   const failure = diagnostics.find((item) => item.state === 'failed')
   const active = lifecycleStatus === 'ACTIVE' && tlsStatus === 'active' && publicRoutingStatus === 'active'
   const failureReason = failure?.message || ''
-  const failureCount = active ? 0 : failure ? Number(record.failureCount || 0) + 1 : Number(record.failureCount || 0)
+  const failureCount = active ? 0 : failure ? Number(slot.failureCount || 0) + 1 : Number(slot.failureCount || 0)
   const retryMs = active ? ACTIVE_RECHECK_MS : lifecycleStatus === 'TLS_PROVISIONING' ? TLS_RECHECK_MS : DNS_RECHECK_MS
 
-  record.lifecycleStatus = lifecycleStatus
-  record.provider = provider.name
-  record.providerRegistrationStatus = routing.registered ? 'registered' : (record.providerRegistrationStatus === 'failed' ? 'failed' : 'pending')
-  record.providerRegisteredAt = routing.registered ? (record.providerRegisteredAt || now) : record.providerRegisteredAt
-  record.publicRoutingStatus = publicRoutingStatus
-  record.status = active ? 'verified' : 'pending'
-  record.tlsStatus = tlsStatus
-  record.diagnostics = diagnostics
-  record.failureReason = failureReason
-  record.failureCount = failureCount
-  record.lastCheckedAt = now
-  record.nextCheckAt = new Date(Date.now() + retryMs)
-  record.ownershipVerifiedAt = ownership.ok ? (record.ownershipVerifiedAt || now) : null
-  record.routingVerifiedAt = routingOk ? (record.routingVerifiedAt || now) : null
-  record.tlsActiveAt = tlsStatus === 'active' ? (record.tlsActiveAt || now) : null
-  record.activeAt = active ? (record.activeAt || now) : null
-  record.verifiedAt = active ? (record.verifiedAt || now) : null
+  return {
+    requiredDns,
+    lifecycleStatus,
+    provider: provider.name,
+    providerRegistrationStatus: routing.registered ? 'registered' : (slot.providerRegistrationStatus === 'failed' ? 'failed' : 'pending'),
+    providerRegisteredAt: routing.registered ? (slot.providerRegisteredAt || now) : slot.providerRegisteredAt,
+    publicRoutingStatus,
+    status: active ? 'verified' : 'pending',
+    tlsStatus,
+    diagnostics,
+    failureReason,
+    failureCount,
+    lastCheckedAt: now,
+    nextCheckAt: new Date(now.getTime() + retryMs),
+    ownershipVerifiedAt: ownership.ok ? (slot.ownershipVerifiedAt || now) : null,
+    routingVerifiedAt: routingOk ? (slot.routingVerifiedAt || now) : null,
+    tlsActiveAt: tlsStatus === 'active' ? (slot.tlsActiveAt || now) : null,
+    activeAt: active ? (slot.activeAt || now) : null,
+    verifiedAt: active ? (slot.verifiedAt || now) : null,
+    active,
+  }
+}
+
+const queueProviderCleanup = (record: any, domain: string, retireAfter: Date, redirectStartedAt = new Date()) => {
+  if (!domain || domain === record.domain) return
+  const existing = (Array.isArray(record.retiredDomains) ? record.retiredDomains : [])
+    .map((item: any) => typeof item.toObject === 'function' ? item.toObject() : item)
+    .filter((item: any) => item.domain !== domain)
+  record.retiredDomains = [
+    ...existing,
+    { domain, redirectStartedAt, retireAfter, providerRemovedAt: null, lastRemovalAttemptAt: null, removalError: '' },
+  ]
+  const currentNext = record.nextCheckAt ? new Date(record.nextCheckAt) : null
+  if (!currentNext || retireAfter.getTime() < currentNext.getTime()) record.nextCheckAt = retireAfter
+}
+
+const cleanupRetiredDomains = async (record: any) => {
+  const retired = Array.isArray(record.retiredDomains) ? record.retiredDomains : []
+  if (!retired.length) return
+  const provider = DomainProviderService.current()
+  const now = new Date()
+  const keep: any[] = []
+  for (const item of retired) {
+    const raw = typeof item.toObject === 'function' ? item.toObject() : item
+    const retireAfter = new Date(raw.retireAfter)
+    if (retireAfter.getTime() > now.getTime()) {
+      keep.push(raw)
+      continue
+    }
+    try {
+      await provider.removeDomain(raw.domain)
+    } catch (error) {
+      keep.push({
+        ...raw,
+        lastRemovalAttemptAt: now,
+        removalError: (error instanceof Error ? error.message : 'Provider removal failed').slice(0, 500),
+      })
+    }
+  }
+  record.retiredDomains = keep
+}
+
+const promoteCandidate = async (record: any, result: any) => {
+  const candidate = typeof record.candidate?.toObject === 'function' ? record.candidate.toObject() : record.candidate
+  if (!candidate?.domain || !result.active) return false
+  const now = new Date()
+  const previousDomain = record.domain
+  const retireAfter = new Date(now.getTime() + config.domains.replacement_grace_ms)
+  record.domain = candidate.domain
+  record.ownershipToken = candidate.ownershipToken
+  record.providerRequestId = candidate.providerRequestId || ''
+  applyLifecycleResult(record, result)
+  record.candidate = null
+  queueProviderCleanup(record, previousDomain, retireAfter, now)
   await record.save()
 
   await Organization.updateOne(
     { organizationId: record.organizationId },
-    { $set: { domain: record.domain, domain_Verify: active, domain_dns: record.requiredDns } },
+    { $set: { domain: record.domain, domain_Verify: true, domain_dns: record.requiredDns } },
+  )
+  await CacheInvalidationService.invalidateTenant(record.organizationId, [previousDomain, record.domain])
+  return true
+}
+
+const add = async (organizationId: string, input: string) => {
+  await EntitlementService.assertFeature(organizationId, 'customDomain')
+  const domain = normalizeDomain(input)
+  const conflicting: any = await DomainRecord.findOne({
+    $or: [{ domain }, { 'candidate.domain': domain }, { 'retiredDomains.domain': domain }],
+  })
+  if (conflicting && conflicting.organizationId !== organizationId) throw new ApiError(409, 'This domain is already attached to another agency')
+
+  const current: any = await DomainRecord.findOne({ organizationId })
+  if (current?.domain === domain || current?.candidate?.domain === domain) return publicDomainStatus(current)
+  if (conflicting?.organizationId === organizationId && (conflicting.retiredDomains || []).some((item: any) => item.domain === domain)) {
+    throw new ApiError(409, 'This hostname is still in its redirect grace period or awaiting provider cleanup and cannot be re-added yet')
+  }
+
+  const ownershipToken = randomBytes(24).toString('base64url')
+  const provider = DomainProviderService.current()
+  const providerRegistration = await provider.registerDomain({ domain, organizationId, ownershipToken })
+  const dnsRecords = await provider.getRequiredDns({ domain, organizationId, ownershipToken })
+  const state = newLifecycleState({
+    domain,
+    ownershipToken,
+    provider: provider.name,
+    providerRequestId: providerRegistration.providerRequestId,
+    registered: providerRegistration.registered,
+    requiredDns: dnsRecords,
+  })
+
+  const hasServingDomain = Boolean(
+    current
+    && deriveLifecycle(current) === 'ACTIVE'
+    && current.status === 'verified'
+    && current.tlsStatus === 'active'
+    && current.publicRoutingStatus === 'active',
+  )
+
+  if (current && hasServingDomain) {
+    const previousCandidate = current.candidate?.domain && current.candidate.domain !== domain ? current.candidate.domain : null
+    current.candidate = state
+    current.entitlementStatus = 'active'
+    current.entitlementSuspendedAt = null
+    current.entitlementSuspendedReason = ''
+    current.nextCheckAt = new Date()
+    if (previousCandidate) queueProviderCleanup(current, previousCandidate, new Date())
+    try {
+      await current.save()
+    } catch (error: any) {
+      if (error?.code === 11000) throw new ApiError(409, 'This domain is already attached to another agency')
+      throw error
+    }
+    await CacheInvalidationService.invalidateTenant(organizationId)
+    return publicDomainStatus(current)
+  }
+
+  const previousPendingDomain = current?.domain && current.domain !== domain ? current.domain : null
+  let record: any
+  try {
+    record = await DomainRecord.findOneAndUpdate(
+      { organizationId },
+      {
+        $set: {
+          ...state,
+          entitlementStatus: 'active',
+          entitlementSuspendedAt: null,
+          entitlementSuspendedReason: '',
+          candidate: null,
+        },
+        $setOnInsert: { retiredDomains: [] },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    )
+  } catch (error: any) {
+    if (error?.code === 11000) throw new ApiError(409, 'This domain is already attached to another agency')
+    throw error
+  }
+  if (!record) throw new ApiError(500, 'Failed to persist custom domain configuration')
+
+  if (previousPendingDomain) {
+    queueProviderCleanup(record, previousPendingDomain, new Date())
+    await record.save()
+  }
+  await Organization.updateOne({ organizationId }, { $set: { domain, domain_Verify: false, domain_dns: dnsRecords } })
+  await CacheInvalidationService.invalidateTenant(organizationId, previousPendingDomain ? [previousPendingDomain] : [])
+  return publicDomainStatus(record)
+}
+
+const verifyRecord = async (record: any) => {
+  await cleanupRetiredDomains(record)
+
+  if (record.candidate?.domain) {
+    const result = await evaluateLifecycle(record.candidate, record.organizationId)
+    applyLifecycleResult(record.candidate, result)
+    record.nextCheckAt = result.nextCheckAt
+    if (result.active) {
+      await promoteCandidate(record, result)
+      return publicDomainStatus(record)
+    }
+    await record.save()
+    await CacheInvalidationService.invalidateTenant(record.organizationId)
+    return publicDomainStatus(record)
+  }
+
+  const result = await evaluateLifecycle(record, record.organizationId)
+  applyLifecycleResult(record, result)
+  await record.save()
+
+  await Organization.updateOne(
+    { organizationId: record.organizationId },
+    { $set: { domain: record.domain, domain_Verify: result.active, domain_dns: record.requiredDns } },
   )
   await CacheInvalidationService.invalidateTenant(record.organizationId)
   return publicDomainStatus(record)
@@ -356,16 +513,17 @@ const verifyRecord = async (record: any) => {
 const markLifecycleFailure = async (record: any, error: unknown) => {
   const now = new Date()
   const message = error instanceof Error ? error.message : 'Unknown domain lifecycle failure'
-  const failureCount = Number(record.failureCount || 0) + 1
-  record.lifecycleStatus = deriveLifecycle(record)
-  if (record.lifecycleStatus === 'ACTIVE') record.lifecycleStatus = 'TLS_PROVISIONING'
-  record.status = 'pending'
-  if (record.tlsStatus === 'active') record.tlsStatus = 'provisioning'
-  record.publicRoutingStatus = 'pending'
-  record.failureCount = failureCount
-  record.failureReason = message.slice(0, 500)
-  record.lastCheckedAt = now
-  record.diagnostics = [...(record.diagnostics || []), {
+  const target = record.candidate?.domain ? record.candidate : record
+  const failureCount = Number(target.failureCount || 0) + 1
+  target.lifecycleStatus = deriveLifecycle(target)
+  if (target.lifecycleStatus === 'ACTIVE') target.lifecycleStatus = 'TLS_PROVISIONING'
+  target.status = 'pending'
+  if (target.tlsStatus === 'active') target.tlsStatus = 'provisioning'
+  target.publicRoutingStatus = 'pending'
+  target.failureCount = failureCount
+  target.failureReason = message.slice(0, 500)
+  target.lastCheckedAt = now
+  target.diagnostics = [...(target.diagnostics || []), {
     check: 'lifecycle',
     label: 'Lifecycle',
     state: 'failed',
@@ -374,9 +532,12 @@ const markLifecycleFailure = async (record: any, error: unknown) => {
     checkedAt: now,
   }].slice(-20)
   const retryMinutes = Math.min(360, Math.max(5, 2 ** Math.min(failureCount, 8)))
-  record.nextCheckAt = new Date(Date.now() + retryMinutes * 60_000)
+  target.nextCheckAt = new Date(Date.now() + retryMinutes * 60_000)
+  record.nextCheckAt = target.nextCheckAt
   await record.save()
-  await Organization.updateOne({ organizationId: record.organizationId }, { $set: { domain_Verify: false } })
+  if (!record.candidate?.domain) {
+    await Organization.updateOne({ organizationId: record.organizationId }, { $set: { domain_Verify: false } })
+  }
   await CacheInvalidationService.invalidateTenant(record.organizationId)
 }
 
@@ -427,15 +588,23 @@ const resolveVerifiedDomain = async (host: string): Promise<string | null> => {
 const resolveVerifiedHost = async (host: string) => {
   const rawHost = requestedHost(host)
   const domain = normalizeDomain(rawHost)
+  const now = new Date()
   const record: any = await DomainRecord.findOne({
-    domain,
     entitlementStatus: { $ne: 'suspended' },
     tlsStatus: 'active',
-    $or: [
-      { lifecycleStatus: 'ACTIVE', publicRoutingStatus: 'active' },
-      // Rolling-deploy compatibility for a Phase 8 record that was already
-      // verified before lifecycleStatus/publicRoutingStatus existed.
-      { lifecycleStatus: { $exists: false }, status: 'verified' },
+    $and: [
+      {
+        $or: [
+          { lifecycleStatus: 'ACTIVE', publicRoutingStatus: 'active' },
+          { lifecycleStatus: { $exists: false }, status: 'verified' },
+        ],
+      },
+      {
+        $or: [
+          { domain },
+          { retiredDomains: { $elemMatch: { domain, retireAfter: { $gt: now } } } },
+        ],
+      },
     ],
   }).lean()
   if (!record?.organizationId) return null
