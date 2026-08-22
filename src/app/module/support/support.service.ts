@@ -168,10 +168,11 @@ const createAttachmentUpload = async (id: string, input: { originalName: string;
   if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_ATTACHMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Attachment must be between 1 byte and 10 MB')
   const attachmentId = new mongoose.Types.ObjectId()
   const key = `support/${ticket.organizationId}/${ticket.ticketId}/${attachmentId.toString()}-${safeFilename(input.originalName)}`
-  const signed = ObjectStorageService.presignUpload(key)
+  const signedRef = ObjectStorageService.presignUpload(key)
+  const uploadUrl = await signedRef.getUploadUrl()
   ticket.attachments.push({ _id: attachmentId, key, url: '', originalName: input.originalName, mimeType: input.mimeType, declaredSize: input.size, size: 0, visibility: input.visibility, status: 'pending', scanStatus: 'pending', uploadedBy: actor.id, createdAt: new Date() })
   await ticket.save()
-  return { attachmentId: attachmentId.toString(), uploadUrl: signed.uploadUrl, expiresIn: signed.expiresIn, maxSize: MAX_ATTACHMENT_SIZE }
+  return { attachmentId: attachmentId.toString(), uploadUrl, expiresIn: signedRef.expiresIn, maxSize: MAX_ATTACHMENT_SIZE }
 }
 
 const completeAttachmentUpload = async (id: string, attachmentId: string, actor: { id: string; role: string; organizationId?: string }) => {

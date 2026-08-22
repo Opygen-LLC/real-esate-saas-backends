@@ -241,9 +241,29 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
-  const original = ObjectStorageService.presignUpload(key)
-  const requiredVariants = payload.mimeType.startsWith('image/') ? [640, 1280].flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, ...ObjectStorageService.presignUpload(`${key}.${width}.${format}`) }))) : []
-  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...requiredVariants.map((variant) => variant.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, expiresAt: new Date(Date.now() + 60 * 60_000) })
+
+  // Resolve variant keys first (synchronous)
+  const variantDefs = payload.mimeType.startsWith('image/')
+    ? [640, 1280].flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, key: `${key}.${width}.${format}` })))
+    : []
+
+  // Generate all GCS signed upload URLs in parallel (async with GCS SDK)
+  const [originalUploadUrl, ...variantUploadUrls] = await Promise.all([
+    ObjectStorageService.presignUpload(key).getUploadUrl(),
+    ...variantDefs.map((v) => ObjectStorageService.presignUpload(v.key).getUploadUrl()),
+  ])
+
+  const original = { key, uploadUrl: originalUploadUrl, publicUrl: ObjectStorageService.publicUrl(key), expiresIn: config.assets.signed_url_ttl_seconds }
+  const requiredVariants = variantDefs.map((v, i) => ({
+    width: v.width,
+    format: v.format,
+    key: v.key,
+    uploadUrl: variantUploadUrls[i],
+    publicUrl: ObjectStorageService.publicUrl(v.key),
+    expiresIn: config.assets.signed_url_ttl_seconds,
+  }))
+
+  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...variantDefs.map((v) => v.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, expiresAt: new Date(Date.now() + 60 * 60_000) })
   return { original, requiredVariants }
 }
 
