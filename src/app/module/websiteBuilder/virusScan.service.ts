@@ -64,7 +64,9 @@ export const scanStoredObject = async (key: string): Promise<{ status: 'clean' |
     return { status: 'skipped', detail: 'CLAMAV_HOST is not configured in development' }
   }
 
-  const response = await Resilience.fetch('object-storage', ObjectStorageService.presignDownload(key, 180), {}, { timeoutMs: 15000 })
+  const url = await ObjectStorageService.presignDownload(key, 180)
+  const response = await Resilience.fetch('object-storage', url, {}, { timeoutMs: 15000 })
+
   if (!response.ok || !response.body) throw new ApiError(502, 'Unable to read uploaded asset for virus scanning')
 
   return withClamSocket<{ status: 'clean'; detail: string }>((socket, resolve, reject) => {
