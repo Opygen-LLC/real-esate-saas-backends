@@ -178,7 +178,8 @@ const getAllTasks = async (
   const where = conditions.length ? { $and: conditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
   const allowedSort = new Set(['dueAt', 'createdAt', 'updatedAt', 'priority', 'status', 'approvalStatus', 'title'])
-  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
+  const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'dueAt'
+
   const dayBounds = getDayBoundsInTimeZone(new Date(), CRM_FOLLOW_UP_TIME_ZONE)
   const [result, summaryRows] = await Promise.all([
     Task.find(where)

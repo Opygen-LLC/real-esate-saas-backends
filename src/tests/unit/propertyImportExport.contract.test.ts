@@ -42,9 +42,13 @@ describe('Phase 6 property import/export contract', () => {
     const service = read('src/app/module/property/propertyImport.service.ts')
     expect(service).toContain("IMPORT_SESSION_NAMESPACE = 'property-import'")
     expect(service).toContain("redis.call('DEL',KEYS[1])")
-    expect(service).toContain('session.organizationId !== organizationId || session.userId !== actor.id')
-    expect(service).toContain("EntitlementService.assertLimit(organizationId, 'properties', session.validRows.length)")
-    expect(service).toContain('PropertyService.createProperty(organizationId, payload, actor)')
+    expect(service).toContain('previewSession.organizationId !== organizationId || previewSession.userId !== actor.id')
+
+    expect(service).toContain('EntitlementService.assertPropertyCapacity')
+
+
+    expect(service).toContain('PropertyService.createProperty(organizationId, payload, actor')
+
   })
 
   it('exports through the exact list filter builder and an explicit property sort allowlist', () => {
