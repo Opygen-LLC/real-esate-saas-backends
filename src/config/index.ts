@@ -146,9 +146,10 @@ const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim() || 'real
 process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
-const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'vercel')
-// Static DNS targets are development/emergency hints only. Production uses the
-// ranked records returned by Vercel's domain configuration API per hostname.
+const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'generic')
+// Static DNS targets used by the generic provider (and as development fallback for vercel).
+// For 'generic', these are the authoritative routing targets tenants must point their DNS to.
+// For 'vercel', these are only used if VERCEL_PROJECT_ID_OR_NAME / VERCEL_API_TOKEN are missing (dev mode).
 const domainATarget = process.env.DOMAIN_A_TARGET?.trim() || (isProduction ? '' : '76.76.21.21')
 const domainCnameTarget = (process.env.DOMAIN_CNAME_TARGET?.trim() || (isProduction ? '' : 'cname.vercel-dns.com')).replace(/\.$/, '')
 const vercelProject = process.env.VERCEL_PROJECT_ID_OR_NAME?.trim() || (isProduction ? '' : 'realestate-saas')
@@ -190,10 +191,13 @@ const objectStorageAccessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim(
 const objectStorageSecretAccessKey = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || ''
 const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: true, allowPath: false })
 
-if (!['vercel'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must currently be vercel')
+if (!['vercel', 'generic'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic')
 if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
 if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget.includes('/'))) throw new Error('DOMAIN_CNAME_TARGET must be a hostname only')
-if (!z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
+if (domainProvider === 'generic' && isProduction && (!domainATarget || !domainCnameTarget)) {
+  throw new Error('DOMAIN_A_TARGET and DOMAIN_CNAME_TARGET are required when DOMAIN_PROVIDER=generic')
+}
+if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
 
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
@@ -206,11 +210,17 @@ if (isProduction) {
   requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
   requiredInProduction('PUBLIC_SITE_ORIGIN')
   requiredInProduction('DOMAIN_PROVIDER')
-  requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
-  requiredInProduction('VERCEL_API_TOKEN', 20)
-  if (vercelRequireTeamId) requiredInProduction('VERCEL_TEAM_ID')
+  if (domainProvider === 'vercel') {
+    requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
+    requiredInProduction('VERCEL_API_TOKEN', 20)
+    if (vercelRequireTeamId) requiredInProduction('VERCEL_TEAM_ID')
+    if (/placeholder|change[-_ ]?me|default_20bytes/i.test(vercelApiToken)) throw new Error('VERCEL_API_TOKEN must be a real production access token, not a placeholder')
+  }
+  if (domainProvider === 'generic') {
+    requiredInProduction('DOMAIN_A_TARGET')
+    requiredInProduction('DOMAIN_CNAME_TARGET')
+  }
   if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
-  if (/placeholder|change[-_ ]?me|default_20bytes/i.test(vercelApiToken)) throw new Error('VERCEL_API_TOKEN must be a real production access token, not a placeholder')
   requiredInProduction('OBJECT_STORAGE_ENDPOINT')
   requiredInProduction('OBJECT_STORAGE_BUCKET')
   requiredInProduction('OBJECT_STORAGE_REGION')

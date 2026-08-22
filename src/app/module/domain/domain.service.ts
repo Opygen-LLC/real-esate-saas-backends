@@ -413,8 +413,21 @@ const add = async (organizationId: string, input: string) => {
 
   const ownershipToken = randomBytes(24).toString('base64url')
   const provider = DomainProviderService.current()
-  const providerRegistration = await provider.registerDomain({ domain, organizationId, ownershipToken })
-  const dnsRecords = await provider.getRequiredDns({ domain, organizationId, ownershipToken })
+
+  let providerRegistration: { registered: boolean; providerRequestId?: string }
+  let dnsRecords: unknown[]
+  try {
+    providerRegistration = await provider.registerDomain({ domain, organizationId, ownershipToken })
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError(503, `Domain provider (${provider.name}) could not register the domain: ${error instanceof Error ? error.message : 'provider unavailable'}`)
+  }
+  try {
+    dnsRecords = await provider.getRequiredDns({ domain, organizationId, ownershipToken })
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError(503, `Domain provider (${provider.name}) could not generate DNS records: ${error instanceof Error ? error.message : 'provider unavailable'}`)
+  }
   const state = newLifecycleState({
     domain,
     ownershipToken,

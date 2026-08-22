@@ -17,7 +17,7 @@ export type RequiredDnsRecord = {
   host: string
   value: string
   purpose: 'ownership' | 'routing' | 'provider_verification'
-  source?: 'opygen_ownership' | 'vercel_recommended' | 'vercel_project_verification' | 'development_fallback'
+  source?: 'opygen_ownership' | 'vercel_recommended' | 'vercel_project_verification' | 'development_fallback' | 'generic_routing'
   rank?: number
 }
 
