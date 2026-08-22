@@ -2,14 +2,16 @@
 FROM node:22-alpine AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
 RUN pnpm build && pnpm prune --prod
+
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production

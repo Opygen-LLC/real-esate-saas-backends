@@ -8,8 +8,12 @@ git pull origin main
 # docker builder prune -f || true
 # docker image prune -f || true
 
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
 echo "🏗️ Rebuilding & restarting Docker production containers..."
 docker compose up -d --build
+
 
 
 echo "✅ Deployment update complete!"
