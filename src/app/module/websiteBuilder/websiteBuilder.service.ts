@@ -4,6 +4,7 @@ import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
 import sharp, { type Metadata } from 'sharp'
 import { isIP } from 'net'
+import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { Cache } from '../../../shared/cache'
@@ -310,6 +311,25 @@ const uploadAssetBuffer = async (
 
   try {
     await ObjectStorageService.putBuffer(signed.original.key, file.buffer, mimeType)
+
+    // The API fallback must produce the same optimized media contract as the
+    // direct browser path. Generate variants server-side with Sharp so a CORS or
+    // client-network fallback never downgrades the resulting property gallery.
+    const completedVariants: Array<{ key: string; format: 'webp' | 'avif'; width: number; height?: number }> = []
+    for (const variant of signed.requiredVariants || []) {
+      try {
+        let pipeline = sharp(file.buffer, { failOn: 'error' }).rotate().resize({ width: Number(variant.width), withoutEnlargement: true })
+        pipeline = variant.format === 'avif' ? pipeline.avif({ quality: 62 }) : pipeline.webp({ quality: 84 })
+        const rendered = await pipeline.toBuffer({ resolveWithObject: true })
+        await ObjectStorageService.putBuffer(variant.key, rendered.data, `image/${variant.format}`)
+        completedVariants.push({ key: variant.key, format: variant.format, width: rendered.info.width, height: rendered.info.height })
+      } catch (error: any) {
+        // Storage/provider errors must abort the upload; codec-specific failures
+        // may omit only that optimization while preserving the verified original.
+        if (error instanceof ApiError && [API_ERROR_CODES.OBJECT_STORAGE_NOT_CONFIGURED, API_ERROR_CODES.OBJECT_STORAGE_UNAVAILABLE].includes(error.code as any)) throw error
+      }
+    }
+
     const altText = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
     return await completeAsset(organizationId, {
       key: signed.original.key,
@@ -318,7 +338,7 @@ const uploadAssetBuffer = async (
       width: metadata.width,
       height: metadata.height,
       altText,
-      variants: [],
+      variants: completedVariants,
     }, userId)
   } catch (error) {
     await Promise.allSettled(objectKeys.map((key: string) => ObjectStorageService.remove(key)))

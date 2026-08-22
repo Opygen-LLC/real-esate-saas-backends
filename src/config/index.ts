@@ -154,6 +154,37 @@ const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || 'realestate_saas_
 const vercelTeamId = process.env.VERCEL_TEAM_ID?.trim() || ''
 const vercelApiBase = (process.env.VERCEL_API_BASE?.trim() || 'https://api.vercel.com').replace(/\/$/, '')
 
+
+const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduction?: boolean; allowPrivateHttp?: boolean; allowPath?: boolean } = {}): string => {
+  if (!raw) return ''
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error(`${name} must be a valid absolute URL`)
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error(`${name} must use http:// or https://`)
+  if (parsed.username || parsed.password) throw new Error(`${name} must not contain embedded credentials`)
+  if (parsed.search || parsed.hash) throw new Error(`${name} must not contain query parameters or fragments`)
+  if (options.allowPath === false && parsed.pathname !== '/' && parsed.pathname !== '') throw new Error(`${name} must be an origin without a path`)
+  if (isProduction && options.httpsInProduction && parsed.protocol !== 'https:') {
+    const privateHttpAllowed = Boolean(options.allowPrivateHttp && isPrivateNetworkHost(parsed.hostname))
+    if (!privateHttpAllowed) throw new Error(`${name} must use https:// in production`)
+  }
+  return raw.replace(/\/$/, '')
+}
+
+const objectStorageRequireInternalEndpoint = envBoolean('OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT', false)
+const objectStorageEndpoint = normalizeStorageUrl('OBJECT_STORAGE_ENDPOINT', process.env.OBJECT_STORAGE_ENDPOINT?.trim() || '', { httpsInProduction: true, allowPath: false })
+const rawObjectStorageInternalEndpoint = process.env.OBJECT_STORAGE_INTERNAL_ENDPOINT?.trim() || ''
+const objectStorageInternalEndpoint = normalizeStorageUrl('OBJECT_STORAGE_INTERNAL_ENDPOINT', rawObjectStorageInternalEndpoint || objectStorageEndpoint, { httpsInProduction: true, allowPrivateHttp: true, allowPath: false })
+const objectStoragePublicBaseUrl = normalizeStorageUrl('OBJECT_STORAGE_PUBLIC_BASE_URL', process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || '', { httpsInProduction: true })
+const objectStorageBucket = process.env.OBJECT_STORAGE_BUCKET?.trim() || ''
+const objectStorageRegion = process.env.OBJECT_STORAGE_REGION?.trim() || (isProduction ? '' : 'auto')
+const objectStorageAccessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim() || ''
+const objectStorageSecretAccessKey = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || ''
+const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: true, allowPath: false })
+
 process.env.DOMAIN_A_TARGET = domainATarget
 process.env.DOMAIN_CNAME_TARGET = domainCnameTarget
 process.env.VERCEL_PROJECT_ID_OR_NAME = vercelProject
@@ -173,8 +204,15 @@ if (isProduction) {
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
   requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
-
-
+  requiredInProduction('OBJECT_STORAGE_ENDPOINT')
+  requiredInProduction('OBJECT_STORAGE_BUCKET')
+  requiredInProduction('OBJECT_STORAGE_REGION')
+  requiredInProduction('OBJECT_STORAGE_ACCESS_KEY_ID')
+  requiredInProduction('OBJECT_STORAGE_SECRET_ACCESS_KEY', 8)
+  requiredInProduction('OBJECT_STORAGE_PUBLIC_BASE_URL')
+  if (objectStorageRequireInternalEndpoint) requiredInProduction('OBJECT_STORAGE_INTERNAL_ENDPOINT')
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,62}$/.test(objectStorageBucket)) throw new Error('OBJECT_STORAGE_BUCKET contains unsupported characters or length')
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/.test(objectStorageRegion)) throw new Error('OBJECT_STORAGE_REGION contains unsupported characters or length')
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (redisEnabled) {
@@ -331,13 +369,15 @@ export default {
     queue_namespace: process.env.REDIS_QUEUE_NAMESPACE || 'queue',
   },
   assets: {
-    bucket: process.env.OBJECT_STORAGE_BUCKET || '',
-    region: process.env.OBJECT_STORAGE_REGION || 'auto',
-    endpoint: (process.env.OBJECT_STORAGE_ENDPOINT || '').replace(/\/$/, ''),
-    internal_endpoint: (process.env.OBJECT_STORAGE_INTERNAL_ENDPOINT || process.env.OBJECT_STORAGE_ENDPOINT || '').replace(/\/$/, ''),
-    access_key_id: process.env.OBJECT_STORAGE_ACCESS_KEY_ID || '',
-    secret_access_key: process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || '',
-    public_base_url: (process.env.OBJECT_STORAGE_PUBLIC_BASE_URL || '').replace(/\/$/, ''),
+    bucket: objectStorageBucket,
+    region: objectStorageRegion,
+    endpoint: objectStorageEndpoint,
+    internal_endpoint: objectStorageInternalEndpoint,
+    require_internal_endpoint: objectStorageRequireInternalEndpoint,
+    access_key_id: objectStorageAccessKeyId,
+    secret_access_key: objectStorageSecretAccessKey,
+    public_base_url: objectStoragePublicBaseUrl,
+    browser_origin: objectStorageBrowserOrigin,
     signed_url_ttl_seconds: Math.max(60, Math.min(3600, Number(process.env.OBJECT_STORAGE_SIGNED_URL_TTL || 600))),
     health_timeout_ms: Math.max(500, Math.min(15000, Number(process.env.OBJECT_STORAGE_HEALTH_TIMEOUT_MS || 3000))),
     health_cache_ms: Math.max(1000, Math.min(60000, Number(process.env.OBJECT_STORAGE_HEALTH_CACHE_MS || 10000))),

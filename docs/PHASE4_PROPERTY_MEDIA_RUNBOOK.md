@@ -14,7 +14,9 @@ Phase 4 replaces legacy `videos: string[]` property media with server-normalized
    - `OBJECT_STORAGE_INTERNAL_ENDPOINT` — API-to-storage address; Compose overrides this to `http://minio:9000`
    - `OBJECT_STORAGE_ACCESS_KEY_ID`
    - `OBJECT_STORAGE_SECRET_ACCESS_KEY`
-   - `OBJECT_STORAGE_PUBLIC_BASE_URL`
+   - `OBJECT_STORAGE_PUBLIC_BASE_URL` — full public object prefix; with path-style MinIO include `/<bucket>`
+   - `OBJECT_STORAGE_BROWSER_ORIGIN` — `https://realestate.opygen.com` for dashboard uploads
+   - `OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT=true` when the API must use a private/internal storage address
    - `CLAMAV_HOST` / `CLAMAV_PORT`
 5. Do not expose ClamAV port 3310 publicly. The production Compose network keeps it private to the API.
 
@@ -47,12 +49,15 @@ Or inspect:
 curl -fsS https://api.faysaldev.com/ready
 ```
 
-Production readiness must report both:
+Production readiness must report all of the following:
 
+- `dependencies.objectStorage.configured: true`
 - `dependencies.objectStorage.healthy: true`
+- `dependencies.objectStorage.browserCors.healthy: true`
+- PUT, GET and HEAD CORS probes are healthy for `https://realestate.opygen.com` with `Content-Type` allowed
 - `dependencies.clamav.healthy: true`
 
-If either dependency is unavailable, `/ready` returns 503 in production. Do not deploy application traffic until both pass.
+If object storage, its browser CORS policy, or ClamAV is unavailable, `/ready` returns 503 in production. Production also fails at startup when required object-storage configuration is missing, so fix environment configuration before restarting the API.
 
 ## 4. Dry-run the property-media migration
 
@@ -111,7 +116,7 @@ Important behavior after deployment:
 6. Set each supported item as hero and confirm only one remains selected.
 7. Add an arbitrary HTTPS hosted-media URL and confirm it opens externally instead of rendering in an iframe.
 8. Temporarily use an invalid/unavailable hero media item and confirm the property page remains usable with a property photo fallback.
-9. Open the gallery at 320, 360, 375, 390 and 430 px widths and verify thumbnails scroll horizontally without overflowing the page.
+9. Open `/dashboard/admin/properties/add` at 320, 375 and 430 px, then tablet, laptop and desktop widths. Verify the six-step wizard scrolls horizontally only on narrow screens, form padding stays compact, footer actions remain full-width/tappable on phones, and media/URL controls never cause page overflow.
 10. Open a property with missing specs/legal fields and confirm the UI displays `—`/not-provided states instead of invented values or verification claims.
 
 ## Rollback

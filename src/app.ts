@@ -64,7 +64,7 @@ app.get('/', (_req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS API Service', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
 })
 
-app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString() }))
+app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString(), objectStorage: ObjectStorageService.configurationStatus() }))
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
   const [transactions, redis, email, objectStorage, clamav, privacy, domainProvider, domainQueue] = await Promise.all([

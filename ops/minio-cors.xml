@@ -4,7 +4,7 @@
     <AllowedMethod>GET</AllowedMethod>
     <AllowedMethod>HEAD</AllowedMethod>
     <AllowedMethod>PUT</AllowedMethod>
-    <AllowedHeader>*</AllowedHeader>
+    <AllowedHeader>Content-Type</AllowedHeader>
     <ExposeHeader>ETag</ExposeHeader>
     <MaxAgeSeconds>3600</MaxAgeSeconds>
   </CORSRule>

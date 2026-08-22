@@ -11,6 +11,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
       OBJECT_STORAGE_INTERNAL_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT: "true"
+      OBJECT_STORAGE_BROWSER_ORIGIN: https://realestate.opygen.com
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
     volumes:
