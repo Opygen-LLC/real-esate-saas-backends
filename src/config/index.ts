@@ -181,10 +181,12 @@ const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduc
 }
 
 const objectStorageRequireInternalEndpoint = envBoolean('OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT', false)
-const objectStorageEndpoint = normalizeStorageUrl('OBJECT_STORAGE_ENDPOINT', process.env.OBJECT_STORAGE_ENDPOINT?.trim() || '', { httpsInProduction: true, allowPath: false })
+const objectStorageEndpoint = normalizeStorageUrl('OBJECT_STORAGE_ENDPOINT', process.env.OBJECT_STORAGE_ENDPOINT?.trim() || '', { httpsInProduction: false, allowPath: false })
 const rawObjectStorageInternalEndpoint = process.env.OBJECT_STORAGE_INTERNAL_ENDPOINT?.trim() || ''
-const objectStorageInternalEndpoint = normalizeStorageUrl('OBJECT_STORAGE_INTERNAL_ENDPOINT', rawObjectStorageInternalEndpoint || objectStorageEndpoint, { httpsInProduction: true, allowPrivateHttp: true, allowPath: false })
-const objectStoragePublicBaseUrl = normalizeStorageUrl('OBJECT_STORAGE_PUBLIC_BASE_URL', process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || '', { httpsInProduction: true })
+const objectStorageInternalEndpoint = normalizeStorageUrl('OBJECT_STORAGE_INTERNAL_ENDPOINT', rawObjectStorageInternalEndpoint || objectStorageEndpoint, { httpsInProduction: false, allowPath: false })
+const objectStoragePublicBaseUrl = normalizeStorageUrl('OBJECT_STORAGE_PUBLIC_BASE_URL', process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || '', { httpsInProduction: false })
+
+
 const objectStorageBucket = process.env.OBJECT_STORAGE_BUCKET?.trim() || ''
 const objectStorageRegion = process.env.OBJECT_STORAGE_REGION?.trim() || (isProduction ? '' : 'auto')
 const objectStorageAccessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim() || ''
