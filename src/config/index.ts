@@ -63,6 +63,8 @@ const publicSiteOrigin = (() => {
     return configuredPublicSiteOrigin
   }
 })()
+process.env.PUBLIC_SITE_ORIGIN = publicSiteOrigin
+
 
 const publicApi = new URL(publicApiUrl)
 
@@ -195,9 +197,10 @@ const defaultGcsPublicBaseUrl = gcsBucketName ? `https://storage.googleapis.com/
 const objectStoragePublicBaseUrl = normalizeStorageUrl(
   'OBJECT_STORAGE_PUBLIC_BASE_URL',
   process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || defaultGcsPublicBaseUrl,
-  { httpsInProduction: true },
+  { httpsInProduction: false },
 )
-const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: true, allowPath: false })
+const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: false, allowPath: false })
+
 
 if (!['vercel', 'generic'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic')
 if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
