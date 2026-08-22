@@ -1,15 +1,19 @@
 import type { NextFunction, Request, Response } from 'express'
 import multer from 'multer'
+import path from 'path'
 import ApiError from '../../../errors/ApiError'
 
 const MAX_PROPERTY_IMAGE_BYTES = 20 * 1024 * 1024
-const ALLOWED_PROPERTY_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
+const ALLOWED_PROPERTY_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif'])
+const ALLOWED_PROPERTY_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif'])
 
 const propertyImageUploader = multer({
   storage: multer.memoryStorage(),
   limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES },
   fileFilter: (_req, file, callback) => {
-    if (!ALLOWED_PROPERTY_IMAGE_TYPES.has(String(file.mimetype || '').toLowerCase())) {
+    const mimeType = String(file.mimetype || '').toLowerCase()
+    const extension = path.extname(String(file.originalname || '')).toLowerCase()
+    if (!ALLOWED_PROPERTY_IMAGE_TYPES.has(mimeType) && !ALLOWED_PROPERTY_IMAGE_EXTENSIONS.has(extension)) {
       callback(new ApiError(400, 'Property photos must be JPEG, PNG, WebP, or AVIF images') as any)
       return
     }

@@ -109,6 +109,7 @@ const presign = async (
   method: 'GET' | 'PUT' | 'HEAD' | 'DELETE',
   key: string,
   expiresInSeconds = config.assets.signed_url_ttl_seconds,
+  contentType?: string,
 ): Promise<string> => {
   assertConfigured()
   const action = (
@@ -121,7 +122,7 @@ const presign = async (
     version: 'v4',
     action,
     expires: Date.now() + expiresInSeconds * 1000,
-    ...(method === 'PUT' ? { contentType: 'application/octet-stream' } : {}),
+    ...(method === 'PUT' && contentType ? { contentType } : {}),
   }
 
   try {
@@ -137,7 +138,7 @@ const presign = async (
 
 // ─── Public API — matches the shape expected by websiteBuilder.service.ts ─────
 
-const presignUpload = (key: string) => {
+const presignUpload = (key: string, contentType?: string) => {
   assertConfigured()
   // Return synchronously using a deferred-resolve pattern so callers that
   // currently use the result synchronously still work. The actual GCS signed
@@ -154,7 +155,7 @@ const presignUpload = (key: string) => {
     // Will be an empty string for GCS (signed URL requires async signing).
     uploadUrl: '',
     // Callers should prefer this.
-    getUploadUrl: () => presign('PUT', key, config.assets.signed_url_ttl_seconds),
+    getUploadUrl: () => presign('PUT', key, config.assets.signed_url_ttl_seconds, contentType),
     expiresIn: config.assets.signed_url_ttl_seconds,
   }
 }

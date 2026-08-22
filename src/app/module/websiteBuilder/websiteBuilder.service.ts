@@ -249,8 +249,8 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
 
   // Generate all GCS signed upload URLs in parallel (async with GCS SDK)
   const [originalUploadUrl, ...variantUploadUrls] = await Promise.all([
-    ObjectStorageService.presignUpload(key).getUploadUrl(),
-    ...variantDefs.map((v) => ObjectStorageService.presignUpload(v.key).getUploadUrl()),
+    ObjectStorageService.presignUpload(key, payload.mimeType).getUploadUrl(),
+    ...variantDefs.map((v) => ObjectStorageService.presignUpload(v.key, `image/${v.format}`).getUploadUrl()),
   ])
 
   const original = { key, uploadUrl: originalUploadUrl, publicUrl: ObjectStorageService.publicUrl(key), expiresIn: config.assets.signed_url_ttl_seconds }
@@ -310,9 +310,8 @@ const uploadAssetBuffer = async (
   userId?: string,
   options: AssetLifecycleOptions = {},
 ) => {
-  const mimeType = String(file?.mimetype || '').toLowerCase()
+  const declaredMime = String(file?.mimetype || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file?.mimetype || '').toLowerCase()
   if (!file?.buffer?.length) throw new ApiError(400, 'No property photo was uploaded')
-  if (!ALLOWED_ASSET_MIME_TYPES.has(mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
   if (file.buffer.length > 20 * 1024 * 1024) throw new ApiError(413, 'Property photos must be 20 MB or smaller')
 
   let metadata: Metadata
@@ -322,7 +321,9 @@ const uploadAssetBuffer = async (
     throw new ApiError(400, 'The uploaded file is not a valid image')
   }
   const detectedMime = metadata.format ? MIME_FROM_SHARP_FORMAT[metadata.format] : undefined
-  if (detectedMime && detectedMime !== mimeType) throw new ApiError(400, 'Uploaded image content does not match its file type')
+  if (!detectedMime || !ALLOWED_ASSET_MIME_TYPES.has(detectedMime)) throw new ApiError(400, 'Asset file type is not allowed')
+  if (ALLOWED_ASSET_MIME_TYPES.has(declaredMime) && declaredMime !== detectedMime) throw new ApiError(400, 'Uploaded image content does not match its file type')
+  const mimeType = detectedMime
 
   const signed: any = await presignAsset(organizationId, {
     filename: file.originalname || 'property-image',

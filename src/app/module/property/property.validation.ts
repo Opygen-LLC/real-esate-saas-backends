@@ -30,7 +30,10 @@ const googleMapsUrl = z.string().trim().url().max(2048).refine((value) => {
   }
 }, 'A valid Google Maps link is required')
 
-const imageMime = z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
+const imageMime = z.preprocess(
+  value => typeof value === 'string' && value.toLowerCase() === 'image/jpg' ? 'image/jpeg' : value,
+  z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/avif']),
+)
 const assetVariant = z.object({
   key: z.string().min(1).max(1200),
   format: z.enum(['webp', 'avif']),
