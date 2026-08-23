@@ -88,7 +88,17 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
   if (!job) return 'empty'
   try {
     await deliver(job)
-    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId }, { $set: { status: 'completed', completedAt: new Date(), lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    const completedAt = new Date()
+    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId }, { $set: { status: 'completed', completedAt, lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    if (job.type === 'domain_verify') {
+      // A later successful lifecycle check supersedes historical dead jobs for
+      // the same domain record. Without this cleanup the health endpoint would
+      // remain permanently unhealthy even after the domain recovered.
+      await OperationsJob.updateMany(
+        { organizationId: job.organizationId, type: 'domain_verify', entityId: job.entityId, status: 'failed', _id: { $ne: job._id } },
+        { $set: { status: 'cancelled', completedAt, lastError: 'Superseded by a successful domain verification' } },
+      )
+    }
     Metrics.observeQueue(job.type, 'completed')
     return 'completed'
   } catch (error) {
@@ -159,6 +169,15 @@ const schedulePendingDomainChecks = async (limit = 100) => {
   return { scheduled }
 }
 
+const resolveFailedDomainChecks = async (entityId: string) => {
+  if (!entityId) return { resolved: 0 }
+  const result = await OperationsJob.updateMany(
+    { type: 'domain_verify', entityId, status: 'failed' },
+    { $set: { status: 'cancelled', completedAt: new Date(), lastError: 'Superseded by a successful manual domain verification' } },
+  )
+  return { resolved: result.modifiedCount }
+}
+
 const backlog = async () => {
   const [pending, failed, oldest] = await Promise.all([
     OperationsJob.countDocuments({ status: 'pending' }), OperationsJob.countDocuments({ status: 'failed' }),
@@ -177,4 +196,4 @@ const domainBacklog = async () => {
   return { pending, processing, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
-export const OperationsQueueService = { schedule, cancel, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, backlog, domainBacklog }
+export const OperationsQueueService = { schedule, cancel, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog }

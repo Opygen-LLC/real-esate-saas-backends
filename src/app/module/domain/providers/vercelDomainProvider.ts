@@ -21,15 +21,34 @@ const CHECK_VALUE = 'real-estate-saas'
 type VercelDomainConfig = {
   configuredBy?: string | null
   misconfigured?: boolean
-  recommendedIPv4?: Array<{ rank?: number; value?: string[] }>
-  recommendedCNAME?: Array<{ rank?: number; value?: string }>
+  recommendedIPv4?: Array<{ rank?: number; value?: string[] | string }>
+  recommendedCNAME?: Array<{ rank?: number; value?: string[] | string }>
+}
+
+type VercelProjectDomain = Record<string, unknown> & {
+  name?: string
+  id?: string
+  verified?: boolean
+  verification?: Array<{
+    type?: string
+    domain?: string
+    name?: string
+    value?: string
+    reason?: string
+  }>
+}
+
+type VercelVerificationAttempt = {
+  domain: string
+  status: number
+  payload: Record<string, unknown>
 }
 
 const diagnostic = (
   check: DomainDiagnostic['check'],
   label: string,
   ok: boolean,
-  options: Pick<DomainDiagnostic, 'expected' | 'observed' | 'message'> & Partial<Pick<DomainDiagnostic, 'state'>> = {},
+  options: Partial<Pick<DomainDiagnostic, 'expected' | 'observed' | 'message' | 'state'>> = {},
 ): DomainDiagnostic => ({
   check,
   label,
@@ -93,7 +112,7 @@ const providerFetch = async (service: string, url: string, init: RequestInit = {
   })
 }
 
-const getProjectDomain = async (domain: string) => {
+const getProjectDomain = async (domain: string): Promise<VercelProjectDomain | null> => {
   const response = await providerFetch(
     'vercel-domain-project',
     projectUrl(`/domains/${encodeURIComponent(domain)}`),
@@ -102,7 +121,7 @@ const getProjectDomain = async (domain: string) => {
   )
   if (response.status === 404) return null
   if (!response.ok) throw new ApiError(502, `Vercel project-domain lookup failed (${response.status})`)
-  return response.json().catch(() => ({})) as Promise<Record<string, unknown>>
+  return response.json().catch(() => ({})) as Promise<VercelProjectDomain>
 }
 
 const getDomainConfig = async (domain: string): Promise<VercelDomainConfig> => {
@@ -112,7 +131,11 @@ const getDomainConfig = async (domain: string): Promise<VercelDomainConfig> => {
     { method: 'GET' },
     [200, 400, 404],
   )
-  if (!response.ok) throw new ApiError(502, `Vercel domain configuration lookup failed for ${domain} (${response.status})`)
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as any
+    const detail = payload?.error?.message || payload?.message || `status ${response.status}`
+    throw new ApiError(502, `Vercel domain configuration lookup failed for ${domain}: ${detail}`)
+  }
   return response.json().catch(() => ({})) as Promise<VercelDomainConfig>
 }
 
@@ -123,7 +146,7 @@ const selectRecommendedIPv4 = (payload: VercelDomainConfig): string[] => {
   if (bestRank === null) return []
   return sorted
     .filter((row) => Number(row.rank ?? 999) === bestRank)
-    .flatMap((row) => Array.isArray(row.value) ? row.value : [])
+    .flatMap((row) => Array.isArray(row.value) ? row.value : [row.value])
     .map((value) => String(value || '').trim())
     .filter((value) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value))
 }
@@ -131,7 +154,9 @@ const selectRecommendedIPv4 = (payload: VercelDomainConfig): string[] => {
 const selectRecommendedCname = (payload: VercelDomainConfig): string => {
   const rows = Array.isArray(payload.recommendedCNAME) ? payload.recommendedCNAME : []
   const sorted = [...rows].sort((a, b) => Number(a.rank ?? 999) - Number(b.rank ?? 999))
-  return normalizeTarget(String(sorted[0]?.value || ''))
+  const raw = sorted[0]?.value
+  const candidate = Array.isArray(raw) ? raw[0] : raw
+  return normalizeTarget(String(candidate || ''))
 }
 
 const recommendedRouting = async (input: DomainProviderInput) => {
@@ -164,10 +189,10 @@ const recommendedRouting = async (input: DomainProviderInput) => {
   }
 }
 
-const providerVerificationRecords = (input: DomainProviderInput, domains: Array<Record<string, unknown> | null>): RequiredDnsRecord[] => {
+const providerVerificationRecords = (input: DomainProviderInput, domains: Array<VercelProjectDomain | null>): RequiredDnsRecord[] => {
   const records: RequiredDnsRecord[] = []
   for (const projectDomain of domains) {
-    const challenges = Array.isArray((projectDomain as any)?.verification) ? (projectDomain as any).verification : []
+    const challenges = Array.isArray(projectDomain?.verification) ? projectDomain.verification : []
     for (const challenge of challenges) {
       const type = String(challenge?.type || '').toUpperCase()
       if (!['TXT', 'CNAME'].includes(type)) continue
@@ -194,19 +219,33 @@ const providerVerificationRecords = (input: DomainProviderInput, domains: Array<
   })
 }
 
-const registerOne = async (domain: string) => {
+const registerOne = async (domain: string): Promise<{ payload: VercelProjectDomain; created: boolean }> => {
+  const existing = await getProjectDomain(domain)
+  if (existing) return { payload: existing, created: false }
+
   const response = await providerFetch(
     'vercel-domain-register',
     domainsApiUrl('v10', `/projects/${encodeURIComponent(config.domains.vercel_project)}/domains`),
     { method: 'POST', body: JSON.stringify({ name: domain }) },
     [200, 201, 400, 409],
   )
-  if (response.ok) return response.json().catch(() => ({})) as Promise<Record<string, unknown>>
+  if (response.ok) {
+    return {
+      payload: await response.json().catch(() => ({})) as VercelProjectDomain,
+      created: true,
+    }
+  }
 
-  const existing = await getProjectDomain(domain)
-  if (existing) return existing
+  // The add operation is idempotent. A race can return a conflict even though
+  // another request attached the same hostname to this project moments earlier.
+  const racedExisting = await getProjectDomain(domain)
+  if (racedExisting) return { payload: racedExisting, created: false }
+
   const payload = await response.json().catch(() => ({})) as any
-  throw new ApiError(409, payload?.error?.message || payload?.message || `Domain ${domain} is attached to another Vercel project or account`)
+  throw new ApiError(
+    response.status === 409 ? 409 : 502,
+    payload?.error?.message || payload?.message || `Vercel could not attach ${domain} to the configured project`,
+  )
 }
 
 const removeOne = async (domain: string) => {
@@ -217,6 +256,42 @@ const removeOne = async (domain: string) => {
     [200, 204, 404],
   )
   if (![200, 204, 404].includes(response.status)) throw new ApiError(502, `Vercel domain removal failed (${response.status})`)
+}
+
+const triggerProjectDomainVerification = async (domain: string): Promise<VercelVerificationAttempt> => {
+  const response = await providerFetch(
+    'vercel-domain-verify',
+    projectUrl(`/domains/${encodeURIComponent(domain)}/verify`),
+    { method: 'POST' },
+    [200, 400, 404, 409],
+  )
+  return {
+    domain,
+    status: response.status,
+    payload: await response.json().catch(() => ({})) as Record<string, unknown>,
+  }
+}
+
+const refreshProjectVerification = async (domains: [string, string]) => {
+  let projectDomains: [VercelProjectDomain | null, VercelProjectDomain | null] = await Promise.all([
+    getProjectDomain(domains[0]),
+    getProjectDomain(domains[1]),
+  ])
+
+  const attempts: VercelVerificationAttempt[] = []
+  await Promise.all(projectDomains.map(async (projectDomain, index) => {
+    if (!projectDomain || projectDomain.verified) return
+    attempts[index] = await triggerProjectDomainVerification(domains[index])
+  }))
+
+  if (attempts.some(Boolean)) {
+    projectDomains = await Promise.all([
+      getProjectDomain(domains[0]),
+      getProjectDomain(domains[1]),
+    ])
+  }
+
+  return { projectDomains, attempts: attempts.filter(Boolean) }
 }
 
 const resolveA = async (name: string) => {
@@ -277,8 +352,9 @@ const getTlsStatus = async (input: DomainProviderInput): Promise<DomainTlsResult
   return {
     status: active ? 'active' : 'provisioning',
     diagnostics: [diagnostic('tls_certificate', 'TLS certificate', active, {
-      expected: 'Valid HTTPS certificate for apex and www',
+      expected: 'Valid Vercel-managed HTTPS certificate for apex and www',
       observed: { apex: apex.detail, www: www.detail },
+      state: active ? 'pass' : 'pending',
     })],
   }
 }
@@ -319,25 +395,40 @@ export const VercelDomainProvider: DomainProvider = {
 
   async registerDomain(input) {
     if (!providerConfigured() && !config.isProduction) return { registered: true, providerRequestId: 'development-manual' }
-    const [apex, www] = await Promise.all([registerOne(input.domain), registerOne(`www.${input.domain}`)])
-    const requestId = String((apex as any)?.id || (www as any)?.id || '')
-    return { registered: true, ...(requestId ? { providerRequestId: requestId } : {}) }
+
+    const apex = await registerOne(input.domain)
+    try {
+      const www = await registerOne(`www.${input.domain}`)
+      const requestId = String(apex.payload?.id || www.payload?.id || '')
+      return { registered: true, ...(requestId ? { providerRequestId: requestId } : {}) }
+    } catch (error) {
+      // Avoid leaving a partial registration when this request created the apex
+      // but the www hostname could not be attached (for example, ownership conflict).
+      if (apex.created) await removeOne(input.domain).catch(() => undefined)
+      throw error
+    }
   },
 
   async verifyRouting(input): Promise<DomainRoutingResult> {
-    const routing = await recommendedRouting(input)
-    const [addresses, cnames] = await Promise.all([
+    const domains: [string, string] = [input.domain, `www.${input.domain}`]
+    const [routing, addresses, cnames, verification] = await Promise.all([
+      recommendedRouting(input),
       resolveA(input.domain),
       resolveCname(`www.${input.domain}`),
+      !providerConfigured() && !config.isProduction
+        ? Promise.resolve({
+          projectDomains: [{ verified: true, development: true }, { verified: true, development: true }] as [VercelProjectDomain, VercelProjectDomain],
+          attempts: [] as VercelVerificationAttempt[],
+        })
+        : refreshProjectVerification(domains),
     ])
-    const manualDevelopment = !providerConfigured() && !config.isProduction
-    const [apexProjectDomain, wwwProjectDomain] = manualDevelopment
-      ? [{ verified: true, development: true }, { verified: true, development: true }]
-      : await Promise.all([getProjectDomain(input.domain), getProjectDomain(`www.${input.domain}`)])
+
+    const [apexProjectDomain, wwwProjectDomain] = verification.projectDomains
     const apexOk = addresses.some((address) => routing.apexCandidates.includes(address))
     const wwwOk = cnames.includes(routing.cnamePreferred)
     const registered = Boolean(apexProjectDomain && wwwProjectDomain)
-    const providerVerified = Boolean((apexProjectDomain as any)?.verified && (wwwProjectDomain as any)?.verified)
+    const providerVerified = Boolean(apexProjectDomain?.verified && wwwProjectDomain?.verified)
+
     return {
       apexOk,
       wwwOk,
@@ -347,22 +438,24 @@ export const VercelDomainProvider: DomainProvider = {
         diagnostic('apex_a', 'A / apex routing', apexOk, {
           expected: { recommended: routing.apexCandidates, source: 'Vercel domain configuration API' },
           observed: { addresses, configuredBy: routing.apexConfig.configuredBy ?? null, misconfigured: routing.apexConfig.misconfigured ?? null },
+          state: apexOk ? 'pass' : 'pending',
         }),
         diagnostic('www_cname', 'www routing', wwwOk, {
           expected: { recommended: routing.cnamePreferred, source: 'Vercel domain configuration API' },
           observed: { cnames, configuredBy: routing.wwwConfig.configuredBy ?? null, misconfigured: routing.wwwConfig.misconfigured ?? null },
+          state: wwwOk ? 'pass' : 'pending',
         }),
-        diagnostic('hosting_registration', 'Hosting registration', registered && providerVerified, {
-          expected: `Registered and verified on Vercel project ${config.domains.vercel_project}`,
+        diagnostic('hosting_registration', 'Vercel project registration', registered && providerVerified, {
+          expected: `Apex and www attached to and verified on Vercel project ${config.domains.vercel_project}`,
           observed: {
-            apex: apexProjectDomain ? 'registered' : 'missing',
-            www: wwwProjectDomain ? 'registered' : 'missing',
-            providerVerified,
+            apex: apexProjectDomain ? { registered: true, verified: Boolean(apexProjectDomain.verified) } : { registered: false, verified: false },
+            www: wwwProjectDomain ? { registered: true, verified: Boolean(wwwProjectDomain.verified) } : { registered: false, verified: false },
+            verificationAttempts: verification.attempts.map((attempt) => ({ domain: attempt.domain, status: attempt.status })),
           },
           ...(!registered
-            ? { message: 'Domain is not registered on the configured Vercel project' }
+            ? { message: 'Domain is not registered on the configured Vercel project', state: 'pending' as const }
             : !providerVerified
-              ? { message: 'Vercel domain verification is pending; add the provider verification DNS record shown below', state: 'pending' as const }
+              ? { message: 'Vercel ownership verification is pending. Add every provider-verification DNS record shown below, then check again.', state: 'pending' as const }
               : {}),
         }),
       ],
@@ -373,21 +466,23 @@ export const VercelDomainProvider: DomainProvider = {
     if (!providerConfigured() && !config.isProduction) {
       return { status: 'provisioning', diagnostics: [diagnostic('tls_certificate', 'TLS certificate', false, { expected: 'Vercel-managed TLS', observed: 'development provider credentials not configured' })] }
     }
-    const verifyOne = async (domain: string) => {
-      const response = await providerFetch(
-        'vercel-domain-verify',
-        projectUrl(`/domains/${encodeURIComponent(domain)}/verify`),
-        { method: 'POST' },
-        [200, 400, 404, 409],
-      )
-      return { status: response.status, payload: await response.json().catch(() => ({})) as Record<string, unknown> }
-    }
-    const verification = await Promise.all([verifyOne(input.domain), verifyOne(`www.${input.domain}`)])
-    const hardFailure = verification.find((item) => item.status === 404)
-    if (hardFailure) {
+
+    // Explicitly invoking Vercel's verification endpoint is important for API-
+    // managed domains: it refreshes domain access verification and kicks the
+    // managed certificate lifecycle without requiring a dashboard visit.
+    const verification = await Promise.all([
+      triggerProjectDomainVerification(input.domain),
+      triggerProjectDomainVerification(`www.${input.domain}`),
+    ])
+    const missing = verification.find((item) => item.status === 404)
+    if (missing) {
       return {
         status: 'failed',
-        diagnostics: [diagnostic('tls_certificate', 'TLS certificate', false, { expected: 'Vercel-managed TLS', observed: verification, message: 'Domain is missing from the configured Vercel project' })],
+        diagnostics: [diagnostic('tls_certificate', 'TLS certificate', false, {
+          expected: 'Vercel-managed TLS',
+          observed: verification.map((item) => ({ domain: item.domain, status: item.status })),
+          message: 'Domain is missing from the configured Vercel project',
+        })],
       }
     }
     return getTlsStatus(input)
@@ -406,6 +501,7 @@ export const VercelDomainProvider: DomainProvider = {
       diagnostics: [diagnostic('public_routing', 'Public routing', active, {
         expected: `${CHECK_HEADER}: ${CHECK_VALUE}`,
         observed: { apex: apex.observed, www: www.observed },
+        state: active ? 'pass' : 'pending',
       })],
     }
   },

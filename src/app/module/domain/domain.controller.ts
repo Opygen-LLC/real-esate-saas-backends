@@ -23,6 +23,7 @@ const addCustomDomain = catchAsync(async (req: Request, res: Response) => {
 const verifyCustomDomain = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const data: any = await DomainService.verify(organizationId)
+  if (data?._id) await OperationsQueueService.resolveFailedDomainChecks(String(data._id))
   await writeAudit({ organizationId, actorId: req.user?._id || 'unknown', actorRole: req.user?.userRole || 'tenant', action: 'domain.verification_checked', entityType: 'domain', entityId: data?._id?.toString?.() || String(data?.candidate?.domain || data?.domain || ''), requestId: req.requestId, ip: req.ip, metadata: { domain: data?.candidate?.domain || data?.domain || '', canonicalDomain: data?.domain || '', replacementInProgress: Boolean(data?.candidate?.domain), status: data?.candidate?.status || data?.status || '', tlsStatus: data?.candidate?.tlsStatus || data?.tlsStatus || '' } })
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Domain lifecycle check completed', data })
 })

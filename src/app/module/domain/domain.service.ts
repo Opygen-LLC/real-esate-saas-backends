@@ -211,12 +211,52 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   const provider = DomainProviderService.current()
   const now = new Date()
   const input = { domain: slot.domain, organizationId, ownershipToken: slot.ownershipToken }
+  const providerChanged = Boolean(slot.provider && slot.provider !== provider.name)
   const ownership = await ownershipDiagnostic(slot)
+
+  // When production is moved from the old generic provider to Vercel, never
+  // keep presenting the obsolete generic A/CNAME records. Keep only Opygen's
+  // ownership TXT until fresh provider-specific records are available.
   let requiredDns = Array.isArray(slot.requiredDns) ? slot.requiredDns : []
+  if (providerChanged) {
+    requiredDns = requiredDns.filter((record: any) => record?.purpose === 'ownership' || record?.source === 'opygen_ownership')
+  }
+
+  let providerRegistrationStatus: 'pending' | 'registered' | 'failed' = providerChanged
+    ? 'pending'
+    : (slot.providerRegistrationStatus || 'pending')
+  let providerRegisteredAt = providerChanged ? null : slot.providerRegisteredAt
+  let registrationFailure: string | null = null
+
+  const registerWithCurrentProvider = async () => {
+    try {
+      const registration = await provider.registerDomain(input)
+      if (registration.registered) {
+        providerRegistrationStatus = 'registered'
+        providerRegisteredAt = providerRegisteredAt || now
+        if (registration.providerRequestId) slot.providerRequestId = registration.providerRequestId
+        registrationFailure = null
+        return true
+      }
+    } catch (error) {
+      providerRegistrationStatus = 'failed'
+      registrationFailure = error instanceof Error ? error.message : 'Hosting registration failed'
+    }
+    return false
+  }
+
+  // Provider registration must happen before the customer is asked to change
+  // DNS. This also makes existing generic records self-migrate after
+  // DOMAIN_PROVIDER=vercel without requiring the old DNS to match Vercel first.
+  if (providerChanged || providerRegistrationStatus !== 'registered') {
+    await registerWithCurrentProvider()
+  }
+
   try {
     requiredDns = await provider.getRequiredDns(input)
   } catch {
-    // Retain last-known provider recommendations during a transient provider outage.
+    // Retain last-known records only when they belong to the current provider.
+    // During provider cutover, stale routing records were already removed above.
   }
 
   let routing
@@ -226,43 +266,49 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     routing = {
       apexOk: false,
       wwwOk: false,
-      registered: false,
+      registered: providerRegistrationStatus === 'registered',
       providerVerified: false,
       diagnostics: [{
         check: 'hosting_registration',
         label: 'Hosting registration',
-        state: 'failed',
+        state: registrationFailure ? 'failed' : 'pending',
         ok: false,
         expected: provider.name,
         observed: null,
-        message: error instanceof Error ? error.message : 'Hosting provider unavailable',
+        message: registrationFailure || (error instanceof Error ? error.message : 'Hosting provider unavailable'),
         checkedAt: now,
       } satisfies DomainDiagnostic],
     }
   }
 
-  if (ownership.ok && routing.apexOk && routing.wwwOk && !routing.registered) {
-    try {
-      const registration = await provider.registerDomain(input)
-      if (registration.registered) {
-        slot.providerRegistrationStatus = 'registered'
-        slot.providerRegisteredAt = slot.providerRegisteredAt || now
-        try { requiredDns = await provider.getRequiredDns(input) } catch { /* retain last-known recommendations */ }
-        routing = await provider.verifyRouting(input)
-      }
-    } catch (error) {
-      slot.providerRegistrationStatus = 'failed'
-      routing.diagnostics = [...routing.diagnostics, {
-        check: 'hosting_registration',
-        label: 'Hosting registration',
-        state: 'failed',
-        ok: false,
-        expected: provider.name,
-        observed: null,
-        message: error instanceof Error ? error.message : 'Hosting registration failed',
-        checkedAt: now,
-      }]
+  // Self-heal if the hostname was removed from the Vercel project after it had
+  // previously been marked registered. Do not wait for DNS to be correct first;
+  // Vercel needs the project attachment in place in order to expose verification
+  // challenges and begin managed TLS issuance.
+  if (!routing.registered && !registrationFailure) {
+    const registered = await registerWithCurrentProvider()
+    if (registered) {
+      try { requiredDns = await provider.getRequiredDns(input) } catch { /* retain last-known current-provider records */ }
+      try { routing = await provider.verifyRouting(input) } catch { /* keep previous diagnostics and retry later */ }
     }
+  }
+
+  if (registrationFailure) {
+    routing.diagnostics = [...routing.diagnostics, {
+      check: 'hosting_registration',
+      label: 'Hosting registration',
+      state: 'failed',
+      ok: false,
+      expected: provider.name,
+      observed: null,
+      message: registrationFailure,
+      checkedAt: now,
+    } satisfies DomainDiagnostic]
+  }
+
+  if (routing.registered) {
+    providerRegistrationStatus = 'registered'
+    providerRegisteredAt = providerRegisteredAt || now
   }
 
   const routingOk = routing.apexOk && routing.wwwOk && routing.registered && routing.providerVerified
@@ -317,8 +363,8 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     requiredDns,
     lifecycleStatus,
     provider: provider.name,
-    providerRegistrationStatus: routing.registered ? 'registered' : (slot.providerRegistrationStatus === 'failed' ? 'failed' : 'pending'),
-    providerRegisteredAt: routing.registered ? (slot.providerRegisteredAt || now) : slot.providerRegisteredAt,
+    providerRegistrationStatus,
+    providerRegisteredAt,
     publicRoutingStatus,
     status: active ? 'verified' : 'pending',
     tlsStatus,
