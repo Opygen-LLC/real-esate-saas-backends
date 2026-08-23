@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose'
+import { entitlementConfigSchema } from '../entitlement/entitlement.schema'
 
 const platformSettingsSchema = new Schema({
   key: { type: String, enum: ['platform'], default: 'platform', unique: true },
@@ -33,6 +34,7 @@ const platformSettingsSchema = new Schema({
     defaultTrialDays: { type: Number, default: 14, min: 0, max: 365 },
     gracePeriodDays: { type: Number, default: 3, min: 0, max: 60 },
     reminderDaysBeforeExpiry: { type: Number, default: 3, min: 0, max: 60 },
+    entitlements: { type: entitlementConfigSchema, default: undefined },
     maxAgents: { type: Number, default: 2, min: 1, max: 9999 },
     maxProperties: { type: Number, default: 10, min: 1, max: 999999 },
     maxLeads: { type: Number, default: 100, min: 1, max: 9999999 },

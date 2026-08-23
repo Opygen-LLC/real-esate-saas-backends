@@ -8,6 +8,7 @@ import { Organization } from '../organization/organization.model'
 import { ISubscriptionPlan, SubscriptionPlanId } from './subscriptionPlan.interface'
 import { SubscriptionPlan } from './subscriptionPlan.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { normalizeEntitlementWrite, resolveEntitlementSource } from '../entitlement/featureCatalog'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 
 type LeadAllowanceConfig = Pick<ISubscriptionPlan,
@@ -33,20 +34,25 @@ const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig =>
 })
 
 const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T & LeadAllowanceConfig => {
+  // Canonical entitlement values are read first when present. Grandfathered plan
+  // documents without the map transparently resolve from their legacy fields.
+  const entitlementResolved = resolveEntitlementSource(plan)
   // Preserve legacy Starter fallbacks for old documents that pre-date the loyalty fields,
   // but never force Professional/Agency bonuses to zero when the immutable plan version
   // explicitly enables them.
-  const fallback = plan.planId === 'starter' ? starterLeadAllowanceDefaults : neutralLeadAllowanceDefaults(plan.maxLeads)
-  const leadAllowanceModel = plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
+  const fallback = entitlementResolved.planId === 'starter'
+    ? starterLeadAllowanceDefaults
+    : neutralLeadAllowanceDefaults(entitlementResolved.maxLeads)
+  const leadAllowanceModel = entitlementResolved.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
   return {
-    ...plan,
+    ...entitlementResolved,
     leadAllowanceModel,
-    baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
-    renewalLeadBonus: Number(plan.renewalLeadBonus ?? fallback.renewalLeadBonus),
-    renewalBonusEnabled: Boolean(plan.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
-    maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
-    continuityGraceDays: Number(plan.continuityGraceDays ?? fallback.continuityGraceDays),
-  }
+    baseMonthlyLeadAllowance: Number(entitlementResolved.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
+    renewalLeadBonus: Number(entitlementResolved.renewalLeadBonus ?? fallback.renewalLeadBonus),
+    renewalBonusEnabled: Boolean(entitlementResolved.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
+    maxRenewalLeadBonus: Number(entitlementResolved.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
+    continuityGraceDays: Number(entitlementResolved.continuityGraceDays ?? fallback.continuityGraceDays),
+  } as T & LeadAllowanceConfig
 }
 
 const validateLeadAllowanceConfig = (plan: Partial<ISubscriptionPlan>) => {
@@ -115,7 +121,7 @@ const ensureDefaults = async (): Promise<void> => {
   if (await SubscriptionPlan.exists({})) return
   const now = new Date()
   await SubscriptionPlan.insertMany(defaultPlans.map((plan) => ({
-    ...plan,
+    ...normalizeEntitlementWrite(plan as Record<string, any>),
     version: 1,
     isCurrent: true,
     effectiveFrom: now,
@@ -180,7 +186,11 @@ const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Pr
   if (await SubscriptionPlan.exists({ planId })) {
     throw new ApiError(httpStatus.CONFLICT, 'This plan family already exists. Create a new version instead.')
   }
-  const normalizedPayload = normalizeLeadAllowanceConfig({ ...payload, planId })
+  const entitlementNormalized = normalizeEntitlementWrite(
+    { ...payload, planId } as Record<string, any>,
+    payload.entitlements,
+  )
+  const normalizedPayload = normalizeLeadAllowanceConfig(entitlementNormalized)
   validateLeadAllowanceConfig(normalizedPayload)
   const result = await SubscriptionPlan.create({
     ...normalizedPayload,
@@ -211,7 +221,12 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
   if (Number.isNaN(effectiveFrom.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid effective date')
 
   const snapshot = current.toObject()
-  const mergedCommercialSnapshot = normalizeLeadAllowanceConfig({ ...snapshot, ...payload, planId: current.planId })
+  const mergedRawSnapshot = { ...snapshot, ...payload, planId: current.planId }
+  const entitlementNormalized = normalizeEntitlementWrite(
+    mergedRawSnapshot,
+    payload.entitlements,
+  )
+  const mergedCommercialSnapshot = normalizeLeadAllowanceConfig(entitlementNormalized)
   validateLeadAllowanceConfig(mergedCommercialSnapshot)
   const nextVersion = (latest?.version || current.version || 1) + 1
   const grandfatherExisting = payload.grandfatherExisting ?? true
@@ -236,7 +251,6 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
     __v: undefined,
     createdAt: undefined,
     updatedAt: undefined,
-    ...payload,
     planId: current.planId,
     version: nextVersion,
     currency: 'BDT',

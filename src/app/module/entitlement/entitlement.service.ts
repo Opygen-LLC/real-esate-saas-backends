@@ -10,12 +10,13 @@ import { LeadAllowanceReservation } from './leadAllowanceReservation.model'
 import type { LeadAllowanceSource } from './leadAllowanceReservation.interface'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 import { Organization } from '../organization/organization.model'
-import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
+import { DEFAULT_TRIAL_POLICY, getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { Property } from '../property/property.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
 import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
+import { resolveEntitlementSource } from './featureCatalog'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
@@ -40,8 +41,9 @@ const withSession = <T extends { session: (session: ClientSession) => T }>(query
 }
 
 const trialLimits = async () => {
-  const policy = await getTrialPolicy()
+  const policy = resolveEntitlementSource(await getTrialPolicy())
   return {
+    entitlements: policy.entitlements,
     maxTeamMembers: Number(policy.maxAgents || 0),
     maxProperties: policy.maxProperties,
     maxLeads: policy.maxLeads,
@@ -56,18 +58,20 @@ const trialLimits = async () => {
   }
 }
 
+// Backward-compatible test/export contract. Runtime trial enforcement always reads
+// PlatformSettings through getTrialPolicy(); these values are only the initial defaults.
 export const trialEntitlements = {
-  maxTeamMembers: 2,
-  maxProperties: 10,
-  maxLeads: 100,
-  maxStorageMb: 512,
-  maxMonthlyVisitors: 5000,
-  hasCustomDomain: false,
-  hasAdvancedAnalytics: false,
-  hasWhatsAppIntegration: false,
-  hasSmsAutomation: false,
-  hasPremiumTemplates: false,
-  hasLeadAutomations: false,
+  maxTeamMembers: DEFAULT_TRIAL_POLICY.maxAgents,
+  maxProperties: DEFAULT_TRIAL_POLICY.maxProperties,
+  maxLeads: DEFAULT_TRIAL_POLICY.maxLeads,
+  maxStorageMb: DEFAULT_TRIAL_POLICY.maxStorageMb,
+  maxMonthlyVisitors: DEFAULT_TRIAL_POLICY.maxMonthlyVisitors,
+  hasCustomDomain: DEFAULT_TRIAL_POLICY.hasCustomDomain,
+  hasAdvancedAnalytics: DEFAULT_TRIAL_POLICY.hasAdvancedAnalytics,
+  hasWhatsAppIntegration: DEFAULT_TRIAL_POLICY.hasWhatsAppIntegration,
+  hasSmsAutomation: DEFAULT_TRIAL_POLICY.hasSmsAutomation,
+  hasPremiumTemplates: DEFAULT_TRIAL_POLICY.hasPremiumTemplates,
+  hasLeadAutomations: DEFAULT_TRIAL_POLICY.hasLeadAutomations,
 }
 
 const resolve = async (organizationId: string, session?: ClientSession) => {
@@ -103,13 +107,14 @@ const resolve = async (organizationId: string, session?: ClientSession) => {
       const exactQuery = SubscriptionPlan.findOne({ planId: organization.subscription.plan, version: organization.subscription.planVersion })
       exactVersion = await withSession(exactQuery, session).lean()
     }
-    if (exactVersion) plan = exactVersion
+    if (exactVersion) plan = resolveEntitlementSource(exactVersion)
     else {
       const currentPlanQuery = SubscriptionPlan.findOne({
         planId: organization.subscription.plan,
         ...activePlanFilter(),
       }).sort({ version: -1 })
-      plan = await withSession(currentPlanQuery, session).lean()
+      const currentPlan = await withSession(currentPlanQuery, session).lean()
+      plan = currentPlan ? resolveEntitlementSource(currentPlan as Record<string, any>) : null
     }
   }
 
@@ -129,13 +134,35 @@ const resolve = async (organizationId: string, session?: ClientSession) => {
     const benefit: any = await withSession(benefitQuery, session)
     effectiveLeadLimit = Math.max(0, Number(benefit?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
   }
+  const effectiveMaxTeamMembers = Number(
+    plan
+      ? persistedPlanTeamLimit ?? baseTrial.maxTeamMembers
+      : organization.subscription.plan === 'trial'
+        ? baseTrial.maxTeamMembers
+        : organization.subscription.maxAgents ?? baseTrial.maxTeamMembers,
+  )
+  const effectiveMaxProperties = Number(
+    plan
+      ? plan.maxProperties ?? baseTrial.maxProperties
+      : organization.subscription.plan === 'trial'
+        ? baseTrial.maxProperties
+        : organization.subscription.maxProperties ?? baseTrial.maxProperties,
+  )
+  const effectiveEntitlements = {
+    ...(baseTrial.entitlements || {}),
+    ...(plan?.entitlements || {}),
+    teamMembers: { enabled: effectiveMaxTeamMembers > 0, limit: effectiveMaxTeamMembers },
+    properties: { enabled: effectiveMaxProperties > 0, limit: effectiveMaxProperties },
+    leads: { enabled: effectiveLeadLimit > 0, limit: effectiveLeadLimit },
+  }
   return {
     organization,
     limits: {
       ...baseTrial,
       ...canonicalPlan,
-      maxTeamMembers: Number(organization.subscription.maxAgents ?? persistedPlanTeamLimit ?? baseTrial.maxTeamMembers),
-      maxProperties: Number(organization.subscription.maxProperties ?? plan?.maxProperties ?? baseTrial.maxProperties),
+      entitlements: effectiveEntitlements,
+      maxTeamMembers: effectiveMaxTeamMembers,
+      maxProperties: effectiveMaxProperties,
       maxLeads: effectiveLeadLimit,
     },
   }
@@ -259,6 +286,11 @@ const getUsageSnapshot = async (organizationId: string) => {
   return { ...resolved, usage: { properties, teamMembers: teamMembersUsed, leads }, teamMemberQuota }
 }
 
+const limitErrorCode = (currentPlan: string, fallback: string) => currentPlan === 'trial' ? 'TRIAL_LIMIT_REACHED' : fallback
+const limitErrorMessage = (currentPlan: string, resourceLabel: string, used: number, limit: number) => currentPlan === 'trial'
+  ? `Trial ${resourceLabel} limit reached (${used}/${limit}). Upgrade your plan to continue.`
+  : `${resourceLabel} limit reached (${used}/${limit}).`
+
 const assertTeamMemberCapacity = async (
   organizationId: string,
   options: { additionalCommitments?: number; session?: ClientSession } = {},
@@ -272,11 +304,13 @@ const assertTeamMemberCapacity = async (
     const recommendedPlan = await recommendPlanForLimit('teamMembers', requiredCommitted)
     throw new ApiError(
       402,
-      `Team member limit reached (${quota.teamMembersCommitted}/${quota.maxTeamMembers}).`,
+      limitErrorMessage(resolved.organization.subscription.plan, 'team member', quota.teamMembersCommitted, quota.maxTeamMembers),
       '',
-      'PLAN_LIMIT_REACHED',
+      limitErrorCode(resolved.organization.subscription.plan, 'PLAN_LIMIT_REACHED'),
       {
         resource: 'teamMembers',
+        used: quota.teamMembersCommitted,
+        limit: quota.maxTeamMembers,
         maxTeamMembers: quota.maxTeamMembers,
         teamMembersUsed: quota.teamMembersUsed,
         teamMembersReserved: quota.teamMembersReserved,
@@ -286,6 +320,7 @@ const assertTeamMemberCapacity = async (
         requestedIncrement: additionalCommitments,
         currentPlan: resolved.organization.subscription.plan,
         recommendedPlan,
+        upgradeRequired: true,
       },
     )
   }
@@ -312,10 +347,12 @@ const assertLimit = async (organizationId: string, resource: LimitedResource, in
     const recommendedPlan = await recommendPlanForLimit(resource, usage + increment)
     throw new ApiError(
       402,
-      `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`,
+      organization.subscription.plan === 'trial'
+        ? limitErrorMessage('trial', resource, usage, maximum)
+        : `${resource} limit reached (${usage}/${maximum}). Existing data was not removed.`,
       '',
-      'PLAN_LIMIT_REACHED',
-      { resource, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan },
+      limitErrorCode(organization.subscription.plan, 'PLAN_LIMIT_REACHED'),
+      { resource, used: usage, limit: maximum, requestedIncrement: increment, currentPlan: organization.subscription.plan, recommendedPlan, upgradeRequired: true },
     )
   }
 }
@@ -375,17 +412,23 @@ const assertPropertyCapacity = async (
   const required = quota.propertiesUsed + additionalCommitments
   if (required > quota.maxProperties) {
     const recommendedPlan = await recommendPlanForLimit('properties', required)
+    const currentPlan = resolved.organization.subscription.plan
     throw new ApiError(
-      409,
-      `Property limit reached (${quota.propertiesUsed}/${quota.maxProperties}). Lock or move another listing off market first.`,
+      currentPlan === 'trial' ? 402 : 409,
+      currentPlan === 'trial'
+        ? limitErrorMessage(currentPlan, 'property', quota.propertiesUsed, quota.maxProperties)
+        : `Property limit reached (${quota.propertiesUsed}/${quota.maxProperties}). Lock or move another listing off market first.`,
       '',
-      'PROPERTY_QUOTA_LIMIT_REACHED',
+      limitErrorCode(currentPlan, 'PROPERTY_QUOTA_LIMIT_REACHED'),
       {
         resource: 'properties',
+        used: quota.propertiesUsed,
+        limit: quota.maxProperties,
         ...quota,
         requestedIncrement: additionalCommitments,
         currentPlan: resolved.organization.subscription.plan,
         recommendedPlan,
+        upgradeRequired: true,
       },
     )
   }
@@ -599,12 +642,14 @@ const leadAllowanceError = (snapshot: {
   currentPlan: string
   benefitPeriodId?: string | null
 }) => new ApiError(
-  409,
-  snapshot.mode === 'benefit_period'
-    ? `Lead capacity reached (${snapshot.used}/${snapshot.limit}).`
-    : `Lead limit reached (${snapshot.used}/${snapshot.limit}).`,
+  snapshot.currentPlan === 'trial' ? 402 : 409,
+  snapshot.currentPlan === 'trial'
+    ? limitErrorMessage('trial', 'lead', snapshot.used, snapshot.limit)
+    : snapshot.mode === 'benefit_period'
+      ? `Lead capacity reached (${snapshot.used}/${snapshot.limit}).`
+      : `Lead limit reached (${snapshot.used}/${snapshot.limit}).`,
   '',
-  'LEAD_ALLOWANCE_EXHAUSTED',
+  limitErrorCode(snapshot.currentPlan, 'LEAD_ALLOWANCE_EXHAUSTED'),
   {
     resource: 'leads',
     allowanceMode: snapshot.mode,
@@ -614,6 +659,7 @@ const leadAllowanceError = (snapshot: {
     requestedIncrement: snapshot.requested,
     currentPlan: snapshot.currentPlan,
     benefitPeriodId: snapshot.benefitPeriodId || null,
+    upgradeRequired: true,
   },
 )
 
@@ -978,7 +1024,7 @@ const assertFeature = async (organizationId: string, feature: Feature): Promise<
       `${feature} is not included in the current plan`,
       '',
       'PLAN_UPGRADE_REQUIRED',
-      { feature, currentPlan: organization.subscription.plan, recommendedPlan },
+      { feature, currentPlan: organization.subscription.plan, recommendedPlan, upgradeRequired: true },
     )
   }
 }
@@ -989,9 +1035,9 @@ const assertStorage = async (organizationId: string, additionalBytes: number): P
   const limitBytes = limits.maxStorageMb * 1024 * 1024
   if (usedBytes + additionalBytes > limitBytes) {
     const plans = await SubscriptionPlan.find({ ...activePlanFilter(), maxStorageMb: { $gte: Math.ceil((usedBytes + additionalBytes) / 1024 / 1024) } }).sort({ priceMonthly: 1, version: -1 }).select('planId').lean()
-    throw new ApiError(402, 'Storage quota exceeded', '', 'PLAN_LIMIT_REACHED', {
+    throw new ApiError(402, organization.subscription.plan === 'trial' ? 'Trial storage limit reached. Upgrade your plan to continue.' : 'Storage quota exceeded', '', limitErrorCode(organization.subscription.plan, 'PLAN_LIMIT_REACHED'), {
       resource: 'storage', used: usedBytes, limit: limitBytes, requestedIncrement: additionalBytes,
-      currentPlan: organization.subscription.plan, recommendedPlan: plans[0]?.planId || null,
+      currentPlan: organization.subscription.plan, recommendedPlan: plans[0]?.planId || null, upgradeRequired: true,
     })
   }
 }
@@ -1014,13 +1060,14 @@ const consumeVisitor = async (organizationId: string): Promise<void> => {
       ...activePlanFilter(),
       maxMonthlyVisitors: { $gte: used + 1 },
     }).sort({ priceMonthly: 1, version: -1 }).select('planId').lean()
-    throw new ApiError(402, 'Monthly visitor quota reached', '', 'PLAN_LIMIT_REACHED', {
+    throw new ApiError(402, organization.subscription.plan === 'trial' ? 'Trial monthly visitor limit reached. Upgrade your plan to continue.' : 'Monthly visitor quota reached', '', limitErrorCode(organization.subscription.plan, 'PLAN_LIMIT_REACHED'), {
       resource: 'monthlyVisitors',
       used,
       limit: limits.maxMonthlyVisitors,
       requestedIncrement: 1,
       currentPlan: organization.subscription.plan,
       recommendedPlan: plan?.planId || null,
+      upgradeRequired: true,
     })
   }
 }

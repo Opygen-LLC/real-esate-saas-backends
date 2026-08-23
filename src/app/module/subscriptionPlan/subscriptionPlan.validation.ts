@@ -3,6 +3,22 @@ import { z } from 'zod'
 const maxTeamMembers = z.number().int().nonnegative()
 const legacyMaxAgents = z.number().int().nonnegative()
 
+const planLimitEntitlementInput = z.object({ enabled: z.boolean(), limit: z.number().int().nonnegative() }).strict()
+const planBooleanEntitlementInput = z.object({ enabled: z.boolean(), limit: z.never().optional() }).strict()
+const planEntitlementsInput = z.object({
+  leads: planLimitEntitlementInput.optional(),
+  properties: planLimitEntitlementInput.optional(),
+  teamMembers: planLimitEntitlementInput.optional(),
+  storage: planLimitEntitlementInput.optional(),
+  monthlyVisitors: planLimitEntitlementInput.optional(),
+  customDomain: planBooleanEntitlementInput.optional(),
+  advancedAnalytics: planBooleanEntitlementInput.optional(),
+  whatsappIntegration: planBooleanEntitlementInput.optional(),
+  smsAutomation: planBooleanEntitlementInput.optional(),
+  leadAutomations: planBooleanEntitlementInput.optional(),
+  premiumTemplates: planBooleanEntitlementInput.optional(),
+}).strict()
+
 const commercialShape = {
   name: z.string().trim().min(2).max(80),
   priceMonthly: z.number().nonnegative(),
@@ -10,6 +26,7 @@ const commercialShape = {
   currency: z.literal('BDT'),
   description: z.string().max(1000).default(''),
   features: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+  entitlements: planEntitlementsInput.optional(),
   maxTeamMembers: maxTeamMembers.optional(),
   // Transitional input alias for older dashboard builds. Parsed payloads are normalized to maxAgents for persistence.
   maxAgents: legacyMaxAgents.optional(),
@@ -63,6 +80,7 @@ const updateBody = z.object({
   currency: commercialShape.currency.optional(),
   description: z.string().max(1000).optional(),
   features: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  entitlements: planEntitlementsInput.partial().optional(),
   maxTeamMembers: maxTeamMembers.optional(),
   maxAgents: legacyMaxAgents.optional(),
   maxProperties: commercialShape.maxProperties.optional(),

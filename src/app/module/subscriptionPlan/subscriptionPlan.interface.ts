@@ -1,3 +1,5 @@
+import type { EntitlementConfig } from '../entitlement/entitlement.types'
+
 export type SubscriptionPlanId = 'starter' | 'professional' | 'agency' | 'enterprise'
 export type LeadAllowanceModel = 'paid_period_credits' | 'active_capacity'
 
@@ -10,6 +12,7 @@ export interface ISubscriptionPlan {
   currency: 'BDT'
   description: string
   features: string[]
+  entitlements?: EntitlementConfig
   maxAgents: number
   maxProperties: number
   maxLeads: number

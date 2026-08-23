@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from 'mongoose'
 import { ISubscriptionPlan } from './subscriptionPlan.interface'
+import { entitlementConfigSchema } from '../entitlement/entitlement.schema'
 
 const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
   {
@@ -16,6 +17,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     currency: { type: String, enum: ['BDT'], default: 'BDT' },
     description: { type: String, default: '' },
     features: { type: [String], default: [] },
+    entitlements: { type: entitlementConfigSchema, default: undefined },
     maxAgents: { type: Number, default: 3, min: 0 },
     maxProperties: { type: Number, default: 100, min: 0 },
     maxLeads: { type: Number, default: 500, min: 0 },
