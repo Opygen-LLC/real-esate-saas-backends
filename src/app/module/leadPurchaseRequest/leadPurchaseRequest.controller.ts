@@ -8,12 +8,12 @@ import { LeadPurchaseRequestService } from './leadPurchaseRequest.service'
 const tenantList = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Lead purchase requests fetched successfully', data: await LeadPurchaseRequestService.tenantRequests(requireTenant(req)) }))
 
 const create = catchAsync(async (req: Request, res: Response) => {
-  const result = await LeadPurchaseRequestService.createRequest(requireTenant(req), req.user!._id!, req.user!.userRole, req.body)
+  const result = await LeadPurchaseRequestService.createRequest(requireTenant(req), req.user!._id!, req.tenant!.role, req.body)
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Additional lead request submitted for Super Admin approval', data: result })
 })
 
 const cancel = catchAsync(async (req: Request, res: Response) => {
-  const result = await LeadPurchaseRequestService.cancelRequest(requireTenant(req), req.params.id, req.user!._id!, req.user!.userRole)
+  const result = await LeadPurchaseRequestService.cancelRequest(requireTenant(req), req.params.id, req.user!._id!, req.tenant!.role)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Lead purchase request cancelled', data: result })
 })
 

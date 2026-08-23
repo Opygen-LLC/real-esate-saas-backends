@@ -244,7 +244,7 @@ const approve = async (requestId: string, actorId: string, requestMeta: { reques
 
   if (result.idempotent) return result
   if (capacityChange) await LeadEntitlementService.publishCapacityChange(result.request.organizationId, capacityChange)
-  RealtimeService.emitOrganization(result.request.organizationId, { type: 'billing.changed', action: 'lead_topup_approved', entityId: String(result.request._id), payload: { requestedLeads: result.request.requestedLeads, expiresAt: result.request.expiresAt } })
+  RealtimeService.emitOrganization(result.request.organizationId, { type: 'subscription.changed', action: 'lead_topup_approved', entityId: String(result.request._id), payload: { requestedLeads: result.request.requestedLeads, expiresAt: result.request.expiresAt } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: String(result.request._id) })
   return result
 }
@@ -261,7 +261,7 @@ const reject = async (requestId: string, actorId: string, reason: string, reques
     throw new ApiError(httpStatus.CONFLICT, `Only pending requests can be rejected. Current status: ${existing.status}`)
   }
   await writeAudit({ organizationId: request.organizationId, actorId, actorRole: 'super-admin', action: 'lead_topup.rejected', entityType: 'leadPurchaseRequest', entityId: String(request._id), reason, requestId: requestMeta.requestId, ip: requestMeta.ip, metadata: { requestNumber: request.requestNumber, requestedLeads: request.requestedLeads, totalAmount: request.totalAmount } })
-  RealtimeService.emitOrganization(request.organizationId, { type: 'billing.changed', action: 'lead_topup_rejected', entityId: String(request._id) })
+  RealtimeService.emitOrganization(request.organizationId, { type: 'subscription.changed', action: 'lead_topup_rejected', entityId: String(request._id) })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: String(request._id) })
   return request
 }

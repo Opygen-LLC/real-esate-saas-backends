@@ -1,0 +1,28 @@
+{
+  "migrationName": "dynamic-subscription-plans-v1",
+  "generatedAt": "2026-08-23T17:49:30.912Z",
+  "backup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/dynamic-subscription-plans-v1-subscriptionplans-2026-08-23T17-49-30-433Z.jsonl",
+    "count": 12,
+    "sha256": "65c857896cfba2c833c9bf09f542ff58d57d2547c0e2064f3aeca2b0d3f277ea"
+  },
+  "modifiedPlanVersions": 12,
+  "planFamilies": {
+    "agency": {
+      "displayOrder": 30,
+      "upgradeRank": 30
+    },
+    "professional": {
+      "displayOrder": 20,
+      "upgradeRank": 20
+    },
+    "starter": {
+      "displayOrder": 10,
+      "upgradeRank": 10
+    }
+  },
+  "tenantPlanVersionMutation": false,
+  "appliedIndexes": [
+    "subscriptionplans.current_active_upgrade_rank_unique"
+  ]
+}

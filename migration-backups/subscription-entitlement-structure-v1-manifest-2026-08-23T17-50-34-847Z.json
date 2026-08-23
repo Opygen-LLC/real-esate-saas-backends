@@ -1,0 +1,41 @@
+{
+  "migrationName": "subscription-entitlement-structure-v1",
+  "generatedAt": "2026-08-23T17:50:34.847Z",
+  "planBackup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/subscription-entitlement-structure-v1-subscriptionplans-2026-08-23T17-50-33-916Z.jsonl",
+    "count": 12,
+    "sha256": "8b466731e3a006e9ce44dad7736de832bc817861e5bc3d29f14d73d5f8d6e462"
+  },
+  "platformBackup": {
+    "file": "/home/faysal/Projects/opygen/Real-estate-saas/server/migration-backups/subscription-entitlement-structure-v1-platformsettings-2026-08-23T17-50-33-981Z.jsonl",
+    "count": 1,
+    "sha256": "072282422e373295455f28485027e6494871a1eabcc73ce8c5026af3b9a83fae"
+  },
+  "modifiedPlanVersions": 12,
+  "trialSettingsModified": 1,
+  "planFamilies": {
+    "agency": {
+      "displayOrder": 30,
+      "upgradeRank": 30
+    },
+    "professional": {
+      "displayOrder": 20,
+      "upgradeRank": 20
+    },
+    "starter": {
+      "displayOrder": 10,
+      "upgradeRank": 10
+    }
+  },
+  "organizationsObserved": 9,
+  "organizationSubscriptionMutation": false,
+  "legacyLimitMutation": false,
+  "planVersionReassignment": false,
+  "fieldsBackfilledOnly": [
+    "entitlements",
+    "displayOrder",
+    "upgradeRank",
+    "trial.entitlements"
+  ],
+  "skippedPlanEntitlementBackfills": []
+}
