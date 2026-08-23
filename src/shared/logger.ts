@@ -79,7 +79,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.LOG_TO_FILE === 'true')
 }
 
 const baseLogger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: process.env.LOG_LEVEL || 'warn',
   transports,
 })
 

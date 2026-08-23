@@ -304,8 +304,8 @@ export default {
   cookie_same_site: cookieSameSite,
   database_string: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
   mongo: {
-    max_pool_size: Math.max(5, Number(process.env.MONGO_MAX_POOL_SIZE || 50)),
-    min_pool_size: Math.max(0, Number(process.env.MONGO_MIN_POOL_SIZE || 5)),
+    max_pool_size: Math.max(1, Number(process.env.MONGO_MAX_POOL_SIZE || 10)),
+    min_pool_size: Math.max(0, Number(process.env.MONGO_MIN_POOL_SIZE || 1)),
     server_selection_timeout_ms: Math.max(1000, Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 5000)),
     connect_timeout_ms: Math.max(1000, Number(process.env.MONGO_CONNECT_TIMEOUT_MS || 10000)),
     socket_timeout_ms: Math.max(5000, Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 30000)),
@@ -428,7 +428,7 @@ export default {
   },
   runtime: {
     worker_enabled: workerEnabled,
-    worker_poll_ms: Math.max(1000, Number(process.env.WORKER_POLL_MS || 5000)),
+    worker_poll_ms: Math.max(1000, Number(process.env.WORKER_POLL_MS || 30000)),
     worker_batch_size: Math.max(1, Math.min(200, Number(process.env.WORKER_BATCH_SIZE || 50))),
     shutdown_timeout_ms: Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS || 15000)),
     max_page_size: Math.max(10, Math.min(500, Number(process.env.MAX_PAGE_SIZE || 100))),

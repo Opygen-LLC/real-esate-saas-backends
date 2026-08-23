@@ -9,10 +9,16 @@ export interface IUploadResult {
   sizeBytes: number
 }
 
+// Max dimension: 1920px on longest side. Prevents 4K+ originals ballooning egress.
+const MAX_DIMENSION = 1920
+
 const sanitizeImage = async (buffer: Buffer, mimetype: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> => {
   const normalizedType = mimetype.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimetype.toLowerCase()
   try {
-    const image = sharp(buffer, { failOn: 'error' }).rotate()
+    const image = sharp(buffer, { failOn: 'error' })
+      .rotate()
+      .resize(MAX_DIMENSION, MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+
     if (normalizedType === 'image/jpeg') return { buffer: await image.jpeg({ quality: 82, mozjpeg: true }).toBuffer(), contentType: 'image/jpeg', extension: 'jpg' }
     if (normalizedType === 'image/png') return { buffer: await image.png({ compressionLevel: 8 }).toBuffer(), contentType: 'image/png', extension: 'png' }
     if (normalizedType === 'image/webp') return { buffer: await image.webp({ quality: 82 }).toBuffer(), contentType: 'image/webp', extension: 'webp' }
@@ -41,6 +47,8 @@ const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => 
       contentType: sanitized.contentType,
       metadata: {
         contentType: sanitized.contentType,
+        // Cache images for 1 year in browsers and CDN (immutable filename via timestamp+random)
+        cacheControl: 'public, max-age=31536000',
       },
     })
 
