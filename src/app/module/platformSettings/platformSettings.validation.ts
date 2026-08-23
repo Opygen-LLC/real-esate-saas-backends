@@ -23,7 +23,9 @@ const trialEntitlementsInput = z.object({
 const trialPolicyInput = z.object({
   enabled: z.boolean(),
   defaultTrialDays: z.number().int().min(0).max(365),
-  gracePeriodDays: z.number().int().min(0).max(60),
+  gracePeriodDays: z.number().int().min(0).max(60).optional(),
+  trialGraceDays: z.number().int().min(0).max(60).optional(),
+  paidRenewalGraceDays: z.number().int().min(0).max(60).default(0),
   reminderDaysBeforeExpiry: z.number().int().min(0).max(60),
   entitlements: trialEntitlementsInput,
   maxTeamMembers: z.number().int().min(1).max(9999).optional(),
@@ -42,15 +44,23 @@ const trialPolicyInput = z.object({
 }).superRefine((value, ctx) => {
   if (value.maxTeamMembers === undefined && value.maxAgents === undefined) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxTeamMembers'], message: 'Team member limit is required' })
-    return
   }
   if (value.maxTeamMembers !== undefined && value.maxAgents !== undefined && value.maxTeamMembers !== value.maxAgents) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxTeamMembers'], message: 'Conflicting team member limits were supplied' })
   }
-}).transform(({ maxTeamMembers, maxAgents, entitlements, ...rest }) => normalizeEntitlementWrite({
-  ...rest,
-  maxAgents: maxTeamMembers ?? maxAgents,
-}, entitlements))
+  if (value.trialGraceDays === undefined && value.gracePeriodDays === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['trialGraceDays'], message: 'Trial grace days are required' })
+  }
+}).transform(({ maxTeamMembers, maxAgents, entitlements, trialGraceDays, gracePeriodDays, paidRenewalGraceDays, ...rest }) => {
+  const normalizedTrialGraceDays = trialGraceDays ?? gracePeriodDays ?? 0
+  return normalizeEntitlementWrite({
+    ...rest,
+    maxAgents: maxTeamMembers ?? maxAgents,
+    gracePeriodDays: normalizedTrialGraceDays, // backward-compatible persistence alias
+    trialGraceDays: normalizedTrialGraceDays,
+    paidRenewalGraceDays,
+  }, entitlements)
+})
 
 export const PlatformSettingsValidation = {
   update: z.object({ body: z.object({

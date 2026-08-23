@@ -10,7 +10,8 @@ import { Lead } from './lead.model'
 export const LEAD_SUBSCRIPTION_LOCK_REASON = 'subscription_limit' as const
 export const LOCKED_LEAD_PHONE_MASK = '••••••••••'
 export const LOCKED_LEAD_EMAIL_MASK = '••••••••'
-export const LOCKED_LEAD_MESSAGE = 'This lead is locked because it exceeds your current plan\'s active quota.'
+export const LOCKED_LEAD_MESSAGE = 'These leads are available only with a higher plan. Upgrade your subscription to access them.'
+export const subscriptionAccessibleLeadFilter = () => ({ isLocked: { $ne: true } })
 
 const recommendedUpgradePlan = async (currentPlan: string, currentPlanVersion?: number, session?: ClientSession): Promise<string | null> => {
   let currentRank = 0
@@ -291,7 +292,7 @@ const assertLeadAccessible = async (
   }
 }
 
-/** Export is all-or-nothing; a matching locked Lead blocks the entire file. */
+/** Legacy defensive guard retained for compatibility; tenant exports now filter locked Leads out before this point. */
 const assertExportContainsNoLockedLeads = async (
   organizationId: string,
   match: Record<string, unknown>,

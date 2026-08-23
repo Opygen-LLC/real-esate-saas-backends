@@ -29,9 +29,9 @@ const usagePercentage = (used: number, limit: number): number => {
 
 const getSubscriptionUsage = async (organizationId: string) => {
   const [resolved, pendingChangeRequest, monthlyLeadAllowance, upcomingBenefitPeriod] = await Promise.all([
-    EntitlementService.getUsageSnapshot(organizationId),
+    EntitlementService.getUsageSnapshot(organizationId, { allowInactive: true }),
     SubscriptionPaymentService.getTenantPendingState(organizationId),
-    EntitlementService.getMonthlyLeadAllowanceSnapshot(organizationId),
+    EntitlementService.getMonthlyLeadAllowanceSnapshot(organizationId, { allowInactive: true }),
     SubscriptionBenefitPeriodService.getUpcomingBenefitPeriod(organizationId),
   ])
 
@@ -223,21 +223,31 @@ const cancelScheduledDowngrade = async (organizationId: string, actorId: string)
 
 const cancelSubscription = async (organizationId: string) => {
   const org = await Organization.findOne({ organizationId })
-  if (!org) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  }
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
-  if (org.subscription?.scheduledPlan) {
+  const subscription: any = org.subscription
+  if (!subscription) throw new ApiError(httpStatus.CONFLICT, 'Subscription state is unavailable')
+  if (subscription.plan === 'trial') throw new ApiError(httpStatus.CONFLICT, 'Trial access does not require cancellation')
+  if (subscription.scheduledPlan) {
     throw new ApiError(httpStatus.CONFLICT, 'A paid downgrade is already scheduled. Subscription cancellation requires an explicit billing adjustment/refund workflow first.')
   }
 
-  if (org.subscription) {
-    org.subscription.status = 'cancel_at_period_end'
-    org.subscription.cancelAtPeriodEnd = true
-    await org.save()
+  // Idempotent cancellation. Critically, never convert an expired/grace/past-due
+  // subscription back into cancel_at_period_end because that status remains
+  // operationally accessible until its paid boundary.
+  if (subscription.status === 'cancel_at_period_end' && subscription.cancelAtPeriodEnd) return subscription
+  if (subscription.status !== 'active') {
+    throw new ApiError(httpStatus.CONFLICT, 'Only an active paid subscription can be scheduled for cancellation')
+  }
+  if (!subscription.currentPeriodEnd || new Date(subscription.currentPeriodEnd).getTime() <= Date.now()) {
+    throw new ApiError(httpStatus.CONFLICT, 'The paid billing period has already ended. Renew the subscription instead of cancelling it.')
   }
 
-  return org.subscription
+  subscription.status = 'cancel_at_period_end'
+  subscription.cancelAtPeriodEnd = true
+  subscription.revision = Math.max(0, Number(subscription.revision || 0)) + 1
+  await org.save()
+  return subscription
 }
 
 const getInvoiceReceipt = async (organizationId: string, id: string): Promise<GeneratedReceiptPdf> => {

@@ -27,6 +27,7 @@ const globalSearch = async (organizationId: string, query: string, access: CrmAc
   if (can('leads.read')) jobs.push(Lead.find({
     organizationId,
     isConverted: { $ne: true },
+    isLocked: { $ne: true },
     ...crmReadOwnerFilter('assignedAgent', access),
     $or: [
       { name: regex },
@@ -38,9 +39,7 @@ const globalSearch = async (organizationId: string, query: string, access: CrmAc
     kind: 'lead',
     id: String(row._id),
     title: row.name,
-    subtitle: row.isLocked === true && row.lockReason === 'subscription_limit'
-      ? ['Locked by plan', row.leadStatus].filter(Boolean).join(' · ')
-      : [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '),
+    subtitle: [row.phone || row.email, row.leadStatus].filter(Boolean).join(' · '),
     href: `/dashboard/admin/leads?lead=${row._id}`,
   }))))
   if (can('contacts.read')) jobs.push(Contact.find({ organizationId, ...crmReadOwnerFilter('assignedTo', access), ...visibleContactRelationshipFilter, $or: [{ name: regex }, { email: regex }, { phone: regex }, { company: regex }] }).select('_id name email phone type').sort({ updatedAt: -1 }).limit(5).lean().then(rows => rows.map((row:any) => ({ kind: 'contact', id: String(row._id), title: row.name, subtitle: [row.phone || row.email, row.type].filter(Boolean).join(' · '), href: `/dashboard/admin/contacts?contact=${row._id}` }))))
@@ -97,7 +96,7 @@ const getOverviewStats = async (organizationId: string) => {
       },
     ]),
     Lead.aggregate([
-      { $match: orgMatch },
+      { $match: { ...orgMatch, isLocked: { $ne: true } } },
       {
         $group: {
           _id: null,
@@ -171,7 +170,7 @@ const getAnalytics = async (organizationId: string, range: string = '30d') => {
 
   const [leadFacetRaw, propertyFacetRaw, viewingFacetRaw, agents] = await Promise.all([
     Lead.aggregate([
-      { $match: orgMatch },
+      { $match: { ...orgMatch, isLocked: { $ne: true } } },
       {
         $facet: {
           summary: [

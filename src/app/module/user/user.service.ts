@@ -348,7 +348,7 @@ const getAgentLeaderboard = async (organizationId: string, startDate?: string, e
   const agentIds = agents.map((agent) => agent._id)
   const [leadRows, viewingRows, listingRows] = await Promise.all([
     Lead.aggregate([
-      { $match: { organizationId, assignedAgent: { $in: agentIds }, createdAt: { $gte: start, $lte: end } } },
+      { $match: { organizationId, isLocked: { $ne: true }, assignedAgent: { $in: agentIds }, createdAt: { $gte: start, $lte: end } } },
       { $group: { _id: '$assignedAgent', totalLeads: { $sum: 1 }, dealsWon: { $sum: { $cond: [convertedStatusExpression(), 1, 0] } }, respondedLeads: { $sum: { $cond: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, 1, 0] } }, slaCompliant: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $lte: ['$firstResponseAt', '$responseDueAt'] }] }, 1, 0] } }, responseMsTotal: { $sum: { $cond: [{ $and: [{ $ne: [{ $type: '$firstResponseAt' }, 'missing'] }, { $ne: [{ $type: '$createdAt' }, 'missing'] }] }, { $subtract: ['$firstResponseAt', '$createdAt'] }, 0] } } } },
     ]),
     Viewing.aggregate([

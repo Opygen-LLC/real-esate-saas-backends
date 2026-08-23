@@ -184,7 +184,7 @@ const getAllTasks = async (
   const [result, summaryRows] = await Promise.all([
     Task.find(where)
       .populate(userRefPopulate('assignedAgent', 'name email userRole'))
-      .populate('linkedLead', 'name phone email')
+      .populate({ path: 'linkedLead', select: 'name phone email', match: { isLocked: { $ne: true } } })
       .populate('linkedProperty', 'title price')
       .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
       .skip(skip)
@@ -282,6 +282,7 @@ const getTaskSummary = async (
                   { $eq: ['$organizationId', organizationId] },
                   { $eq: ['$assignedAgent', '$$memberId'] },
                   { $ne: ['$isConverted', true] },
+                  { $ne: ['$isLocked', true] },
                 ],
               },
             },
@@ -420,7 +421,7 @@ const updateTask = async (
   })
 
   await task.populate(userRefPopulate('assignedAgent', 'name email userRole'))
-  await task.populate('linkedLead', 'name phone email')
+  await task.populate({ path: 'linkedLead', select: 'name phone email', match: { isLocked: { $ne: true } } })
   await task.populate('linkedProperty', 'title price')
   return task
 }

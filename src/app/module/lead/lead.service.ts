@@ -324,7 +324,7 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
   // Lead Pipeline is intentionally unconverted-only. Even a crafted query cannot expose
   // converted Leads through this collection endpoint.
   if(isConverted!==undefined && String(isConverted)!=='false')throw new ApiError(400,'Lead Pipeline only supports isConverted=false')
-  const conditions:any[]=[{isConverted:{$ne:true}}]
+  const conditions:any[]=[{isConverted:{$ne:true}},{isLocked:{$ne:true}}]
   if(organizationId)conditions.push({organizationId})
   const ownerScope=crmReadOwnerFilter('assignedAgent',access)
   if(Object.keys(ownerScope).length)conditions.push(ownerScope)
@@ -408,6 +408,7 @@ const getTodayFollowUps=async(
   const where={
     organizationId,
     isConverted:{$ne:true},
+    isLocked:{$ne:true},
     followUpDate:{$gte:bounds.start,$lt:bounds.endExclusive},
     ...crmReadOwnerFilter('assignedAgent',access),
   }
@@ -431,14 +432,20 @@ const getTodayFollowUps=async(
 }
 
 const getLeadById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{
-  const result=await Lead.findOne({_id:id,organizationId,...crmReadOwnerFilter('assignedAgent',access)})
+  // Preserve CRM ownership scoping before revealing that a Lead is subscription
+  // locked. Authorized callers get the required 402 upgrade response; callers
+  // outside their CRM scope still receive a normal 404 without private data.
+  const ownerScope=crmReadOwnerFilter('assignedAgent',access)
+  const visible=await Lead.exists({_id:id,organizationId,...ownerScope})
+  if(!visible)throw new ApiError(404,'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  const result=await Lead.findOne({_id:id,organizationId,isLocked:{$ne:true},...ownerScope})
     .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
     .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
     .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
     .populate('propertyInterest','title price images city propertyType bedrooms bathrooms')
     .populate('contactId','name email phone address company tags')
   if(!result)throw new ApiError(404,'Lead not found')
-  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
   return result
 }
 
@@ -542,9 +549,10 @@ const getLeadExportRows = async (
   access?: CrmAccessContext,
 ): Promise<CrmExportRow[]> => {
   // buildLeadWhere is the exact same server-side filter + workspace scope used by
-  // GET /lead, so an export cannot widen the records visible in the Lead Pipeline.
+  // GET /lead, including the subscription-accessible predicate. Locked rows remain
+  // stored but are never included in normal tenant exports.
   const where = buildLeadWhere({ ...filters, organizationId }, access)
-  await LeadEntitlementService.assertExportContainsNoLockedLeads(organizationId, where)
+  await LeadEntitlementService.ensureCurrentLeadCapacity(organizationId)
   const total = await Lead.countDocuments(where)
   if (total > MAX_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
 

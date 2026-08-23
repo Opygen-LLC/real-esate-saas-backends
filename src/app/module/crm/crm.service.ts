@@ -111,7 +111,7 @@ const chooseAgent = async (organizationId: string, lead: { locationPreference?: 
 
   if (assignment.mode === 'workload' || assignment.mode === 'territory') {
     const counts = await Lead.aggregate([
-      { $match: { organizationId, ...activePipelineLeadFilter(), assignedAgent: { $in: agents.map((a: any) => a._id) } } },
+      { $match: { organizationId, ...activePipelineLeadFilter(), isLocked: { $ne: true }, assignedAgent: { $in: agents.map((a: any) => a._id) } } },
       { $group: { _id: '$assignedAgent', count: { $sum: 1 } } },
     ])
     const byId = new Map<string, number>(counts.map((row: any) => [String(row._id), Number(row.count || 0)]))

@@ -56,6 +56,8 @@ describe('unified entitlement catalog', () => {
         enabled: true,
         defaultTrialDays: 14,
         gracePeriodDays: 3,
+        trialGraceDays: 3,
+        paidRenewalGraceDays: 0,
         reminderDaysBeforeExpiry: 3,
         maxTeamMembers: 2,
         maxProperties: 5,
@@ -72,6 +74,9 @@ describe('unified entitlement catalog', () => {
     } })
 
     expect(result.body.trial?.maxAgents).toBe(2)
+    expect(result.body.trial?.trialGraceDays).toBe(3)
+    expect(result.body.trial?.gracePeriodDays).toBe(3)
+    expect(result.body.trial?.paidRenewalGraceDays).toBe(0)
     expect(result.body.trial?.entitlements.leads).toEqual({ enabled: true, limit: 50 })
     expect(result.body.trial?.entitlements.properties).toEqual({ enabled: true, limit: 5 })
   })

@@ -74,28 +74,28 @@ export const trialEntitlements = {
   hasLeadAutomations: DEFAULT_TRIAL_POLICY.hasLeadAutomations,
 }
 
-const resolve = async (organizationId: string, session?: ClientSession) => {
+type ResolveOptions = { allowInactive?: boolean }
+
+const resolve = async (organizationId: string, session?: ClientSession, options: ResolveOptions = {}) => {
   let organization = await withSession(Organization.findOne({ organizationId }), session)
   if (!organization || organization.isBlocked) throw new ApiError(403, 'Organization is unavailable')
 
-  // The worker is the normal path, but entitlement reads are the authoritative boundary guard:
-  // a request arriving at/after scheduledEffectiveAt must never observe the old plan limits.
-  if (!session
-    && organization.subscription?.scheduledPlan
-    && organization.subscription?.scheduledEffectiveAt
-    && new Date(organization.subscription.scheduledEffectiveAt).getTime() <= Date.now()) {
-    const { SubscriptionScheduleService } = await import('../subscription/subscriptionSchedule.service')
-    await SubscriptionScheduleService.applyDueChange(organizationId, { actorId: 'system:entitlement-boundary' })
+  // The worker is the normal path, but entitlement reads are also an authoritative
+  // billing-boundary guard. This covers public capture and internal service calls
+  // that do not pass through authenticated Express middleware.
+  if (!session) {
+    const { reconcileOrganizationSubscriptionBoundary } = await import('../subscription/subscriptionLifecycle.service')
+    await reconcileOrganizationSubscriptionBoundary(organizationId, new Date(), 'system:entitlement-boundary')
     organization = await Organization.findOne({ organizationId })
     if (!organization || organization.isBlocked) throw new ApiError(403, 'Organization is unavailable')
   }
-  if (!['trialing', 'active', 'grace', 'cancel_at_period_end'].includes(organization.subscription.status)) {
+  if (!options.allowInactive && !['trialing', 'active', 'cancel_at_period_end'].includes(organization.subscription.status)) {
     throw new ApiError(
       402,
       `Subscription is ${organization.subscription.status}. Choose an active plan to continue.`,
       '',
       'SUBSCRIPTION_INACTIVE',
-      { currentPlan: organization.subscription.plan, subscriptionStatus: organization.subscription.status },
+      { currentPlan: organization.subscription.plan, subscriptionStatus: organization.subscription.status, currentPeriodEnd: organization.subscription.currentPeriodEnd, gracePeriodEnd: organization.subscription.gracePeriodEnd, upgradeRequired: true },
     )
   }
 
@@ -267,8 +267,8 @@ const getPropertyQuotaSnapshot = async (organizationId: string, session?: Client
   }
 }
 
-const getUsageSnapshot = async (organizationId: string) => {
-  const resolved = await resolve(organizationId)
+const getUsageSnapshot = async (organizationId: string, options: ResolveOptions = {}) => {
+  const resolved = await resolve(organizationId, undefined, options)
   const leadUsage = resolved.limits.leadAllowanceModel === 'active_capacity'
     ? synchronizeActiveLeadCapacityUsage(organizationId, Number(resolved.limits.maxLeads || 0))
     : countLimitedResourceUsage(organizationId, 'leads')
@@ -860,8 +860,8 @@ const releaseLeadAllowanceReservation = async (
   return release
 })
 
-const getMonthlyLeadAllowanceSnapshot = async (organizationId: string) => {
-  const resolved = await resolve(organizationId)
+const getMonthlyLeadAllowanceSnapshot = async (organizationId: string, options: ResolveOptions = {}) => {
+  const resolved = await resolve(organizationId, undefined, options)
   const benefit: any = await activeBenefitPeriod(organizationId)
   if (benefit) {
     const limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))

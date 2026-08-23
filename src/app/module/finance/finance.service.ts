@@ -204,7 +204,7 @@ const refreshOverdueInvoices = async (organizationId: string) => {
 
 const invoicePopulate = (query: any) => query
   .populate('propertyId', 'title')
-  .populate('leadId', 'name phone email')
+  .populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } })
   .populate('createdBy', 'name email')
   .populate('updatedBy', 'name email')
   .populate('cancelledBy', 'name email')
@@ -249,7 +249,7 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate('leadId', 'name phone email').sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
+    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
     FinanceInvoice.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
@@ -391,7 +391,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate('leadId', 'name phone email').sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit),
+    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit),
     FinanceCommission.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }

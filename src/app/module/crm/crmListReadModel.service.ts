@@ -3,7 +3,6 @@ import { logger } from '../../../shared/logger'
 import { Activity } from '../activity/activity.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
-import { LOCKED_LEAD_EMAIL_MASK, LOCKED_LEAD_PHONE_MASK, redactLockedLeadForList } from '../lead/leadEntitlement.service'
 import { Property } from '../property/property.model'
 import { Task } from '../task/task.model'
 import { TASK_TYPE } from '../task/taskType.contract'
@@ -315,22 +314,6 @@ const leadContactLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   },
   { $unset: '__legacyContact' },
 ]
-
-const lockedLeadRedactionStages = (): PipelineStage.FacetPipelineStage[] => {
-  const locked = { $and: [{ $eq: ['$isLocked', true] }, { $eq: ['$lockReason', 'subscription_limit'] }] }
-  return [{
-    $set: {
-      phone: { $cond: [locked, LOCKED_LEAD_PHONE_MASK, '$phone'] },
-      email: { $cond: [locked, LOCKED_LEAD_EMAIL_MASK, '$email'] },
-      normalizedPhone: { $cond: [locked, '$$REMOVE', '$normalizedPhone'] },
-      normalizedEmail: { $cond: [locked, '$$REMOVE', '$normalizedEmail'] },
-      notes: { $cond: [locked, '$$REMOVE', '$notes'] },
-      latestNote: { $cond: [locked, '$$REMOVE', '$latestNote'] },
-      latestInteraction: { $cond: [locked, '$$REMOVE', '$latestInteraction'] },
-      contactId: { $cond: [locked, '$$REMOVE', '$contactId'] },
-    },
-  } as PipelineStage.FacetPipelineStage]
-}
 
 const sourceLeadLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   {
@@ -652,8 +635,10 @@ export const readContactListPageFallback = async <T = any>(options: ContactListR
   return { rows, total }
 }
 
+const accessibleLeadMatch = (match: Record<string, unknown>) => ({ $and: [match, { isLocked: { $ne: true } }] })
+
 const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
-  const query = options.match as any
+  const query = accessibleLeadMatch(options.match) as any
   const sort = sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') as any
   const [documents, total] = await Promise.all([
     Lead.find(query)
@@ -671,7 +656,7 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
 
   const rows = (documents as any[]).map((row) => {
     const properties = Array.isArray(row.propertyInterest) ? row.propertyInterest : []
-    return redactLockedLeadForList({
+    return {
       ...row,
       assignedAgent: publicUserRef(row.assignedAgent),
       createdBy: publicUserRef(row.createdBy),
@@ -679,7 +664,7 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
       propertyInterest: properties,
       propertySummary: { count: properties.length, primary: properties[0] },
       followUp: { date: row.followUpDate },
-    }) as T
+    } as T
   })
 
   return { rows, total }
@@ -688,7 +673,7 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
 export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
   try {
     const result = await Lead.aggregate([
-    { $match: castAggregationMatch(options.match) as Record<string, unknown> },
+    { $match: castAggregationMatch(accessibleLeadMatch(options.match)) as Record<string, unknown> },
     {
       $facet: {
         rows: [
@@ -702,7 +687,6 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
           ...leadActivityLookupStages(),
           ...leadFollowUpLookupStages(),
           ...leadContactLookupStages(),
-          ...lockedLeadRedactionStages(),
         ],
         total: [{ $count: 'count' }],
       },
