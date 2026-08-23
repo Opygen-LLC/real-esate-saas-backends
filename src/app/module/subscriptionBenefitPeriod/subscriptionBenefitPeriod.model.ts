@@ -1,12 +1,13 @@
 import mongoose, { Model, Schema } from 'mongoose'
 import { ISubscriptionBenefitPeriod } from './subscriptionBenefitPeriod.interface'
+import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 
 const subscriptionBenefitPeriodSchema = new Schema<ISubscriptionBenefitPeriod>(
   {
     organizationId: { type: String, required: true, index: true, trim: true },
     paymentSource: { type: String, enum: ['manual_payment', 'bkash'], required: true },
     paymentNumber: { type: String, required: true, trim: true },
-    planId: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise'], required: true, index: true },
+    planId: { type: String, required: true, trim: true, lowercase: true, minlength: 3, maxlength: 50, match: PAID_PLAN_ID_PATTERN, index: true },
     planVersion: { type: Number, required: true, min: 1 },
     // Missing historical rows are interpreted as paid-period credits for grandfathering.
     leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: 'paid_period_credits' },

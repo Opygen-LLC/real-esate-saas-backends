@@ -9,6 +9,7 @@ import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanOrdering } from '../subscriptionPlan/planIdentity'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import {
   publishSubscriptionEntitlementReconciliation,
@@ -16,19 +17,49 @@ import {
   type SubscriptionEntitlementReconciliationResult,
 } from '../entitlement/subscriptionEntitlementReconciliation.service'
 
-export type PaidPlanId = 'starter' | 'professional' | 'agency' | 'enterprise'
+export type PaidPlanId = string
 export type SubscriptionChangeType = 'upgrade' | 'downgrade' | 'version_change'
 export type ScheduledBillingCycle = 'monthly' | 'yearly'
 
-const PLAN_RANK: Record<string, number> = { trial: 0, starter: 1, professional: 2, agency: 3, enterprise: 4 }
-
-export const classifySubscriptionChange = (currentPlan: string, requestedPlan: string): SubscriptionChangeType => {
-  if (currentPlan === requestedPlan) return 'version_change'
-  return (PLAN_RANK[requestedPlan] ?? Number.MAX_SAFE_INTEGER) < (PLAN_RANK[currentPlan] ?? -1) ? 'downgrade' : 'upgrade'
+type ClassifySubscriptionChangeOptions = {
+  currentPlanVersion?: number | null
+  requestedPlanVersion?: number | null
+  session?: ClientSession
 }
 
-export const isSubscriptionDowngrade = (currentPlan: string, requestedPlan: string) =>
-  classifySubscriptionChange(currentPlan, requestedPlan) === 'downgrade'
+const planRank = async (planId: string, version?: number | null, session?: ClientSession): Promise<number> => {
+  if (planId === 'trial') return 0
+  const query = SubscriptionPlan.findOne({
+    planId,
+    ...(version && Number(version) > 0 ? { version: Number(version) } : { isCurrent: true }),
+  }).select('planId upgradeRank displayOrder')
+  if (session) query.session(session)
+  const plan: any = await query.lean()
+  if (!plan) throw new ApiError(httpStatus.CONFLICT, `Subscription plan rank could not be resolved for ${planId}${version ? ` v${version}` : ''}`)
+  return Number(resolvePlanOrdering(plan).upgradeRank)
+}
+
+export const classifySubscriptionChange = async (
+  currentPlan: string,
+  requestedPlan: string,
+  options: ClassifySubscriptionChangeOptions = {},
+): Promise<SubscriptionChangeType> => {
+  if (currentPlan === requestedPlan) return 'version_change'
+  const [currentRank, requestedRank] = await Promise.all([
+    planRank(currentPlan, options.currentPlanVersion, options.session),
+    planRank(requestedPlan, options.requestedPlanVersion, options.session),
+  ])
+  if (requestedRank === currentRank) {
+    throw new ApiError(httpStatus.CONFLICT, `Plan ranking conflict: ${currentPlan} and ${requestedPlan} have the same upgrade rank`)
+  }
+  return requestedRank < currentRank ? 'downgrade' : 'upgrade'
+}
+
+export const isSubscriptionDowngrade = async (
+  currentPlan: string,
+  requestedPlan: string,
+  options: ClassifySubscriptionChangeOptions = {},
+) => (await classifySubscriptionChange(currentPlan, requestedPlan, options)) === 'downgrade'
 
 const addBillingCycle = (start: Date, billingCycle: ScheduledBillingCycle) => {
   const end = new Date(start)
@@ -124,7 +155,7 @@ const applyDueChange = async (
   const result = await runTransaction(async (session) => {
     const organizationQuery = Organization.findOne({
       organizationId,
-      'subscription.scheduledPlan': { $in: ['starter', 'professional', 'agency', 'enterprise'] },
+      'subscription.scheduledPlan': { $type: 'string', $ne: '' },
       'subscription.scheduledEffectiveAt': { $lte: now },
     })
     if (session) organizationQuery.session(session)
@@ -271,7 +302,7 @@ const cancelScheduledChange = async (
   const result = await runTransaction(async (session) => {
     const organizationQuery = Organization.findOne({
       organizationId,
-      'subscription.scheduledPlan': { $in: ['starter', 'professional', 'agency', 'enterprise'] },
+      'subscription.scheduledPlan': { $type: 'string', $ne: '' },
       'subscription.scheduledEffectiveAt': { $gt: now },
     })
     if (session) organizationQuery.session(session)
@@ -384,7 +415,7 @@ const cancelScheduledChange = async (
 const processDueChanges = async (limit = 50, now = new Date()) => {
   const capped = Math.max(1, Math.min(500, Math.trunc(Number(limit || 50))))
   const due: any[] = await Organization.find({
-    'subscription.scheduledPlan': { $in: ['starter', 'professional', 'agency', 'enterprise'] },
+    'subscription.scheduledPlan': { $type: 'string', $ne: '' },
     'subscription.scheduledEffectiveAt': { $lte: now },
   })
     .select('organizationId')

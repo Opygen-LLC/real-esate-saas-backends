@@ -6,7 +6,6 @@ import { RedisClient } from '../../shared/redisClient'
 import { Organization } from '../module/organization/organization.model'
 import { SubscriptionPlan } from '../module/subscriptionPlan/subscriptionPlan.model'
 import { SubscriptionPlanService } from '../module/subscriptionPlan/subscriptionPlan.service'
-import type { SubscriptionPlanId } from '../module/subscriptionPlan/subscriptionPlan.interface'
 import { mongoSupportsTransactions } from './mongoCapabilities'
 import { backupDocuments, migrationCli, writeMigrationManifest } from './migrations/migrationSafety'
 
@@ -15,7 +14,7 @@ const LEAD_LOCK_INDEX = 'lead_tenant_lock_created'
 const LEAD_LOCK_INDEX_KEY = { organizationId: 1, isLocked: 1, createdAt: -1, _id: -1 } as const
 
 type TargetPlan = {
-  planId: Extract<SubscriptionPlanId, 'starter' | 'professional' | 'agency'>
+  planId: 'starter' | 'professional' | 'agency'
   version: number
   name: string
   priceMonthly: number

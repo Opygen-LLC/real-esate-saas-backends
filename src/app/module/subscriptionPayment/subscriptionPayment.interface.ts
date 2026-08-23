@@ -9,7 +9,7 @@ export interface ISubscriptionPayment {
   receiptNumber: string
   organizationId: string
   changeRequestId?: mongoose.Types.ObjectId | string | null
-  planId: 'starter' | 'professional' | 'agency' | 'enterprise'
+  planId: string
   planVersion: number
   billingCycle: SubscriptionBillingCycle
   amount: number

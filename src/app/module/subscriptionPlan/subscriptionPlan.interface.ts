@@ -1,12 +1,14 @@
 import type { EntitlementConfig } from '../entitlement/entitlement.types'
 
-export type SubscriptionPlanId = 'starter' | 'professional' | 'agency' | 'enterprise'
+export type SubscriptionPlanId = string
 export type LeadAllowanceModel = 'paid_period_credits' | 'active_capacity'
 
 export interface ISubscriptionPlan {
   planId: SubscriptionPlanId
   version: number
   name: string
+  displayOrder: number
+  upgradeRank: number
   priceMonthly: number
   priceYearly: number
   currency: 'BDT'

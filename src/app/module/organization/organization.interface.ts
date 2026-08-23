@@ -5,7 +5,7 @@ export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'grace' | 
 export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped'
 
 export interface ISubscription {
-  plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
+  plan: string
   planVersion?: number
   revision?: number
   status: SubscriptionStatus
@@ -18,7 +18,7 @@ export interface ISubscription {
   cancelAtPeriodEnd?: boolean
   reminderSentAt?: Date | null
   source?: 'trial' | 'bkash' | 'manual_payment' | 'manual_admin' | 'migration'
-  scheduledPlan?: 'starter' | 'professional' | 'agency' | 'enterprise' | null
+  scheduledPlan?: string | null
   scheduledPlanVersion?: number | null
   scheduledBillingCycle?: 'monthly' | 'yearly' | null
   scheduledEffectiveAt?: Date | null

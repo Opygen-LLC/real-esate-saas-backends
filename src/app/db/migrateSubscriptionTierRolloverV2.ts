@@ -6,14 +6,13 @@ import { RedisClient } from '../../shared/redisClient'
 import { Organization } from '../module/organization/organization.model'
 import { SubscriptionPlan } from '../module/subscriptionPlan/subscriptionPlan.model'
 import { SubscriptionPlanService } from '../module/subscriptionPlan/subscriptionPlan.service'
-import type { SubscriptionPlanId } from '../module/subscriptionPlan/subscriptionPlan.interface'
 import { mongoSupportsTransactions } from './mongoCapabilities'
 import { backupDocuments, migrationCli, writeMigrationManifest } from './migrations/migrationSafety'
 
 const MIGRATION = 'subscription-tier-rollover-v2'
 
 type TargetPlan = {
-  planId: Extract<SubscriptionPlanId, 'starter' | 'professional' | 'agency'>
+  planId: 'starter' | 'professional' | 'agency'
   version: number
   name: string
   priceMonthly: number

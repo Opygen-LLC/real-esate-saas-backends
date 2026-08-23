@@ -1,13 +1,14 @@
 import mongoose, { Model, Schema } from 'mongoose'
 import { ISubscriptionChangeRequest } from './subscriptionChangeRequest.interface'
+import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 
 const subscriptionChangeRequestSchema = new Schema<ISubscriptionChangeRequest>(
   {
     requestNumber: { type: String, required: true, unique: true, index: true, trim: true },
     organizationId: { type: String, required: true, index: true },
-    currentPlan: { type: String, enum: ['trial', 'starter', 'professional', 'agency', 'enterprise'], required: true },
+    currentPlan: { type: String, required: true, trim: true, lowercase: true, validate: { validator: (value: string) => value === 'trial' || PAID_PLAN_ID_PATTERN.test(value), message: 'Invalid current plan ID' } },
     currentPlanVersion: { type: Number, required: true, min: 1 },
-    requestedPlan: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise'], required: true },
+    requestedPlan: { type: String, required: true, trim: true, lowercase: true, minlength: 3, maxlength: 50, match: PAID_PLAN_ID_PATTERN },
     requestedPlanName: { type: String, trim: true, maxlength: 120, default: '' },
     requestedPlanVersion: { type: Number, required: true, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },

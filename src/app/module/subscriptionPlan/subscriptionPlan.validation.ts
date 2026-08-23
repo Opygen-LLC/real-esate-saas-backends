@@ -1,7 +1,16 @@
 import { z } from 'zod'
+import { PAID_PLAN_ID_MAX_LENGTH, PAID_PLAN_ID_MIN_LENGTH, PAID_PLAN_ID_PATTERN } from './planIdentity'
 
 const maxTeamMembers = z.number().int().nonnegative()
 const legacyMaxAgents = z.number().int().nonnegative()
+
+export const paidPlanIdSchema = z.string()
+  .trim()
+  .toLowerCase()
+  .min(PAID_PLAN_ID_MIN_LENGTH)
+  .max(PAID_PLAN_ID_MAX_LENGTH)
+  .regex(PAID_PLAN_ID_PATTERN, 'Plan ID must be a lowercase slug containing only letters, numbers, and hyphens')
+  .refine((value) => value !== 'trial', 'The plan ID "trial" is reserved')
 
 const planLimitEntitlementInput = z.object({ enabled: z.boolean(), limit: z.number().int().nonnegative() }).strict()
 const planBooleanEntitlementInput = z.object({ enabled: z.boolean(), limit: z.never().optional() }).strict()
@@ -21,6 +30,8 @@ const planEntitlementsInput = z.object({
 
 const commercialShape = {
   name: z.string().trim().min(2).max(80),
+  displayOrder: z.number().int().min(0).max(100000),
+  upgradeRank: z.number().int().min(0).max(100000),
   priceMonthly: z.number().nonnegative(),
   priceYearly: z.number().nonnegative(),
   currency: z.literal('BDT'),
@@ -67,7 +78,7 @@ const requireTeamMemberLimit = (value: { maxTeamMembers?: number; maxAgents?: nu
 
 const createBody = z.object({
   ...commercialShape,
-  planId: z.enum(['starter', 'professional', 'agency', 'enterprise']),
+  planId: paidPlanIdSchema,
   effectiveFrom: z.coerce.date().optional(),
   grandfatherExisting: z.boolean().default(true),
   changeReason: z.string().trim().min(10).max(500),
@@ -75,6 +86,8 @@ const createBody = z.object({
 
 const updateBody = z.object({
   name: commercialShape.name.optional(),
+  displayOrder: commercialShape.displayOrder.optional(),
+  upgradeRank: commercialShape.upgradeRank.optional(),
   priceMonthly: commercialShape.priceMonthly.optional(),
   priceYearly: commercialShape.priceYearly.optional(),
   currency: commercialShape.currency.optional(),

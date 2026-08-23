@@ -1,5 +1,6 @@
 import mongoose, { Model, Schema } from 'mongoose'
 import { ISubscriptionPayment } from './subscriptionPayment.interface'
+import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 
 const subscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
   {
@@ -7,7 +8,7 @@ const subscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
     receiptNumber: { type: String, required: true, unique: true, index: true, trim: true },
     organizationId: { type: String, required: true, index: true },
     changeRequestId: { type: Schema.Types.ObjectId, ref: 'SubscriptionChangeRequest', default: null, index: true },
-    planId: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise'], required: true, index: true },
+    planId: { type: String, required: true, trim: true, lowercase: true, minlength: 3, maxlength: 50, match: PAID_PLAN_ID_PATTERN, index: true },
     planVersion: { type: Number, required: true, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'one-time'], required: true },
     amount: { type: Number, required: true, min: 0 },

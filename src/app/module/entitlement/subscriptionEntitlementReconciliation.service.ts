@@ -75,10 +75,10 @@ const resolveCatalogPolicy = async (input: SubscriptionEntitlementInput | null |
     }
   }
 
-  if (!['starter', 'professional', 'agency', 'enterprise'].includes(plan)) return { plan, planVersion }
   const exact = await withSession(SubscriptionPlan.findOne({ planId: plan, version: planVersion }), session).lean()
   if (exact) return exact as any
-  return await withSession(SubscriptionPlan.findOne({ planId: plan, isCurrent: true }).sort({ version: -1 }), session).lean() as any
+  const current = await withSession(SubscriptionPlan.findOne({ planId: plan, isCurrent: true }).sort({ version: -1 }), session).lean() as any
+  return current || { plan, planVersion }
 }
 
 export const resolveSubscriptionEntitlementSnapshot = async (

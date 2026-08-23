@@ -203,7 +203,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     const previousSubscription = organization.subscription?.toObject?.() || { ...(organization.subscription || {}) }
     const currentPeriodEnd = organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null
     const samePlan = organization.subscription?.plan === attempt.planId
-    const changeType = classifySubscriptionChange(String(organization.subscription?.plan || 'trial'), String(attempt.planId))
+    const changeType = await classifySubscriptionChange(String(organization.subscription?.plan || 'trial'), String(attempt.planId), { currentPlanVersion: Number(organization.subscription?.planVersion || 1), requestedPlanVersion: Number(attempt.planVersion || 1), session })
     deferredDowngrade = changeType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
     const periodStart = new Date(deferredDowngrade && currentPeriodEnd
       ? currentPeriodEnd

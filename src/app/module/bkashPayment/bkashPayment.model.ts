@@ -1,5 +1,6 @@
 import { Model, Schema, model } from 'mongoose'
 import { IBkashPayment } from './bkashPayment.interface'
+import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 
 const bkashPaymentSchema = new Schema<IBkashPayment>(
   {
@@ -7,8 +8,12 @@ const bkashPaymentSchema = new Schema<IBkashPayment>(
     initiatedBy: { type: String, default: '' },
     planId: {
       type: String,
-      enum: ['starter', 'professional', 'agency', 'enterprise'],
       required: true,
+      trim: true,
+      lowercase: true,
+      minlength: 3,
+      maxlength: 50,
+      match: PAID_PLAN_ID_PATTERN,
     },
     planName: { type: String, required: true },
     planVersion: { type: Number, required: true, default: 1, min: 1 },

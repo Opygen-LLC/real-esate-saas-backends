@@ -2,6 +2,7 @@ import mongoose, { Schema, model } from 'mongoose'
 import { IOrganization, OrganizationModel } from './organization.interface'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION } from './onboarding.constants'
+import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 
 const organizationSchema = new Schema<IOrganization, OrganizationModel>(
   {
@@ -133,7 +134,9 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     subscription: {
       plan: {
         type: String,
-        enum: ['trial', 'starter', 'professional', 'agency', 'enterprise'],
+        trim: true,
+        lowercase: true,
+        validate: { validator: (value: string) => value === 'trial' || PAID_PLAN_ID_PATTERN.test(value), message: 'Invalid subscription plan ID' },
         default: 'trial',
       },
       planVersion: { type: Number, default: 1, min: 1 },
@@ -164,7 +167,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       cancelAtPeriodEnd: { type: Boolean, default: false },
       reminderSentAt: { type: Date, default: null },
       source: { type: String, enum: ['trial', 'bkash', 'manual_payment', 'manual_admin', 'migration'], default: 'trial' },
-      scheduledPlan: { type: String, enum: ['starter', 'professional', 'agency', 'enterprise', null], default: null },
+      scheduledPlan: { type: String, trim: true, lowercase: true, match: PAID_PLAN_ID_PATTERN, default: null },
       scheduledPlanVersion: { type: Number, min: 1, default: null },
       scheduledBillingCycle: { type: String, enum: ['monthly', 'yearly', null], default: null },
       scheduledEffectiveAt: { type: Date, default: null },

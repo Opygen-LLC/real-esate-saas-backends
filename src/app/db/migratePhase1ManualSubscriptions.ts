@@ -1,6 +1,7 @@
 import mongoose from 'mongoose'
 import config from '../../config'
 import { backupDocuments, migrationCli, requireConfirmation, writeMigrationManifest } from './migrations/migrationSafety'
+import { isValidPaidPlanId, normalizePaidPlanId } from '../module/subscriptionPlan/planIdentity'
 
 const MIGRATION = 'phase1-manual-subscriptions'
 const normalizeMethod = (value: unknown) => {
@@ -11,7 +12,6 @@ const normalizeMethod = (value: unknown) => {
   if (raw.includes('cash')) return 'cash'
   return 'other'
 }
-const allowedPlans = new Set(['starter', 'professional', 'agency', 'enterprise'])
 
 const run = async () => {
   const cli = migrationCli()
@@ -58,7 +58,8 @@ const run = async () => {
   let imported = 0
   const cursor = billing.find(paidFilter).sort({ createdAt: 1 })
   for await (const row of cursor) {
-    const planId = allowedPlans.has(String(row.plan)) ? String(row.plan) : 'starter'
+    const normalizedPlan = normalizePaidPlanId(row.plan)
+    const planId = isValidPaidPlanId(normalizedPlan) ? normalizedPlan : 'starter'
     const receiptNumber = String(row.invoiceId || `LEGACY-RCT-${row._id}`)
     const paymentNumber = `LEGACY-${String(row._id).toUpperCase()}`
     const reference = String(row.transactionId || row.paymentId || row.invoiceId || '')

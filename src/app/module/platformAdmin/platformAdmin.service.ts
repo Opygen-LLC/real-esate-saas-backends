@@ -327,7 +327,6 @@ const getSubscriptionSummary = async () => {
 }
 
 const planForAdminAssignment = async (planId: string, version?: number) => {
-  if (!['starter', 'professional', 'agency', 'enterprise'].includes(planId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported subscription plan')
   const query: any = { planId, isActive: true }
   if (version) query.version = version
   else query.isCurrent = true
@@ -367,7 +366,7 @@ const tenantUsage = async (organizationId: string, session?: mongoose.ClientSess
 
 const changeTenantSubscription = async (
   organizationId: string,
-  input: { plan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'; planVersion?: number; reason: string; periodDays?: number },
+  input: { plan: string; planVersion?: number; reason: string; periodDays?: number },
   actor: { id: string; requestId?: string; ip?: string },
 ) => {
   if (input.plan !== 'trial') throw new ApiError(httpStatus.CONFLICT, 'Paid plans are activated only by confirming a manual subscription payment. Record the payment instead.')

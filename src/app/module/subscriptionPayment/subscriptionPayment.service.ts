@@ -74,7 +74,7 @@ const toChangeRequestContract = (request: any, requestedPlanName?: string) => {
   return {
     ...plain,
     requestedPlanName: String(requestedPlanName || plain.requestedPlanName || fallbackPlanName(plain.requestedPlan)).trim(),
-    changeType: plain.changeType || classifySubscriptionChange(String(plain.currentPlan || 'trial'), String(plain.requestedPlan || 'starter')),
+    changeType: plain.changeType || undefined,
   }
 }
 
@@ -108,7 +108,10 @@ const createChangeRequest = async (organizationId: string, requestedBy: string, 
   }
   const existing: any = await SubscriptionChangeRequest.findOne({ organizationId, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } }).sort({ createdAt: -1, _id: -1 }).lean()
   if (existing) throw new ApiError(httpStatus.CONFLICT, `A subscription request is already open (${existing.requestNumber}). Complete or cancel it first.`)
-  const changeType = classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId))
+  const changeType = await classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId), {
+    currentPlanVersion: Number(org.subscription?.planVersion || 1),
+    requestedPlanVersion: Number(plan.version || 1),
+  })
   let request: any
   try {
     request = await SubscriptionChangeRequest.create({
@@ -298,7 +301,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     const now = new Date()
     const samePlan = org.subscription?.plan === plan.planId
     const existingEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
-    const changeType = request?.changeType || classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId))
+    const changeType = request?.changeType || await classifySubscriptionChange(String(org.subscription?.plan || 'trial'), String(plan.planId), { currentPlanVersion: Number(org.subscription?.planVersion || 1), requestedPlanVersion: Number(plan.version || 1), session })
     const deferredDowngrade = changeType === 'downgrade' && Boolean(existingEnd && existingEnd > now)
     const start = deferredDowngrade && existingEnd
       ? existingEnd

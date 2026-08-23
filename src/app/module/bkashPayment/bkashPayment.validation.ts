@@ -1,8 +1,9 @@
+import { paidPlanIdSchema } from '../subscriptionPlan/subscriptionPlan.validation'
 import { z } from 'zod'
 
 const createPayment = z.object({
   body: z.object({
-    planId: z.enum(['starter', 'professional', 'agency', 'enterprise']),
+    planId: paidPlanIdSchema,
     billingCycle: z.enum(['monthly', 'yearly']).default('monthly'),
   }),
 })

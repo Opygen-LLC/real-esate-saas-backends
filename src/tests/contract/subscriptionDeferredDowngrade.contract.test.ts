@@ -28,9 +28,10 @@ describe('deferred subscription downgrade contract', () => {
     expect(model).toContain("'scheduled'")
     expect(model).toContain("'applied'")
     expect(model).toContain("['upgrade', 'downgrade', 'version_change']")
-    expect(schedule).toContain('PLAN_RANK')
+    expect(schedule).toContain('planRank')
+    expect(schedule).toContain('upgradeRank')
     expect(schedule).toContain("return 'version_change'")
-    expect(schedule).toContain("? 'downgrade' : 'upgrade'")
+    expect(schedule).toContain("requestedRank < currentRank ? 'downgrade' : 'upgrade'")
   })
 
   it('confirms manual downgrade payment now but defers entitlement reconciliation until the boundary', () => {

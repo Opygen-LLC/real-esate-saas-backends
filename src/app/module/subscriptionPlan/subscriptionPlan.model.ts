@@ -1,17 +1,25 @@
 import mongoose, { Schema, Model } from 'mongoose'
 import { ISubscriptionPlan } from './subscriptionPlan.interface'
 import { entitlementConfigSchema } from '../entitlement/entitlement.schema'
+import { PAID_PLAN_ID_PATTERN } from './planIdentity'
 
 const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
   {
     planId: {
       type: String,
       required: true,
-      enum: ['starter', 'professional', 'agency', 'enterprise'],
+      trim: true,
+      lowercase: true,
+      minlength: 3,
+      maxlength: 50,
+      match: PAID_PLAN_ID_PATTERN,
+      validate: { validator: (value: string) => value !== 'trial', message: 'trial is reserved for the platform trial policy' },
       index: true,
     },
     version: { type: Number, required: true, min: 1 },
     name: { type: String, required: true },
+    displayOrder: { type: Number, required: true, min: 0, index: true },
+    upgradeRank: { type: Number, required: true, min: 0, index: true },
     priceMonthly: { type: Number, required: true, min: 0 },
     priceYearly: { type: Number, required: true, min: 0 },
     currency: { type: String, enum: ['BDT'], default: 'BDT' },
@@ -56,6 +64,19 @@ subscriptionPlanSchema.index(
   { unique: true, partialFilterExpression: { isCurrent: true } },
 )
 subscriptionPlanSchema.index({ isActive: 1, effectiveFrom: 1, effectiveTo: 1 })
+subscriptionPlanSchema.index({ isCurrent: 1, isActive: 1, displayOrder: 1, upgradeRank: 1 })
+subscriptionPlanSchema.index(
+  { upgradeRank: 1 },
+  {
+    name: 'current_active_upgrade_rank_unique',
+    unique: true,
+    partialFilterExpression: {
+      isCurrent: true,
+      isActive: true,
+      upgradeRank: { $type: 'number' },
+    },
+  },
+)
 
 export const SubscriptionPlan: Model<ISubscriptionPlan> = mongoose.model<ISubscriptionPlan>(
   'SubscriptionPlan',

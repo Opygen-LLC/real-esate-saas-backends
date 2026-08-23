@@ -9,7 +9,7 @@ export type BkashPaymentStatus =
 export interface IBkashPayment {
   organizationId: string
   initiatedBy?: string
-  planId: 'starter' | 'professional' | 'agency' | 'enterprise'
+  planId: string
   planName: string
   planVersion: number
   billingCycle: 'monthly' | 'yearly'

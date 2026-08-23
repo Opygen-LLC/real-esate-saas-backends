@@ -3,6 +3,8 @@ import ApiError from '../../../errors/ApiError'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { RealtimeService } from '../realtime/realtime.service'
+import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanOrdering } from '../subscriptionPlan/planIdentity'
 import { Lead } from './lead.model'
 
 export const LEAD_SUBSCRIPTION_LOCK_REASON = 'subscription_limit' as const
@@ -10,12 +12,28 @@ export const LOCKED_LEAD_PHONE_MASK = '••••••••••'
 export const LOCKED_LEAD_EMAIL_MASK = '••••••••'
 export const LOCKED_LEAD_MESSAGE = 'This lead is locked because it exceeds your current plan\'s active quota.'
 
-const NEXT_PLAN: Record<string, string | null> = {
-  trial: 'starter',
-  starter: 'professional',
-  professional: 'agency',
-  agency: 'enterprise',
-  enterprise: null,
+const recommendedUpgradePlan = async (currentPlan: string, currentPlanVersion?: number, session?: ClientSession): Promise<string | null> => {
+  let currentRank = 0
+  if (currentPlan !== 'trial') {
+    const currentQuery = SubscriptionPlan.findOne({
+      planId: currentPlan,
+      ...(currentPlanVersion ? { version: currentPlanVersion } : { isCurrent: true }),
+    }).select('planId upgradeRank displayOrder')
+    if (session) currentQuery.session(session)
+    const current: any = await currentQuery.lean()
+    if (!current) return null
+    currentRank = Number(resolvePlanOrdering(current).upgradeRank)
+  }
+
+  const candidatesQuery = SubscriptionPlan.find({ isCurrent: true, isActive: true })
+    .select('planId upgradeRank displayOrder')
+  if (session) candidatesQuery.session(session)
+  const candidates: any[] = await candidatesQuery.lean()
+  const next = candidates
+    .map((plan) => resolvePlanOrdering(plan))
+    .filter((plan) => Number(plan.upgradeRank) > currentRank)
+    .sort((a, b) => Number(a.upgradeRank) - Number(b.upgradeRank) || Number(a.displayOrder) - Number(b.displayOrder))[0]
+  return next?.planId ? String(next.planId) : null
 }
 
 const sessionOptions = (session?: ClientSession) => session ? { session } : undefined
@@ -35,11 +53,13 @@ export type LeadCapacityReconciliationResult = {
   preserved: true
 }
 
-const upgradeError = (input: {
+const upgradeError = async (input: {
   leadId?: string
   currentPlan: string
+  currentPlanVersion?: number
   limit: number
   lockedCount?: number
+  session?: ClientSession
 }) => new ApiError(
   402,
   LOCKED_LEAD_MESSAGE,
@@ -51,7 +71,7 @@ const upgradeError = (input: {
     ...(input.leadId ? { leadId: input.leadId } : {}),
     currentPlan: input.currentPlan,
     limit: Math.max(0, Number(input.limit || 0)),
-    recommendedPlan: NEXT_PLAN[input.currentPlan] ?? null,
+    recommendedPlan: await recommendedUpgradePlan(input.currentPlan, input.currentPlanVersion, input.session),
     ...(input.lockedCount ? { lockedCount: input.lockedCount } : {}),
   },
 )
@@ -261,10 +281,12 @@ const assertLeadAccessible = async (
   const lead: any = await withSession(query as any, session)
   if (!lead) throw new ApiError(404, 'Lead not found')
   if (lead.isLocked === true && lead.lockReason === LEAD_SUBSCRIPTION_LOCK_REASON) {
-    throw upgradeError({
+    throw await upgradeError({
       leadId: String(lead._id),
       currentPlan: String(resolved.organization.subscription.plan || 'trial'),
+      currentPlanVersion: Number(resolved.organization.subscription.planVersion || 1),
       limit: Number(resolved.limits.maxLeads || 0),
+      session,
     })
   }
 }
@@ -282,8 +304,9 @@ const assertExportContainsNoLockedLeads = async (
     ],
   })
   if (lockedCount > 0) {
-    throw upgradeError({
+    throw await upgradeError({
       currentPlan: String(resolved.organization.subscription.plan || 'trial'),
+      currentPlanVersion: Number(resolved.organization.subscription.planVersion || 1),
       limit: Number(resolved.limits.maxLeads || 0),
       lockedCount,
     })

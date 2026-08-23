@@ -1,9 +1,10 @@
+import { paidPlanIdSchema } from '../subscriptionPlan/subscriptionPlan.validation'
 import { z } from 'zod'
 
 export const subscriptionPaymentInputSchema = z.object({
   organizationId: z.string().trim().min(3).max(80),
   changeRequestId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
-  planId: z.enum(['starter', 'professional', 'agency', 'enterprise']).optional(),
+  planId: paidPlanIdSchema.optional(),
   planVersion: z.number().int().min(1).optional(),
   billingCycle: z.enum(['monthly', 'yearly']).optional(),
   method: z.enum(['cash', 'bank', 'bkash', 'nagad', 'other']),

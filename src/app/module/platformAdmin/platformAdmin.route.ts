@@ -4,10 +4,11 @@ import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
 import { PlatformAdminController } from './platformAdmin.controller'
 import { subscriptionPaymentDecisionSchema, subscriptionPaymentInputSchema } from '../subscriptionPayment/subscriptionPayment.validation'
+import { paidPlanIdSchema } from '../subscriptionPlan/subscriptionPlan.validation'
 
 const router = express.Router()
 const subscriptionBody = z.object({ body: z.object({
-  plan: z.enum(['trial', 'starter', 'professional', 'agency', 'enterprise']),
+  plan: z.union([z.literal('trial'), paidPlanIdSchema]),
   planVersion: z.number().int().positive().optional(), periodDays: z.number().int().min(1).max(3660).optional(),
   reason: z.string().trim().min(10).max(500),
 }) })
@@ -30,7 +31,7 @@ const subscriptionRequestQuery = z.object({ query: z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   search: z.string().trim().max(200).optional(),
   status: z.enum(['open', 'all', 'pending_payment', 'payment_submitted', 'scheduled', 'approved', 'applied', 'rejected', 'cancelled']).optional(),
-  planId: z.enum(['starter', 'professional', 'agency', 'enterprise']).optional(),
+  planId: paidPlanIdSchema.optional(),
   billingCycle: z.enum(['monthly', 'yearly']).optional(),
 }) })
 const benefitHistoryQuery = z.object({ query: z.object({
@@ -38,7 +39,7 @@ const benefitHistoryQuery = z.object({ query: z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   search: z.string().trim().max(200).optional(),
   organizationId: z.string().trim().max(120).optional(),
-  planId: z.enum(['starter', 'professional', 'agency', 'enterprise']).optional(),
+  planId: paidPlanIdSchema.optional(),
   paymentSource: z.enum(['manual_payment', 'bkash']).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

@@ -4,13 +4,21 @@ import { backupDocuments, migrationCli, writeMigrationManifest } from './migrati
 
 const MIGRATION = 'deferred-subscription-schedules-v1'
 const CHANGE_TYPES = ['upgrade', 'downgrade', 'version_change'] as const
-const PLAN_RANK: Record<string, number> = { trial: 0, starter: 1, professional: 2, agency: 3, enterprise: 4 }
-
-const classifyChange = (currentPlan: unknown, requestedPlan: unknown): typeof CHANGE_TYPES[number] => {
-  const current = String(currentPlan || 'trial')
-  const requested = String(requestedPlan || 'starter')
+const classifyChange = (
+  currentPlan: unknown,
+  requestedPlan: unknown,
+  rankByPlan: Map<string, number>,
+): typeof CHANGE_TYPES[number] => {
+  const current = String(currentPlan || 'trial').trim().toLowerCase()
+  const requested = String(requestedPlan || '').trim().toLowerCase()
   if (current === requested) return 'version_change'
-  return (PLAN_RANK[requested] ?? Number.MAX_SAFE_INTEGER) < (PLAN_RANK[current] ?? -1) ? 'downgrade' : 'upgrade'
+  const currentRank = current === 'trial' ? 0 : rankByPlan.get(current)
+  const requestedRank = rankByPlan.get(requested)
+  if (!Number.isInteger(currentRank) || !Number.isInteger(requestedRank)) {
+    throw new Error(`Cannot classify ${current} → ${requested}: run migrate:dynamic-subscription-plans first so every paid plan has an upgrade rank`)
+  }
+  if (currentRank === requestedRank) throw new Error(`Cannot classify ${current} → ${requested}: both plans use upgrade rank ${currentRank}`)
+  return Number(requestedRank) < Number(currentRank) ? 'downgrade' : 'upgrade'
 }
 
 const run = async () => {
@@ -24,6 +32,20 @@ const run = async () => {
 
   const organizations = db.collection('organizations')
   const requests = db.collection('subscriptionchangerequests')
+  const plans = db.collection('subscriptionplans')
+  const currentPlans = await plans.find(
+    { isCurrent: true, isActive: { $ne: false } },
+    { projection: { planId: 1, upgradeRank: 1 } },
+  ).toArray()
+  const rankByPlan = new Map<string, number>()
+  for (const plan of currentPlans) {
+    const planId = String(plan.planId || '').trim().toLowerCase()
+    const rank = Number(plan.upgradeRank)
+    if (!planId || !Number.isInteger(rank)) continue
+    const existingOwner = Array.from(rankByPlan.entries()).find(([, value]) => value === rank)?.[0]
+    if (existingOwner && existingOwner !== planId) throw new Error(`Upgrade rank ${rank} is shared by ${existingOwner} and ${planId}`)
+    rankByPlan.set(planId, rank)
+  }
   const requestBackfillFilter = { changeType: { $nin: [...CHANGE_TYPES] } }
   const [organizationsMissingRevision, requestsMissingChangeType] = await Promise.all([
     organizations.countDocuments({ 'subscription.revision': { $exists: false } }),
@@ -82,7 +104,7 @@ const run = async () => {
     operations.push({
       updateOne: {
         filter: { _id: request._id, changeType: { $nin: [...CHANGE_TYPES] } },
-        update: { $set: { changeType: classifyChange(request.currentPlan, request.requestedPlan) } },
+        update: { $set: { changeType: classifyChange(request.currentPlan, request.requestedPlan, rankByPlan) } },
       },
     })
     if (operations.length >= 500) await flush()

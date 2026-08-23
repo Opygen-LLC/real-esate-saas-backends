@@ -10,9 +10,9 @@ export type SubscriptionChangeRequestStatus =
 export interface ISubscriptionChangeRequest {
   requestNumber: string
   organizationId: string
-  currentPlan: 'trial' | 'starter' | 'professional' | 'agency' | 'enterprise'
+  currentPlan: string
   currentPlanVersion: number
-  requestedPlan: 'starter' | 'professional' | 'agency' | 'enterprise'
+  requestedPlan: string
   requestedPlanName?: string
   requestedPlanVersion: number
   billingCycle: 'monthly' | 'yearly'
