@@ -25,6 +25,7 @@ import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
+import { LeadPurchaseRequest } from '../leadPurchaseRequest/leadPurchaseRequest.model'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
 import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
@@ -515,8 +516,9 @@ const searchPlatform = async (query: string) => {
 }
 
 const getPlatformNotifications = async () => {
-  const [subscriptionRequests, pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
+  const [subscriptionRequests, leadPurchaseRequests, pendingPayments, failedJobs, suspendedTenants, failedDomains] = await Promise.all([
     SubscriptionChangeRequest.find({ status: 'pending_payment' }).select('_id requestNumber organizationId requestedPlan requestedPlanName requestedPlanVersion billingCycle amount createdAt').sort({ createdAt: -1, _id: -1 }).limit(8).lean(),
+    LeadPurchaseRequest.find({ status: 'pending', expiresAt: { $gt: new Date() } }).select('_id requestNumber organizationId requestedLeads totalAmount currency createdAt').sort({ createdAt: -1, _id: -1 }).limit(8).lean(),
     SubscriptionPayment.find({ status: 'pending' }).select('_id paymentNumber organizationId amount method createdAt').sort({ createdAt: -1, _id: -1 }).limit(6).lean(),
     OperationsJob.find({ status: 'failed' }).select('_id organizationId type entityId lastError updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(6).lean(),
     Organization.find({ isBlocked: true }).select('_id organizationId agencyName platformAccess.suspensionReason updatedAt').sort({ updatedAt: -1, _id: -1 }).limit(4).lean(),
@@ -524,6 +526,7 @@ const getPlatformNotifications = async () => {
   ])
   const items = [
     ...subscriptionRequests.map((row:any) => ({ id: `subscription-request:${row._id}`, type: 'subscription_request', severity: 'warning', title: 'New subscription request', body: `${row.requestNumber} · ${row.organizationId} · ${row.requestedPlanName || String(row.requestedPlan).replace(/_/g, ' ')} v${row.requestedPlanVersion} · ${row.billingCycle} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: `/dashboard/super-admin/subscription-requests?search=${encodeURIComponent(row.requestNumber)}`, createdAt: row.createdAt })),
+    ...leadPurchaseRequests.map((row:any) => ({ id: `lead-purchase-request:${row._id}`, type: 'lead_purchase_request', severity: 'warning', title: 'Additional leads requested', body: `${row.requestNumber} · ${row.organizationId} · ${Number(row.requestedLeads || 0).toLocaleString()} leads · ৳${Number(row.totalAmount || 0).toLocaleString('en-BD')}`, href: `/dashboard/super-admin/lead-purchase-requests?search=${encodeURIComponent(row.requestNumber)}`, createdAt: row.createdAt })),
     ...pendingPayments.map((row:any) => ({ id: `payment:${row._id}`, type: 'payment_pending', severity: 'warning', title: 'Payment needs review', body: `${row.paymentNumber} · ${row.organizationId} · ৳${Number(row.amount || 0).toLocaleString('en-BD')}`, href: '/dashboard/super-admin/subscriptions', createdAt: row.createdAt })),
     ...failedJobs.map((row:any) => ({ id: `job:${row._id}`, type: 'operation_failed', severity: 'danger', title: `${String(row.type).replace(/_/g, ' ')} failed`, body: `${row.organizationId}${row.lastError ? ` · ${String(row.lastError).slice(0, 140)}` : ''}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),
     ...failedDomains.map((row:any) => ({ id: `domain:${row._id}`, type: 'domain_failed', severity: 'danger', title: 'Domain/TLS needs attention', body: `${row.domain || row.organizationId} · ${row.status}/${row.tlsStatus}`, href: `/dashboard/super-admin/organizations?search=${encodeURIComponent(row.organizationId)}`, createdAt: row.updatedAt })),

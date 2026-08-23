@@ -9,6 +9,7 @@ import { writeAudit } from '../audit/audit.service'
 import type { BenefitBillingCycle, BenefitPaymentSource } from './subscriptionBenefitPeriod.interface'
 import { Lead } from '../lead/lead.model'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
+import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const nonVoidedFilter = () => ({ $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }] })
@@ -321,12 +322,15 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
   const currentRenewalStreak = adjustment
     ? Math.max(1, integer(adjustment.adjustedRenewalStreak))
     : grantedRenewalStreak
+  const topup = await LeadTopupGrantService.getActiveGrantSummary(normalizedOrganizationId, period._id, session)
+  const planLeadAllowance = integer(period.totalLeadAllowance)
+  const effectiveLeadAllowance = planLeadAllowance + topup.topupLeadAllowance
   const activeCapacityUsed = period.leadAllowanceModel === 'active_capacity'
     ? await (session
       ? Lead.countDocuments({ organizationId: normalizedOrganizationId, ...activePipelineLeadFilter() }).session(session)
       : Lead.countDocuments({ organizationId: normalizedOrganizationId, ...activePipelineLeadFilter() }))
     : integer(period.usedLeadAllowance)
-  const remainingLeadAllowance = Math.max(0, integer(period.totalLeadAllowance) - integer(activeCapacityUsed))
+  const remainingLeadAllowance = Math.max(0, effectiveLeadAllowance - integer(activeCapacityUsed))
   const eligibleForStreakAdjustment = period.billingCycle === 'monthly'
     && period.renewalBonusEnabled === true
 
@@ -343,6 +347,10 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
       grantedRenewalStreak,
       currentRenewalStreak,
       usedLeadAllowance: activeCapacityUsed,
+      planLeadAllowance,
+      topupLeadAllowance: topup.topupLeadAllowance,
+      activeTopupGrantCount: topup.grantCount,
+      effectiveLeadAllowance,
       remainingLeadAllowance,
     },
     adjustment: adjustment || null,

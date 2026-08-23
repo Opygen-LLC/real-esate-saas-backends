@@ -33,10 +33,14 @@ import { FinanceRoute } from '../module/finance/finance.route'
 import { UploadRoute } from '../module/upload/upload.route'
 import { ReviewRoute } from '../module/review/review.route'
 import { WebsiteSubmissionRoute } from '../module/websiteSubmission/websiteSubmission.route'
+import { LeadTopupPricingRoute } from '../module/leadTopupPricing/leadTopupPricing.route'
+import { LeadPurchaseRequestRoute } from '../module/leadPurchaseRequest/leadPurchaseRequest.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/lead-purchase-requests', route: LeadPurchaseRequestRoute },
+  { path: '/lead-topup-pricing', route: LeadTopupPricingRoute },
   { path: '/website-submissions', route: WebsiteSubmissionRoute },
   { path: '/reviews', route: ReviewRoute },
   { path: '/upload', route: UploadRoute },

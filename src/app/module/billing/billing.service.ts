@@ -61,7 +61,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
   let nextRenewal: any = null
   if (upcomingBenefitPeriod) {
     const upcoming: any = upcomingBenefitPeriod
-    const currentTotal = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
+    const currentTotal = Math.max(0, Number(monthlyLeadAllowance.planLeadAllowance ?? monthlyLeadAllowance.limit ?? 0))
     nextRenewal = {
       alreadyConfirmed: true,
       paymentNumber: upcoming.paymentNumber || null,
@@ -106,7 +106,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
         renewalStreak: effectiveRenewalStreak,
         renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,
       })
-      const currentTotal = Math.max(0, Number(monthlyLeadAllowance.limit || 0))
+      const currentTotal = Math.max(0, Number(monthlyLeadAllowance.planLeadAllowance ?? monthlyLeadAllowance.limit ?? 0))
       const graceDays = Math.max(0, Number(assignedPlan.continuityGraceDays || 0))
       const renewBy = new Date(previousEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
       nextRenewal = {
@@ -145,6 +145,9 @@ const getSubscriptionUsage = async (organizationId: string) => {
     remaining: Math.max(0, allowanceLimit - allowanceUsed),
     baseAllowance: Math.max(0, Number(monthlyLeadAllowance.baseLeadAllowance || 0)),
     loyaltyBonus: Math.max(0, Number(monthlyLeadAllowance.bonusLeadAllowance || 0)),
+    planAllowance: Math.max(0, Number(monthlyLeadAllowance.planLeadAllowance ?? (Number(monthlyLeadAllowance.baseLeadAllowance || 0) + Number(monthlyLeadAllowance.bonusLeadAllowance || 0)))),
+    topupAllowance: Math.max(0, Number(monthlyLeadAllowance.topupLeadAllowance || 0)),
+    activeTopupGrantCount: Math.max(0, Number(monthlyLeadAllowance.activeTopupGrantCount || 0)),
     renewalStreak: effectiveRenewalStreak,
     grantedRenewalStreak: Math.max(1, Number(monthlyLeadAllowance.renewalStreak || 1)),
     renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,

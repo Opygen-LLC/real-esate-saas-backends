@@ -17,6 +17,7 @@ import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
 import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 import { resolveEntitlementSource } from './featureCatalog'
+import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
@@ -120,19 +121,27 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
 
   const { maxAgents: persistedPlanTeamLimit, ...canonicalPlan } = plan || {}
   let effectiveLeadLimit = Number(plan?.maxLeads ?? baseTrial.maxLeads)
-  if (plan?.leadAllowanceModel === 'active_capacity' && organization.subscription.plan !== 'trial') {
+  let activeBenefitForLeadCapacity: any = null
+  let activeTopupLeadAllowance = 0
+  if (organization.subscription.plan !== 'trial') {
     const now = new Date()
     const benefitQuery = SubscriptionBenefitPeriod.findOne({
       organizationId,
       planId: organization.subscription.plan,
       planVersion: organization.subscription.planVersion,
-      leadAllowanceModel: 'active_capacity',
       periodStart: { $lte: now },
       periodEnd: { $gt: now },
       $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }],
-    }).sort({ periodStart: -1, _id: -1 }).select('totalLeadAllowance').lean()
-    const benefit: any = await withSession(benefitQuery, session)
-    effectiveLeadLimit = Math.max(0, Number(benefit?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
+    }).sort({ periodStart: -1, _id: -1 }).select('_id totalLeadAllowance leadAllowanceModel').lean()
+    activeBenefitForLeadCapacity = await withSession(benefitQuery, session)
+    if (activeBenefitForLeadCapacity) {
+      const topup = await LeadTopupGrantService.getActiveGrantSummary(organizationId, activeBenefitForLeadCapacity._id, session)
+      activeTopupLeadAllowance = topup.topupLeadAllowance
+    }
+    if (plan?.leadAllowanceModel === 'active_capacity') {
+      const planCapacity = Math.max(0, Number(activeBenefitForLeadCapacity?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
+      effectiveLeadLimit = planCapacity + activeTopupLeadAllowance
+    }
   }
   const effectiveMaxTeamMembers = Number(
     plan
@@ -164,6 +173,8 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
       maxTeamMembers: effectiveMaxTeamMembers,
       maxProperties: effectiveMaxProperties,
       maxLeads: effectiveLeadLimit,
+      topupLeadAllowance: activeTopupLeadAllowance,
+      activeBenefitPeriodId: activeBenefitForLeadCapacity?._id ? String(activeBenefitForLeadCapacity._id) : null,
     },
   }
 }
@@ -694,7 +705,8 @@ const reserveLeadAllowance = async (
     if (benefit) {
       mode = 'benefit_period'
       benefitPeriodId = String(benefit._id)
-      limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
+      const topup = await LeadTopupGrantService.getActiveGrantSummary(organizationId, benefit._id, session)
+      limit = Math.max(0, Number(benefit.totalLeadAllowance || 0)) + topup.topupLeadAllowance
       if (benefit.leadAllowanceModel === 'active_capacity') {
         const [accessibleUsed, outstanding] = await Promise.all([
           synchronizeActiveLeadCapacityUsage(organizationId, limit, session),
@@ -758,7 +770,7 @@ const reserveLeadAllowance = async (
         {
           _id: benefit!._id,
           organizationId,
-          $expr: { $lte: [{ $add: ['$usedLeadAllowance', granted] }, '$totalLeadAllowance'] },
+          $expr: { $lte: [{ $add: ['$usedLeadAllowance', granted] }, limit] },
         },
         { $inc: { usedLeadAllowance: granted } },
         session ? { session } : undefined,
@@ -864,7 +876,9 @@ const getMonthlyLeadAllowanceSnapshot = async (organizationId: string, options: 
   const resolved = await resolve(organizationId, undefined, options)
   const benefit: any = await activeBenefitPeriod(organizationId)
   if (benefit) {
-    const limit = Math.max(0, Number(benefit.totalLeadAllowance || 0))
+    const topup = await LeadTopupGrantService.getActiveGrantSummary(organizationId, benefit._id)
+    const planLeadAllowance = Math.max(0, Number(benefit.totalLeadAllowance || 0))
+    const limit = planLeadAllowance + topup.topupLeadAllowance
     const used = benefit.leadAllowanceModel === 'active_capacity'
       ? (await Promise.all([
         synchronizeActiveLeadCapacityUsage(organizationId, limit),
@@ -880,6 +894,9 @@ const getMonthlyLeadAllowanceSnapshot = async (organizationId: string, options: 
       renewalStreak: Number(benefit.renewalStreak || 1),
       baseLeadAllowance: Number(benefit.baseLeadAllowance || 0),
       bonusLeadAllowance: Number(benefit.bonusLeadAllowance || 0),
+      planLeadAllowance,
+      topupLeadAllowance: topup.topupLeadAllowance,
+      activeTopupGrantCount: topup.grantCount,
       billingCycle: benefit.billingCycle || null,
       leadAllowanceModel: benefit.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
       renewalBonusEnabled: benefit.renewalBonusEnabled === true,
@@ -906,6 +923,9 @@ const getMonthlyLeadAllowanceSnapshot = async (organizationId: string, options: 
       renewalStreak: Number(latest.renewalStreak || 1),
       baseLeadAllowance: 0,
       bonusLeadAllowance: 0,
+      planLeadAllowance: 0,
+      topupLeadAllowance: 0,
+      activeTopupGrantCount: 0,
       billingCycle: latest.billingCycle || null,
       leadAllowanceModel: latest.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
       renewalBonusEnabled: latest.renewalBonusEnabled === true,
@@ -937,6 +957,9 @@ const getMonthlyLeadAllowanceSnapshot = async (organizationId: string, options: 
     renewalStreak: 1,
     baseLeadAllowance: limit,
     bonusLeadAllowance: 0,
+    planLeadAllowance: limit,
+    topupLeadAllowance: 0,
+    activeTopupGrantCount: 0,
     billingCycle: null,
     leadAllowanceModel: 'paid_period_credits' as const,
     renewalBonusEnabled: false,
