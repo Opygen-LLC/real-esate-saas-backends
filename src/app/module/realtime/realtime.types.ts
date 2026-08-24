@@ -7,6 +7,7 @@ export type RealtimeChannelEvent =
   | 'notification.changed'
   | 'task.changed'
   | 'viewing.changed'
+  | 'website_submission.changed'
   | 'team.changed'
   | 'auth.changed'
   | 'session.changed'

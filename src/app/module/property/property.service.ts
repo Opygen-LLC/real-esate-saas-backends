@@ -188,7 +188,13 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
 
   if (propertyType) andConditions.push({ propertyType })
   if (listingType) andConditions.push({ listingType })
-  if (status) andConditions.push(Array.isArray(status) ? { status: { $in: status } } : { status })
+  if (status) {
+    const statusValues = (Array.isArray(status) ? status : String(status).split(','))
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+    if (statusValues.length === 1) andConditions.push({ status: statusValues[0] })
+    else if (statusValues.length > 1) andConditions.push({ status: { $in: statusValues } })
+  }
   if (city) andConditions.push({ city: { $regex: city, $options: 'i' } })
   if (state) andConditions.push({ state: { $regex: state, $options: 'i' } })
   if (divisionId) andConditions.push({ 'bangladeshAddress.divisionId': divisionId })

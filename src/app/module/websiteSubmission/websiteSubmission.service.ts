@@ -2,8 +2,12 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import type { CrmAccessContext } from '../crm/crmAccess'
 import type { PublicLeadCaptureInput } from '../lead/lead.validation'
+import { Lead } from '../lead/lead.model'
+import { Viewing } from '../viewing/viewing.model'
 import type { PublicViewingRequestInput } from '../viewing/viewing.validation'
+import { RealtimeService } from '../realtime/realtime.service'
 import {
   IWebsiteSubmission,
   WebsiteSubmissionFilter,
@@ -37,12 +41,19 @@ const leadSubmissionType = (payload: PublicLeadCaptureInput): WebsiteSubmissionT
   return 'GENERAL_LEAD'
 }
 
-const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'submittedAt'> & { submittedAt?: Date }) =>
-  WebsiteSubmission.create({
+const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'submittedAt'> & { submittedAt?: Date }) => {
+  const submission = await WebsiteSubmission.create({
     ...payload,
     status: 'NEW',
     submittedAt: payload.submittedAt || new Date(),
   })
+  RealtimeService.emitOrganization(payload.organizationId, {
+    type: 'website_submission.changed',
+    action: 'created',
+    entityId: submission._id.toString(),
+  })
+  return submission
+}
 
 const captureLead = async (payload: PublicLeadCaptureInput, lead: any) => {
   const landingPage = payload.attribution?.landingPage || ''
@@ -105,7 +116,118 @@ const parseBoundary = (value: string | undefined, field: string): Date | undefin
   return parsed
 }
 
-const list = async (organizationId: string, filters: WebsiteSubmissionFilter, paginationOptions: IPaginationOptions) => {
+type WebsiteSubmissionReadOptions = {
+  includeLeadDetails?: boolean
+  includeViewingDetails?: boolean
+  crmAccess?: CrmAccessContext
+}
+
+const objectIdStrings = (rows: any[], type: 'Lead' | 'Viewing') => [...new Set(rows
+  .filter((row) => row.linkedEntityType === type && row.linkedEntityId)
+  .map((row) => String(row.linkedEntityId)))]
+
+/**
+ * Enriches submission rows with CRM metadata without ever crossing the tenant
+ * boundary. The caller decides whether Lead/Viewing details are permitted for
+ * the current user; the canonical linkedEntityId remains available regardless.
+ */
+const enrichLinkedRecords = async (
+  organizationId: string,
+  rows: any[],
+  options: WebsiteSubmissionReadOptions = {},
+) => {
+  if (!rows.length) return rows
+
+  const leadIds = options.includeLeadDetails ? objectIdStrings(rows, 'Lead') : []
+  const viewingIds = options.includeViewingDetails ? objectIdStrings(rows, 'Viewing') : []
+  const ownLeadScope = options.crmAccess?.scope === 'mine' ? { assignedAgent: options.crmAccess.userId } : {}
+  const ownViewingScope = options.crmAccess?.scope === 'mine' ? { agentId: options.crmAccess.userId } : {}
+
+  const [leads, viewings] = await Promise.all([
+    leadIds.length
+      ? Lead.find({ _id: { $in: leadIds }, organizationId, ...ownLeadScope })
+        .select('_id name leadStatus assignedAgent isLocked lockReason')
+        .populate({ path: 'assignedAgent', select: 'name email phoneNumber userRole', match: { organizationId } })
+        .lean()
+      : [],
+    viewingIds.length
+      ? Viewing.find({ _id: { $in: viewingIds }, organizationId, ...ownViewingScope })
+        .select('_id status date startTime endTime leadId agentId')
+        .populate({ path: 'agentId', select: 'name email phoneNumber userRole', match: { organizationId } })
+        .lean()
+      : [],
+  ])
+
+  const leadById = new Map(leads.map((lead: any) => [String(lead._id), lead]))
+  const viewingById = new Map(viewings.map((viewing: any) => [String(viewing._id), viewing]))
+
+  return rows.map((row) => {
+    const linkedId = String(row.linkedEntityId || '')
+    if (row.linkedEntityType === 'Lead' && options.includeLeadDetails) {
+      const lead: any = leadById.get(linkedId)
+      return {
+        ...row,
+        linkedRecord: {
+          type: 'Lead',
+          id: linkedId,
+          available: Boolean(lead),
+          ...(lead ? {
+            lead: {
+              _id: String(lead._id),
+              name: lead.name,
+              leadStatus: lead.leadStatus,
+              isLocked: Boolean(lead.isLocked),
+              lockReason: lead.lockReason,
+              assignedAgent: lead.assignedAgent ? {
+                _id: String(lead.assignedAgent._id),
+                name: lead.assignedAgent.name,
+                email: lead.assignedAgent.email,
+                phoneNumber: lead.assignedAgent.phoneNumber,
+                userRole: lead.assignedAgent.userRole,
+              } : null,
+            },
+          } : {}),
+        },
+      }
+    }
+    if (row.linkedEntityType === 'Viewing' && options.includeViewingDetails) {
+      const viewing: any = viewingById.get(linkedId)
+      return {
+        ...row,
+        linkedRecord: {
+          type: 'Viewing',
+          id: linkedId,
+          available: Boolean(viewing),
+          ...(viewing ? {
+            viewing: {
+              _id: String(viewing._id),
+              status: viewing.status,
+              date: viewing.date,
+              startTime: viewing.startTime,
+              endTime: viewing.endTime,
+              leadId: viewing.leadId ? String(viewing.leadId) : undefined,
+              agent: viewing.agentId ? {
+                _id: String(viewing.agentId._id),
+                name: viewing.agentId.name,
+                email: viewing.agentId.email,
+                phoneNumber: viewing.agentId.phoneNumber,
+                userRole: viewing.agentId.userRole,
+              } : null,
+            },
+          } : {}),
+        },
+      }
+    }
+    return row
+  })
+}
+
+const list = async (
+  organizationId: string,
+  filters: WebsiteSubmissionFilter,
+  paginationOptions: IPaginationOptions,
+  options: WebsiteSubmissionReadOptions = {},
+) => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({
     ...paginationOptions,
     sortBy: paginationOptions.sortBy || 'createdAt',
@@ -134,7 +256,7 @@ const list = async (organizationId: string, filters: WebsiteSubmissionFilter, pa
   const where = { $and: conditions }
   const [rows, total] = await Promise.all([
     WebsiteSubmission.find(where)
-      .populate({ path: 'propertyId', select: 'title slug address city images', match: { organizationId } })
+      .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
       .sort(paginationHelper.buildStableSort(sortBy, sortOrder))
       .skip(skip)
       .limit(limit)
@@ -142,18 +264,24 @@ const list = async (organizationId: string, filters: WebsiteSubmissionFilter, pa
     WebsiteSubmission.countDocuments(where),
   ])
 
-  return { meta: { page, limit, total }, data: rows }
+  return { meta: { page, limit, total }, data: await enrichLinkedRecords(organizationId, rows, options) }
 }
 
-const getById = async (organizationId: string, id: string) => {
+const getById = async (organizationId: string, id: string, options: WebsiteSubmissionReadOptions = {}) => {
   const submission = await WebsiteSubmission.findOne({ _id: id, organizationId })
-    .populate({ path: 'propertyId', select: 'title slug address city images', match: { organizationId } })
+    .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
     .lean()
   if (!submission) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
-  return submission
+  const [enriched] = await enrichLinkedRecords(organizationId, [submission], options)
+  return enriched
 }
 
-const updateStatus = async (organizationId: string, id: string, status: WebsiteSubmissionStatus) => {
+const updateStatus = async (
+  organizationId: string,
+  id: string,
+  status: WebsiteSubmissionStatus,
+  options: WebsiteSubmissionReadOptions = {},
+) => {
   const now = new Date()
   const set: Record<string, unknown> = { status }
   if (status === 'NEW') {
@@ -174,10 +302,16 @@ const updateStatus = async (organizationId: string, id: string, status: WebsiteS
     { _id: id, organizationId },
     { $set: set },
     { new: true, runValidators: true },
-  ).populate({ path: 'propertyId', select: 'title slug address city images', match: { organizationId } })
+  ).populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
 
   if (!submission) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
-  return submission
+  RealtimeService.emitOrganization(organizationId, {
+    type: 'website_submission.changed',
+    action: 'status_changed',
+    entityId: submission._id.toString(),
+  })
+  const [enriched] = await enrichLinkedRecords(organizationId, [submission.toObject()], options)
+  return enriched
 }
 
 const toPublicReceipt = (submission: any, linkedEntity: any) => ({
@@ -193,7 +327,6 @@ const toPublicReceipt = (submission: any, linkedEntity: any) => ({
   submittedAt: new Date(submission.submittedAt || submission.createdAt || Date.now()).toISOString(),
   linkedEntityId: String(linkedEntity?._id || linkedEntity?.id || submission.linkedEntityId),
 })
-
 
 const withPublicReceipt = (linkedEntity: any, submission: any) => {
   const plain = typeof linkedEntity?.toObject === 'function' ? linkedEntity.toObject() : linkedEntity
