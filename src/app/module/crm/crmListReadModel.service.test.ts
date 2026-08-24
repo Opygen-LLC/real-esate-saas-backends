@@ -25,14 +25,21 @@ describe('CRM list read-model performance contract', () => {
     expect(contactList).not.toContain('.populate(')
   })
 
-  it('enriches only the paged rows and computes total count in the same aggregate', () => {
+  it('counts separately and enriches only the bounded page so lookups are never nested in the outer facet', () => {
     const source = read('src/app/module/crm/crmListReadModel.service.ts')
-    expect(source).toContain('$facet')
-    expect(source).toContain('{ $skip: options.skip }')
-    expect(source).toContain('{ $limit: options.limit }')
-    expect(source).toContain("...leadActivityLookupStages()")
-    expect(source).toContain("...contactActivityLookupStages()")
-    expect(source).toContain("total: [{ $count: 'count' }]")
+    const leadReader = functionSlice(source, 'export const readLeadListPage = async', 'export const readContactListPage = async')
+    const contactReader = source.slice(source.indexOf('export const readContactListPage = async'))
+
+    for (const reader of [leadReader, contactReader]) {
+      expect(reader).toContain('{ $skip: options.skip }')
+      expect(reader).toContain('{ $limit: options.limit }')
+      expect(reader).toContain('Promise.all([')
+      expect(reader).not.toContain('$facet')
+    }
+    expect(leadReader).toContain("...leadActivityLookupStages()")
+    expect(leadReader).toContain('Lead.countDocuments(documentMatch as any)')
+    expect(contactReader).toContain("...contactActivityLookupStages()")
+    expect(contactReader).toContain('Contact.countDocuments(documentMatch as any)')
   })
 
 

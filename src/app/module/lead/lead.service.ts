@@ -1,7 +1,10 @@
 import httpStatus from 'http-status'
+import mongoose, { type ClientSession } from 'mongoose'
+import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import { ActivityService } from '../activity/activity.service'
@@ -23,9 +26,9 @@ import { Organization } from '../organization/organization.model'
 import { ILead, ILeadFilter } from './lead.interface'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone, getWeekBoundsInTimeZone } from './leadFollowUpTime'
 import { Lead } from './lead.model'
-import { LeadLifecycleService } from './leadLifecycle.service'
+import { LeadLifecycleService, type LifecycleEffects } from './leadLifecycle.service'
 import { LeadEntitlementService } from './leadEntitlement.service'
-import type { PublicLeadCaptureInput } from './lead.validation'
+import type { ManageLeadInput, PublicLeadCaptureInput } from './lead.validation'
 import {
   LEAD_STATUS,
   LEAD_STATUS_LABELS,
@@ -473,6 +476,156 @@ const updateLead=async(organizationId:string,id:string,payload:Partial<ILead>,ac
   return result
 }
 
+const emptyLeadManagementEffects=():LifecycleEffects=>({events:[],cancelTaskReminderIds:[],refreshTaskReminderIds:[]})
+const mergeLeadManagementEffects=(target:LifecycleEffects,source:LifecycleEffects)=>{
+  target.events.push(...source.events)
+  target.cancelTaskReminderIds.push(...source.cancelTaskReminderIds)
+  target.refreshTaskReminderIds.push(...source.refreshTaskReminderIds)
+}
+
+const applyLeadProfilePatchInTransaction=async(
+  organizationId:string,
+  id:string,
+  payload:Partial<ILead>,
+  actorId:string|undefined,
+  access:CrmAccessContext|undefined,
+  session:ClientSession,
+  effects:LifecycleEffects,
+)=>{
+  if(!Object.keys(payload).length)return
+  assertGenericLeadPatchFields(payload)
+  const ownerFilter=crmMutationOwnerFilter('assignedAgent',access)
+  const current:any=await Lead.findOne({_id:id,organizationId,...ownerFilter}).session(session)
+  if(!current)throw new ApiError(404,'Lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id,session)
+
+  const prepared:any=prepareLeadMutationPayload(payload,actorId)
+  if(prepared.phone){prepared.phone=normalizePhone(prepared.phone);prepared.normalizedPhone=prepared.phone}
+  if(prepared.email!==undefined)prepared.normalizedEmail=normalizeOptionalEmail(prepared.email)
+  const scored=scoreLead({...current.toObject(),...prepared})
+  prepared.leadScore=scored.score
+  prepared.scoreReasons=scored.reasons
+
+  for(const [key,value] of Object.entries(prepared))current.set(key,value)
+  await current.save({session})
+
+  const event={organizationId,aggregateType:'lead' as const,aggregateId:id,eventType:'lead.updated',leadId:id,actorId,payload:{summary:'Lead profile fields updated',fields:Object.keys(payload)}}
+  await DomainEventService.emit(event,{session,deferPublish:true})
+  effects.events.push(event)
+}
+
+const manageLead=async(
+  organizationId:string,
+  id:string,
+  input:ManageLeadInput,
+  actorId?:string,
+  access?:CrmAccessContext,
+)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  const {
+    leadStatus,
+    assignedAgent,
+    followUpDate,
+    lostReason,
+    reason,
+    followUpTitle,
+    followUpPriority,
+    ...profilePayload
+  }=input
+
+  let effects=emptyLeadManagementEffects()
+  const mutate=async(session:ClientSession)=>{
+    const attemptEffects=emptyLeadManagementEffects()
+    const hasProfilePatch=Object.keys(profilePayload).length>0
+    const hasMutableLifecycleChange=Boolean(followUpDate||leadStatus)
+    const hasMutableChange=hasProfilePatch||hasMutableLifecycleChange
+
+    // Authorize the mutable portion against the pre-mutation owner while the same
+    // transaction snapshot is active. This is important when this request also
+    // reassigns the Lead: subsequent lifecycle work must not become unauthorized
+    // simply because the assignment changed earlier in this same atomic command.
+    if(hasMutableChange&&!hasProfilePatch){
+      const ownerFilter=crmMutationOwnerFilter('assignedAgent',access)
+      const current=await Lead.findOne({_id:id,organizationId,...ownerFilter}).session(session)
+      if(!current)throw new ApiError(404,'Lead not found')
+      await LeadEntitlementService.assertLeadAccessible(organizationId,id,session)
+    }
+    if(assignedAgent&&hasMutableChange&&access&&!canAssignLeadTo(access,assignedAgent)){
+      throw new ApiError(403,'Assigning a lead to another team member requires leads.assign')
+    }
+
+    await applyLeadProfilePatchInTransaction(organizationId,id,profilePayload as Partial<ILead>,actorId,access,session,attemptEffects)
+
+    // Assignment runs before follow-up so an unassigned Lead can receive its task.
+    // Once the mutable portion has been authorized above, internal lifecycle steps
+    // use the already-authorized transaction rather than re-evaluating ownership
+    // after assignment changes it. Follow-up still precedes FollowUpScheduled.
+    if(assignedAgent){
+      const assignment=await LeadLifecycleService.assignLeadInTransaction(organizationId,id,assignedAgent,session,{actorId,access:hasMutableChange?undefined:access,reason:reason||'Lead management update'})
+      mergeLeadManagementEffects(attemptEffects,assignment.effects)
+    }
+    if(followUpDate){
+      const followUp=await LeadLifecycleService.scheduleFollowUpInTransaction(organizationId,id,followUpDate,session,{actorId,access:undefined,reason,title:followUpTitle,priority:followUpPriority})
+      mergeLeadManagementEffects(attemptEffects,followUp.effects)
+    }
+    if(leadStatus){
+      const status=await LeadLifecycleService.changeStatusInTransaction(organizationId,id,leadStatus,session,{actorId,access:undefined,lostReason,reason})
+      mergeLeadManagementEffects(attemptEffects,status.effects)
+    }
+
+    // Re-score from the committed-in-this-transaction state so adding a follow-up
+    // through the management endpoint immediately affects the Lead score as well.
+    const finalLead:any=await Lead.findOne({_id:id,organizationId}).session(session)
+    if(!finalLead)throw new ApiError(404,'Lead not found')
+    const scored=scoreLead(finalLead.toObject())
+    if(finalLead.leadScore!==scored.score||JSON.stringify(finalLead.scoreReasons||[])!==JSON.stringify(scored.reasons)){
+      finalLead.leadScore=scored.score
+      finalLead.scoreReasons=scored.reasons
+      if(actorId)finalLead.updatedBy=actorId
+      await finalLead.save({session})
+    }
+
+    effects=attemptEffects
+  }
+
+  const supportsTransactions=await mongoSupportsTransactions()
+  if(supportsTransactions){
+    const session=await mongoose.startSession()
+    try{
+      await session.withTransaction(async()=>{
+        // withTransaction may retry. Only retain deferred effects from the
+        // successful attempt so realtime/activity publication remains exactly once.
+        effects=emptyLeadManagementEffects()
+        await mutate(session)
+      })
+    }finally{
+      await session.endSession()
+    }
+  }else{
+    if(config.isProduction)throw new ApiError(503,'Lead management mutations require a MongoDB replica set or mongos in production')
+    // Development-only compatibility for standalone MongoDB. Production never uses
+    // this branch, so paid-customer writes remain transactionally atomic.
+    if(Object.keys(profilePayload).length)await updateLead(organizationId,id,profilePayload as Partial<ILead>,actorId,access)
+    if(assignedAgent)await assignAgent(organizationId,id,assignedAgent,undefined,actorId,access)
+    if(followUpDate)await scheduleFollowUp(organizationId,id,followUpDate,actorId,access,reason,followUpTitle,followUpPriority)
+    if(leadStatus)await updateLeadStatus(organizationId,id,leadStatus,lostReason,actorId,access,reason)
+  }
+
+  if(supportsTransactions)await LeadLifecycleService.publishDeferredEffects(organizationId,effects)
+
+  // Return the exact record just mutated. The mutation itself already enforced CRM
+  // ownership/assignment permissions; this one response remains usable even when an
+  // authorized reassignment moves the Lead out of the caller's subsequent "mine" scope.
+  const result=await Lead.findOne({_id:id,organizationId,isLocked:{$ne:true}})
+    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
+    .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
+    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
+    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms status')
+    .populate('contactId','name email phone address company tags')
+  if(!result)throw new ApiError(404,'Lead not found')
+  return result
+}
+
 const updateLeadStatus=async(organizationId:string,id:string,leadStatus:string,lostReason?:string,agentId?:string,access?:CrmAccessContext,reason?:string)=>{
   await LeadEntitlementService.assertLeadAccessible(organizationId,id)
   return LeadLifecycleService.changeStatus(organizationId,id,leadStatus,{lostReason,reason,actorId:agentId,access})
@@ -599,4 +752,4 @@ const exportCsv = async (organizationId: string, filters: ILeadFilter, access?: 
 const exportXlsx = async (organizationId: string, filters: ILeadFilter, access?: CrmAccessContext) =>
   buildCrmXlsx('Leads', LEAD_EXPORT_COLUMNS, await getLeadExportRows(organizationId, filters, access))
 
-export const LeadService={createLead,createLeadWithOutcome,publicCaptureLead,getAllLeads,getTodayFollowUps,getLeadById,updateLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}
+export const LeadService={createLead,createLeadWithOutcome,publicCaptureLead,getAllLeads,getTodayFollowUps,getLeadById,updateLead,manageLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}

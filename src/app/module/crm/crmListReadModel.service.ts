@@ -420,14 +420,6 @@ const contactActivityLookupStages = (): PipelineStage.FacetPipelineStage[] => [
   { $unset: '__activityReadModel' },
 ]
 
-const unwrapFacet = <T>(result: any[]): ReadModelPage<T> => {
-  const facet = result[0] || {}
-  return {
-    rows: Array.isArray(facet.rows) ? facet.rows : [],
-    total: Number(facet.total?.[0]?.count || 0),
-  }
-}
-
 const publicUserRef = (value: any) => {
   if (!value || typeof value !== 'object') return value
   return {
@@ -683,57 +675,58 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
 }
 
 export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
-  try {
-    const result = await Lead.aggregate([
-    { $match: castAggregationMatch(accessibleLeadMatch(options.match)) as Record<string, unknown> },
-    {
-      $facet: {
-        rows: [
-          { $sort: sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') },
-          { $skip: options.skip },
-          { $limit: options.limit },
-          ...lockedLeadRedactionStages(),
-          ...userLookupStages('assignedAgent'),
-          ...userLookupStages('createdBy'),
-          ...userLookupStages('updatedBy'),
-          ...propertyLookupStages(),
-          ...leadActivityLookupStages(),
-          ...leadFollowUpLookupStages(),
-          ...leadContactLookupStages(),
-        ],
-        total: [{ $count: 'count' }],
-      },
-    },
-    ]).allowDiskUse(true)
+  const documentMatch = accessibleLeadMatch(options.match) as Record<string, unknown>
+  const aggregateMatch = castAggregationMatch(documentMatch) as Record<string, unknown>
+  const rowPipeline: PipelineStage[] = [
+    { $match: aggregateMatch },
+    { $sort: sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') },
+    { $skip: options.skip },
+    { $limit: options.limit },
+    ...lockedLeadRedactionStages(),
+    ...userLookupStages('assignedAgent'),
+    ...userLookupStages('createdBy'),
+    ...userLookupStages('updatedBy'),
+    ...propertyLookupStages(),
+    ...leadActivityLookupStages(),
+    ...leadFollowUpLookupStages(),
+    ...leadContactLookupStages(),
+  ] as PipelineStage[]
 
-    return unwrapFacet<T>(result)
+  try {
+    // Production Mongo rejects lookup stages nested inside an outer facet stage.
+    // Keep counting and page hydration as independent queries: the count stays
+    // cheap, and expensive lookups only run for the bounded page of rows.
+    const [rows, total] = await Promise.all([
+      Lead.aggregate(rowPipeline).allowDiskUse(true),
+      Lead.countDocuments(documentMatch as any),
+    ])
+    return { rows: rows as T[], total }
   } catch (error) {
-    logger.warn('crm_lead_read_model_fallback', { error })
+    logger.warn('crm_lead_read_model_failed', { error })
     return readLeadListPageFallback<T>(options)
   }
 }
 
 export const readContactListPage = async <T = any>(options: ContactListReadModelOptions): Promise<ReadModelPage<T>> => {
-  try {
-    const result = await Contact.aggregate([
-      { $match: castAggregationMatch({ $and: [options.match, { organizationId: options.organizationId }] }) as Record<string, unknown> },
-      {
-        $facet: {
-          rows: [
-            { $sort: sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt') },
-            { $skip: options.skip },
-            { $limit: options.limit },
-            ...userLookupStages('assignedTo'),
-            ...propertyLookupStages(),
-            ...contactActivityLookupStages(),
-            ...sourceLeadLookupStages(),
-          ],
-          total: [{ $count: 'count' }],
-        },
-      },
-    ]).allowDiskUse(true)
+  const documentMatch = { $and: [options.match, { organizationId: options.organizationId }] } as Record<string, unknown>
+  const aggregateMatch = castAggregationMatch(documentMatch) as Record<string, unknown>
+  const rowPipeline: PipelineStage[] = [
+    { $match: aggregateMatch },
+    { $sort: sortSpec(options.sortBy, options.sortOrder, CONTACT_SORT_FIELDS, 'updatedAt') },
+    { $skip: options.skip },
+    { $limit: options.limit },
+    ...userLookupStages('assignedTo'),
+    ...propertyLookupStages(),
+    ...contactActivityLookupStages(),
+    ...sourceLeadLookupStages(),
+  ] as PipelineStage[]
 
-    return unwrapFacet<T>(result)
+  try {
+    const [rows, total] = await Promise.all([
+      Contact.aggregate(rowPipeline).allowDiskUse(true),
+      Contact.countDocuments(documentMatch as any),
+    ])
+    return { rows: rows as T[], total }
   } catch (error) {
     const candidate = error as { code?: unknown; codeName?: unknown; name?: unknown }
     logger.warn('crm_contact_read_model_failed', {

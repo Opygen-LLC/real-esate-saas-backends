@@ -68,6 +68,13 @@ const updateLead = catchAsync(async (req, res) => sendResponse(res, {
   data: await LeadService.updateLead(requireTenant(req), req.params.id, req.body, actor(req), crmAccessFromRequest(req)),
 }))
 
+const manageLead = catchAsync(async (req, res) => sendResponse(res, {
+  statusCode: 200,
+  success: true,
+  message: 'Lead management changes saved successfully',
+  data: await LeadService.manageLead(requireTenant(req), req.params.id, req.body, actor(req), crmAccessFromRequest(req)),
+}))
+
 const updateLeadStatus = catchAsync(async (req, res) => sendResponse(res, {
   statusCode: 200,
   success: true,
@@ -212,6 +219,7 @@ export const LeadController = {
   getTodayFollowUps,
   getLeadById,
   updateLead,
+  manageLead,
   updateLeadStatus,
   assignAgent,
   scheduleFollowUp,

@@ -22,6 +22,7 @@ router.get('/:id/history',authMiddlewares.requirePermission('leads.read'),LeadCo
 router.post('/:id/notes',authMiddlewares.requirePermission('leads.write'),validateRequest(ActivityValidation.appendNoteZodSchema),LeadController.addNote)
 router.get('/:id',authMiddlewares.requirePermission('leads.read'),LeadController.getLeadById)
 router.patch('/:id',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.updateLeadZodSchema),LeadController.updateLead)
+router.patch('/:id/manage',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.manageLeadZodSchema),LeadController.manageLead)
 router.patch('/:id/status',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.updateLeadStatusZodSchema),LeadController.updateLeadStatus)
 router.patch('/:id/assign',authMiddlewares.requirePermission('leads.assign'),validateRequest(LeadValidation.assignLeadAgentZodSchema),LeadController.assignAgent)
 router.patch('/:id/follow-up',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.scheduleLeadFollowUpZodSchema),LeadController.scheduleFollowUp)

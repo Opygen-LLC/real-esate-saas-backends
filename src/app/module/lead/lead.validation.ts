@@ -75,6 +75,30 @@ const updateLeadZodSchema = z.object({
     phone: leadFields.phone.optional(),
   }).partial().strict(),
 })
+const manageLeadBody = z.object({
+  ...genericEditableLeadFields,
+  name: leadFields.name.optional(),
+  phone: leadFields.phone.optional(),
+  leadStatus: leadStatusSchema.optional(),
+  assignedAgent: objectIdSchema.optional(),
+  followUpDate: z.string().datetime().optional(),
+  lostReason: z.string().trim().max(120).optional(),
+  reason: z.string().trim().max(500).optional(),
+  followUpTitle: z.string().trim().min(1).max(200).optional(),
+  followUpPriority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+}).partial().strict().superRefine((value, ctx) => {
+  if (value.leadStatus === 'Lost' && !value.lostReason) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['lostReason'],
+      message: 'A lost reason is required when marking a Lead as Lost',
+    })
+  }
+  if (!Object.keys(value).length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one Lead field is required' })
+  }
+})
+const manageLeadZodSchema = z.object({ body: manageLeadBody })
 const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: leadStatusSchema, lostReason: z.string().trim().max(120).optional(), reason: z.string().trim().max(500).optional() }).strict() })
 const scheduleLeadFollowUpZodSchema = z.object({ body: z.object({ followUpDate: z.string().datetime(), title: z.string().trim().min(1).max(200).optional(), priority: z.enum(['low','medium','high','urgent']).optional(), reason: z.string().trim().max(500).optional() }).strict() })
 const reengageLeadZodSchema = z.object({ body: z.object({ reason: z.string().trim().max(500).optional() }).strict() })
@@ -86,5 +110,6 @@ const assignLeadAgentZodSchema = z.object({
 })
 const confirmImportZodSchema = z.object({ body: z.object({ importSessionId: z.string().uuid('Invalid import session') }).strict() })
 
-export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
+export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, manageLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
 export type PublicLeadCaptureInput = z.infer<typeof publicCaptureZodSchema>['body']
+export type ManageLeadInput = z.infer<typeof manageLeadBody>

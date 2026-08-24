@@ -292,16 +292,15 @@ const findSafeConversionContact = async (lead: any, session?: ClientSession) => 
   return candidates[0] || null
 }
 
-const convertToContact = async (
+const convertToContactMutation = async (
   organizationId: string,
   leadId: string,
-  actorId?: string,
-  access?: CrmAccessContext,
-  reason = 'Lead won / converted',
+  actorId: string | undefined,
+  access: CrmAccessContext | undefined,
+  reason: string,
+  session: ClientSession | undefined,
+  effects: LifecycleEffects,
 ): Promise<LeadLifecycleResult> => {
-  // Keep direct service callers on the same configured pipeline contract as changeStatus().
-  await validateConfiguredStage(organizationId, LEAD_CONVERSION_STATUS)
-  return runLifecycleMutation(organizationId, async (session, effects) => {
   const lead: any = await loadMutableLead(organizationId, leadId, access, session)
   const previousStatus = normalizeLeadStatus(lead.leadStatus) || String(lead.leadStatus || LEAD_STATUS.NEW)
   const changedAt = new Date()
@@ -403,7 +402,39 @@ const convertToContact = async (
   }, session, effects)
 
   return { lead, contact: contactIdentity(contact) }
-  })
+}
+
+const convertToContact = async (
+  organizationId: string,
+  leadId: string,
+  actorId?: string,
+  access?: CrmAccessContext,
+  reason = 'Lead won / converted',
+): Promise<LeadLifecycleResult> => {
+  // Keep direct service callers on the same configured pipeline contract as changeStatus().
+  await validateConfiguredStage(organizationId, LEAD_CONVERSION_STATUS)
+  return runLifecycleMutation(organizationId, (session, effects) =>
+    convertToContactMutation(organizationId, leadId, actorId, access, reason, session, effects))
+}
+
+const convertToContactInTransaction = async (
+  organizationId: string,
+  leadId: string,
+  session: ClientSession,
+  options: { reason?: string; actorId?: string; access?: CrmAccessContext } = {},
+): Promise<{ result: LeadLifecycleResult; effects: LifecycleEffects }> => {
+  await validateConfiguredStage(organizationId, LEAD_CONVERSION_STATUS)
+  const effects = emptyEffects()
+  const result = await convertToContactMutation(
+    organizationId,
+    leadId,
+    options.actorId,
+    options.access,
+    options.reason || 'Lead won / converted',
+    session,
+    effects,
+  )
+  return { result, effects }
 }
 
 const changeStatus = async (
@@ -446,7 +477,7 @@ const changeStatusInTransaction = async (
   const newStatus = requireLeadStatus(status)
   await validateConfiguredStage(organizationId, newStatus, options.lostReason)
   if (newStatus === LEAD_CONVERSION_STATUS) {
-    throw new ApiError(400, 'Lead conversion cannot be nested inside another transaction')
+    return convertToContactInTransaction(organizationId, leadId, session, options)
   }
 
   const effects = emptyEffects()
@@ -465,12 +496,14 @@ const changeStatusInTransaction = async (
   return { result: { lead, contact: null }, effects }
 }
 
-const assignLead = async (
+const assignLeadMutation = async (
   organizationId: string,
   leadId: string,
   assignedAgent: string,
-  options: { actorId?: string; reason?: string; access?: CrmAccessContext } = {},
-) => runLifecycleMutation(organizationId, async (session, effects) => {
+  options: { actorId?: string; reason?: string; access?: CrmAccessContext },
+  session: ClientSession | undefined,
+  effects: LifecycleEffects,
+) => {
   if (options.access && !canAssignLeadTo(options.access, assignedAgent)) {
     throw new ApiError(403, 'Assigning a lead to another team member requires leads.assign')
   }
@@ -515,7 +548,76 @@ const assignLead = async (
   }, session, effects)
 
   return lead
-})
+}
+
+const assignLead = async (
+  organizationId: string,
+  leadId: string,
+  assignedAgent: string,
+  options: { actorId?: string; reason?: string; access?: CrmAccessContext } = {},
+) => runLifecycleMutation(organizationId, (session, effects) =>
+  assignLeadMutation(organizationId, leadId, assignedAgent, options, session, effects))
+
+const assignLeadInTransaction = async (
+  organizationId: string,
+  leadId: string,
+  assignedAgent: string,
+  session: ClientSession,
+  options: { actorId?: string; reason?: string; access?: CrmAccessContext } = {},
+): Promise<{ lead: any; effects: LifecycleEffects }> => {
+  const effects = emptyEffects()
+  const lead = await assignLeadMutation(organizationId, leadId, assignedAgent, options, session, effects)
+  return { lead, effects }
+}
+
+const scheduleFollowUpMutation = async (
+  organizationId: string,
+  leadId: string,
+  dueAt: Date,
+  options: { actorId?: string; reason?: string; title?: string; priority?: 'low'|'medium'|'high'|'urgent'; access?: CrmAccessContext },
+  session: ClientSession | undefined,
+  effects: LifecycleEffects,
+) => {
+  const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
+  if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Schedule follow-up from the Contact instead.')
+  if (!lead.assignedAgent) throw new ApiError(400, 'Assign the Lead before scheduling a follow-up')
+
+  lead.followUpDate = dueAt
+  // nextFollowUp remains in the schema only for rollout compatibility. Once this
+  // Lead is touched by the canonical scheduler, remove the stale legacy value.
+  lead.nextFollowUp = undefined
+  if (options.actorId) lead.updatedBy = options.actorId
+  await lead.save(session ? { session } : undefined)
+
+  const task: any = await TaskService.syncLeadFollowUpTask({
+    organizationId,
+    leadId,
+    assignedAgent: String(lead.assignedAgent),
+    dueAt,
+    title: options.title?.trim() || `Follow up with ${lead.name}`,
+    description: options.reason || 'Scheduled from Lead follow-up',
+    priority: options.priority || 'medium',
+  }, session)
+  effects.refreshTaskReminderIds.push(String(task._id))
+
+  await emitLifecycleEvent({
+    organizationId,
+    aggregateType: 'lead',
+    aggregateId: leadId,
+    eventType: 'lead.follow_up_scheduled',
+    leadId,
+    actorId: options.actorId,
+    payload: {
+      summary: `Follow-up scheduled for ${dueAt.toISOString()}`,
+      followUpDate: dueAt.toISOString(),
+      assignedAgentId: String(lead.assignedAgent),
+      reason: options.reason || '',
+      taskId: String(task._id),
+    },
+  }, session, effects)
+
+  return { lead, task }
+}
 
 const scheduleFollowUp = async (
   organizationId: string,
@@ -525,48 +627,22 @@ const scheduleFollowUp = async (
 ) => {
   const dueAt = followUpDate instanceof Date ? followUpDate : new Date(followUpDate)
   if (Number.isNaN(dueAt.getTime())) throw new ApiError(400, 'Invalid follow-up date')
+  return runLifecycleMutation(organizationId, (session, effects) =>
+    scheduleFollowUpMutation(organizationId, leadId, dueAt, options, session, effects))
+}
 
-  return runLifecycleMutation(organizationId, async (session, effects) => {
-    const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
-    if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Schedule follow-up from the Contact instead.')
-    if (!lead.assignedAgent) throw new ApiError(400, 'Assign the Lead before scheduling a follow-up')
-
-    lead.followUpDate = dueAt
-    // nextFollowUp remains in the schema only for rollout compatibility. Once this
-    // Lead is touched by the canonical scheduler, remove the stale legacy value.
-    lead.nextFollowUp = undefined
-    if (options.actorId) lead.updatedBy = options.actorId
-    await lead.save(session ? { session } : undefined)
-
-    const task: any = await TaskService.syncLeadFollowUpTask({
-      organizationId,
-      leadId,
-      assignedAgent: String(lead.assignedAgent),
-      dueAt,
-      title: options.title?.trim() || `Follow up with ${lead.name}`,
-      description: options.reason || 'Scheduled from Lead follow-up',
-      priority: options.priority || 'medium',
-    }, session)
-    effects.refreshTaskReminderIds.push(String(task._id))
-
-    await emitLifecycleEvent({
-      organizationId,
-      aggregateType: 'lead',
-      aggregateId: leadId,
-      eventType: 'lead.follow_up_scheduled',
-      leadId,
-      actorId: options.actorId,
-      payload: {
-        summary: `Follow-up scheduled for ${dueAt.toISOString()}`,
-        followUpDate: dueAt.toISOString(),
-        assignedAgentId: String(lead.assignedAgent),
-        reason: options.reason || '',
-        taskId: String(task._id),
-      },
-    }, session, effects)
-
-    return { lead, task }
-  })
+const scheduleFollowUpInTransaction = async (
+  organizationId: string,
+  leadId: string,
+  followUpDate: Date | string,
+  session: ClientSession,
+  options: { actorId?: string; reason?: string; title?: string; priority?: 'low'|'medium'|'high'|'urgent'; access?: CrmAccessContext } = {},
+): Promise<{ lead: any; task: any; effects: LifecycleEffects }> => {
+  const dueAt = followUpDate instanceof Date ? followUpDate : new Date(followUpDate)
+  if (Number.isNaN(dueAt.getTime())) throw new ApiError(400, 'Invalid follow-up date')
+  const effects = emptyEffects()
+  const result = await scheduleFollowUpMutation(organizationId, leadId, dueAt, options, session, effects)
+  return { ...result, effects }
 }
 
 const recordContact = async (
@@ -633,8 +709,11 @@ export const LeadLifecycleService = {
   changeStatusInTransaction,
   publishDeferredEffects,
   assignLead,
+  assignLeadInTransaction,
   scheduleFollowUp,
+  scheduleFollowUpInTransaction,
   recordContact,
   convertToContact,
+  convertToContactInTransaction,
   reengage,
 }
