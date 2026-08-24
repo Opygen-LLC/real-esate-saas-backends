@@ -165,6 +165,7 @@ const propertyLookupStages = (): PipelineStage.FacetPipelineStage[] => [
             price: 1,
             city: 1,
             propertyType: 1,
+            status: 1,
             bedrooms: 1,
             bathrooms: 1,
             images: { $slice: [{ $cond: [{ $isArray: '$images' }, '$images', []] }, 1] },

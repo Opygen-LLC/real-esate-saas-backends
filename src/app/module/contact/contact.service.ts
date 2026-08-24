@@ -5,7 +5,7 @@ import paginationHelper from '../../helpers/paginationHelper'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { User } from '../user/user.model'
-import { crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { readContactListPage } from '../crm/crmListReadModel.service'
 import { userRefPopulate } from '../user/userProfile.service'
@@ -131,7 +131,7 @@ const createContact = async (
   access?: CrmAccessContext,
 ): Promise<IContact> => {
   const prepared: any = prepareEditablePayload(payload, actorId)
-  if (access && !access.isManager) {
+  if (access && !canManageTeamCrm(access)) {
     if (prepared.assignedTo && String(prepared.assignedTo) !== access.userId) {
       throw new ApiError(403, 'Team members can only create contacts assigned to themselves')
     }
@@ -187,8 +187,8 @@ const getContactById = async (organizationId: string, id: string, access?: CrmAc
     .populate(userRefPopulate('convertedBy', 'name email userRole profileImgURL'))
     .populate(userRefPopulate('createdBy', 'name email userRole profileImgURL'))
     .populate(userRefPopulate('updatedBy', 'name email userRole profileImgURL'))
-    .populate({ path: 'sourceLeadId', select: 'name phone email source leadStatus budgetMin budgetMax currency locationPreference propertyType bedrooms propertyInterest firstContactedAt followUpDate convertedAt createdAt updatedAt isConverted', populate: { path: 'propertyInterest', select: 'title price city propertyType' } })
-    .populate('propertyInterest', 'title price images city propertyType bedrooms bathrooms')
+    .populate({ path: 'sourceLeadId', select: 'name phone email source leadStatus budgetMin budgetMax currency locationPreference propertyType bedrooms propertyInterest firstContactedAt followUpDate convertedAt createdAt updatedAt isConverted', populate: { path: 'propertyInterest', select: 'title price city propertyType status' } })
+    .populate('propertyInterest', 'title price images city propertyType bedrooms bathrooms status')
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Contact not found')
   return result
 }
@@ -201,7 +201,7 @@ const updateContact = async (
   access?: CrmAccessContext,
 ): Promise<IContact | null> => {
   const prepared: any = prepareEditablePayload(payload, actorId)
-  if (access && !access.isManager && prepared.assignedTo !== undefined && String(prepared.assignedTo) !== access.userId) {
+  if (access && !canManageTeamCrm(access) && prepared.assignedTo !== undefined && String(prepared.assignedTo) !== access.userId) {
     throw new ApiError(403, 'Team members cannot reassign contacts to another member')
   }
   await assertAssignedMember(organizationId, prepared.assignedTo)
@@ -211,7 +211,7 @@ const updateContact = async (
   })
     .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL'))
     .populate('sourceLeadId', 'name phone email leadStatus source createdAt')
-    .populate('propertyInterest', 'title price images city propertyType')
+    .populate('propertyInterest', 'title price images city propertyType status')
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Contact not found')
   await DomainEventService.emit({
     organizationId,

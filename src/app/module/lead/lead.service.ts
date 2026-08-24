@@ -10,7 +10,7 @@ import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { CrmService } from '../crm/crm.service'
 import { readLeadListPage } from '../crm/crmListReadModel.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
-import { canAssignLeadTo, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { canAssignLeadTo, canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -186,7 +186,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
   }
 
   const duplicates:any[]=await findDuplicates(organizationId,normalizedPhone,normalizedEmail)
-  if(access&&!access.isManager&&duplicates.some((lead:any)=>String(lead.assignedAgent||'')!==access.userId)){
+  if(access&&!canManageTeamCrm(access)&&duplicates.some((lead:any)=>String(lead.assignedAgent||'')!==access.userId)){
     throw new ApiError(409,'A matching lead already exists under another team member. Ask an owner/admin to review the duplicate.')
   }
   if(duplicates.length){
@@ -443,7 +443,7 @@ const getLeadById=async(organizationId:string,id:string,access?:CrmAccessContext
     .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
     .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
     .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
-    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms')
+    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms status')
     .populate('contactId','name email phone address company tags')
   if(!result)throw new ApiError(404,'Lead not found')
   return result
@@ -463,7 +463,7 @@ const updateLead=async(organizationId:string,id:string,payload:Partial<ILead>,ac
   prepared.scoreReasons=scored.reasons
   const result=await Lead.findOneAndUpdate({_id:id,organizationId,...ownerFilter,isLocked:{$ne:true}},prepared,{new:true,runValidators:true})
     .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole'))
-    .populate('propertyInterest','title price images city')
+    .populate('propertyInterest','title price images city status')
   if(!result) {
     await LeadEntitlementService.assertLeadAccessible(organizationId,id)
     throw new ApiError(404,'Lead not found')

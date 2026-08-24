@@ -5,7 +5,7 @@ import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common
 import paginationHelper from '../../helpers/paginationHelper'
 import { CrmService } from '../crm/crm.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
-import { crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Lead } from '../lead/lead.model'
 import { LeadEntitlementService } from '../lead/leadEntitlement.service'
@@ -111,7 +111,7 @@ const createTask = async (organizationId: string, payload: Partial<ITask>, actor
   if (prepared.taskType === TASK_TYPE.LEAD_FOLLOW_UP) {
     throw new ApiError(400, 'Lead follow-up tasks must be scheduled through the Lead follow-up endpoint')
   }
-  if (access && !access.isManager) {
+  if (access && !canManageTeamCrm(access)) {
     if (prepared.assignedAgent && String(prepared.assignedAgent) !== access.userId) {
       throw new ApiError(403, 'Team members can only create tasks assigned to themselves')
     }
@@ -382,7 +382,7 @@ const updateTask = async (
 
   const previousStatus = task.status
   const prepared: any = normalizeDueFields(payload, task)
-  if (access && !access.isManager && prepared.assignedAgent !== undefined && String(prepared.assignedAgent) !== access.userId) {
+  if (access && !canManageTeamCrm(access) && prepared.assignedAgent !== undefined && String(prepared.assignedAgent) !== access.userId) {
     throw new ApiError(403, 'Team members cannot reassign tasks to another member')
   }
   const relationCandidate = {

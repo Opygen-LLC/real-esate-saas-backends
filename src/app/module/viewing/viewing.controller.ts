@@ -7,14 +7,14 @@ import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { ViewingService } from './viewing.service'
 import { requireTenant } from '../../middlewares/auth'
-import { crmAccessFromRequest } from '../crm/crmAccess'
+import { canManageTeamCrm, crmAccessFromRequest, crmRecordReadAccessFromRequest } from '../crm/crmAccess'
 import { WebsiteSubmissionService } from '../websiteSubmission/websiteSubmission.service'
 
 const checkConflict = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { agentId, propertyId, date, startTime, endTime, excludeViewingId } = req.body
   const access = crmAccessFromRequest(req)
-  if (!access.isManager && String(agentId) !== access.userId) {
+  if (!canManageTeamCrm(access) && String(agentId) !== access.userId) {
     throw new ApiError(403, 'Team members can only check their own viewing availability')
   }
 
@@ -77,7 +77,7 @@ const getAllViewings = catchAsync(async (req: Request, res: Response) => {
   filters.organizationId = requireTenant(req)
 
   const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
-  const result = await ViewingService.getAllViewings(filters, paginationOptions)
+  const result = await ViewingService.getAllViewings(filters, paginationOptions, crmAccessFromRequest(req, req.query.scope))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -121,7 +121,7 @@ const getCalendarViewings = catchAsync(async (req: Request, res: Response) => {
     status: filters.status ? String(filters.status) : undefined,
     propertyId: filters.propertyId ? String(filters.propertyId) : undefined,
     agentId: filters.agentId ? String(filters.agentId) : undefined,
-  })
+  }, crmAccessFromRequest(req, req.query.scope))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -134,7 +134,7 @@ const getCalendarViewings = catchAsync(async (req: Request, res: Response) => {
 const getViewingById = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await ViewingService.getViewingById(organizationId, id)
+  const result = await ViewingService.getViewingById(organizationId, id, crmRecordReadAccessFromRequest(req))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

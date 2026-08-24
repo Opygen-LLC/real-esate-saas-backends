@@ -9,6 +9,7 @@ export type CrmAccessContext = {
   permissions: string[]
   isManager: boolean
   canReadTeam: boolean
+  canManageTeam: boolean
   scope: CrmRecordScope
 }
 
@@ -26,7 +27,8 @@ export const crmAccessFromRequest = (req: Request, requestedScope?: unknown): Cr
   if (!userId) throw new ApiError(403, 'Authenticated CRM user context is required')
 
   const isManager = isCrmManagerRole(role)
-  const canReadTeam = isManager || permissions.includes('crm.team.read')
+  const canManageTeam = isManager || permissions.includes('crm.team.manage')
+  const canReadTeam = canManageTeam || permissions.includes('crm.team.read')
   let requested = String(requestedScope || '').trim().toLowerCase()
   if (requested.startsWith('team')) requested = 'team'
   else if (requested.startsWith('mine')) requested = 'mine'
@@ -38,17 +40,17 @@ export const crmAccessFromRequest = (req: Request, requestedScope?: unknown): Cr
     throw new ApiError(403, 'Team-wide CRM visibility requires crm.team.read')
   }
 
-  // Owners/admins see the agency by default. Team members remain scoped to their
-  // own records unless they explicitly request team scope and have crm.team.read.
+  // Role managers and members with crm.team.manage see the agency by default.
+  // Team-read-only members remain scoped to their own records unless they explicitly request team scope.
   const scope: CrmRecordScope = requested === 'mine'
     ? 'mine'
     : requested === 'team'
       ? 'team'
-      : isManager
+      : canManageTeam
         ? 'team'
         : 'mine'
 
-  return { userId, role, permissions, isManager, canReadTeam, scope }
+  return { userId, role, permissions, isManager, canReadTeam, canManageTeam, scope }
 }
 
 
@@ -62,12 +64,21 @@ export const crmReadOwnerFilter = (field: string, access?: CrmAccessContext): Re
   return { [field]: access.userId }
 }
 
+export const canManageTeamCrm = (access?: Pick<CrmAccessContext, 'isManager' | 'canManageTeam'>): boolean =>
+  Boolean(access && (access.isManager || access.canManageTeam))
+
 export const crmMutationOwnerFilter = (field: string, access?: CrmAccessContext): Record<string, unknown> => {
-  if (!access || access.isManager) return {}
+  if (!access || canManageTeamCrm(access)) return {}
+  return { [field]: access.userId }
+}
+
+export const crmAssignmentOwnerFilter = (field: string, access?: CrmAccessContext): Record<string, unknown> => {
+  if (!access || canManageTeamCrm(access)) return {}
+  if (access.canReadTeam && access.permissions.includes('leads.assign')) return {}
   return { [field]: access.userId }
 }
 
 export const canAssignLeadTo = (access: CrmAccessContext | undefined, assignedAgent?: string): boolean => {
-  if (!access || access.isManager || !assignedAgent || assignedAgent === access.userId) return true
+  if (!access || canManageTeamCrm(access) || !assignedAgent || assignedAgent === access.userId) return true
   return access.permissions.includes('leads.assign')
 }

@@ -1,7 +1,7 @@
 export const permissionValues = [
   'dashboard.read',
   'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
-  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
+  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
   'contacts.read', 'contacts.write',
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
@@ -22,7 +22,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
   agency_admin: [
     'dashboard.read',
     'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
-    'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
+    'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
     'contacts.read', 'contacts.write',
     'tasks.read', 'tasks.write',
     'viewings.read', 'viewings.write',
@@ -57,6 +57,7 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'properties.delete': ['properties.read'],
   'leads.write': ['leads.read'],
   'leads.assign': ['leads.read'],
+  'crm.team.manage': ['crm.team.read', 'leads.read', 'leads.write', 'leads.assign', 'contacts.read', 'contacts.write', 'tasks.read', 'tasks.write', 'viewings.read', 'viewings.write'],
   'contacts.write': ['contacts.read'],
   'tasks.write': ['tasks.read'],
   'viewings.write': ['viewings.read'],
@@ -91,7 +92,7 @@ export const normalizeCustomPermissions = (input: string[] = [], options: { allo
 }
 
 const mandatoryAgencyAdminCrmPermissions: Permission[] = [
-  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read',
+  'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
   'contacts.read', 'contacts.write',
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
@@ -133,7 +134,8 @@ export const permissionCatalog = [
     { permission: 'leads.read', label: 'View leads', description: 'View leads and pipeline records.' },
     { permission: 'leads.write', label: 'Manage leads', description: 'Create and update leads.' },
     { permission: 'leads.assign', label: 'Assign leads', description: 'Assign or reassign leads to team members.' },
-    { permission: 'crm.team.read', label: 'View team CRM records', description: 'Switch from assigned-to-me records to team-wide leads, contacts, and tasks.' },
+    { permission: 'crm.team.read', label: 'View team CRM records', description: 'Switch from assigned-to-me records to team-wide leads, contacts, tasks, and viewings.' },
+    { permission: 'crm.team.manage', label: 'Manage team CRM records', description: 'Edit team-wide leads, contacts, tasks, follow-ups, activities, and viewings. Includes team visibility and lead assignment permissions.' },
     { permission: 'crm.export', label: 'Export CRM records', description: 'Download only the lead/contact records this member is allowed to view. Team-wide exports still require View team CRM records.' },
     { permission: 'contacts.read', label: 'View contacts', description: 'View CRM contacts.' },
     { permission: 'contacts.write', label: 'Manage contacts', description: 'Create and update contacts.' },

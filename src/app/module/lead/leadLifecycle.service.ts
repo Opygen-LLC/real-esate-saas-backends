@@ -6,7 +6,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { Contact } from '../contact/contact.model'
 import { CONTACT_RELATIONSHIP_STATE } from '../contact/contactRelationship.contract'
 import { CrmService } from '../crm/crm.service'
-import { canAssignLeadTo, crmMutationOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { canAssignLeadTo, crmAssignmentOwnerFilter, crmMutationOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { DomainEventService, type DomainEventInput } from '../domainEvent/domainEvent.service'
 import { TaskService } from '../task/task.service'
@@ -129,6 +129,23 @@ const loadMutableLead = async (
   if (!lead) throw new ApiError(404, 'Lead not found')
   // Defense in depth for lifecycle callers that bypass LeadService. When called
   // inside a transaction this re-checks the persisted lock state in the same session.
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId, session)
+  return lead
+}
+
+const loadAssignableLead = async (
+  organizationId: string,
+  leadId: string,
+  access?: CrmAccessContext,
+  session?: ClientSession,
+) => {
+  const query = Lead.findOne({
+    _id: leadId,
+    organizationId,
+    ...crmAssignmentOwnerFilter('assignedAgent', access),
+  })
+  const lead: any = await queryWithSession(query as any, session)
+  if (!lead) throw new ApiError(404, 'Lead not found')
   await LeadEntitlementService.assertLeadAccessible(organizationId, leadId, session)
   return lead
 }
@@ -424,7 +441,7 @@ const assignLead = async (
   if (options.access && !canAssignLeadTo(options.access, assignedAgent)) {
     throw new ApiError(403, 'Assigning a lead to another team member requires leads.assign')
   }
-  const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
+  const lead: any = await loadAssignableLead(organizationId, leadId, options.access, session)
   if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Reassign the Contact instead.')
 
   await CrmAssignableMemberService.assertAssignableMember(organizationId, assignedAgent, 'lead', session)

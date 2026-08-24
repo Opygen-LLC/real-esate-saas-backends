@@ -14,6 +14,7 @@ export const LISTING_TYPES = ['ForSale', 'ForRent', 'ForLease'] as const
 export const PROPERTY_STATUSES = ['Draft', 'Available', 'Reserved', 'UnderOffer', 'Sold', 'Rented', 'OffMarket', 'ComingSoon'] as const
 export const PUBLIC_PROPERTY_STATUSES = ['Available', 'UnderOffer'] as const
 export const VIEWING_REQUESTABLE_PROPERTY_STATUSES = ['Available', 'UnderOffer'] as const
+export const CRM_PROPERTY_INTEREST_STATUSES = ['Available', 'UnderOffer', 'Reserved', 'ComingSoon'] as const
 export const PROPERTY_CURRENCIES = ['BDT'] as const
 export const PROPERTY_COUNTRIES = ['Bangladesh'] as const
 export const AREA_UNITS = ['sqft', 'decimal', 'shotok', 'katha', 'bigha', 'acre'] as const

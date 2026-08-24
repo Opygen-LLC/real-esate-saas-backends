@@ -107,7 +107,9 @@
     "migrate:subscription-fixed-lead-policy": "ts-node --transpile-only src/app/db/migrateSubscriptionFixedLeadPolicyV3.ts",
     "migrate:subscription-recurring-addon-v4": "ts-node --transpile-only src/app/db/migrateSubscriptionRecurringAddonScalingV4.ts",
     "migrate:subscription-canonical-v5": "ts-node --transpile-only src/app/db/migrateSubscriptionCanonicalModelV5.ts",
-    "verify:subscription-canonical-v5": "node scripts/verify-subscription-canonical-v5.mjs"
+    "verify:subscription-canonical-v5": "node scripts/verify-subscription-canonical-v5.mjs",
+    "migrate:crm-team-manage-permission": "ts-node --transpile-only src/app/db/migrateCrmTeamManagePermission.ts",
+    "verify:phase4-crm-permissions": "node scripts/verify-phase4-crm-permissions.mjs"
   },
   "keywords": [
     "real-estate",
