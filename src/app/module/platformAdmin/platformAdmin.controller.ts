@@ -7,6 +7,8 @@ import { PlatformAdminService } from './platformAdmin.service'
 
 const impersonationCookie: CookieOptions = { httpOnly: true, secure: config.cookie_secure, sameSite: config.cookie_same_site, domain: config.cookie_domain, path: '/' }
 
+const tenantDetails = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: 200, success: true, message: 'Agency 360 details fetched', data: await PlatformAdminService.getTenantDetails(req.params.organizationId) }))
+
 const tenantHealth = catchAsync(async (req: Request, res: Response) => {
   const result = await PlatformAdminService.getTenantHealth(req.query)
   sendResponse(res, { statusCode: 200, success: true, message: 'Tenant health fetched', data: result.data, meta: result.meta })
@@ -63,4 +65,4 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantHealth, suspendTenant, reactivateTenant, subscriptionRequests, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }
+export const PlatformAdminController = { tenantDetails, tenantHealth, suspendTenant, reactivateTenant, subscriptionRequests, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }

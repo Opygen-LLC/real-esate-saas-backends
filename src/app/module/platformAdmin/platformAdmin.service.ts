@@ -30,6 +30,7 @@ import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts'
 import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
+import { getTenant360 } from './platformAdmin.tenant360.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
@@ -41,6 +42,8 @@ const groupCounts = async (model: any, ids: string[], match: Record<string, unkn
   ])
   return new Map(rows.map((row: any) => [String(row._id), Number(row.count || 0)]))
 }
+
+const getTenantDetails = async (organizationId: string) => getTenant360(organizationId)
 
 const getTenantHealth = async (query: any) => {
   const page = Math.max(1, Number(query.page || 1))
@@ -586,4 +589,4 @@ const endImpersonation = async (token: string, _actorId?: string, requestId?: st
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantHealth, suspendTenant, reactivateTenant, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
