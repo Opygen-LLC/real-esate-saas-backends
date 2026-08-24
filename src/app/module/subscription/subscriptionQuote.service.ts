@@ -12,6 +12,7 @@ import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscrip
 import { calculateBenefitPeriodAllowance } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
+import { addonCapacityWithinLimit, resolveMaxAddonLeadCapacity } from '../subscriptionPlan/planAddonCapacity'
 import { classifySubscriptionChange, type SubscriptionChangeType } from './subscriptionSchedule.service'
 
 export type SubscriptionQuoteChangeType = SubscriptionChangeType | 'renewal' | 'new_subscription'
@@ -268,14 +269,15 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
     ? await LeadAddonSubscriptionService.getRenewingSummary(organizationId, input.billingCycle, session)
     : { recurringLeadAllowance: 0, recurringAddonPriceMonthly: 0, recurringAddonCyclePrice: 0, count: 0 }
   if (currentIsPaid && currentPlanId !== targetPlan.planId) {
-    const maxRecurringLeadAddon = Math.max(0, Number(targetPlan.maxRecurringLeadAddon || 0))
+    const maxAddonLeadCapacity = resolveMaxAddonLeadCapacity(targetPlan)
     const relevantAddonCapacity = changeType === 'downgrade'
       ? renewingRecurringAddons.recurringLeadAllowance
       : activeRecurringAddons.recurringLeadAllowance
-    if (relevantAddonCapacity > maxRecurringLeadAddon) {
+    if (!addonCapacityWithinLimit(Number(relevantAddonCapacity), 0, maxAddonLeadCapacity)) {
+      const limitLabel = maxAddonLeadCapacity === null ? 'unlimited' : maxAddonLeadCapacity.toLocaleString()
       throw new ApiError(
         httpStatus.CONFLICT,
-        `Your recurring lead add-ons total ${Number(relevantAddonCapacity).toLocaleString()} leads, but the target plan supports only ${maxRecurringLeadAddon.toLocaleString()}. Cancel or reduce add-ons before changing to that plan.`,
+        `Your recurring lead add-ons total ${Number(relevantAddonCapacity).toLocaleString()} leads, but the target plan supports only ${limitLabel}. Cancel or reduce add-ons before changing to that plan.`,
       )
     }
   }

@@ -61,7 +61,9 @@ const commercialShape = {
   // Phase 1 canonical lead-capacity field. maxLeads remains an accepted compatibility alias.
   baseLeadCapacity: nonNegativeInteger.optional(),
   maxLeads: nonNegativeInteger.optional(),
-  maxRecurringLeadAddon: nonNegativeInteger.default(0),
+  maxAddonLeadCapacity: nonNegativeInteger.nullable().optional(),
+  // Transitional alias accepted from older dashboard builds. New writes normalize to maxAddonLeadCapacity.
+  maxRecurringLeadAddon: nonNegativeInteger.optional(),
   hasCustomDomain: z.boolean().default(false),
   hasAdvancedAnalytics: z.boolean().default(false),
   hasWhatsAppIntegration: z.boolean().default(false),
@@ -80,6 +82,8 @@ type CanonicalAliasInput = {
   upgradeRank?: number
   baseLeadCapacity?: number
   maxLeads?: number
+  maxAddonLeadCapacity?: number | null
+  maxRecurringLeadAddon?: number
   entitlements?: { leads?: { enabled: boolean; limit: number } }
 }
 
@@ -108,6 +112,13 @@ const validateCanonicalAliases = (value: CanonicalAliasInput, ctx: z.RefinementC
   if (resolvedLeadCapacity !== undefined && value.entitlements?.leads && value.entitlements.leads.enabled !== (resolvedLeadCapacity > 0)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['entitlements', 'leads', 'enabled'], message: 'Lead entitlement enabled state must match whether base lead capacity is greater than zero.' })
   }
+
+
+  if (value.maxAddonLeadCapacity !== undefined && value.maxRecurringLeadAddon !== undefined) {
+    if (value.maxAddonLeadCapacity === null || value.maxAddonLeadCapacity !== value.maxRecurringLeadAddon) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxAddonLeadCapacity'], message: 'Conflicting recurring add-on ceilings were supplied. Use maxAddonLeadCapacity only; null means unlimited.' })
+    }
+  }
 }
 
 const requireTeamMemberLimit = (value: { maxTeamMembers?: number; maxAgents?: number }, ctx: z.RefinementCtx) => {
@@ -129,15 +140,19 @@ const normalizeCompatibilityAliases = <T extends Record<string, any>>(value: T) 
     upgradeRank,
     baseLeadCapacity,
     maxLeads,
+    maxAddonLeadCapacity,
+    maxRecurringLeadAddon,
     ...rest
   } = value
   const resolvedTierRank = tierRank ?? upgradeRank ?? displayOrder
   const resolvedBaseLeadCapacity = baseLeadCapacity ?? maxLeads ?? value.entitlements?.leads?.limit
+  const resolvedAddonCapacity = maxAddonLeadCapacity !== undefined ? maxAddonLeadCapacity : maxRecurringLeadAddon
   return {
     ...rest,
     ...(canonicalTeamMembers !== undefined || legacyTeamMembers !== undefined ? { maxAgents: canonicalTeamMembers ?? legacyTeamMembers } : {}),
     ...(resolvedTierRank !== undefined ? { tierRank: resolvedTierRank } : {}),
     ...(resolvedBaseLeadCapacity !== undefined ? { baseLeadCapacity: resolvedBaseLeadCapacity } : {}),
+    ...(resolvedAddonCapacity !== undefined ? { maxAddonLeadCapacity: resolvedAddonCapacity } : {}),
   }
 }
 
@@ -185,6 +200,7 @@ const updateBody = z.object({
   maxProperties: commercialShape.maxProperties.optional(),
   baseLeadCapacity: nonNegativeInteger.optional(),
   maxLeads: nonNegativeInteger.optional(),
+  maxAddonLeadCapacity: nonNegativeInteger.nullable().optional(),
   maxRecurringLeadAddon: nonNegativeInteger.optional(),
   hasCustomDomain: z.boolean().optional(),
   hasAdvancedAnalytics: z.boolean().optional(),

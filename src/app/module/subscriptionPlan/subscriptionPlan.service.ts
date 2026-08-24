@@ -14,11 +14,16 @@ import { mirrorTierRankWrite, normalizePaidPlanId, resolvePlanOrdering } from '.
 import { mirrorBaseLeadCapacityWrite } from './planLeadCapacity'
 import { applyFixedLeadCapacityPolicyWrite, resolvePlanLeadPolicy } from './planLeadPolicy'
 import { mirrorPlanStatusWrite, resolvePlanStatus } from './planLifecycle'
+import { applyCanonicalAddonCapacityWrite, resolveMaxAddonLeadCapacity } from './planAddonCapacity'
 
 const normalizePlanRead = <T extends Record<string, any>>(plan: T) => {
   const entitlementResolved = resolvePlanOrdering(resolveEntitlementSource(plan))
+  const addonResolved = {
+    ...entitlementResolved,
+    maxAddonLeadCapacity: resolveMaxAddonLeadCapacity(entitlementResolved),
+  }
   return {
-    ...resolvePlanLeadPolicy(entitlementResolved),
+    ...resolvePlanLeadPolicy(addonResolved),
     status: resolvePlanStatus(entitlementResolved),
   }
 }
@@ -33,10 +38,12 @@ const validateBaseLeadCapacityConfig = (plan: Partial<ISubscriptionPlan>) => {
 const normalizePlanWrite = <T extends Record<string, any>>(
   source: T,
   explicitEntitlements?: unknown,
-) => applyFixedLeadCapacityPolicyWrite(
-  mirrorBaseLeadCapacityWrite(
-    mirrorTierRankWrite(
-      normalizeEntitlementWrite(source, explicitEntitlements),
+) => applyCanonicalAddonCapacityWrite(
+  applyFixedLeadCapacityPolicyWrite(
+    mirrorBaseLeadCapacityWrite(
+      mirrorTierRankWrite(
+        normalizeEntitlementWrite(source, explicitEntitlements),
+      ),
     ),
   ),
 )
@@ -49,7 +56,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     planId: 'starter', name: 'Starter', tierRank: 10, displayOrder: 10, upgradeRank: 10, priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
     description: 'A simple starting plan for small real estate teams.',
     features: ['Up to 3 Team Members', '10 Property Listings', '200 Active CRM Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
-    maxAgents: 3, maxProperties: 10, baseLeadCapacity: 200, maxLeads: 200, maxRecurringLeadAddon: 0, hasCustomDomain: false, hasAdvancedAnalytics: false,
+    maxAgents: 3, maxProperties: 10, baseLeadCapacity: 200, maxLeads: 200, maxAddonLeadCapacity: 2000, hasCustomDomain: false, hasAdvancedAnalytics: false,
     hasWhatsAppIntegration: false, hasLeadAutomations: false, hasSmsAutomation: false, hasPremiumTemplates: false,
     maxStorageMb: 1024, maxMonthlyVisitors: 10000, isPopular: false, isActive: true,
   },
@@ -57,7 +64,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     planId: 'professional', name: 'Professional', tierRank: 20, displayOrder: 20, upgradeRank: 20, priceMonthly: 1000, priceYearly: 10000, currency: 'BDT',
     description: 'More capacity and premium tools for growing real estate teams.',
     features: ['Up to 5 Team Members', '25 Property Listings', '800 Active CRM Leads', 'Custom Domain', 'Advanced Analytics', 'WhatsApp Integration', 'Lead Automations', 'Priority Support'],
-    maxAgents: 5, maxProperties: 25, baseLeadCapacity: 800, maxLeads: 800, maxRecurringLeadAddon: 0, hasCustomDomain: true, hasAdvancedAnalytics: true,
+    maxAgents: 5, maxProperties: 25, baseLeadCapacity: 800, maxLeads: 800, maxAddonLeadCapacity: 5000, hasCustomDomain: true, hasAdvancedAnalytics: true,
     hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: false, hasPremiumTemplates: true,
     maxStorageMb: 1024, maxMonthlyVisitors: 100000, isPopular: true, isActive: true,
   },
@@ -65,7 +72,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     planId: 'agency', name: 'Agency Scale', tierRank: 30, displayOrder: 30, upgradeRank: 30, priceMonthly: 1500, priceYearly: 15000, currency: 'BDT',
     description: 'Higher fixed capacity for established agencies and larger teams.',
     features: ['Up to 10 Team Members', '50 Property Listings', '2,000 Active CRM Leads', 'Custom Domain', 'Advanced Analytics', 'WhatsApp Integration', 'Lead Automations', 'Premium Templates'],
-    maxAgents: 10, maxProperties: 50, baseLeadCapacity: 2000, maxLeads: 2000, maxRecurringLeadAddon: 0, hasCustomDomain: true, hasAdvancedAnalytics: true,
+    maxAgents: 10, maxProperties: 50, baseLeadCapacity: 2000, maxLeads: 2000, maxAddonLeadCapacity: 20000, hasCustomDomain: true, hasAdvancedAnalytics: true,
     hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: true, hasPremiumTemplates: true,
     maxStorageMb: 5120, maxMonthlyVisitors: 1000000, isPopular: false, isActive: true,
   },

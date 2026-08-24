@@ -46,7 +46,10 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     renewalBonusEnabled: { type: Boolean, default: undefined },
     maxRenewalLeadBonus: { type: Number, min: 0, default: undefined },
     continuityGraceDays: { type: Number, min: 0, max: 31, default: undefined },
-    maxRecurringLeadAddon: { type: Number, default: 0, min: 0 },
+    // Phase 4 canonical recurring add-on ceiling. null means unlimited; 0 disables add-ons.
+    maxAddonLeadCapacity: { type: Number, default: undefined, min: 0 },
+    // Legacy field retained only for reading historical immutable versions.
+    maxRecurringLeadAddon: { type: Number, default: undefined, min: 0 },
     hasCustomDomain: { type: Boolean, default: false },
     hasAdvancedAnalytics: { type: Boolean, default: false },
     hasWhatsAppIntegration: { type: Boolean, default: false },

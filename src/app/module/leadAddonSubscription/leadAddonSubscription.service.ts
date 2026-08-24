@@ -12,6 +12,7 @@ import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { addonCapacityWithinLimit, resolveMaxAddonLeadCapacity, type MaxAddonLeadCapacity } from '../subscriptionPlan/planAddonCapacity'
 import { writeAudit } from '../audit/audit.service'
 import { LeadAddonDefinition } from '../leadAddonDefinition/leadAddonDefinition.model'
 import { LeadAddonSubscription } from './leadAddonSubscription.model'
@@ -94,11 +95,11 @@ const getRenewingSummary = async (organizationId: string, billingCycle: 'monthly
   }
 }
 
-const assertPlanCeiling = async (organizationId: string, maxRecurringLeadAddon: number, session?: ClientSession) => {
+const assertPlanCeiling = async (organizationId: string, maxAddonLeadCapacity: MaxAddonLeadCapacity, session?: ClientSession) => {
   const summary = await getActiveSummary(organizationId, session)
-  const max = Math.max(0, Number(maxRecurringLeadAddon || 0))
-  if (summary.recurringLeadAllowance > max) {
-    throw new ApiError(httpStatus.CONFLICT, `Your active recurring lead add-ons total ${summary.recurringLeadAllowance.toLocaleString()} leads, but the target plan supports only ${max.toLocaleString()}. Cancel or reduce add-ons before changing to that plan.`)
+  if (!addonCapacityWithinLimit(summary.recurringLeadAllowance, 0, maxAddonLeadCapacity)) {
+    const limit = maxAddonLeadCapacity === null ? 'unlimited' : maxAddonLeadCapacity.toLocaleString()
+    throw new ApiError(httpStatus.CONFLICT, `Your active recurring lead add-ons total ${summary.recurringLeadAllowance.toLocaleString()} leads, but the target plan supports only ${limit}. Cancel or reduce add-ons before changing to that plan.`)
   }
   return summary
 }
@@ -122,16 +123,16 @@ const quote = async (organizationId: string, definitionId: string, now = new Dat
   if (!Array.isArray(definition.eligiblePlans) || !definition.eligiblePlans.includes(context.planId)) {
     throw new ApiError(httpStatus.CONFLICT, `This recurring lead add-on is not available on the ${context.plan.name || context.planId} plan`)
   }
-  const duplicateQuery = LeadAddonSubscription.findOne({ organizationId, definitionId: definition._id, status: { $in: [...committedStatuses] } })
-  if (session) duplicateQuery.session(session)
-  if (await duplicateQuery.lean()) throw new ApiError(httpStatus.CONFLICT, 'This recurring lead add-on is already active or awaiting payment')
-
-  const maxRecurringLeadAddon = Math.max(0, Number(context.plan.maxRecurringLeadAddon || 0))
+  // Phase 4 intentionally allows the same catalog unit to be purchased more than
+  // once (for example +500 +500). A unique pending-payment index still prevents
+  // duplicate concurrent payment requests for the same tenant.
+  const maxAddonLeadCapacity = resolveMaxAddonLeadCapacity(context.plan)
   const committed = await getCommittedCapacity(organizationId, session)
   const requested = Math.max(1, Number(definition.leadCapacity || 0))
-  if (maxRecurringLeadAddon <= 0 || committed + requested > maxRecurringLeadAddon) {
-    throw new ApiError(402, `Your ${context.plan.name || context.planId} plan supports up to ${maxRecurringLeadAddon.toLocaleString()} additional recurring lead capacity. Upgrade your plan to add more leads.`, '', 'LEAD_ADDON_LIMIT_REACHED', {
-      resource: 'leads', currentPlan: context.planId, currentAddonCapacity: committed, requestedAddonCapacity: requested, maxRecurringLeadAddon, upgradeRequired: true,
+  if (maxAddonLeadCapacity === 0 || !addonCapacityWithinLimit(committed, requested, maxAddonLeadCapacity)) {
+    const limitLabel = maxAddonLeadCapacity === null ? 'unlimited' : maxAddonLeadCapacity.toLocaleString()
+    throw new ApiError(402, `Your ${context.plan.name || context.planId} plan supports up to ${limitLabel} additional recurring lead capacity. Upgrade your plan to add more leads.`, '', 'LEAD_ADDON_LIMIT_REACHED', {
+      resource: 'leads', currentPlan: context.planId, currentAddonCapacity: committed, requestedAddonCapacity: requested, maxAddonLeadCapacity, upgradeRequired: true,
     })
   }
 
@@ -148,7 +149,7 @@ const quote = async (organizationId: string, definitionId: string, now = new Dat
     calculatedAt: now,
     organizationId,
     definition: { id: String(definition._id), name: definition.name, slug: definition.slug, leadCapacity: requested, priceMonthly: money(definition.priceMonthly), updatedAt: definition.updatedAt || null },
-    plan: { planId: context.planId, planName: context.plan.name || context.planId, planVersion: context.planVersion, billingCycle: context.billingCycle, maxRecurringLeadAddon },
+    plan: { planId: context.planId, planName: context.plan.name || context.planId, planVersion: context.planVersion, billingCycle: context.billingCycle, maxAddonLeadCapacity },
     currentAddonCapacity: committed,
     addonCapacityAfter: committed + requested,
     periodStart: context.periodStart,
@@ -275,9 +276,11 @@ const activateWrites = async (id: string, input: { status: 'active'; method: str
   const context = await currentPaidContext(row.organizationId, new Date(), session)
   if (context.planId !== row.planId || context.planVersion !== Number(row.planVersion)) throw new ApiError(httpStatus.CONFLICT, 'The customer changed plans after requesting this add-on. Create a fresh add-on request.')
   const committed = await getCommittedCapacity(row.organizationId, session)
-  const max = Math.max(0, Number(context.plan.maxRecurringLeadAddon || 0))
+  const maxAddonLeadCapacity = resolveMaxAddonLeadCapacity(context.plan)
   const otherCommitted = Math.max(0, committed - Number(row.leadCapacity || 0))
-  if (otherCommitted + Number(row.leadCapacity || 0) > max) throw new ApiError(httpStatus.CONFLICT, 'The current plan no longer has enough recurring lead add-on capacity for this request')
+  if (maxAddonLeadCapacity === 0 || !addonCapacityWithinLimit(otherCommitted, Number(row.leadCapacity || 0), maxAddonLeadCapacity)) {
+    throw new ApiError(httpStatus.CONFLICT, 'The current plan no longer has enough recurring lead add-on capacity for this request')
+  }
   const quoted: any = row.quoteSnapshot || {}
   if (quoted.periodEnd && new Date(quoted.periodEnd).getTime() !== context.periodEnd.getTime()) throw new ApiError(httpStatus.CONFLICT, 'The quoted billing period changed. Ask the customer to create a fresh add-on request.')
 

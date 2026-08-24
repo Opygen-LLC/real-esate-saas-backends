@@ -63,7 +63,7 @@ describe('Phase 7 production release contract', () => {
   })
 
   it('enforces recurring add-on ceiling, proration, renewal and period-end cancellation', () => {
-    expect(addon).toContain('maxRecurringLeadAddon')
+    expect(addon).toContain('maxAddonLeadCapacity')
     expect(addon).toContain('remainingSeconds / totalSeconds')
     expect(addon).toContain("status = 'cancel_at_period_end'")
     expect(addon).toContain('renewForSubscriptionPeriod')

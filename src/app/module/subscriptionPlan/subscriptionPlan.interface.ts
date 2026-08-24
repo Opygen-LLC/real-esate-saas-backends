@@ -32,7 +32,9 @@ export interface ISubscriptionPlan {
   renewalBonusEnabled?: boolean
   maxRenewalLeadBonus?: number
   continuityGraceDays?: number
-  maxRecurringLeadAddon: number
+  maxAddonLeadCapacity: number | null
+  // Historical immutable versions may still carry this legacy field.
+  maxRecurringLeadAddon?: number
   hasCustomDomain: boolean
   hasAdvancedAnalytics: boolean
   hasWhatsAppIntegration: boolean

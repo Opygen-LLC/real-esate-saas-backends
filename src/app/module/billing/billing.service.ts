@@ -36,6 +36,9 @@ const getSubscriptionUsage = async (organizationId: string) => {
   ])
 
   const { organization: org, limits, usage, teamMemberQuota } = resolved
+  const assignedPlanForUsage: any = org.subscription?.plan && org.subscription.plan !== 'trial'
+    ? await SubscriptionPlanService.getPlanById(org.subscription.plan, Number(org.subscription.planVersion || 1))
+    : null
   const currentProperties = usage.properties
   const currentLeads = usage.leads
   const lockedLeads = limits.leadAllowanceModel === 'active_capacity'
@@ -84,7 +87,10 @@ const getSubscriptionUsage = async (organizationId: string) => {
   } else if (monthlyLeadAllowance.billingCycle === 'monthly' && monthlyLeadAllowance.renewalBonusEnabled === true && sourceBenefitPeriodId) {
     // Grandfathering invariant: project renewal from the tenant's assigned immutable plan
     // version, never from the latest catalog version.
-    const assignedPlan: any = await SubscriptionPlanService.getPlanById(monthlyLeadAllowance.planId, Number(monthlyLeadAllowance.planVersion || 1))
+    const assignedPlan: any = assignedPlanForUsage?.planId === monthlyLeadAllowance.planId
+      && Number(assignedPlanForUsage?.version || 1) === Number(monthlyLeadAllowance.planVersion || 1)
+      ? assignedPlanForUsage
+      : await SubscriptionPlanService.getPlanById(monthlyLeadAllowance.planId, Number(monthlyLeadAllowance.planVersion || 1))
     if (assignedPlan) {
       const now = new Date()
       const previousEnd = new Date(monthlyLeadAllowance.periodEnd || monthlyLeadAllowance.previousPeriodEnd)
@@ -152,6 +158,11 @@ const getSubscriptionUsage = async (organizationId: string) => {
     activeRecurringAddonCount: Math.max(0, Number(monthlyLeadAllowance.activeRecurringAddonCount || 0)),
     recurringAddonPriceMonthly: Math.max(0, Number(monthlyLeadAllowance.recurringAddonPriceMonthly || 0)),
     recurringAddonCyclePrice: Math.max(0, Number(monthlyLeadAllowance.recurringAddonCyclePrice || 0)),
+    baseLeadCapacity: Math.max(0, Number((limits as any).baseLeadCapacity ?? monthlyLeadAllowance.baseLeadAllowance ?? 0)),
+    recurringAddonCapacity: Math.max(0, Number((limits as any).recurringAddonCapacity ?? monthlyLeadAllowance.recurringLeadAllowance ?? 0)),
+    legacyTopupCapacity: Math.max(0, Number((limits as any).legacyTopupLeadAllowance ?? monthlyLeadAllowance.topupLeadAllowance ?? 0)),
+    adminAdjustmentCapacity: Number((limits as any).adminAdjustmentCapacity || 0),
+    effectiveLeadCapacity: Math.max(0, Number((limits as any).effectiveLeadCapacity ?? maxLeads)),
     renewalStreak: effectiveRenewalStreak,
     grantedRenewalStreak: Math.max(1, Number(monthlyLeadAllowance.renewalStreak || 1)),
     renewalBonusEnabled: monthlyLeadAllowance.renewalBonusEnabled === true,
@@ -160,6 +171,25 @@ const getSubscriptionUsage = async (organizationId: string) => {
     legacyFallback: Boolean(monthlyLeadAllowance.legacyFallback),
     periodInactive: Boolean(monthlyLeadAllowance.periodInactive),
     nextRenewal,
+  }
+
+  const recurringBillingCycle = monthlyLeadAllowance.billingCycle === 'yearly'
+    ? 'yearly'
+    : (monthlyLeadAllowance.billingCycle === 'monthly' ? 'monthly' : null)
+  const basePlanRecurringPrice = assignedPlanForUsage && recurringBillingCycle
+    ? Math.max(0, Number(recurringBillingCycle === 'yearly' ? assignedPlanForUsage.priceYearly : assignedPlanForUsage.priceMonthly))
+    : 0
+  const recurringAddonPrice = recurringBillingCycle
+    ? Math.max(0, Number(monthlyLeadAllowance.recurringAddonCyclePrice || 0))
+    : 0
+  const billingSummary = {
+    billingCycle: recurringBillingCycle,
+    planName: assignedPlanForUsage?.name || org.subscription?.plan || 'Trial',
+    basePlanPrice: basePlanRecurringPrice,
+    recurringAddonPrice,
+    recurringAddonCapacity: Math.max(0, Number(monthlyLeadAllowance.recurringLeadAllowance || 0)),
+    totalRecurringPrice: basePlanRecurringPrice + recurringAddonPrice,
+    currency: 'BDT' as const,
   }
 
   const scheduledPlan = org.subscription?.scheduledPlan || null
@@ -184,7 +214,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
     pendingChangeRequest,
     properties: { used: currentProperties, limit: maxProperties, percentage: propertiesPercent },
     maxTeamMembers,
-    maxRecurringLeadAddon: Math.max(0, Number((limits as any).maxRecurringLeadAddon || 0)),
+    maxAddonLeadCapacity: (limits as any).maxAddonLeadCapacity === null ? null : Math.max(0, Number((limits as any).maxAddonLeadCapacity || 0)),
     teamMembersUsed: teamMemberQuota.teamMembersUsed,
     teamMembersReserved: teamMemberQuota.teamMembersReserved,
     teamMembersCommitted: teamMemberQuota.teamMembersCommitted,
@@ -210,6 +240,7 @@ const getSubscriptionUsage = async (organizationId: string) => {
       percentage: leadsPercent,
     },
     leadAllowance,
+    billingSummary,
     storage: { usedBytes: org.storageUsedBytes || 0, limitBytes: limits.maxStorageMb * 1024 * 1024 },
     visitors: { used: org.monthlyVisitorCount || 0, limit: limits.maxMonthlyVisitors, month: org.visitorUsageMonth },
     features: {

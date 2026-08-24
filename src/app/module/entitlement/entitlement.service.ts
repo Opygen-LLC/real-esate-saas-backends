@@ -13,7 +13,8 @@ import { Organization } from '../organization/organization.model'
 import { DEFAULT_TRIAL_POLICY, getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { Property } from '../property/property.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
-import { resolvePlanLeadPolicy } from '../subscriptionPlan/planLeadPolicy'
+import { resolvePlanLeadPolicy, usesFixedLeadCapacityPolicy } from '../subscriptionPlan/planLeadPolicy'
+import { resolveMaxAddonLeadCapacity } from '../subscriptionPlan/planAddonCapacity'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
 import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
@@ -124,6 +125,8 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
 
   const { maxAgents: persistedPlanTeamLimit, ...canonicalPlan } = plan || {}
   let effectiveLeadLimit = Number(plan?.maxLeads ?? baseTrial.maxLeads)
+  let basePlanLeadCapacity = Math.max(0, Number(plan?.baseLeadCapacity ?? plan?.maxLeads ?? baseTrial.maxLeads))
+  let planLeadCapacity = basePlanLeadCapacity
   let activeBenefitForLeadCapacity: any = null
   let activeTopupLeadAllowance = 0
   let activeRecurringLeadAllowance = 0
@@ -136,19 +139,27 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
       periodStart: { $lte: now },
       periodEnd: { $gt: now },
       $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }],
-    }).sort({ periodStart: -1, _id: -1 }).select('_id totalLeadAllowance leadAllowanceModel').lean()
+    }).sort({ periodStart: -1, _id: -1 }).select('_id baseLeadAllowance bonusLeadAllowance totalLeadAllowance leadAllowanceModel').lean()
     activeBenefitForLeadCapacity = await withSession(benefitQuery, session)
-    if (activeBenefitForLeadCapacity) {
-      const [topup, recurring] = await Promise.all([
-        LeadTopupGrantService.getActiveGrantSummary(organizationId, activeBenefitForLeadCapacity._id, session),
-        LeadAddonSubscriptionService.getActiveSummary(organizationId, session),
-      ])
-      activeTopupLeadAllowance = topup.topupLeadAllowance
-      activeRecurringLeadAllowance = recurring.recurringLeadAllowance
-    }
+
+    const [topup, recurring] = await Promise.all([
+      activeBenefitForLeadCapacity
+        ? LeadTopupGrantService.getActiveGrantSummary(organizationId, activeBenefitForLeadCapacity._id, session)
+        : Promise.resolve({ topupLeadAllowance: 0, grantCount: 0 }),
+      LeadAddonSubscriptionService.getActiveSummary(organizationId, session),
+    ])
+    activeTopupLeadAllowance = topup.topupLeadAllowance
+    activeRecurringLeadAllowance = recurring.recurringLeadAllowance
+
     if (plan?.leadAllowanceModel === 'active_capacity') {
-      const planCapacity = Math.max(0, Number(activeBenefitForLeadCapacity?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
-      effectiveLeadLimit = planCapacity + activeTopupLeadAllowance + activeRecurringLeadAllowance
+      // Phase 4 fixed plans are deterministic: the immutable plan's base capacity
+      // plus recurring add-ons is the normal scaling path. Historical active-capacity
+      // versions keep their already-earned loyalty total from the benefit ledger.
+      basePlanLeadCapacity = Math.max(0, Number(activeBenefitForLeadCapacity?.baseLeadAllowance ?? plan.baseLeadCapacity ?? plan.maxLeads ?? baseTrial.maxLeads))
+      planLeadCapacity = usesFixedLeadCapacityPolicy(plan)
+        ? Math.max(0, Number(plan.baseLeadCapacity ?? plan.maxLeads ?? baseTrial.maxLeads))
+        : Math.max(0, Number(activeBenefitForLeadCapacity?.totalLeadAllowance ?? plan.baseMonthlyLeadAllowance ?? plan.maxLeads ?? baseTrial.maxLeads))
+      effectiveLeadLimit = planLeadCapacity + activeRecurringLeadAllowance + activeTopupLeadAllowance
     }
   }
   const effectiveMaxTeamMembers = Number(
@@ -166,6 +177,7 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
         : organization.subscription.maxProperties ?? baseTrial.maxProperties,
   )
   const activeTenantOverride = await getActiveTenantEntitlementOverride(organizationId, session)
+  const leadCapacityBeforeAdminAdjustment = effectiveLeadLimit
   const overridden = applyTenantEntitlementOverride({
     maxTeamMembers: effectiveMaxTeamMembers,
     maxProperties: effectiveMaxProperties,
@@ -201,10 +213,18 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
       ...canonicalPlan,
       ...overridden,
       entitlements: effectiveEntitlements,
+      // Canonical Phase 4 lead-capacity breakdown. topupLeadAllowance is retained
+      // as a legacy compatibility component for already-active temporary grants.
+      baseLeadCapacity: basePlanLeadCapacity,
+      planLeadCapacity,
       topupLeadAllowance: activeTopupLeadAllowance,
+      legacyTopupLeadAllowance: activeTopupLeadAllowance,
       recurringLeadAllowance: activeRecurringLeadAllowance,
+      recurringAddonCapacity: activeRecurringLeadAllowance,
+      adminAdjustmentCapacity: Number(overridden.maxLeads || 0) - leadCapacityBeforeAdminAdjustment,
+      effectiveLeadCapacity: Number(overridden.maxLeads || 0),
       tenantOverride: activeTenantOverride || null,
-      maxRecurringLeadAddon: plan ? Math.max(0, Number((plan as any).maxRecurringLeadAddon || 0)) : 0,
+      maxAddonLeadCapacity: plan ? resolveMaxAddonLeadCapacity(plan as Record<string, any>) : 0,
       activeBenefitPeriodId: activeBenefitForLeadCapacity?._id ? String(activeBenefitForLeadCapacity._id) : null,
     },
   }

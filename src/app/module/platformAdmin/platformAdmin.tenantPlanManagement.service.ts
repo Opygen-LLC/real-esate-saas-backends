@@ -10,6 +10,7 @@ import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/s
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
+import { resolveMaxAddonLeadCapacity } from '../subscriptionPlan/planAddonCapacity'
 import { classifySubscriptionChange, SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
 import { SubscriptionQuoteService } from '../subscription/subscriptionQuote.service'
 import { TenantEntitlementOverrideService, type TenantEntitlementOverrideInput } from '../tenantEntitlementOverride/tenantEntitlementOverride.service'
@@ -49,7 +50,7 @@ const applyNoChargePlanOverride = async (
   actor: Actor,
 ) => {
   const target = await planByVersion(input.planId, input.planVersion)
-  await LeadAddonSubscriptionService.assertPlanCeiling(organizationId, Number(target.maxRecurringLeadAddon || 0))
+  await LeadAddonSubscriptionService.assertPlanCeiling(organizationId, resolveMaxAddonLeadCapacity(target))
   let response: any = null
   let reconciliation: any = null
   await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
@@ -111,7 +112,7 @@ const scheduleNoChargeDowngrade = async (
   if (changeType !== 'downgrade') throw new ApiError(httpStatus.CONFLICT, 'Only a lower-ranked plan can be scheduled as a downgrade. Use the immediate administrative override for corrections/upgrades.')
   const effectiveAt = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
   if (!effectiveAt || effectiveAt <= new Date()) throw new ApiError(httpStatus.CONFLICT, 'This agency has no future paid billing boundary for a scheduled downgrade')
-  await LeadAddonSubscriptionService.assertPlanCeiling(organizationId, Number(target.maxRecurringLeadAddon || 0))
+  await LeadAddonSubscriptionService.assertPlanCeiling(organizationId, resolveMaxAddonLeadCapacity(target))
 
   await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
     const orgQuery = Organization.findOne({ organizationId })
