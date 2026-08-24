@@ -146,6 +146,10 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
         enum: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired', 'suspended'],
         default: 'trialing',
       },
+      currentPeriodStart: {
+        type: Date,
+        default: null,
+      },
       currentPeriodEnd: {
         type: Date,
         default: () => new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14-day trial

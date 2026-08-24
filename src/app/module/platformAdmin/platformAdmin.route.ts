@@ -79,6 +79,16 @@ const tenantOverrideBody = z.object({ params: organizationParams, body: z.object
   features: z.object({ customDomain: z.boolean().optional(), advancedAnalytics: z.boolean().optional(), whatsappIntegration: z.boolean().optional(), smsAutomation: z.boolean().optional(), leadAutomations: z.boolean().optional(), premiumTemplates: z.boolean().optional() }).strict().optional(),
   expiresAt: z.string().datetime().nullable().optional(), reason: z.string().trim().min(10).max(500),
 }).refine((body) => Object.values(body.resources || {}).some(Boolean) || Object.values(body.features || {}).some((value) => typeof value === 'boolean'), { message: 'At least one tenant-specific entitlement override is required' }) })
+
+const subscriptionDateAdjustmentBody = z.object({
+  params: z.object({ paymentNumber: z.string().trim().regex(/^PAY-[A-Z0-9-]+$/).max(120) }),
+  body: z.object({
+    paidAt: z.string().datetime(),
+    periodStart: z.string().datetime(),
+    periodEnd: z.string().datetime(),
+    reason: z.string().trim().min(10).max(500),
+  }).refine((body) => new Date(body.periodEnd).getTime() > new Date(body.periodStart).getTime(), { message: 'Period End / Access Until must be later than Period Start', path: ['periodEnd'] }),
+})
 const tenantLeadEntitlementParams = z.object({ params: organizationParams })
 const renewalStreakBody = z.object({
   params: organizationParams,
@@ -110,6 +120,7 @@ router.get('/notifications', authMiddlewares.authSuperAdmin, PlatformAdminContro
 router.get('/subscriptions/summary', authMiddlewares.authSuperAdmin, PlatformAdminController.subscriptionSummary)
 router.patch('/tenants/:organizationId/subscription', authMiddlewares.authSuperAdmin, validateRequest(subscriptionBody), PlatformAdminController.changeTenantSubscription)
 router.patch('/tenants/:organizationId/trial', authMiddlewares.authSuperAdmin, validateRequest(trialBody), PlatformAdminController.manageTenantTrial)
+router.patch('/subscription-payments/:paymentNumber/dates', authMiddlewares.authSuperAdmin, validateRequest(subscriptionDateAdjustmentBody), PlatformAdminController.editSubscriptionDates)
 router.post('/tenants/:organizationId/subscription/admin-override', authMiddlewares.authSuperAdmin, validateRequest(adminPlanOverrideBody), PlatformAdminController.applyTenantAdminPlanOverride)
 router.post('/tenants/:organizationId/subscription/schedule-downgrade', authMiddlewares.authSuperAdmin, validateRequest(adminPlanOverrideBody), PlatformAdminController.scheduleTenantAdminDowngrade)
 router.post('/tenants/:organizationId/subscription/cancel-scheduled-change', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.cancelTenantScheduledChange)

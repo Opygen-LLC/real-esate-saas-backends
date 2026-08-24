@@ -9,6 +9,7 @@ export interface ISubscription {
   planVersion?: number
   revision?: number
   status: SubscriptionStatus
+  currentPeriodStart?: Date | null
   currentPeriodEnd: Date | null
   lastPaymentDate: Date | null
   maxProperties?: number

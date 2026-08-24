@@ -438,7 +438,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       }
       org.subscription = {
         ...(org.subscription?.toObject?.() || org.subscription || {}), plan: plan.planId, planVersion: plan.version, status: 'active',
-        currentPeriodEnd: end, lastPaymentDate: payment.paidAt || now, trialEndsAt: null, gracePeriodEnd: null,
+        currentPeriodStart: start, currentPeriodEnd: end, lastPaymentDate: payment.paidAt || now, trialEndsAt: null, gracePeriodEnd: null,
         cancelAtPeriodEnd: false, reminderSentAt: null, source: 'manual_payment', maxProperties: plan.maxProperties, maxAgents: plan.maxAgents,
         revision: Math.max(0, Number(org.subscription?.revision || 0)) + 1,
       }

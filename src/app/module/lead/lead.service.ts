@@ -316,7 +316,7 @@ const parseFollowUpBoundary = (value: string | undefined, field: string) => {
   return parsed
 }
 
-const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
+const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext,includeLocked=false)=>{
   const {
     searchTerm, organizationId, leadStatus, source, assignedAgent, propertyType,
     minBudget, maxBudget, sla, minScore, isConverted, followUpPreset, followUpFrom, followUpTo,
@@ -324,7 +324,8 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext)=>{
   // Lead Pipeline is intentionally unconverted-only. Even a crafted query cannot expose
   // converted Leads through this collection endpoint.
   if(isConverted!==undefined && String(isConverted)!=='false')throw new ApiError(400,'Lead Pipeline only supports isConverted=false')
-  const conditions:any[]=[{isConverted:{$ne:true}},{isLocked:{$ne:true}}]
+  const conditions:any[]=[{isConverted:{$ne:true}}]
+  if(!includeLocked)conditions.push({isLocked:{$ne:true}})
   if(organizationId)conditions.push({organizationId})
   const ownerScope=crmReadOwnerFilter('assignedAgent',access)
   if(Object.keys(ownerScope).length)conditions.push(ownerScope)
@@ -548,15 +549,17 @@ const getLeadExportRows = async (
   filters: ILeadFilter,
   access?: CrmAccessContext,
 ): Promise<CrmExportRow[]> => {
-  // buildLeadWhere is the exact same server-side filter + workspace scope used by
-  // GET /lead, including the subscription-accessible predicate. Locked rows remain
-  // stored but are never included in normal tenant exports.
-  const where = buildLeadWhere({ ...filters, organizationId }, access)
+  // Exports are all-or-nothing for subscription-locked Leads: first evaluate the
+  // requested tenant/CRM scope without the accessibility predicate and reject if it
+  // contains a locked record, then query only the accessible subset.
+  const where = buildLeadWhere({ ...filters, organizationId }, access, true)
   await LeadEntitlementService.ensureCurrentLeadCapacity(organizationId)
-  const total = await Lead.countDocuments(where)
+  await LeadEntitlementService.assertExportContainsNoLockedLeads(organizationId, where)
+  const accessibleWhere = buildLeadWhere({ ...filters, organizationId }, access)
+  const total = await Lead.countDocuments(accessibleWhere)
   if (total > MAX_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
 
-  const leads: any[] = await Lead.find(where)
+  const leads: any[] = await Lead.find(accessibleWhere)
     .populate(userRefPopulate('assignedAgent', 'name email userRole'))
     .populate(userRefPopulate('createdBy', 'name email userRole'))
     .populate('propertyInterest', 'title')

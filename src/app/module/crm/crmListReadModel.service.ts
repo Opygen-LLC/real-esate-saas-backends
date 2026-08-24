@@ -3,6 +3,7 @@ import { logger } from '../../../shared/logger'
 import { Activity } from '../activity/activity.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
+import { LOCKED_LEAD_EMAIL_MASK, LOCKED_LEAD_PHONE_MASK, redactLockedLeadForList } from '../lead/leadEntitlement.service'
 import { Property } from '../property/property.model'
 import { Task } from '../task/task.model'
 import { TASK_TYPE } from '../task/taskType.contract'
@@ -636,6 +637,15 @@ export const readContactListPageFallback = async <T = any>(options: ContactListR
   return { rows, total }
 }
 
+const lockedLeadRedactionStages = (): PipelineStage.FacetPipelineStage[] => [
+  {
+    $set: {
+      phone: { $cond: [{ $and: [{ $eq: ['$isLocked', true] }, { $eq: ['$lockReason', 'subscription_limit'] }] }, LOCKED_LEAD_PHONE_MASK, '$phone'] },
+      email: { $cond: [{ $and: [{ $eq: ['$isLocked', true] }, { $eq: ['$lockReason', 'subscription_limit'] }] }, LOCKED_LEAD_EMAIL_MASK, '$email'] },
+    },
+  },
+]
+
 const accessibleLeadMatch = (match: Record<string, unknown>) => ({ $and: [match, { isLocked: { $ne: true } }] })
 
 const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
@@ -656,12 +666,13 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
   ])
 
   const rows = (documents as any[]).map((row) => {
-    const properties = Array.isArray(row.propertyInterest) ? row.propertyInterest : []
+    const safeRow = redactLockedLeadForList(row)
+    const properties = Array.isArray(safeRow.propertyInterest) ? safeRow.propertyInterest : []
     return {
-      ...row,
-      assignedAgent: publicUserRef(row.assignedAgent),
-      createdBy: publicUserRef(row.createdBy),
-      updatedBy: publicUserRef(row.updatedBy),
+      ...safeRow,
+      assignedAgent: publicUserRef(safeRow.assignedAgent),
+      createdBy: publicUserRef(safeRow.createdBy),
+      updatedBy: publicUserRef(safeRow.updatedBy),
       propertyInterest: properties,
       propertySummary: { count: properties.length, primary: properties[0] },
       followUp: { date: row.followUpDate },
@@ -681,6 +692,7 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
           { $sort: sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') },
           { $skip: options.skip },
           { $limit: options.limit },
+          ...lockedLeadRedactionStages(),
           ...userLookupStages('assignedAgent'),
           ...userLookupStages('createdBy'),
           ...userLookupStages('updatedBy'),

@@ -241,6 +241,7 @@ if (isProduction) {
   if (objectStorageBucket && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,62}$/.test(objectStorageBucket)) throw new Error('OBJECT_STORAGE_BUCKET / GCP_BUCKET_NAME contains unsupported characters or length')
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
+  if (realtimeEnabled && !redisEnabled) throw new Error('REDIS_ENABLED/REDIS_HOST is required when realtime is enabled in production')
   if (redisEnabled) {
     if (process.env.REDIS_PASSWORD?.trim() || !redisAllowInsecurePrivateNetwork) {
       requiredInProduction('REDIS_PASSWORD', 8)

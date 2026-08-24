@@ -23,6 +23,7 @@ import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
+import { SubscriptionDateAdjustmentService } from '../subscriptionPayment/subscriptionDateAdjustment.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { LeadPurchaseRequest } from '../leadPurchaseRequest/leadPurchaseRequest.model'
@@ -78,13 +79,14 @@ const getTenantHealth = async (query: any) => {
   const ids = organizations.map((org: any) => org.organizationId)
   if (!ids.length) return { data: [], meta: { page, limit, total } }
 
-  const [properties, teamMembers, leads, domains, latestEvents, latestPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
+  const [properties, teamMembers, leads, domains, latestEvents, latestPayments, latestConfirmedPayments, latestRequests, failedJobs, deadMeta] = await Promise.all([
     groupCounts(Property, ids, propertyCountsTowardQuotaFilter()),
     groupCounts(User, ids, { userRole: { $in: ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer'] }, status: { $ne: 'blocked' } }),
     groupCounts(Lead, ids, activePipelineLeadFilter()),
     DomainRecord.find({ organizationId: { $in: ids } }).select('organizationId domain status tlsStatus entitlementStatus lastCheckedAt diagnostics').lean(),
     DomainEvent.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { occurredAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', at: { $first: '$occurredAt' }, type: { $first: '$eventType' } } }]),
     SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
+    SubscriptionPayment.aggregate([{ $match: { organizationId: { $in: ids }, status: 'confirmed' } }, { $sort: { periodEnd: -1, confirmedAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', payment: { $first: '$$ROOT' } } }]),
     SubscriptionChangeRequest.aggregate([{ $match: { organizationId: { $in: ids }, status: { $in: ['pending_payment', 'payment_submitted', 'scheduled'] } } }, { $sort: { createdAt: -1, _id: -1 } }, { $group: { _id: '$organizationId', request: { $first: '$$ROOT' } } }]),
     groupCounts(OperationsJob, ids, { status: 'failed' }),
     groupCounts(MetaEvent, ids, { status: 'dead' }),
@@ -92,11 +94,13 @@ const getTenantHealth = async (query: any) => {
   const domainMap = new Map(domains.map((row: any) => [row.organizationId, row]))
   const eventMap = new Map(latestEvents.map((row: any) => [String(row._id), row]))
   const paymentMap = new Map(latestPayments.map((row: any) => [String(row._id), row.payment]))
+  const confirmedPaymentMap = new Map(latestConfirmedPayments.map((row: any) => [String(row._id), row.payment]))
   const requestMap = new Map(latestRequests.map((row: any) => [String(row._id), row.request]))
 
   const data = organizations.map((org: any) => {
     const domain: any = domainMap.get(org.organizationId)
     const payment: any = paymentMap.get(org.organizationId)
+    const confirmedPayment: any = confirmedPaymentMap.get(org.organizationId)
     const pendingRequest: any = requestMap.get(org.organizationId)
     const errorCount = Number(failedJobs.get(org.organizationId) || 0) + Number(deadMeta.get(org.organizationId) || 0) + (domain?.status === 'failed' || domain?.tlsStatus === 'failed' ? 1 : 0)
     const accessStatus = tenantAccessStatus(org)
@@ -115,7 +119,9 @@ const getTenantHealth = async (query: any) => {
       paymentId: payment?.paymentNumber || '',
       pendingChangeRequest: pendingRequest ? { _id: pendingRequest._id, requestNumber: pendingRequest.requestNumber, requestedPlan: pendingRequest.requestedPlan, requestedPlanVersion: pendingRequest.requestedPlanVersion, billingCycle: pendingRequest.billingCycle, amount: pendingRequest.amount, status: pendingRequest.status, paymentId: pendingRequest.paymentId, createdAt: pendingRequest.createdAt, rejectionReason: pendingRequest.rejectionReason } : null,
       subscriptionStatus: org.subscription?.status || 'trialing',
+      currentPeriodStart: org.subscription?.currentPeriodStart || confirmedPayment?.periodStart || null,
       currentPeriodEnd: org.subscription?.currentPeriodEnd,
+      currentConfirmedPayment: confirmedPayment ? { paymentNumber: confirmedPayment.paymentNumber, receiptNumber: confirmedPayment.receiptNumber, planId: confirmedPayment.planId, planVersion: confirmedPayment.planVersion, billingCycle: confirmedPayment.billingCycle, paidAt: confirmedPayment.paidAt, periodStart: confirmedPayment.periodStart, periodEnd: confirmedPayment.periodEnd, confirmedAt: confirmedPayment.confirmedAt } : null,
       trialEndsAt: org.subscription?.trialEndsAt,
       subscriptionSource: org.subscription?.source || 'trial',
       usage: {
@@ -614,6 +620,8 @@ const restoreArchivedTenant = PlatformAdminTenantManagementService.restoreArchiv
 const getTenantDeletionPreview = PlatformAdminTenantManagementService.getDeletionPreview
 const scheduleTenantDeletion = PlatformAdminTenantManagementService.scheduleTenantDeletion
 
+const editSubscriptionDates = SubscriptionDateAdjustmentService.editConfirmedPaymentDates
+
 const applyTenantAdminPlanOverride = PlatformAdminTenantPlanManagementService.applyNoChargePlanOverride
 const scheduleTenantAdminDowngrade = PlatformAdminTenantPlanManagementService.scheduleNoChargeDowngrade
 const cancelTenantScheduledChange = PlatformAdminTenantPlanManagementService.cancelScheduledChange
@@ -623,4 +631,4 @@ const getTenantEntitlementOverrides = PlatformAdminTenantPlanManagementService.g
 const setTenantEntitlementOverride = PlatformAdminTenantPlanManagementService.setTenantOverride
 const revokeTenantEntitlementOverride = PlatformAdminTenantPlanManagementService.revokeTenantOverride
 
-export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, getTenantDeletionPreview, scheduleTenantDeletion, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, applyTenantAdminPlanOverride, scheduleTenantAdminDowngrade, cancelTenantScheduledChange, setTenantCancellation, requestTenantRecurringAddon, getTenantEntitlementOverrides, setTenantEntitlementOverride, revokeTenantEntitlementOverride, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, getTenantDeletionPreview, scheduleTenantDeletion, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, editSubscriptionDates, applyTenantAdminPlanOverride, scheduleTenantAdminDowngrade, cancelTenantScheduledChange, setTenantCancellation, requestTenantRecurringAddon, getTenantEntitlementOverrides, setTenantEntitlementOverride, revokeTenantEntitlementOverride, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
