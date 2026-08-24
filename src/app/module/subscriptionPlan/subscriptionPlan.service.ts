@@ -12,6 +12,7 @@ import { normalizeEntitlementWrite, resolveEntitlementSource } from '../entitlem
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { mirrorTierRankWrite, normalizePaidPlanId, resolvePlanOrdering } from './planIdentity'
 import { mirrorBaseLeadCapacityWrite, resolveBaseLeadCapacity } from './planLeadCapacity'
+import { mirrorPlanStatusWrite, resolvePlanStatus } from './planLifecycle'
 
 type LeadAllowanceConfig = Pick<ISubscriptionPlan,
   'leadAllowanceModel' | 'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
@@ -48,6 +49,7 @@ const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T
   const leadAllowanceModel = entitlementResolved.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
   return {
     ...entitlementResolved,
+    status: resolvePlanStatus(entitlementResolved),
     baseLeadCapacity: resolveBaseLeadCapacity(entitlementResolved),
     leadAllowanceModel,
     baseMonthlyLeadAllowance: Number(entitlementResolved.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
@@ -134,16 +136,13 @@ const planWindowFilter = (at = new Date()) => ({
 const ensureDefaults = async (): Promise<void> => {
   if (await SubscriptionPlan.exists({})) return
   const now = new Date()
-  await SubscriptionPlan.insertMany(defaultPlans.map((plan) => ({
+  await SubscriptionPlan.insertMany(defaultPlans.map((plan) => mirrorPlanStatusWrite({
     ...normalizeEntitlementWrite(plan as Record<string, any>),
     version: 1,
-    isCurrent: true,
     effectiveFrom: now,
     effectiveTo: null,
-    grandfatherExisting: true,
-    migrationAppliedAt: now,
     changeReason: 'Initial Bangladesh production plan catalog',
-  })))
+  }, 'current', now)))
   await Cache.plans.del('catalog')
 }
 
@@ -152,7 +151,7 @@ const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
   const cached = await Cache.plans.get<ISubscriptionPlan[]>('catalog')
   if (cached) return cached.map((plan: any) => normalizeLeadAllowanceConfig(plan)) as ISubscriptionPlan[]
   const now = new Date()
-  const rows = await SubscriptionPlan.find(planWindowFilter(now)).lean()
+  const rows = await SubscriptionPlan.find({ isCurrent: true, ...planWindowFilter(now) }).lean()
   const plans = rows
     .map((plan: any) => normalizeLeadAllowanceConfig(plan))
     .sort((a: any, b: any) => Number(a.tierRank) - Number(b.tierRank) || Number(a.priceMonthly) - Number(b.priceMonthly) || Number(b.version) - Number(a.version)) as ISubscriptionPlan[]
@@ -163,7 +162,7 @@ const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
 const getPlanById = async (planId: string, version?: number): Promise<ISubscriptionPlan | null> => {
   await ensureDefaults()
   if (version) return SubscriptionPlan.findOne({ planId, version })
-  return SubscriptionPlan.findOne({ planId, ...planWindowFilter(new Date()) }).sort({ version: -1 })
+  return SubscriptionPlan.findOne({ planId, isCurrent: true, ...planWindowFilter(new Date()) }).sort({ version: -1 })
 }
 
 const getLatestPurchasablePlan = async (planId: string): Promise<ISubscriptionPlan | null> => {
@@ -182,18 +181,18 @@ const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknow
   const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
   const filter: any = query.planId ? { planId: query.planId } : {}
   if (String(query.currentOnly || '') === 'true') filter.isCurrent = true
-  const allowed = new Set(['createdAt', 'effectiveFrom', 'version', 'planId', 'priceMonthly', 'tierRank', 'displayOrder', 'upgradeRank'])
+  const allowed = new Set(['createdAt', 'effectiveFrom', 'version', 'planId', 'priceMonthly', 'tierRank', 'displayOrder', 'upgradeRank', 'status'])
   const sortBy = allowed.has(String(query.sortBy || '')) ? String(query.sortBy) : 'createdAt'
   const order: 1 | -1 = String(query.sortOrder || 'desc') === 'asc' ? 1 : -1
   const summaryFilter: any = query.planId ? { planId: query.planId } : {}
-  const now = new Date()
-  const [data, total, grandfathered, scheduled] = await Promise.all([
+  const [data, total, summaryRows] = await Promise.all([
     SubscriptionPlan.find(filter).sort({ [sortBy]: order, _id: order }).skip((page - 1) * limit).limit(limit).lean(),
     SubscriptionPlan.countDocuments(filter),
-    SubscriptionPlan.countDocuments({ ...summaryFilter, grandfatherExisting: true }),
-    SubscriptionPlan.countDocuments({ ...summaryFilter, effectiveFrom: { $gt: now } }),
+    SubscriptionPlan.find(summaryFilter).select('status isActive isCurrent effectiveFrom').lean(),
   ])
-  return { data: data.map((plan: any) => normalizeLeadAllowanceConfig(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary: { grandfathered, scheduled } } }
+  const summary = { current: 0, scheduled: 0, grandfathered: 0, retired: 0 }
+  for (const row of summaryRows as any[]) summary[resolvePlanStatus(row)] += 1
+  return { data: data.map((plan: any) => normalizeLeadAllowanceConfig(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary } }
 }
 
 const assertTierRankAvailable = async (planId: string, tierRank: number, session?: ClientSession) => {
@@ -221,59 +220,61 @@ const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Pr
     payload.entitlements,
   )
   validateLeadAllowanceConfig(normalizedPayload)
-  const result = await SubscriptionPlan.create({
+  const now = new Date()
+  const result = await SubscriptionPlan.create(mirrorPlanStatusWrite({
     ...normalizedPayload,
     planId,
     version: 1,
     currency: 'BDT',
-    isCurrent: true,
-    effectiveFrom: payload.effectiveFrom || new Date(),
+    effectiveFrom: now,
     effectiveTo: null,
-    grandfatherExisting: payload.grandfatherExisting ?? true,
-    migrationAppliedAt: payload.grandfatherExisting === false ? null : new Date(),
     createdBy: actorId,
-  })
+  }, 'current', now))
   await Cache.plans.del('catalog')
   return result
 }
 
 const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPlan>, actorId: string, session?: ClientSession): Promise<ISubscriptionPlan> => {
+  if (Object.prototype.hasOwnProperty.call(payload, 'planId')) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Plan ID is immutable. Create a different plan family if you need a new Plan ID.')
+  }
+
   const currentQuery = SubscriptionPlan.findById(id)
   if (session) currentQuery.session(session)
   const current = await currentQuery
   if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan not found')
+  if (resolvePlanStatus(current.toObject()) !== 'current') {
+    throw new ApiError(httpStatus.CONFLICT, 'New versions can only be created from the current plan version')
+  }
+
+  const scheduledQuery = SubscriptionPlan.findOne({ planId: current.planId, status: 'scheduled', isActive: true })
+  if (session) scheduledQuery.session(session)
+  if (await scheduledQuery.lean()) {
+    throw new ApiError(httpStatus.CONFLICT, 'This plan family already has a scheduled version. Retire that scheduled version before creating another version.')
+  }
 
   const latestQuery = SubscriptionPlan.findOne({ planId: current.planId }).sort({ version: -1 }).lean()
   if (session) latestQuery.session(session)
   const latest = await latestQuery
-  const effectiveFrom = payload.effectiveFrom ? new Date(payload.effectiveFrom) : new Date()
-  if (Number.isNaN(effectiveFrom.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid effective date')
-
+  const now = new Date()
   const snapshot = current.toObject()
-  const mergedRawSnapshot = { ...snapshot, ...payload, planId: current.planId }
   const mergedCommercialSnapshot = normalizePlanWrite(
-    mergedRawSnapshot,
+    { ...snapshot, ...payload, planId: current.planId },
     payload.entitlements,
   )
   validateLeadAllowanceConfig(mergedCommercialSnapshot)
   await assertTierRankAvailable(String(current.planId), Number(mergedCommercialSnapshot.tierRank), session)
   const nextVersion = (latest?.version || current.version || 1) + 1
-  const grandfatherExisting = payload.grandfatherExisting ?? true
 
-  await SubscriptionPlan.updateMany({ planId: current.planId, isCurrent: true }, { $set: { isCurrent: false } }, session ? { session } : undefined)
-  const previousQuery = SubscriptionPlan.findOne({
-    planId: current.planId,
-    effectiveFrom: { $lte: effectiveFrom },
-    $or: [{ effectiveTo: null }, { effectiveTo: { $exists: false } }, { effectiveTo: { $gt: effectiveFrom } }],
-  }).sort({ version: -1 })
-  if (session) previousQuery.session(session)
-  const previousEffective = await previousQuery
-  if (previousEffective) {
-    previousEffective.effectiveTo = effectiveFrom
-    await previousEffective.save(session ? { session } : undefined)
-  }
+  current.status = 'grandfathered'
+  current.isCurrent = false
+  current.isActive = true
+  current.effectiveTo = now
+  current.grandfatherExisting = true
+  current.migrationAppliedAt = current.migrationAppliedAt || now
+  await current.save(session ? { session } : undefined)
 
-  const docs = await SubscriptionPlan.create([{
+  const docs = await SubscriptionPlan.create([mirrorPlanStatusWrite({
     ...snapshot,
     ...mergedCommercialSnapshot,
     _id: undefined,
@@ -283,14 +284,11 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
     planId: current.planId,
     version: nextVersion,
     currency: 'BDT',
-    isCurrent: true,
-    effectiveFrom,
+    effectiveFrom: now,
     effectiveTo: null,
-    grandfatherExisting,
-    migrationAppliedAt: grandfatherExisting ? new Date() : null,
     createdBy: actorId,
     changeReason: payload.changeReason || '',
-  }], session ? { session } : undefined)
+  }, 'current', now)], session ? { session } : undefined)
   return docs[0]
 }
 
@@ -310,14 +308,14 @@ const createVersion = async (id: string, payload: Partial<ISubscriptionPlan>, ac
   if (config.env === 'production') {
     throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Plan version changes require a MongoDB replica set or mongos in production')
   }
-  // Local standalone MongoDB fallback. Production deliberately fails closed above
-  // because plan versioning is a multi-document commercial mutation.
+  // Local standalone fallback. The production path above is transactional.
+  const previous = await SubscriptionPlan.findById(id).lean()
   try {
     const created = await createVersionWrites(id, payload, actorId)
     await Cache.plans.del('catalog')
     return created
   } catch (error) {
-    await SubscriptionPlan.updateOne({ _id: id }, { $set: { isCurrent: true } }).catch(() => undefined)
+    if (previous) await SubscriptionPlan.replaceOne({ _id: id }, previous).catch(() => undefined)
     throw error
   }
 }
@@ -325,24 +323,100 @@ const createVersion = async (id: string, payload: Partial<ISubscriptionPlan>, ac
 const archivePlan = async (id: string): Promise<ISubscriptionPlan> => {
   const plan = await SubscriptionPlan.findById(id)
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan not found')
+  const status = resolvePlanStatus(plan.toObject())
+  if (status === 'current') {
+    throw new ApiError(httpStatus.CONFLICT, 'The current plan version cannot be retired. Create its replacement version first.')
+  }
+  if (status === 'retired') return plan
+
   const tenantCount = await Organization.countDocuments({ 'subscription.plan': plan.planId, 'subscription.planVersion': plan.version })
   if (tenantCount > 0) {
-    throw new ApiError(httpStatus.CONFLICT, `This plan version is still assigned to ${tenantCount} tenant(s) and cannot be archived`)
+    throw new ApiError(httpStatus.CONFLICT, `This plan version is still assigned to ${tenantCount} tenant(s) and cannot be retired`)
   }
+  const now = new Date()
+  plan.status = 'retired'
   plan.isActive = false
   plan.isCurrent = false
-  plan.effectiveTo = plan.effectiveTo || new Date()
+  plan.grandfatherExisting = true
+  plan.effectiveTo = plan.effectiveTo || now
   await plan.save()
   await Cache.plans.del('catalog')
   return plan
 }
 
-const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migratedTenants: number }> => {
+const activateScheduledPlanVersionWrites = async (id: string, session?: ClientSession): Promise<boolean> => {
+  const scheduledQuery = SubscriptionPlan.findById(id)
+  if (session) scheduledQuery.session(session)
+  const scheduled = await scheduledQuery
+  if (!scheduled || resolvePlanStatus(scheduled.toObject()) !== 'scheduled' || new Date(scheduled.effectiveFrom).getTime() > Date.now()) return false
+
+  await assertTierRankAvailable(String(scheduled.planId), Number(resolvePlanOrdering(scheduled.toObject()).tierRank), session)
+  const currentQuery = SubscriptionPlan.findOne({ planId: scheduled.planId, isCurrent: true, _id: { $ne: scheduled._id } })
+  if (session) currentQuery.session(session)
+  const current = await currentQuery
+  const activatedAt = new Date(scheduled.effectiveFrom)
+
+  if (current) {
+    current.status = 'grandfathered'
+    current.isCurrent = false
+    current.isActive = true
+    current.grandfatherExisting = true
+    current.effectiveTo = activatedAt
+    current.migrationAppliedAt = current.migrationAppliedAt || activatedAt
+    await current.save(session ? { session } : undefined)
+  }
+
+  scheduled.status = 'current'
+  scheduled.isCurrent = true
+  scheduled.isActive = true
+  scheduled.grandfatherExisting = true
+  scheduled.effectiveTo = null
+  scheduled.migrationAppliedAt = scheduled.migrationAppliedAt || activatedAt
+  await scheduled.save(session ? { session } : undefined)
+  return true
+}
+
+const activateDueScheduledPlanVersions = async (): Promise<number> => {
+  const due = await SubscriptionPlan.find({ status: 'scheduled', isActive: true, effectiveFrom: { $lte: new Date() } })
+    .sort({ effectiveFrom: 1, version: 1 })
+    .select('_id')
+    .limit(50)
+    .lean()
+  if (!due.length) return 0
+
+  const transactional = await mongoSupportsTransactions()
+  if (!transactional && config.env === 'production') {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Scheduled plan activation requires a MongoDB replica set or mongos in production')
+  }
+
+  let activated = 0
+  for (const row of due) {
+    if (transactional) {
+      const session = await mongoose.startSession()
+      try {
+        await session.withTransaction(async () => {
+          if (await activateScheduledPlanVersionWrites(String(row._id), session)) activated += 1
+        })
+      } finally {
+        await session.endSession()
+      }
+    } else if (await activateScheduledPlanVersionWrites(String(row._id))) {
+      activated += 1
+    }
+  }
+  if (activated) await Cache.plans.del('catalog')
+  return activated
+}
+
+const applyDuePlanVersions = async (): Promise<{ activatedVersions: number; appliedVersions: number; migratedTenants: number }> => {
+  const activatedVersions = await activateDueScheduledPlanVersions()
+  // Compatibility-only path for legacy pre-Phase-2 versions that explicitly opted into tenant migration.
   const due = await SubscriptionPlan.find({
     grandfatherExisting: false,
     migrationAppliedAt: null,
     effectiveFrom: { $lte: new Date() },
     isActive: true,
+    status: { $ne: 'scheduled' },
   }).sort({ effectiveFrom: 1 }).limit(50)
 
   let migratedTenants = 0
@@ -389,7 +463,7 @@ const applyDuePlanVersions = async (): Promise<{ appliedVersions: number; migrat
     await plan.save()
   }
   if (due.length) await Cache.plans.del('catalog')
-  return { appliedVersions: due.length, migratedTenants }
+  return { activatedVersions, appliedVersions: due.length, migratedTenants }
 }
 
 export const SubscriptionPlanService = {
@@ -401,5 +475,6 @@ export const SubscriptionPlanService = {
   createVersion,
   updatePlan: createVersion,
   deletePlan: archivePlan,
+  activateDueScheduledPlanVersions,
   applyDuePlanVersions,
 }

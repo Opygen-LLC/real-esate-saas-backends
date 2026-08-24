@@ -1,4 +1,5 @@
 import type { EntitlementConfig } from '../entitlement/entitlement.types'
+import type { PlanStatus } from './planLifecycle'
 
 export type SubscriptionPlanId = string
 export type LeadAllowanceModel = 'paid_period_credits' | 'active_capacity'
@@ -38,6 +39,8 @@ export interface ISubscriptionPlan {
   maxStorageMb: number
   maxMonthlyVisitors: number
   isPopular?: boolean
+  status?: PlanStatus
+  // Legacy lifecycle mirrors kept during Phase 2 for backward compatibility.
   isActive: boolean
   isCurrent: boolean
   effectiveFrom: Date

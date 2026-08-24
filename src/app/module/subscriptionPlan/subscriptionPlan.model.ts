@@ -8,6 +8,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     planId: {
       type: String,
       required: true,
+      immutable: true,
       trim: true,
       lowercase: true,
       minlength: 3,
@@ -53,6 +54,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     maxStorageMb: { type: Number, default: 1024, min: 0 },
     maxMonthlyVisitors: { type: Number, default: 10000, min: 0 },
     isPopular: { type: Boolean, default: false },
+    status: { type: String, enum: ['scheduled', 'current', 'grandfathered', 'retired'], index: true },
     isActive: { type: Boolean, default: true, index: true },
     isCurrent: { type: Boolean, default: true, index: true },
     effectiveFrom: { type: Date, required: true, default: Date.now, index: true },
@@ -67,10 +69,15 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
 
 subscriptionPlanSchema.index({ planId: 1, version: 1 }, { unique: true })
 subscriptionPlanSchema.index(
+  { planId: 1, status: 1 },
+  { name: 'planId_1_status_1_current_unique', unique: true, partialFilterExpression: { status: 'current' } },
+)
+subscriptionPlanSchema.index(
   { planId: 1, isCurrent: 1 },
   { unique: true, partialFilterExpression: { isCurrent: true } },
 )
 subscriptionPlanSchema.index({ isActive: 1, effectiveFrom: 1, effectiveTo: 1 })
+subscriptionPlanSchema.index({ status: 1, tierRank: 1 })
 subscriptionPlanSchema.index({ isCurrent: 1, isActive: 1, tierRank: 1 })
 subscriptionPlanSchema.index({ isCurrent: 1, isActive: 1, displayOrder: 1, upgradeRank: 1 })
 subscriptionPlanSchema.index(

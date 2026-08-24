@@ -14,8 +14,8 @@ describe('Phase 13 Super Admin lead-bonus controls', () => {
     }
     expect(service).toContain('createVersionWrites')
     expect(service).toContain('version: nextVersion')
-    expect(service).toContain('isCurrent: false')
-    expect(service).toContain('isCurrent: true')
+    expect(service).toContain("current.status = 'grandfathered'")
+    expect(service).toContain("}, 'current', now)")
   })
 
   it('exposes current per-tenant streak, allowance, usage and remaining leads', () => {

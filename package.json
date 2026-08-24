@@ -102,7 +102,8 @@
     "migrate:subscription-platform-phase7": "ts-node --transpile-only src/app/db/migrateSubscriptionPlatformPhase7.ts",
     "verify:subscription-platform-phase7": "node scripts/verify-phase7-subscription-platform-release.mjs",
     "test:subscription-platform-phase7": "vitest run src/tests/contract/phase7SubscriptionPlatformRelease.contract.test.ts src/tests/security/phase7SubscriptionPlatformRelease.security.test.ts src/tests/unit/phase7SubscriptionCommercialRules.unit.test.ts",
-    "migrate:subscription-plan-normalization": "ts-node --transpile-only src/app/db/migrateSubscriptionPlanNormalizationV1.ts"
+    "migrate:subscription-plan-normalization": "ts-node --transpile-only src/app/db/migrateSubscriptionPlanNormalizationV1.ts",
+    "migrate:subscription-plan-lifecycle": "ts-node --transpile-only src/app/db/migrateSubscriptionPlanLifecycleV2.ts"
   },
   "keywords": [
     "real-estate",

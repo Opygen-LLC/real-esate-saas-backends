@@ -65,7 +65,6 @@ const commercialShape = {
   maxStorageMb: nonNegativeInteger.default(1024),
   maxMonthlyVisitors: nonNegativeInteger.default(10000),
   isPopular: z.boolean().default(false),
-  isActive: z.boolean().default(true),
 }
 
 type CanonicalAliasInput = {
@@ -88,7 +87,7 @@ const validateCanonicalAliases = (value: CanonicalAliasInput, ctx: z.RefinementC
   if (requireCanonicalConcepts && rankValues.every((entry) => entry === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Plan tier is required' })
   } else if (!valuesAgree(rankValues)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Conflicting plan tier values were supplied. tierRank, displayOrder and upgradeRank must match during Phase 1.' })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Conflicting plan tier values were supplied. tierRank, displayOrder and upgradeRank must match during Phase 1 compatibility.' })
   }
 
   const entitlementLeadLimit = value.entitlements?.leads?.limit
@@ -137,11 +136,26 @@ const normalizeCompatibilityAliases = <T extends Record<string, any>>(value: T) 
   }
 }
 
+// Phase 2: lifecycle is system-owned. Super Admin edits commercial fields only.
+const forbiddenLifecycleCreateFields = {
+  status: z.never().optional(),
+  isActive: z.never().optional(),
+  isCurrent: z.never().optional(),
+  grandfatherExisting: z.never().optional(),
+  effectiveFrom: z.never().optional(),
+  effectiveTo: z.never().optional(),
+  migrationAppliedAt: z.never().optional(),
+}
+
+const forbiddenLifecycleUpdateFields = {
+  planId: z.never().optional(),
+  ...forbiddenLifecycleCreateFields,
+}
+
 const createBody = z.object({
   ...commercialShape,
+  ...forbiddenLifecycleCreateFields,
   planId: paidPlanIdSchema,
-  effectiveFrom: z.coerce.date().optional(),
-  grandfatherExisting: z.boolean().default(true),
   changeReason: z.string().trim().min(10).max(500),
 }).superRefine((value, ctx) => {
   requireTeamMemberLimit(value, ctx)
@@ -149,6 +163,7 @@ const createBody = z.object({
 }).transform(normalizeCompatibilityAliases)
 
 const updateBody = z.object({
+  ...forbiddenLifecycleUpdateFields,
   name: commercialShape.name.optional(),
   tierRank: tierRankInput.optional(),
   displayOrder: tierRankInput.optional(),
@@ -180,9 +195,6 @@ const updateBody = z.object({
   maxStorageMb: nonNegativeInteger.optional(),
   maxMonthlyVisitors: nonNegativeInteger.optional(),
   isPopular: z.boolean().optional(),
-  isActive: z.boolean().optional(),
-  effectiveFrom: z.coerce.date().optional(),
-  grandfatherExisting: z.boolean().optional(),
   changeReason: z.string().trim().min(10).max(500),
 }).superRefine((value, ctx) => {
   if (value.maxTeamMembers !== undefined && value.maxAgents !== undefined && value.maxTeamMembers !== value.maxAgents) {
@@ -190,7 +202,7 @@ const updateBody = z.object({
   }
   validateCanonicalAliases(value, ctx, false)
   if (!Object.keys(value).some((key) => key !== 'changeReason')) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one plan field must change' })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one commercial plan field must change' })
   }
 }).transform(normalizeCompatibilityAliases)
 
