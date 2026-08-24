@@ -1,6 +1,6 @@
 import type { LeadAllowanceModel, SubscriptionPlanId } from '../subscriptionPlan/subscriptionPlan.interface'
 
-export type BenefitPaymentSource = 'manual_payment' | 'bkash'
+export type BenefitPaymentSource = 'manual_payment' | 'bkash' | 'manual_admin'
 export type BenefitBillingCycle = 'monthly' | 'yearly' | 'one-time'
 
 export interface ISubscriptionBenefitPeriod {

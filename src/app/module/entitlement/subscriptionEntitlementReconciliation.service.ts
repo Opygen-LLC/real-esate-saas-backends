@@ -8,6 +8,7 @@ import {
   type ResourceEntitlementSnapshot,
 } from './resourceEntitlementReconciliation.service'
 import { publishTeamSeatReconciliation, reconcileTeamSeats, type TeamSeatReconciliationResult } from './teamSeatReconciliation.service'
+import { applyTenantEntitlementOverride, getActiveTenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.resolver'
 
 export interface SubscriptionEntitlementInput {
   plan?: string
@@ -26,6 +27,8 @@ export interface SubscriptionEntitlementInput {
   hasSmsAutomation?: boolean
   hasPremiumTemplates?: boolean
   hasLeadAutomations?: boolean
+  /** Internal marker: the input already contains tenant-specific override effects. */
+  tenantOverrideApplied?: boolean
 }
 
 export interface SubscriptionEntitlementSnapshot extends ResourceEntitlementSnapshot {
@@ -149,8 +152,21 @@ export const reconcileOrganizationEntitlements = async (
   newPlan: SubscriptionEntitlementInput,
   options: { session?: ClientSession; actorId?: string; reason?: string } = {},
 ): Promise<SubscriptionEntitlementReconciliationResult> => {
-  const current = await resolveSubscriptionEntitlementSnapshot(newPlan, options.session)
-  const previous = await resolveSubscriptionEntitlementSnapshot(previousPlan, options.session, current)
+  let current = await resolveSubscriptionEntitlementSnapshot(newPlan, options.session)
+  let previous = await resolveSubscriptionEntitlementSnapshot(previousPlan, options.session, current)
+  const tenantOverride = await getActiveTenantEntitlementOverride(organizationId, options.session)
+  const applyOverride = (snapshot: SubscriptionEntitlementSnapshot): SubscriptionEntitlementSnapshot => {
+    const applied = applyTenantEntitlementOverride({
+      maxLeads: snapshot.maxLeads, maxProperties: snapshot.maxProperties, maxTeamMembers: snapshot.maxTeamMembers,
+      maxStorageMb: snapshot.maxStorageMb, maxMonthlyVisitors: 0, hasCustomDomain: snapshot.hasCustomDomain,
+      hasAdvancedAnalytics: snapshot.hasAdvancedAnalytics, hasWhatsAppIntegration: snapshot.hasWhatsAppIntegration,
+      hasSmsAutomation: snapshot.hasSmsAutomation, hasLeadAutomations: snapshot.hasLeadAutomations,
+      hasPremiumTemplates: snapshot.hasPremiumTemplates,
+    }, tenantOverride)
+    return { ...snapshot, maxLeads: applied.maxLeads, maxProperties: applied.maxProperties, maxTeamMembers: applied.maxTeamMembers, maxStorageMb: applied.maxStorageMb, hasCustomDomain: applied.hasCustomDomain, hasAdvancedAnalytics: applied.hasAdvancedAnalytics, hasWhatsAppIntegration: applied.hasWhatsAppIntegration, hasSmsAutomation: applied.hasSmsAutomation, hasLeadAutomations: applied.hasLeadAutomations, hasPremiumTemplates: applied.hasPremiumTemplates }
+  }
+  if (!newPlan.tenantOverrideApplied) current = applyOverride(current)
+  if (!previousPlan?.tenantOverrideApplied) previous = applyOverride(previous)
   const downgrade = hasDowngrade(previous, current)
   const upgrade = hasUpgrade(previous, current)
   const direction: SubscriptionEntitlementReconciliationResult['direction'] = downgrade ? 'downgrade' : upgrade ? 'upgrade' : 'unchanged'

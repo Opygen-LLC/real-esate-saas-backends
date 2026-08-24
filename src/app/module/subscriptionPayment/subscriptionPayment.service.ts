@@ -452,7 +452,17 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       entitlementReconciliation = await reconcileOrganizationEntitlements(payment.organizationId, previous, {
         ...(plan.toObject?.() || plan),
         maxLeads: Number(effective.limits.maxLeads || 0),
+        maxTeamMembers: Number(effective.limits.maxTeamMembers || 0),
+        maxProperties: Number(effective.limits.maxProperties || 0),
+        maxStorageMb: Number(effective.limits.maxStorageMb || 0),
+        hasCustomDomain: Boolean(effective.limits.hasCustomDomain),
+        hasAdvancedAnalytics: Boolean(effective.limits.hasAdvancedAnalytics),
+        hasWhatsAppIntegration: Boolean(effective.limits.hasWhatsAppIntegration),
+        hasSmsAutomation: Boolean(effective.limits.hasSmsAutomation),
+        hasPremiumTemplates: Boolean(effective.limits.hasPremiumTemplates),
+        hasLeadAutomations: Boolean(effective.limits.hasLeadAutomations),
         leadAllowanceModel: effective.limits.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+        tenantOverrideApplied: true,
       }, {
         session,
         actorId: actor.id,

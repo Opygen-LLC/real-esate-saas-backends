@@ -203,6 +203,37 @@ const createSubscription = async (organizationId: string, requestedBy: string, i
   }
 }
 
+
+const createAdminSubscriptionRequest = async (
+  organizationId: string,
+  requestedBy: string,
+  input: { definitionId: string; quoteCalculatedAt?: string; reason: string },
+) => {
+  const now = new Date()
+  let anchor = now
+  if (input.quoteCalculatedAt) {
+    const parsed = new Date(input.quoteCalculatedAt)
+    if (!Number.isFinite(parsed.getTime()) || parsed.getTime() > now.getTime() + 5_000 || now.getTime() - parsed.getTime() > 10 * 60_000) throw new ApiError(httpStatus.CONFLICT, 'This recurring lead add-on quote has expired. Review a fresh quote before continuing.')
+    anchor = parsed
+  }
+  const snapshot: any = await quote(organizationId, input.definitionId, anchor)
+  try {
+    const row: any = await LeadAddonSubscription.create({
+      organizationId, definitionId: snapshot.definition.id, definitionName: snapshot.definition.name, definitionSlug: snapshot.definition.slug,
+      leadCapacity: snapshot.definition.leadCapacity, priceMonthly: snapshot.definition.priceMonthly, currency: 'BDT', planId: snapshot.plan.planId,
+      planVersion: snapshot.plan.planVersion, billingCycle: snapshot.plan.billingCycle, cyclePrice: snapshot.cyclePrice, status: 'pending_payment',
+      quoteSnapshot: snapshot, cancelAtPeriodEnd: false, requestedBy, requestedAt: now,
+    })
+    await writeAudit({ organizationId, actorId: requestedBy, actorRole: 'super-admin', action: 'lead_addon.requested_by_platform_admin', entityType: 'leadAddonSubscription', entityId: String(row._id), reason: input.reason, metadata: { definitionId: snapshot.definition.id, leadCapacity: snapshot.definition.leadCapacity, dueNow: snapshot.dueNow, nextRenewalPrice: snapshot.nextRenewalPrice, periodEnd: snapshot.periodEnd } })
+    RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'created', entityId: String(row._id) })
+    RealtimeService.emitOrganization(organizationId, { type: 'subscription.changed', action: 'lead_addon_payment_requested', entityId: String(row._id) })
+    return row
+  } catch (error: any) {
+    if (Number(error?.code) === 11000) throw new ApiError(httpStatus.CONFLICT, 'Another recurring lead add-on payment request is already pending. Complete or cancel it before creating a new one.')
+    throw error
+  }
+}
+
 const listTenant = async (organizationId: string) => LeadAddonSubscription.find({ organizationId }).sort({ createdAt: -1, _id: -1 }).lean()
 
 const cancel = async (organizationId: string, id: string, actorId: string) => {
@@ -330,4 +361,4 @@ const applyDueLifecycle = async (limit = 100, now = new Date()) => {
   return { processed: rows.length, cancelled, paymentFailed }
 }
 
-export const LeadAddonSubscriptionService = { quote, createSubscription, listTenant, cancel, listAdmin, decide, getActiveSummary, getRenewingSummary, assertPlanCeiling, getCommittedCapacity, renewForSubscriptionPeriod, applyDueLifecycle, cyclePrice }
+export const LeadAddonSubscriptionService = { quote, createSubscription, createAdminSubscriptionRequest, listTenant, cancel, listAdmin, decide, getActiveSummary, getRenewingSummary, assertPlanCeiling, getCommittedCapacity, renewForSubscriptionPeriod, applyDueLifecycle, cyclePrice }

@@ -66,6 +66,19 @@ const deletionBody = z.object({
   }),
 })
 const organizationParams = z.object({ organizationId: z.string().trim().min(3).max(120) })
+
+const adminPlanOverrideBody = z.object({ params: organizationParams, body: z.object({
+  planId: paidPlanIdSchema, planVersion: z.number().int().positive().optional(), billingCycle: z.enum(['monthly', 'yearly']).default('monthly'),
+  reason: z.string().trim().min(10).max(500),
+}) })
+const cancellationBody = z.object({ params: organizationParams, body: z.object({ cancelAtPeriodEnd: z.boolean(), reason: z.string().trim().min(10).max(500) }) })
+const adminAddonBody = z.object({ params: organizationParams, body: z.object({ definitionId: z.string().trim().min(8).max(80), quoteCalculatedAt: z.string().datetime().optional(), reason: z.string().trim().min(10).max(500) }) })
+const numericOverride = z.object({ mode: z.enum(['add', 'set']), value: z.number().int().nonnegative() }).strict()
+const tenantOverrideBody = z.object({ params: organizationParams, body: z.object({
+  resources: z.object({ leads: numericOverride.optional(), properties: numericOverride.optional(), teamMembers: numericOverride.optional(), storageMb: numericOverride.optional(), monthlyVisitors: numericOverride.optional() }).strict().optional(),
+  features: z.object({ customDomain: z.boolean().optional(), advancedAnalytics: z.boolean().optional(), whatsappIntegration: z.boolean().optional(), smsAutomation: z.boolean().optional(), leadAutomations: z.boolean().optional(), premiumTemplates: z.boolean().optional() }).strict().optional(),
+  expiresAt: z.string().datetime().nullable().optional(), reason: z.string().trim().min(10).max(500),
+}).refine((body) => Object.values(body.resources || {}).some(Boolean) || Object.values(body.features || {}).some((value) => typeof value === 'boolean'), { message: 'At least one tenant-specific entitlement override is required' }) })
 const tenantLeadEntitlementParams = z.object({ params: organizationParams })
 const renewalStreakBody = z.object({
   params: organizationParams,
@@ -88,7 +101,7 @@ const benefitHistoryQuery = z.object({ query: z.object({
   search: z.string().trim().max(200).optional(),
   organizationId: z.string().trim().max(120).optional(),
   planId: paidPlanIdSchema.optional(),
-  paymentSource: z.enum(['manual_payment', 'bkash']).optional(),
+  paymentSource: z.enum(['manual_payment', 'bkash', 'manual_admin']).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }) })
@@ -97,6 +110,14 @@ router.get('/notifications', authMiddlewares.authSuperAdmin, PlatformAdminContro
 router.get('/subscriptions/summary', authMiddlewares.authSuperAdmin, PlatformAdminController.subscriptionSummary)
 router.patch('/tenants/:organizationId/subscription', authMiddlewares.authSuperAdmin, validateRequest(subscriptionBody), PlatformAdminController.changeTenantSubscription)
 router.patch('/tenants/:organizationId/trial', authMiddlewares.authSuperAdmin, validateRequest(trialBody), PlatformAdminController.manageTenantTrial)
+router.post('/tenants/:organizationId/subscription/admin-override', authMiddlewares.authSuperAdmin, validateRequest(adminPlanOverrideBody), PlatformAdminController.applyTenantAdminPlanOverride)
+router.post('/tenants/:organizationId/subscription/schedule-downgrade', authMiddlewares.authSuperAdmin, validateRequest(adminPlanOverrideBody), PlatformAdminController.scheduleTenantAdminDowngrade)
+router.post('/tenants/:organizationId/subscription/cancel-scheduled-change', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.cancelTenantScheduledChange)
+router.patch('/tenants/:organizationId/subscription/cancellation', authMiddlewares.authSuperAdmin, validateRequest(cancellationBody), PlatformAdminController.setTenantCancellation)
+router.post('/tenants/:organizationId/subscription/recurring-addon', authMiddlewares.authSuperAdmin, validateRequest(adminAddonBody), PlatformAdminController.requestTenantRecurringAddon)
+router.get('/tenants/:organizationId/entitlement-overrides', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.getTenantEntitlementOverrides)
+router.post('/tenants/:organizationId/entitlement-overrides', authMiddlewares.authSuperAdmin, validateRequest(tenantOverrideBody), PlatformAdminController.setTenantEntitlementOverride)
+router.post('/tenants/:organizationId/entitlement-overrides/revoke', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.revokeTenantEntitlementOverride)
 router.get('/tenants/health', authMiddlewares.authSuperAdmin, PlatformAdminController.tenantHealth)
 router.get('/tenants/:organizationId', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.tenantDetails)
 router.patch('/tenants/:organizationId/profile', authMiddlewares.authSuperAdmin, validateRequest(tenantProfileBody), PlatformAdminController.updateTenantProfile)

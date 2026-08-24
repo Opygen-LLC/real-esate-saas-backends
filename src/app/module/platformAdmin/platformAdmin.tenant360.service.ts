@@ -26,7 +26,8 @@ import { User } from '../user/user.model'
 import { USER_PROFILE_POPULATES, toUserDto } from '../user/userProfile.service'
 import { ImpersonationSession } from './impersonationSession.model'
 import { resolveEntitlementSource } from '../entitlement/featureCatalog'
-import { propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
+import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
+import { TenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.model'
 
 const TEAM_ROLES = ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer']
 
@@ -111,6 +112,7 @@ export const getTenant360 = async (organizationId: string) => {
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
   const planSnapshot = await resolvePlanSnapshot(organization)
+  const effectiveSnapshot = await EntitlementService.resolve(normalizedOrganizationId, undefined, { allowInactive: true, allowUnavailable: true })
   const now = new Date()
 
   const [
@@ -134,6 +136,7 @@ export const getTenant360 = async (organizationId: string) => {
     auditEntries,
     authSessions,
     impersonationSessions,
+    tenantOverrideHistory,
   ]: any[] = await Promise.all([
     User.find({ organizationId: normalizedOrganizationId, userRole: { $in: TEAM_ROLES } })
       .select('_id name email phoneNumber organizationId userRole status accessRestriction isVerified createdAt updatedAt')
@@ -169,6 +172,7 @@ export const getTenant360 = async (organizationId: string) => {
     AuditEvent.find({ organizationId: normalizedOrganizationId }).sort({ createdAt: -1, _id: -1 }).limit(100).lean(),
     AuthSession.find({ organizationId: normalizedOrganizationId }).select('_id userId expiresAt revokedAt revokeReason lastUsedAt lastUsedIp createdIp userAgent createdAt updatedAt').sort({ lastUsedAt: -1, _id: -1 }).limit(25).lean(),
     ImpersonationSession.find({ organizationId: normalizedOrganizationId }).select('_id adminUserId targetUserId reason readOnly startedAt expiresAt endedAt endedBy ip userAgent createdAt').sort({ startedAt: -1, _id: -1 }).limit(20).lean(),
+    TenantEntitlementOverride.find({ organizationId: normalizedOrganizationId }).sort({ version: -1, _id: -1 }).limit(20).lean(),
   ])
 
   const benefitAdjustment: any = activeBenefitPeriod
@@ -199,7 +203,7 @@ export const getTenant360 = async (organizationId: string) => {
   const pendingTeamMembers = team.filter((member: any) => member.status === 'pending').length
   const blockedTeamMembers = team.filter((member: any) => member.status === 'blocked').length
   const seatMembersUsed = team.filter((member: any) => member.status !== 'blocked').length
-  const teamLimit = number(planSnapshot.limits.maxTeamMembers)
+  const teamLimit = number(effectiveSnapshot.limits.maxTeamMembers)
   const seatCommitted = seatMembersUsed + invitationRows.length
 
   const benefit: any = activeBenefitPeriod || null
@@ -212,9 +216,8 @@ export const getTenant360 = async (organizationId: string) => {
   const basePlanCapacity = benefit ? Math.max(0, number(benefit.baseLeadAllowance)) : number(planSnapshot.limits.maxLeads)
   const purchasedTopupCapacity = number(activeTopupSummary.topupLeadAllowance)
   const recurringAddonCapacity = number(activeRecurringAddonSummary.recurringLeadAllowance)
-  const effectiveLeadCapacity = organization.subscription?.plan === 'trial'
-    ? number(planSnapshot.limits.maxLeads)
-    : planLeadAllowance + purchasedTopupCapacity + recurringAddonCapacity
+  const effectiveLeadCapacity = number(effectiveSnapshot.limits.maxLeads)
+  const adminAdjustmentCapacity = effectiveLeadCapacity - (planLeadAllowance + purchasedTopupCapacity + recurringAddonCapacity)
 
   const latestConfirmedPayment: any = payments.find((payment: any) => payment.status === 'confirmed' && ['monthly', 'yearly'].includes(payment.billingCycle)) || null
   const currentBillingCycle = benefit?.billingCycle === 'yearly'
@@ -364,13 +367,24 @@ export const getTenant360 = async (organizationId: string) => {
         recurringSubscriptions: recurringAddonSubscriptions,
       },
       tenantOverrides: {
-        supported: false,
-        items: [],
-        note: 'Per-tenant entitlement overrides are not enabled in the current release.',
+        supported: true,
+        active: effectiveSnapshot.limits.tenantOverride || null,
+        items: tenantOverrideHistory,
+        note: 'Tenant-specific overrides are applied after plan, loyalty, recurring add-ons and legacy top-up grants.',
       },
       effectiveLimits: {
         ...planSnapshot.limits,
+        maxTeamMembers: number(effectiveSnapshot.limits.maxTeamMembers),
+        maxProperties: number(effectiveSnapshot.limits.maxProperties),
         maxLeads: effectiveLeadCapacity,
+        maxStorageMb: number(effectiveSnapshot.limits.maxStorageMb),
+        maxMonthlyVisitors: number(effectiveSnapshot.limits.maxMonthlyVisitors),
+        hasCustomDomain: Boolean(effectiveSnapshot.limits.hasCustomDomain),
+        hasAdvancedAnalytics: Boolean(effectiveSnapshot.limits.hasAdvancedAnalytics),
+        hasWhatsAppIntegration: Boolean(effectiveSnapshot.limits.hasWhatsAppIntegration),
+        hasSmsAutomation: Boolean(effectiveSnapshot.limits.hasSmsAutomation),
+        hasPremiumTemplates: Boolean(effectiveSnapshot.limits.hasPremiumTemplates),
+        hasLeadAutomations: Boolean(effectiveSnapshot.limits.hasLeadAutomations),
       },
     },
     leadCapacity: {
@@ -379,7 +393,7 @@ export const getTenant360 = async (organizationId: string) => {
       planLeadAllowance,
       recurringLeadAddonCapacity: recurringAddonCapacity,
       purchasedTopupCapacity,
-      adminAdjustmentCapacity: 0,
+      adminAdjustmentCapacity,
       effectiveCapacity: effectiveLeadCapacity,
       storedLeads: storedLeadCount,
       accessibleLeads: accessibleLeadCount,
@@ -458,7 +472,7 @@ export const getTenant360 = async (organizationId: string) => {
     metadata: {
       generatedAt: new Date(),
       customDomainHealthy: !domain || (domain.status === 'verified' && activeDomainTls.has(String(domain.tlsStatus || '').toLowerCase())),
-      tenantOverridesAvailable: false,
+      tenantOverridesAvailable: true,
       recurringLeadAddOnsAvailable: true,
     },
   }

@@ -11,6 +11,7 @@ import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscrip
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { resolvePlanOrdering } from '../subscriptionPlan/planIdentity'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 import {
   publishSubscriptionEntitlementReconciliation,
   reconcileOrganizationEntitlements,
@@ -230,7 +231,22 @@ const applyDueChange = async (
     const appliedOrganization: any = await appliedOrganizationQuery
     if (!appliedOrganization) throw new ApiError(httpStatus.CONFLICT, 'Scheduled subscription changed concurrently; retry the entitlement request')
 
-    reconciliation = await reconcileOrganizationEntitlements(organizationId, previous, targetPlan, {
+    const effective = await EntitlementService.resolve(organizationId, session, { allowInactive: true })
+    reconciliation = await reconcileOrganizationEntitlements(organizationId, previous, {
+      ...(targetPlan || {}),
+      maxTeamMembers: Number(effective.limits.maxTeamMembers || 0),
+      maxProperties: Number(effective.limits.maxProperties || 0),
+      maxLeads: Number(effective.limits.maxLeads || 0),
+      maxStorageMb: Number(effective.limits.maxStorageMb || 0),
+      hasCustomDomain: Boolean(effective.limits.hasCustomDomain),
+      hasAdvancedAnalytics: Boolean(effective.limits.hasAdvancedAnalytics),
+      hasWhatsAppIntegration: Boolean(effective.limits.hasWhatsAppIntegration),
+      hasSmsAutomation: Boolean(effective.limits.hasSmsAutomation),
+      hasPremiumTemplates: Boolean(effective.limits.hasPremiumTemplates),
+      hasLeadAutomations: Boolean(effective.limits.hasLeadAutomations),
+      leadAllowanceModel: effective.limits.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
+      tenantOverrideApplied: true,
+    }, {
       session,
       actorId: options.actorId || 'system:subscription-schedule',
       reason: `Deferred downgrade applied to ${scheduledPlan} v${scheduledPlanVersion}`,
@@ -296,7 +312,7 @@ const applyDueChange = async (
 
 const cancelScheduledChange = async (
   organizationId: string,
-  options: { actorId: string; reason?: string } = { actorId: 'system:subscription-schedule' },
+  options: { actorId: string; reason?: string; actorRole?: 'agency_owner' | 'super-admin' | 'system' } = { actorId: 'system:subscription-schedule', actorRole: 'system' },
 ) => {
   const now = new Date()
   const result = await runTransaction(async (session) => {
@@ -374,7 +390,7 @@ const cancelScheduledChange = async (
     await writeAudit({
       organizationId,
       actorId: options.actorId,
-      actorRole: 'agency_owner',
+      actorRole: options.actorRole || 'agency_owner',
       action: 'subscription.scheduled_change_cancelled',
       entityType: 'organization',
       entityId: String(updatedOrganization._id),

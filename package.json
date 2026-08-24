@@ -96,7 +96,9 @@
     "migrate:subscription-entitlement-structure": "ts-node --transpile-only src/app/db/migrateSubscriptionEntitlementStructureV1.ts",
     "verify:phase5-subscription-ux": "node scripts/verify-phase5-subscription-ux.mjs",
     "migrate:recurring-lead-addons": "ts-node --transpile-only src/app/db/migrateRecurringLeadAddons.ts",
-    "verify:recurring-lead-addons": "node scripts/verify-recurring-lead-addons.mjs"
+    "verify:recurring-lead-addons": "node scripts/verify-recurring-lead-addons.mjs",
+    "migrate:tenant-entitlement-overrides": "ts-node --transpile-only src/app/db/migrateTenantEntitlementOverrides.ts",
+    "verify:agency-plan-management": "node scripts/verify-phase6-agency-plan-management.mjs"
   },
   "keywords": [
     "real-estate",

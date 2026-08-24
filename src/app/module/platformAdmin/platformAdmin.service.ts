@@ -33,6 +33,7 @@ import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlem
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { getTenant360 } from './platformAdmin.tenant360.service'
 import { PlatformAdminTenantManagementService } from './platformAdmin.tenantManagement.service'
+import { PlatformAdminTenantPlanManagementService } from './platformAdmin.tenantPlanManagement.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
@@ -613,4 +614,13 @@ const restoreArchivedTenant = PlatformAdminTenantManagementService.restoreArchiv
 const getTenantDeletionPreview = PlatformAdminTenantManagementService.getDeletionPreview
 const scheduleTenantDeletion = PlatformAdminTenantManagementService.scheduleTenantDeletion
 
-export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, getTenantDeletionPreview, scheduleTenantDeletion, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+const applyTenantAdminPlanOverride = PlatformAdminTenantPlanManagementService.applyNoChargePlanOverride
+const scheduleTenantAdminDowngrade = PlatformAdminTenantPlanManagementService.scheduleNoChargeDowngrade
+const cancelTenantScheduledChange = PlatformAdminTenantPlanManagementService.cancelScheduledChange
+const setTenantCancellation = PlatformAdminTenantPlanManagementService.setCancellation
+const requestTenantRecurringAddon = PlatformAdminTenantPlanManagementService.requestRecurringAddon
+const getTenantEntitlementOverrides = PlatformAdminTenantPlanManagementService.getTenantOverrides
+const setTenantEntitlementOverride = PlatformAdminTenantPlanManagementService.setTenantOverride
+const revokeTenantEntitlementOverride = PlatformAdminTenantPlanManagementService.revokeTenantOverride
+
+export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, getTenantDeletionPreview, scheduleTenantDeletion, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, applyTenantAdminPlanOverride, scheduleTenantAdminDowngrade, cancelTenantScheduledChange, setTenantCancellation, requestTenantRecurringAddon, getTenantEntitlementOverrides, setTenantEntitlementOverride, revokeTenantEntitlementOverride, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

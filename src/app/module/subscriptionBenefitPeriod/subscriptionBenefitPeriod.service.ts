@@ -34,6 +34,7 @@ export interface BenefitPeriodInput {
   periodStart: Date
   periodEnd: Date
   plan: BenefitPlanSnapshot
+  continuityMode?: 'normal' | 'reset'
 }
 
 export interface PreviousBenefitPeriodSnapshot {
@@ -186,8 +187,8 @@ const createForPaidSubscription = async (input: BenefitPeriodInput, session?: Cl
 
   // This service is invoked only by confirmed paid activation paths. The previous ledger row,
   // not the current Organization.subscription object, defines continuity and plan-switch resets.
-  const previous = await findPreviousConfirmedBenefitPeriod(input.organizationId, session)
-  const effectivePrevious = await applyLatestSupportStreakAdjustment(input.organizationId, previous, session)
+  const previous = input.continuityMode === 'reset' ? null : await findPreviousConfirmedBenefitPeriod(input.organizationId, session)
+  const effectivePrevious = input.continuityMode === 'reset' ? null : await applyLatestSupportStreakAdjustment(input.organizationId, previous, session)
   const allowance = calculateBenefitPeriodAllowance(input.plan, input.billingCycle, input.periodStart, effectivePrevious)
 
   try {
@@ -294,8 +295,14 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
   const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId })
     .select('organizationId agencyName email subscription.plan subscription.planVersion subscription.status subscription.currentPeriodEnd')
     .lean()
-  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId, ...nonVoidedFilter() })
-    .sort({ createdAt: -1, _id: -1 })
+  const now = new Date()
+  const periodQuery = SubscriptionBenefitPeriod.findOne({
+    organizationId: normalizedOrganizationId,
+    periodStart: { $lte: now },
+    periodEnd: { $gt: now },
+    ...nonVoidedFilter(),
+  })
+    .sort({ periodStart: -1, createdAt: -1, _id: -1 })
     .lean()
   if (session) {
     organizationQuery.session(session)
@@ -383,8 +390,14 @@ const adjustRenewalStreak = async (
   }
 
   const organizationQuery = Organization.findOne({ organizationId: normalizedOrganizationId }).select('organizationId')
-  const periodQuery = SubscriptionBenefitPeriod.findOne({ organizationId: normalizedOrganizationId, ...nonVoidedFilter() })
-    .sort({ createdAt: -1, _id: -1 })
+  const now = new Date()
+  const periodQuery = SubscriptionBenefitPeriod.findOne({
+    organizationId: normalizedOrganizationId,
+    periodStart: { $lte: now },
+    periodEnd: { $gt: now },
+    ...nonVoidedFilter(),
+  })
+    .sort({ periodStart: -1, createdAt: -1, _id: -1 })
   if (session) {
     organizationQuery.session(session)
     periodQuery.session(session)

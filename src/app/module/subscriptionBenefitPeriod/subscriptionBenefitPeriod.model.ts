@@ -5,7 +5,7 @@ import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
 const subscriptionBenefitPeriodSchema = new Schema<ISubscriptionBenefitPeriod>(
   {
     organizationId: { type: String, required: true, index: true, trim: true },
-    paymentSource: { type: String, enum: ['manual_payment', 'bkash'], required: true },
+    paymentSource: { type: String, enum: ['manual_payment', 'bkash', 'manual_admin'], required: true },
     paymentNumber: { type: String, required: true, trim: true },
     planId: { type: String, required: true, trim: true, lowercase: true, minlength: 3, maxlength: 50, match: PAID_PLAN_ID_PATTERN, index: true },
     planVersion: { type: Number, required: true, min: 1 },

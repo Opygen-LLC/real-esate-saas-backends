@@ -38,6 +38,7 @@ export const TENANT_DELETION_COLLECTIONS = [
   // non-existent Mongo collection is harmless and keeps retention future-safe.
   'recurringleadaddons',
   'leadaddonsubscriptions',
+  'tenantentitlementoverrides',
 
   // Team / tenant configuration
   'teaminvitations',

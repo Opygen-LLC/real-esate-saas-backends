@@ -19,6 +19,7 @@ import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
 import { resolveEntitlementSource } from './featureCatalog'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
+import { applyTenantEntitlementOverride, getActiveTenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.resolver'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
@@ -76,11 +77,11 @@ export const trialEntitlements = {
   hasLeadAutomations: DEFAULT_TRIAL_POLICY.hasLeadAutomations,
 }
 
-type ResolveOptions = { allowInactive?: boolean }
+type ResolveOptions = { allowInactive?: boolean; allowUnavailable?: boolean }
 
 const resolve = async (organizationId: string, session?: ClientSession, options: ResolveOptions = {}) => {
   let organization = await withSession(Organization.findOne({ organizationId }), session)
-  if (!organization || organization.isBlocked) throw new ApiError(403, 'Organization is unavailable')
+  if (!organization || (organization.isBlocked && !options.allowUnavailable)) throw new ApiError(403, 'Organization is unavailable')
 
   // The worker is the normal path, but entitlement reads are also an authoritative
   // billing-boundary guard. This covers public capture and internal service calls
@@ -89,7 +90,7 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     const { reconcileOrganizationSubscriptionBoundary } = await import('../subscription/subscriptionLifecycle.service')
     await reconcileOrganizationSubscriptionBoundary(organizationId, new Date(), 'system:entitlement-boundary')
     organization = await Organization.findOne({ organizationId })
-    if (!organization || organization.isBlocked) throw new ApiError(403, 'Organization is unavailable')
+    if (!organization || (organization.isBlocked && !options.allowUnavailable)) throw new ApiError(403, 'Organization is unavailable')
   }
   if (!options.allowInactive && !['trialing', 'active', 'cancel_at_period_end'].includes(organization.subscription.status)) {
     throw new ApiError(
@@ -163,24 +164,45 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
         ? baseTrial.maxProperties
         : organization.subscription.maxProperties ?? baseTrial.maxProperties,
   )
+  const activeTenantOverride = await getActiveTenantEntitlementOverride(organizationId, session)
+  const overridden = applyTenantEntitlementOverride({
+    maxTeamMembers: effectiveMaxTeamMembers,
+    maxProperties: effectiveMaxProperties,
+    maxLeads: effectiveLeadLimit,
+    maxStorageMb: Number(plan?.maxStorageMb ?? baseTrial.maxStorageMb),
+    maxMonthlyVisitors: Number(plan?.maxMonthlyVisitors ?? baseTrial.maxMonthlyVisitors),
+    hasCustomDomain: Boolean(plan?.hasCustomDomain ?? baseTrial.hasCustomDomain),
+    hasAdvancedAnalytics: Boolean(plan?.hasAdvancedAnalytics ?? baseTrial.hasAdvancedAnalytics),
+    hasWhatsAppIntegration: Boolean(plan?.hasWhatsAppIntegration ?? baseTrial.hasWhatsAppIntegration),
+    hasSmsAutomation: Boolean(plan?.hasSmsAutomation ?? baseTrial.hasSmsAutomation),
+    hasLeadAutomations: Boolean(plan?.hasLeadAutomations ?? baseTrial.hasLeadAutomations),
+    hasPremiumTemplates: Boolean(plan?.hasPremiumTemplates ?? baseTrial.hasPremiumTemplates),
+  }, activeTenantOverride)
   const effectiveEntitlements = {
     ...(baseTrial.entitlements || {}),
     ...(plan?.entitlements || {}),
-    teamMembers: { enabled: effectiveMaxTeamMembers > 0, limit: effectiveMaxTeamMembers },
-    properties: { enabled: effectiveMaxProperties > 0, limit: effectiveMaxProperties },
-    leads: { enabled: effectiveLeadLimit > 0, limit: effectiveLeadLimit },
+    teamMembers: { enabled: overridden.maxTeamMembers > 0, limit: overridden.maxTeamMembers },
+    properties: { enabled: overridden.maxProperties > 0, limit: overridden.maxProperties },
+    leads: { enabled: overridden.maxLeads > 0, limit: overridden.maxLeads },
+    storage: { enabled: overridden.maxStorageMb > 0, limit: overridden.maxStorageMb },
+    monthlyVisitors: { enabled: overridden.maxMonthlyVisitors > 0, limit: overridden.maxMonthlyVisitors },
+    customDomain: { enabled: overridden.hasCustomDomain },
+    advancedAnalytics: { enabled: overridden.hasAdvancedAnalytics },
+    whatsappIntegration: { enabled: overridden.hasWhatsAppIntegration },
+    smsAutomation: { enabled: overridden.hasSmsAutomation },
+    leadAutomations: { enabled: overridden.hasLeadAutomations },
+    premiumTemplates: { enabled: overridden.hasPremiumTemplates },
   }
   return {
     organization,
     limits: {
       ...baseTrial,
       ...canonicalPlan,
+      ...overridden,
       entitlements: effectiveEntitlements,
-      maxTeamMembers: effectiveMaxTeamMembers,
-      maxProperties: effectiveMaxProperties,
-      maxLeads: effectiveLeadLimit,
       topupLeadAllowance: activeTopupLeadAllowance,
       recurringLeadAllowance: activeRecurringLeadAllowance,
+      tenantOverride: activeTenantOverride || null,
       maxRecurringLeadAddon: plan ? Math.max(0, Number((plan as any).maxRecurringLeadAddon || 0)) : 0,
       activeBenefitPeriodId: activeBenefitForLeadCapacity?._id ? String(activeBenefitForLeadCapacity._id) : null,
     },
