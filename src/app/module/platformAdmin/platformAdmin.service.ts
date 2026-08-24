@@ -301,7 +301,7 @@ const recordManualPayment = async (input: any, actor: { id: string; requestId?: 
   return result
 }
 
-const decideManualPayment = async (paymentId: string, input: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) => {
+const decideManualPayment = async (paymentId: string, input: { status: 'confirmed' | 'rejected'; reason: string }, actor: { id: string; requestId?: string; ip?: string }) => {
   const result = await SubscriptionPaymentService.decidePayment(paymentId, input, actor)
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: paymentId })
   return result

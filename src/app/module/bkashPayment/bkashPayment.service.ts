@@ -344,7 +344,6 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         planId: attempt.planId,
         version: attempt.planVersion || 1,
         maxAgents: attempt.maxAgents,
-        maxProperties: attempt.maxProperties,
         maxLeads: Number(effective.limits.maxLeads || 0),
         maxTeamMembers: Number(effective.limits.maxTeamMembers || 0),
         maxProperties: Number(effective.limits.maxProperties || 0),

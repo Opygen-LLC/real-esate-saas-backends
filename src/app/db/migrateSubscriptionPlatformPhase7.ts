@@ -19,7 +19,7 @@ const digestTenantAssignments = async (organizations: any) => {
 }
 
 const run = async () => {
-  await mongoose.connect(config.database_url as string)
+  await mongoose.connect(config.database_string as string)
   const db = mongoose.connection.db
   if (!db) throw new Error('MongoDB connection unavailable')
 

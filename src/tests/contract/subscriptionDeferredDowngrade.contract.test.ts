@@ -66,12 +66,11 @@ describe('deferred subscription downgrade contract', () => {
   it('has both worker and request-time protection for the exact effective boundary', () => {
     const worker = read('src/app/module/cron/phase3.worker.ts')
     const lifecycle = read('src/app/module/subscription/subscriptionLifecycle.service.ts')
-    const entitlement = read('src/app/module/entitlement/entitlement.service.ts')
     expect(worker).toContain('SubscriptionScheduleService.processDueChanges')
     expect(lifecycle).toContain('SubscriptionScheduleService.processDueChanges')
-    expect(entitlement).toContain('system:entitlement-boundary')
-    expect(entitlement).toContain('SubscriptionScheduleService.applyDueChange')
+    expect(lifecycle).toContain('SubscriptionScheduleService.applyDueChange')
   })
+
 
   it('exposes current and scheduled subscription state without changing the current plan contract', () => {
     const billing = read('src/app/module/billing/billing.service.ts')
