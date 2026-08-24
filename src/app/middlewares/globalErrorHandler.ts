@@ -10,16 +10,9 @@ import handleValidationError from '../../errors/handleValidationError'
 import handleZodError from '../../errors/handleZodError'
 import { IGenericErrorMessage } from '../../interfaces/common'
 import { errorLogger } from '../../shared/logger'
+import { httpErrorEvent, httpLogLevelForStatus, isUnexpectedServerError, requestRoute } from '../../shared/httpObservability'
 
 const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
-  errorLogger.error('Unhandled request error', {
-    error,
-    method: req.method,
-    path: req.path,
-    statusCode: error?.statusCode || 500,
-    requestId: req.requestId,
-  })
-
   let statusCode = 500
   let message = 'Internal server error'
   let code: string = API_ERROR_CODES.INTERNAL_ERROR
@@ -59,6 +52,35 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     message = config.env === 'production' ? 'Internal server error' : error.message
     errorMessages = config.env === 'production' ? [] : [{ path: '', message: error.message }]
   }
+
+  const event = httpErrorEvent(statusCode)
+  const level = httpLogLevelForStatus(statusCode, code)
+  const commonLogMeta = {
+    event,
+    requestId: req.requestId,
+    method: req.method,
+    route: requestRoute(req),
+    statusCode,
+    organizationId: req.tenant?.organizationId,
+    errorCode: code,
+    errorName: error?.name || 'Error',
+    durationMs: typeof res.locals.requestStartedAtMs === 'number'
+      ? Math.round((performance.now() - res.locals.requestStartedAtMs) * 10) / 10
+      : undefined,
+  }
+
+  // Expected 4xx outcomes are operational responses, not application crashes.
+  // Keep them concise so expired sessions/subscriptions cannot flood production
+  // with stack traces. Unexpected 5xx errors retain the original Error object so
+  // source-mapped stacks remain available in Cloud Logging.
+  if (isUnexpectedServerError(statusCode)) {
+    errorLogger.log(level, event, { ...commonLogMeta, error })
+  } else {
+    errorLogger.log(level, event, { ...commonLogMeta, errorMessage: message })
+  }
+
+  res.locals.apiErrorCode = code
+  res.locals.apiErrorEvent = event
 
   res.status(statusCode).json({
     success: false,

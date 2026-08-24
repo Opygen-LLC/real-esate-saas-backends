@@ -22,6 +22,7 @@ import { corsOptionsDelegate } from './app/middlewares/corsPolicy'
 import { PrivacyPolicyService } from './app/module/privacy/privacyPolicy.service'
 import { DomainProviderService } from './app/module/domain/providers'
 import { OperationsQueueService } from './app/module/operationsQueue/operationsQueue.service'
+import { httpLogLevelForStatus, requestRoute } from './shared/httpObservability'
 
 const app: Application = express()
 const startedAt = Date.now()
@@ -39,17 +40,23 @@ app.use(helmet({
 app.use(requestContext)
 app.use((req: Request, res: Response, next: NextFunction) => {
   const started = performance.now()
+  res.locals.requestStartedAtMs = started
   res.on('finish', () => {
     const durationMs = performance.now() - started
-    Metrics.observeHttp({ method: req.method, path: req.originalUrl, statusCode: res.statusCode, durationMs })
-    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'
+    const route = requestRoute(req)
+    const errorCode = typeof res.locals.apiErrorCode === 'string' ? res.locals.apiErrorCode : undefined
+    Metrics.observeHttp({ method: req.method, path: route, statusCode: res.statusCode, durationMs })
+    const level = httpLogLevelForStatus(res.statusCode, errorCode)
     logger.log(level, 'http_request', {
+      event: 'http_request',
+      requestId: req.requestId,
       method: req.method,
-      path: req.originalUrl || req.path,
+      route,
       statusCode: res.statusCode,
       durationMs: Math.round(durationMs * 10) / 10,
+      organizationId: req.tenant?.organizationId,
+      errorCode,
     })
-
   })
   next()
 })
@@ -129,6 +136,8 @@ app.use(globalErrorHandler)
 
 app.all('*', (req: Request, res: Response) => {
   const message = `No API endpoint found for ${req.method} ${req.originalUrl}`
+  res.locals.apiErrorCode = 'NOT_FOUND'
+  res.locals.apiErrorEvent = 'request_rejected'
   res.status(httpStatus.NOT_FOUND).json({
     success: false,
     code: 'NOT_FOUND',

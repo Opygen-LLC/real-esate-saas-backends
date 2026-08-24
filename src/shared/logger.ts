@@ -25,43 +25,66 @@ const scrub = (value: unknown, depth = 0): unknown => {
   return value
 }
 
-// Formatter for readable console & daily file logs
-const customFormat = winston.format.printf(({ level, message, ...meta }) => {
+const enrichAndScrub = winston.format((info) => {
+  const context = RequestContext.current()
+  info.message = scrubString(String(info.message || ''))
+  info.event = scrubString(String(info.event || info.message || 'log'))
+  info.severity = String(info.level || 'info').toUpperCase()
+  info.service = String(info.service || 'real-estate-api')
+
+  if (!info.requestId && context?.requestId) info.requestId = context.requestId
+  if (!info.traceId && context?.traceId) info.traceId = context.traceId
+  if (!info.organizationId && context?.organizationId) info.organizationId = context.organizationId
+  if (!info.userId && context?.userId) info.userId = context.userId
+  if (!info.paymentId && context?.paymentId) info.paymentId = context.paymentId
+
+  for (const key of Object.keys(info)) {
+    if (['level', 'timestamp', 'message', 'event', 'severity', 'service'].includes(key)) continue
+    info[key] = sensitiveKey.test(key) ? '[redacted]' : scrub(info[key])
+  }
+
+  return info
+})
+
+// Readable local output keeps development convenient while production emits
+// one JSON object per line so Google Cloud Logging can index fields directly.
+const readableFormat = winston.format.printf(({ level, message, ...meta }) => {
   const context = RequestContext.current()
   const reqId = context?.requestId ? `[${context.requestId}] ` : meta.requestId ? `[${meta.requestId}] ` : ''
 
-  // Special formatting for http_request logs
-  if (message === 'http_request' && meta.method && meta.path) {
+  if (message === 'http_request' && meta.method && meta.route) {
     const statusStr = meta.statusCode ? ` - ${meta.statusCode}` : ''
     const durationStr = meta.durationMs !== undefined ? ` - ${meta.durationMs}ms` : ''
-    return `${level}: ${reqId}${meta.method} ${meta.path}${statusStr}${durationStr}`
+    const codeStr = meta.errorCode ? ` - ${meta.errorCode}` : ''
+    return `${level}: ${reqId}${meta.method} ${meta.route}${statusStr}${durationStr}${codeStr}`
   }
 
   let msg = scrubString(String(message || ''))
-  const metaKeys = Object.keys(meta).filter((k) => !['timestamp', 'level', 'splat', 'requestId'].includes(k))
+  const metaKeys = Object.keys(meta).filter((key) => !['timestamp', 'level', 'splat', 'requestId', 'event', 'severity', 'service'].includes(key))
   if (metaKeys.length > 0) {
-    // Exclude redundant http keys if present
     const cleanMeta: Record<string, unknown> = {}
-    for (const key of metaKeys) {
-      if (!['method', 'path', 'statusCode', 'durationMs'].includes(key)) {
-        cleanMeta[key] = sensitiveKey.test(key) ? '[redacted]' : scrub(meta[key])
-      }
-    }
-    if (Object.keys(cleanMeta).length > 0) {
-      msg = `${msg} ${JSON.stringify(cleanMeta)}`
-    }
+    for (const key of metaKeys) cleanMeta[key] = sensitiveKey.test(key) ? '[redacted]' : scrub(meta[key])
+    if (Object.keys(cleanMeta).length > 0) msg = `${msg} ${JSON.stringify(cleanMeta)}`
   }
 
   return `${level}: ${reqId}${msg}`
 })
 
+const productionFormat = winston.format.combine(
+  winston.format.timestamp(),
+  enrichAndScrub(),
+  winston.format.json(),
+)
+
+const developmentFormat = winston.format.combine(
+  enrichAndScrub(),
+  winston.format.colorize({ all: true }),
+  readableFormat,
+)
+
+const consoleFormat = process.env.NODE_ENV === 'production' ? productionFormat : developmentFormat
 const transports: winston.transport[] = [
-  new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize({ all: process.env.NODE_ENV !== 'production' }),
-      customFormat,
-    ),
-  }),
+  new winston.transports.Console({ format: consoleFormat }),
 ]
 
 if (process.env.NODE_ENV !== 'production' || process.env.LOG_TO_FILE === 'true') {
@@ -73,7 +96,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.LOG_TO_FILE === 'true')
       maxSize: '20m',
       maxFiles: '7d',
       level: 'info',
-      format: customFormat,
+      format: process.env.NODE_ENV === 'production' ? productionFormat : developmentFormat,
     }),
   )
 }
@@ -82,7 +105,6 @@ const baseLogger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'warn',
   transports,
 })
-
 
 export const logger = baseLogger
 export const errorLogger = baseLogger

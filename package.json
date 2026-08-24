@@ -10,7 +10,7 @@
     "migrate:starter-500": "ts-node --transpile-only src/app/db/migrateStarterPlanTo500.ts",
     "migrate:phase-0-1": "ts-node --transpile-only src/app/db/migratePhase01.ts",
     "migrate:phase-2": "ts-node --transpile-only src/app/db/migratePhase2.ts",
-    "start": "node ./dist/server.js",
+    "start": "node --enable-source-maps ./dist/server.js",
     "build": "tsc && node scripts/copy-brand-assets.mjs",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
