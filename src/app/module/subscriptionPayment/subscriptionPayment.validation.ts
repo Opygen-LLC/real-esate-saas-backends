@@ -12,6 +12,7 @@ export const subscriptionPaymentInputSchema = z.object({
   paidAt: z.coerce.date().optional(),
   notes: z.string().trim().max(2000).optional(),
   proofAssetId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  reason: z.string().trim().min(10).max(1000),
 }).strict().superRefine((value, ctx) => {
   if (!value.changeRequestId && !value.planId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['planId'], message: 'Plan is required when no change request is supplied' })
@@ -23,9 +24,5 @@ export const subscriptionPaymentInputSchema = z.object({
 
 export const subscriptionPaymentDecisionSchema = z.object({
   status: z.enum(['confirmed', 'rejected']),
-  reason: z.string().trim().max(1000).optional(),
-}).strict().superRefine((value, ctx) => {
-  if (value.status === 'rejected' && (!value.reason || value.reason.length < 5)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['reason'], message: 'A rejection reason of at least 5 characters is required' })
-  }
-})
+  reason: z.string().trim().min(10).max(1000),
+}).strict()

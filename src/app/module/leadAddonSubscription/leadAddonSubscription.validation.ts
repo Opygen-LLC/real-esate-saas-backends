@@ -5,7 +5,7 @@ export const LeadAddonSubscriptionValidation = {
   subscribe: z.object({ body: z.object({ definitionId: objectId, quoteCalculatedAt: z.string().datetime({ offset: true }).optional() }) }),
   id: z.object({ params: z.object({ id: objectId }) }),
   decision: z.object({ params: z.object({ id: objectId }), body: z.discriminatedUnion('status', [
-    z.object({ status: z.literal('active'), method: z.enum(['cash', 'bank', 'bkash', 'nagad', 'other']), reference: z.string().trim().max(200).optional(), paidAt: z.string().datetime({ offset: true }).optional() }),
+    z.object({ status: z.literal('active'), method: z.enum(['cash', 'bank', 'bkash', 'nagad', 'other']), reference: z.string().trim().max(200).optional(), paidAt: z.string().datetime({ offset: true }).optional(), reason: z.string().trim().min(10).max(500) }),
     z.object({ status: z.literal('rejected'), reason: z.string().trim().min(10).max(500) }),
   ]) }),
 }

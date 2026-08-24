@@ -16,13 +16,13 @@ const listAdmin = catchAsync(async (req: Request, res: Response) => {
 
 const create = catchAsync(async (req: Request, res: Response) => {
   const result: any = await LeadTopupPricingService.createPricing(req.body, req.user!._id!)
-  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'lead_topup.pricing_created', entityType: 'leadTopupPricing', entityId: String(result._id), reason: 'Super Admin created lead top-up pricing', requestId: req.requestId, ip: req.ip, metadata: { pricingMode: result.pricingMode, name: result.name } })
+  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'lead_topup.pricing_created', entityType: 'leadTopupPricing', entityId: String(result._id), reason: req.body.reason, requestId: req.requestId, ip: req.ip, metadata: { pricingMode: result.pricingMode, name: result.name } })
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Lead top-up pricing created successfully', data: result })
 })
 
 const update = catchAsync(async (req: Request, res: Response) => {
   const result: any = await LeadTopupPricingService.updatePricing(req.params.id, req.body, req.user!._id!)
-  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'lead_topup.pricing_updated', entityType: 'leadTopupPricing', entityId: String(result._id), reason: 'Super Admin updated lead top-up pricing', requestId: req.requestId, ip: req.ip, metadata: { pricingMode: result.pricingMode, name: result.name, fields: Object.keys(req.body) } })
+  await writeAudit({ actorId: req.user!._id!, actorRole: 'super-admin', action: 'lead_topup.pricing_updated', entityType: 'leadTopupPricing', entityId: String(result._id), reason: req.body.reason, requestId: req.requestId, ip: req.ip, metadata: { pricingMode: result.pricingMode, name: result.name, fields: Object.keys(req.body) } })
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Lead top-up pricing updated successfully', data: result })
 })
 

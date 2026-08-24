@@ -182,7 +182,7 @@ const transaction = async <T>(work: (session?: ClientSession) => Promise<T>): Pr
   return work()
 }
 
-const approve = async (requestId: string, actorId: string, requestMeta: { requestId?: string; ip?: string }) => {
+const approve = async (requestId: string, actorId: string, reason: string, requestMeta: { requestId?: string; ip?: string }) => {
   let capacityChange: Awaited<ReturnType<typeof LeadEntitlementService.reconcileLeadCapacity>> | null = null
   const result = await transaction(async (session) => {
     const query = LeadPurchaseRequest.findById(requestId)
@@ -238,7 +238,7 @@ const approve = async (requestId: string, actorId: string, requestMeta: { reques
       capacityChange = await LeadEntitlementService.reconcileLeadCapacity(request.organizationId, Number(resolved.limits.maxLeads || 0), session, actorId)
     }
 
-    await writeAudit({ organizationId: request.organizationId, actorId, actorRole: 'super-admin', action: 'lead_topup.approved', entityType: 'leadPurchaseRequest', entityId: String(request._id), reason: 'Super Admin approved additional lead capacity', requestId: requestMeta.requestId, ip: requestMeta.ip, metadata: { requestNumber: request.requestNumber, requestedLeads: request.requestedLeads, totalAmount: request.totalAmount, grantId: String(grant._id), benefitPeriodId: String(request.benefitPeriodId), expiresAt: request.expiresAt } }, session)
+    await writeAudit({ organizationId: request.organizationId, actorId, actorRole: 'super-admin', action: 'lead_topup.approved', entityType: 'leadPurchaseRequest', entityId: String(request._id), reason, requestId: requestMeta.requestId, ip: requestMeta.ip, metadata: { requestNumber: request.requestNumber, requestedLeads: request.requestedLeads, totalAmount: request.totalAmount, grantId: String(grant._id), benefitPeriodId: String(request.benefitPeriodId), expiresAt: request.expiresAt } }, session)
     return { request, grant, idempotent: false }
   })
 
@@ -267,7 +267,7 @@ const reject = async (requestId: string, actorId: string, reason: string, reques
 }
 
 const decide = async (requestId: string, actorId: string, input: { status: 'approved' | 'rejected'; reason?: string }, requestMeta: { requestId?: string; ip?: string }) => {
-  if (input.status === 'approved') return approve(requestId, actorId, requestMeta)
+  if (input.status === 'approved') return approve(requestId, actorId, String(input.reason || ''), requestMeta)
   return { request: await reject(requestId, actorId, String(input.reason || ''), requestMeta), grant: null, idempotent: false }
 }
 

@@ -265,7 +265,7 @@ const listAdmin = async (query: any = {}) => {
   return { data: rows.map((row: any) => ({ ...row, organization: map.get(row.organizationId) || null })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } }
 }
 
-const activateWrites = async (id: string, input: { status: 'active'; method: string; reference?: string; paidAt?: string }, actorId: string, session?: ClientSession) => {
+const activateWrites = async (id: string, input: { status: 'active'; method: string; reference?: string; paidAt?: string; reason: string }, actorId: string, session?: ClientSession) => {
   const rowQuery = LeadAddonSubscription.findById(id)
   if (session) rowQuery.session(session)
   const row: any = await rowQuery
@@ -297,7 +297,7 @@ const activateWrites = async (id: string, input: { status: 'active'; method: str
 
   const effective = await EntitlementService.resolve(row.organizationId, session)
   const reconciliation = await LeadEntitlementService.reconcileLeadCapacity(row.organizationId, Number(effective.limits.maxLeads || 0), session, actorId)
-  await writeAudit({ organizationId: row.organizationId, actorId, actorRole: 'super-admin', action: 'lead_addon.activated', entityType: 'leadAddonSubscription', entityId: String(row._id), reason: 'Super Admin confirmed recurring lead add-on payment', metadata: { leadCapacity: row.leadCapacity, amount: quoted.dueNow, nextRenewalPrice: quoted.nextRenewalPrice, billingCycle: row.billingCycle, currentPeriodEnd: row.currentPeriodEnd } }, session)
+  await writeAudit({ organizationId: row.organizationId, actorId, actorRole: 'super-admin', action: 'lead_addon.activated', entityType: 'leadAddonSubscription', entityId: String(row._id), reason: input.reason, metadata: { leadCapacity: row.leadCapacity, amount: quoted.dueNow, nextRenewalPrice: quoted.nextRenewalPrice, billingCycle: row.billingCycle, currentPeriodEnd: row.currentPeriodEnd } }, session)
   RealtimeService.emitOrganization(row.organizationId, { type: 'subscription.changed', action: 'lead_addon_activated', entityId: String(row._id), payload: { leadCapacity: row.leadCapacity, currentPeriodEnd: row.currentPeriodEnd } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: String(row._id) })
   return { subscription: row, reconciliation, idempotent: false }

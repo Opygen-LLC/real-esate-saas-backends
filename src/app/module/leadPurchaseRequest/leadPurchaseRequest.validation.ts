@@ -17,7 +17,7 @@ export const LeadPurchaseRequestValidation = {
   decision: z.object({
     params: z.object({ id: objectId }),
     body: z.discriminatedUnion('status', [
-      z.object({ status: z.literal('approved') }).strict(),
+      z.object({ status: z.literal('approved'), reason: z.string().trim().min(10).max(500) }).strict(),
       z.object({ status: z.literal('rejected'), reason: z.string().trim().min(10).max(500) }).strict(),
     ]),
   }),

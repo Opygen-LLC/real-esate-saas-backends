@@ -238,7 +238,7 @@ const getTenantPaymentHistory = async (organizationId: string, query: any = {}) 
 
 const recordPayment = async (input: {
   organizationId: string; changeRequestId?: string; planId?: string; planVersion?: number; billingCycle?: 'monthly' | 'yearly';
-  method: ManualPaymentMethod; reference?: string; paidAt?: Date; notes?: string; proofAssetId?: string
+  method: ManualPaymentMethod; reference?: string; paidAt?: Date; notes?: string; proofAssetId?: string; reason: string
 }, actor: { id: string; requestId?: string; ip?: string }) => {
   const created = await commercialTransaction(async (session) => {
     const orgQuery = Organization.findOne({ organizationId: input.organizationId, isBlocked: { $ne: true } })
@@ -297,18 +297,21 @@ const recordPayment = async (input: {
       request.status = 'payment_submitted'; request.paymentId = payment.paymentNumber; request.rejectionReason = ''
       await request.save(session ? { session } : undefined)
     }
-    await writeAudit({ organizationId: input.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_recorded', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: input.notes || 'Manual subscription payment recorded', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber: payment.paymentNumber, requestNumber: request?.requestNumber || null, plan: plan.planId, planVersion: plan.version, billingCycle, amount, method: input.method, reference: input.reference || '', quote: quoteSnapshot } }, session)
+    await writeAudit({ organizationId: input.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_recorded', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber: payment.paymentNumber, requestNumber: request?.requestNumber || null, plan: plan.planId, planVersion: plan.version, billingCycle, amount, method: input.method, reference: input.reference || '', quote: quoteSnapshot } }, session)
     return payment.toObject()
   })
   return created
 }
 
-const decidePayment = async (paymentNumber: string, decision: { status: 'confirmed' | 'rejected'; reason?: string }, actor: { id: string; requestId?: string; ip?: string }) => {
+const decidePayment = async (paymentNumber: string, decision: { status: 'confirmed' | 'rejected'; reason: string }, actor: { id: string; requestId?: string; ip?: string }) => {
   const transactionResult = await commercialTransaction(async (session) => {
     const paymentQuery = SubscriptionPayment.findOne({ paymentNumber })
     if (session) paymentQuery.session(session)
     const payment: any = await paymentQuery
     if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Manual payment not found')
+    if (payment.status === decision.status) {
+      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: payment.periodStart || null, changeType: (payment.quoteSnapshot as SubscriptionQuoteSnapshot | null)?.changeType || null, idempotent: true }
+    }
     if (payment.status !== 'pending') throw new ApiError(httpStatus.CONFLICT, `Payment is already ${payment.status}`)
 
     const orgQuery = Organization.findOne({ organizationId: payment.organizationId })
@@ -332,7 +335,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         await request.save(session ? { session } : undefined)
       }
       await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_rejected', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Payment rejected', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber } }, session)
-      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: null, changeType: request?.changeType || null }
+      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: null, changeType: request?.changeType || null, idempotent: false }
     }
 
     const plan = await resolvePlan(payment.planId, payment.planVersion, session)
@@ -520,14 +523,16 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       },
     }, session)
 
-    return { organizationId: payment.organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt: deferredDowngrade ? start : null, changeType: quoteType }
+    return { organizationId: payment.organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt: deferredDowngrade ? start : null, changeType: quoteType, idempotent: false }
   })
 
-  const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType } = transactionResult
-  await CacheInvalidationService.invalidateTenant(organizationId)
-  await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
+  const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType, idempotent } = transactionResult
+  if (!idempotent) {
+    await CacheInvalidationService.invalidateTenant(organizationId)
+    await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
+  }
   const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
-  if (decision.status === 'confirmed' && result) {
+  if (!idempotent && decision.status === 'confirmed' && result) {
     RealtimeService.emitOrganization(organizationId, {
       type: 'subscription.changed',
       action: deferredDowngrade ? 'scheduled' : 'confirmed',

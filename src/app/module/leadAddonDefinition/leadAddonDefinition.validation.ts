@@ -11,13 +11,14 @@ const body = z.object({
   eligiblePlans: z.array(paidPlanIdSchema).min(1).max(100),
   displayOrder: z.number().int().min(0).max(100_000).default(0),
   isActive: z.boolean().default(true),
+  reason: z.string().trim().min(10).max(500),
 }).strict()
 
 export const LeadAddonDefinitionValidation = {
   create: z.object({ body }),
   update: z.object({
     params: z.object({ id: objectId }),
-    body: body.partial().omit({ slug: true }).strict().refine((value) => Object.keys(value).length > 0, 'At least one add-on field must change'),
+    body: body.partial().omit({ slug: true }).extend({ reason: z.string().trim().min(10).max(500) }).strict().refine((value) => Object.keys(value).some((key) => key !== 'reason'), 'At least one add-on field must change'),
   }),
   archive: z.object({ params: z.object({ id: objectId }), body: z.object({ reason: z.string().trim().min(10).max(500) }) }),
 }

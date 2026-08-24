@@ -12,6 +12,7 @@ const rateShape = z.object({
   currency: z.literal('BDT').default('BDT'),
   displayOrder: z.number().int().min(0).max(100000).default(0),
   isActive: z.boolean().default(true),
+  reason: z.string().trim().min(10).max(500),
 }).strict()
 
 const packageShape = z.object({
@@ -22,6 +23,7 @@ const packageShape = z.object({
   currency: z.literal('BDT').default('BDT'),
   displayOrder: z.number().int().min(0).max(100000).default(0),
   isActive: z.boolean().default(true),
+  reason: z.string().trim().min(10).max(500),
 }).strict()
 
 export const leadTopupPricingCreateSchema = z.discriminatedUnion('pricingMode', [rateShape, packageShape])
@@ -40,7 +42,8 @@ export const LeadTopupPricingValidation = {
       currency: z.literal('BDT').optional(),
       displayOrder: z.number().int().min(0).max(100000).optional(),
       isActive: z.boolean().optional(),
-    }).strict().refine((value) => Object.keys(value).length > 0, 'At least one pricing field must change'),
+      reason: z.string().trim().min(10).max(500),
+    }).strict().refine((value) => Object.keys(value).some((key) => key !== 'reason'), 'At least one pricing field must change'),
   }),
   archive: z.object({
     params: z.object({ id: objectId }),
