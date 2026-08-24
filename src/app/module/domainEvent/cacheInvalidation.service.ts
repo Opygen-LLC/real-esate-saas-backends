@@ -11,7 +11,7 @@ const invalidateTenant = async (organizationId: string, extraIdentifiers: string
   if (!organizationId || organizationId === '__platform__') return
 
   const [org, domains, aliases, pages] = await Promise.all([
-    Organization.findOne({ organizationId }).select('organizationId sub_domain domain customDomain').lean(),
+    Organization.findOne({ organizationId }).select('organizationId sub_domain domain').lean(),
     DomainRecord.find({ organizationId }).select('domain').lean(),
     SubdomainAlias.find({ organizationId }).select('alias').lean(),
     WebsitePage.find({ organizationId }).select('_id slug').lean(),
@@ -24,7 +24,6 @@ const invalidateTenant = async (organizationId: string, extraIdentifiers: string
         org?.organizationId,
         org?.sub_domain,
         org?.domain,
-        org?.customDomain,
         ...domains.map((record: any) => record.domain),
         ...aliases.map((record: any) => record.alias),
         ...extraIdentifiers,
