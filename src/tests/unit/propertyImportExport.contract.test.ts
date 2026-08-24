@@ -32,9 +32,8 @@ describe('Phase 6 property import/export contract', () => {
       expect(service).toContain(`'${field}'`)
     }
     expect(service).toContain('Property import cannot set system-managed column')
-    expect(service).toContain("organizationId,")
-    expect(service).toContain("status: 'active'")
-    expect(service).toContain("userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] }")
+    expect(service).toContain("CrmAssignableMemberService.listAssignableMembers(organizationId, 'property')")
+    expect(service).toContain("CrmAssignableMemberService.listAssignableMembers(organizationId, 'property', { ids: assignedIds, session: dbSession })")
     expect(service).toContain('Agent ID is not an active assignable member of this agency')
   })
 

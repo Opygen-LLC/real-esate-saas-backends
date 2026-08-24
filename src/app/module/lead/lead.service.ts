@@ -11,6 +11,7 @@ import { CrmService } from '../crm/crm.service'
 import { readLeadListPage } from '../crm/crmListReadModel.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { canAssignLeadTo, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import type { LeadAllowanceSource } from '../entitlement/leadAllowanceReservation.interface'
@@ -210,8 +211,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
 
   const config:any=await CrmService.getConfig(organizationId)
   if(prepared.assignedAgent){
-    const validAgent=await User.exists({_id:prepared.assignedAgent,organizationId,status:'active',userRole:{$in:['agency_owner','agency_admin','agent']}})
-    if(!validAgent)throw new ApiError(400,'Assigned agent must be an active member of this agency')
+    await CrmAssignableMemberService.assertAssignableMember(organizationId, String(prepared.assignedAgent), 'lead')
   }
   let propertyAgent:string|undefined
   if(prepared.propertyInterest?.[0]){

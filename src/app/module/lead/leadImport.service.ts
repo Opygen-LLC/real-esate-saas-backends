@@ -6,7 +6,7 @@ import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity
 import { canAssignLeadTo, type CrmAccessContext } from '../crm/crmAccess'
 import { Contact } from '../contact/contact.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
-import { User } from '../user/user.model'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { Lead } from './lead.model'
 import { LeadService } from './lead.service'
 import { LeadImportSession } from './leadImportSession.model'
@@ -279,11 +279,8 @@ const loadExistingIdentities = async (organizationId: string, rows: Array<Partia
   return { leadPhones, leadEmails, contactPhones, contactEmails }
 }
 
-const getImportAssignees = (organizationId: string) => User.find({
-  organizationId,
-  status: 'active',
-  userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-}).select('_id name email userRole').lean()
+const getImportAssignees = (organizationId: string) =>
+  CrmAssignableMemberService.listAssignableMembers(organizationId, 'lead')
 
 const storeSession = async (sessionId: string, session: ImportSession): Promise<void> => {
   try {

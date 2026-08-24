@@ -13,6 +13,7 @@ import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './publicProperty.serializer'
 
@@ -88,6 +89,9 @@ const createProperty = async (
   const normalizedPayload = normalizeDiscount(postalNormalized, undefined, Boolean(actor?.canPublish))
   const status: IProperty['status'] = actor?.canPublish ? (normalizedPayload.status || 'Draft') : 'Draft'
   const mediaLinks = normalizePropertyMediaLinks(normalizedPayload.mediaLinks)
+  if (normalizedPayload.agentId) {
+    await CrmAssignableMemberService.assertAssignableMember(organizationId, String(normalizedPayload.agentId), 'property', options.session)
+  }
   const propertyData: Partial<IProperty> = {
     ...normalizedPayload,
     ...(mediaLinks !== undefined ? { mediaLinks } : {}),
@@ -365,6 +369,9 @@ const updateProperty = async (
 
   if (payload.status !== undefined && payload.status !== existing.status && !actor?.canPublish) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
+  }
+  if (payload.agentId !== undefined && payload.agentId) {
+    await CrmAssignableMemberService.assertAssignableMember(organizationId, String(payload.agentId), 'property')
   }
   if (payload.title && payload.title !== existing.title) payload.slug = await generateSlug(organizationId, payload.title)
   if (payload.mediaLinks !== undefined) payload.mediaLinks = normalizePropertyMediaLinks(payload.mediaLinks)

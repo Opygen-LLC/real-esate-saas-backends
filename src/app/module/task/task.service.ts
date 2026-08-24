@@ -4,6 +4,7 @@ import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { CrmService } from '../crm/crm.service'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Lead } from '../lead/lead.model'
@@ -75,11 +76,7 @@ const assertTaskRelations = async (organizationId: string, task: Partial<ITask>,
     })())
   }
   if (task.assignedAgent) {
-    checks.push(
-      User.exists({ _id: task.assignedAgent, organizationId, status: 'active' }).then((user) => {
-        if (!user) throw new ApiError(400, 'Assigned team member must be active in this agency')
-      }),
-    )
+    checks.push(CrmAssignableMemberService.assertAssignableMember(organizationId, String(task.assignedAgent), 'task'))
   }
   await Promise.all(checks)
 
@@ -244,12 +241,10 @@ const getAllTasks = async (
 }
 
 
-const CRM_ASSIGNABLE_MEMBER_ROLES = ['agency_owner', 'agency_admin', 'agent'] as const
-
 /**
- * One database aggregation for the Tasks workload header. Starting from the
- * active CRM member roster keeps zero-workload members visible; the correlated
- * Lead lookup computes every count in MongoDB instead of issuing N queries.
+ * Capability-filtered Tasks workload header. The roster is resolved once from
+ * effective Lead permissions, then one aggregation keeps zero-workload members
+ * visible without issuing per-member Lead queries.
  */
 const getTaskSummary = async (
   organizationId: string,
@@ -257,10 +252,15 @@ const getTaskSummary = async (
   referenceDate: Date = new Date(),
 ): Promise<ITaskSummaryResponse> => {
   const bounds = getDayBoundsInTimeZone(referenceDate, CRM_FOLLOW_UP_TIME_ZONE)
+  const assignableLeadMembers = await CrmAssignableMemberService.listAssignableMembers(organizationId, 'lead')
+  const assignableIds = assignableLeadMembers
+    .map((member) => String(member._id))
+    .filter((id) => Types.ObjectId.isValid(id))
+    .map((id) => new Types.ObjectId(id))
   const memberMatch: Record<string, unknown> = {
     organizationId,
     status: 'active',
-    userRole: { $in: [...CRM_ASSIGNABLE_MEMBER_ROLES] },
+    _id: { $in: assignableIds },
   }
 
   if (access.scope === 'mine') {

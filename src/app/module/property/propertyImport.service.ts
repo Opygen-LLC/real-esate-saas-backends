@@ -5,7 +5,7 @@ import config from '../../../config'
 import { RedisClient } from '../../../shared/redisClient'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.service'
-import { User } from '../user/user.model'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import {
   AREA_UNITS,
   LISTING_TYPES,
@@ -191,11 +191,8 @@ const parseBoolean = (value: unknown, label: string): { value?: boolean; error?:
   return { error: `${label} must be Yes/No, True/False, or 1/0` }
 }
 
-const getImportAssignees = (organizationId: string): Promise<Assignee[]> => User.find({
-  organizationId,
-  status: 'active',
-  userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-}).select('_id name email userRole').lean() as unknown as Promise<Assignee[]>
+const getImportAssignees = (organizationId: string): Promise<Assignee[]> =>
+  CrmAssignableMemberService.listAssignableMembers(organizationId, 'property') as unknown as Promise<Assignee[]>
 
 const buildAssigneeResolver = (assignees: Assignee[]) => {
   const byId = new Map<string, Assignee>()
@@ -428,21 +425,14 @@ const confirm = async (organizationId: string, actor: ImportActor, importSession
     }
 
     const assignedIds = [...new Set(previewSession.validRows.map((row) => row.data.agentId).filter(Boolean) as string[])]
-    const assignedQuery = User.find({
-      _id: { $in: assignedIds },
-      organizationId,
-      status: 'active',
-      userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-    }).select('_id')
-    if (dbSession) assignedQuery.session(dbSession)
     const activeAssignedIds = assignedIds.length
-      ? new Set((await assignedQuery.lean()).map((user: any) => String(user._id)))
+      ? new Set((await CrmAssignableMemberService.listAssignableMembers(organizationId, 'property', { ids: assignedIds, session: dbSession })).map((user: any) => String(user._id)))
       : new Set<string>()
 
     for (const row of previewSession.validRows) {
       try {
         if (row.data.agentId && !activeAssignedIds.has(row.data.agentId)) {
-          throw new ApiError(400, 'Assigned agent is no longer an active assignable member of this agency')
+          throw new ApiError(400, 'Assigned listing team member is no longer active or no longer has property manage access')
         }
         const { agentName: _agentName, ...payload } = row.data
         await PropertyService.createProperty(organizationId, payload, actor, { session: dbSession })

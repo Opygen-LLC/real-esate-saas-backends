@@ -2,11 +2,10 @@ import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Lead } from '../lead/lead.model'
 import { LeadEntitlementService } from '../lead/leadEntitlement.service'
-import { User } from '../user/user.model'
-import { listUsersWithProfiles } from '../user/userReadModel.service'
 import { CrmConfig, LeadAssignmentAudit } from './crm.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { crmReadOwnerFilter, type CrmAccessContext } from './crmAccess'
+import { CrmAssignableMemberService, type CrmAssignmentCapability } from './crmAssignableMember.service'
 import {
   DEFAULT_LEAD_PIPELINE_STAGES,
   activePipelineLeadFilter,
@@ -35,18 +34,12 @@ const canonicalizePipelineStages = (stages: any[] = [], rejectUnknown = false) =
 
 
 
-const getAssignees = async (organizationId: string) => {
-  const rows = await listUsersWithProfiles(
-    {
-      organizationId,
-      status: 'active',
-      userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-    },
-    { sort: { name: 1, createdAt: 1 }, limit: 1000 },
-  )
+const getAssignees = async (organizationId: string, capability: CrmAssignmentCapability = 'lead') => {
+  const rows = await CrmAssignableMemberService.listAssignableMembers(organizationId, capability)
   return rows.map((row: any) => ({
     _id: String(row._id),
     name: row.name,
+    email: row.email,
     userRole: row.userRole,
     profileImgURL: row.profile?.profileImgURL || '',
   }))
@@ -74,8 +67,7 @@ const updateConfig = async (organizationId: string, payload: any) => {
     for (const id of payload.assignment.eligibleAgentIds || []) ids.add(String(id))
     for (const rule of payload.assignment.territoryRules || []) for (const id of rule.agentIds || []) ids.add(String(id))
     if (ids.size) {
-      const validCount = await User.countDocuments({ _id: { $in: [...ids] }, organizationId, status: 'active', userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] } })
-      if (validCount !== ids.size) throw new ApiError(400, 'Assignment rules contain an agent outside this agency or an inactive agent')
+      await CrmAssignableMemberService.assertAssignableMemberIds(organizationId, [...ids], 'lead')
     }
   }
   const setOnInsert: Record<string, unknown> = { organizationId }
@@ -83,17 +75,17 @@ const updateConfig = async (organizationId: string, payload: any) => {
   return CrmConfig.findOneAndUpdate({ organizationId }, { $set: payload, $setOnInsert: setOnInsert }, { new: true, upsert: true, runValidators: true })
 }
 
-const activeEligibleAgents = async (organizationId: string, configuredIds: any[] = []) => {
-  const query: any = { organizationId, status: 'active', userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] } }
-  if (configuredIds.length) query._id = { $in: configuredIds }
-  return User.find(query).select('_id name email userRole').sort({ createdAt: 1 }).lean()
-}
+const activeEligibleAgents = async (organizationId: string, configuredIds: any[] = []) =>
+  CrmAssignableMemberService.listAssignableMembers(organizationId, 'lead', { ids: configuredIds.length ? configuredIds : undefined })
 
 const chooseAgent = async (organizationId: string, lead: { locationPreference?: string }, preferredPropertyAgent?: string) => {
   if (!(await EntitlementService.hasFeature(organizationId, 'leadAutomations'))) return { agentId: undefined, strategy: 'manual' as const, reason: 'Lead automation is not included in the current plan' }
   const config = await getConfig(organizationId)
   const assignment = config?.assignment || { mode: 'manual', eligibleAgentIds: [], territoryRules: [], workloadCap: 100, roundRobinCursor: 0 }
-  if (preferredPropertyAgent) return { agentId: preferredPropertyAgent, strategy: 'property_owner' as const, reason: 'Property listing agent' }
+  if (preferredPropertyAgent) {
+    const preferred = await CrmAssignableMemberService.getAssignableMember(organizationId, preferredPropertyAgent, 'lead')
+    if (preferred) return { agentId: preferredPropertyAgent, strategy: 'property_owner' as const, reason: 'Property listing team member' }
+  }
   if (assignment.mode === 'manual') return { agentId: undefined, strategy: 'manual' as const, reason: 'Manual assignment configured' }
   let agents = await activeEligibleAgents(organizationId, assignment.eligibleAgentIds || [])
   if (!agents.length) return { agentId: undefined, strategy: assignment.mode as any, reason: 'No eligible active agents' }

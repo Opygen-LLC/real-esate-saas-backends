@@ -7,9 +7,9 @@ import { Contact } from '../contact/contact.model'
 import { CONTACT_RELATIONSHIP_STATE } from '../contact/contactRelationship.contract'
 import { CrmService } from '../crm/crm.service'
 import { canAssignLeadTo, crmMutationOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
+import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { DomainEventService, type DomainEventInput } from '../domainEvent/domainEvent.service'
 import { TaskService } from '../task/task.service'
-import { User } from '../user/user.model'
 import { Lead } from './lead.model'
 import { LeadEntitlementService } from './leadEntitlement.service'
 import {
@@ -427,14 +427,7 @@ const assignLead = async (
   const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
   if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Reassign the Contact instead.')
 
-  const agentQuery = User.findOne({
-    _id: assignedAgent,
-    organizationId,
-    status: 'active',
-    userRole: { $in: ['agency_owner', 'agency_admin', 'agent'] },
-  })
-  const agent: any = await queryWithSession(agentQuery as any, session)
-  if (!agent) throw new ApiError(400, 'Assigned agent must be an active member of this agency')
+  await CrmAssignableMemberService.assertAssignableMember(organizationId, assignedAgent, 'lead', session)
 
   const previousAgentId = lead.assignedAgent?.toString()
   if (previousAgentId === String(assignedAgent)) return lead
