@@ -22,7 +22,6 @@ export const MUTATION_STATUSES = ['not_applicable', 'pending', 'completed'] as c
 export const PROPERTY_MEDIA_PROVIDERS = ['youtube', 'vimeo', 'matterport', 'kuula', 'other'] as const
 export const PROPERTY_MEDIA_TYPES = ['video', 'virtual_tour', '360'] as const
 
-
 export const PUBLIC_PROPERTY_FIELDS = [
   'price',
   'discount',
@@ -61,3 +60,81 @@ export type MutationStatus = (typeof MUTATION_STATUSES)[number]
 export type PropertyMediaProvider = (typeof PROPERTY_MEDIA_PROVIDERS)[number]
 export type PropertyMediaType = (typeof PROPERTY_MEDIA_TYPES)[number]
 export type PublicPropertyField = (typeof PUBLIC_PROPERTY_FIELDS)[number]
+
+/**
+ * Canonical property-spec contract shared conceptually with the frontend.
+ * These are the fields whose persistence is dependent on propertyType.
+ */
+export const PROPERTY_SPEC_FIELDS = [
+  'bedrooms',
+  'bathrooms',
+  'area',
+  'areaUnit',
+  'floorNumber',
+  'totalFloors',
+  'yearBuilt',
+  'parking',
+  'furnished',
+  'amenities',
+  'facing',
+  'roadWidthFeet',
+  'landShare',
+  'utilities',
+  'regulatory',
+  'developerName',
+  'handoverDate',
+  'serviceCharge',
+  'loadingAccess',
+] as const
+
+export type PropertySpecField = (typeof PROPERTY_SPEC_FIELDS)[number]
+
+type PropertyTypeFieldConfig = {
+  fields: readonly PropertySpecField[]
+  areaUnits: readonly AreaUnit[]
+}
+
+export const PROPERTY_TYPE_FIELDS: Readonly<Record<PropertyType, PropertyTypeFieldConfig>> = {
+  Apartment: {
+    fields: ['bedrooms', 'bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'yearBuilt', 'parking', 'furnished', 'amenities', 'facing', 'landShare', 'utilities', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+  ReadyFlat: {
+    fields: ['bedrooms', 'bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'yearBuilt', 'parking', 'furnished', 'amenities', 'facing', 'landShare', 'utilities', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+  UnderConstruction: {
+    fields: ['bedrooms', 'bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'parking', 'amenities', 'facing', 'landShare', 'utilities', 'regulatory', 'developerName', 'handoverDate', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+  LandPlot: {
+    fields: ['area', 'areaUnit', 'facing', 'roadWidthFeet', 'utilities', 'regulatory'],
+    areaUnits: ['decimal', 'shotok', 'katha', 'bigha', 'acre', 'sqft'],
+  },
+  Commercial: {
+    fields: ['bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'yearBuilt', 'parking', 'furnished', 'amenities', 'facing', 'roadWidthFeet', 'utilities', 'regulatory', 'serviceCharge', 'loadingAccess'],
+    areaUnits: ['sqft'],
+  },
+  Office: {
+    fields: ['bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'yearBuilt', 'parking', 'furnished', 'amenities', 'facing', 'utilities', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+  Shop: {
+    fields: ['bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'yearBuilt', 'parking', 'furnished', 'roadWidthFeet', 'utilities', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+  Warehouse: {
+    fields: ['bathrooms', 'area', 'areaUnit', 'yearBuilt', 'parking', 'roadWidthFeet', 'utilities', 'loadingAccess'],
+    areaUnits: ['sqft'],
+  },
+  RentalSublet: {
+    fields: ['bedrooms', 'bathrooms', 'area', 'areaUnit', 'floorNumber', 'totalFloors', 'parking', 'furnished', 'amenities', 'facing', 'utilities', 'serviceCharge'],
+    areaUnits: ['sqft'],
+  },
+}
+
+export const propertyTypeSupports = (propertyType: PropertyType, field: PropertySpecField) =>
+  PROPERTY_TYPE_FIELDS[propertyType].fields.includes(field)
+
+export const defaultAreaUnitForPropertyType = (propertyType: PropertyType): AreaUnit =>
+  PROPERTY_TYPE_FIELDS[propertyType].areaUnits[0] || 'sqft'

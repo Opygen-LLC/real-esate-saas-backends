@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, PROPERTY_TYPE_FIELDS, type PropertyType } from './property.constants'
+import { sanitizePropertyTypePayload } from './propertyTypePolicy'
 import { normalizeBangladeshDigits } from './property.normalization'
 
 
@@ -74,7 +75,8 @@ const fields = {
   isDiscount: z.boolean().optional(), discountedPrice: z.number().positive('Discounted price must be greater than zero').max(1_000_000_000_000).optional(),
   currency: z.literal('BDT').default('BDT'),
   bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(),
-  area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(AREA_UNITS).default('sqft'),
+  area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(AREA_UNITS).optional(),
+  floorNumber: z.number().int().nonnegative().max(300).optional(), totalFloors: z.number().int().positive().max(300).optional(),
   yearBuilt: z.number().int().min(1800).max(2200).optional(), parking: z.number().int().nonnegative().max(1000).optional(), furnished: z.boolean().optional(),
   address: z.string().max(500).optional(), city: z.string().max(100).optional(), state: z.string().max(100).optional(),
   country: z.literal('Bangladesh').default('Bangladesh'),
@@ -89,6 +91,7 @@ const fields = {
     approvalNumber: z.string().max(100).optional(), mutationStatus: z.enum(MUTATION_STATUSES).optional(),
     khatianNumber: z.string().max(100).optional(), holdingTaxPaidThrough: z.string().max(30).optional() }).strict().optional(),
   developerName: z.string().max(160).optional(), handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
+  loadingAccess: z.string().trim().max(300).optional(),
   images: propertyImages.optional(), mediaLinks: mediaLinks.optional(),
   amenities: z.array(z.string().max(100)).max(100).optional(), features: z.array(z.string().max(100)).max(100).optional(),
   hiddenPublicFields: z.array(z.enum(PUBLIC_PROPERTY_FIELDS)).max(PUBLIC_PROPERTY_FIELDS.length).refine((items) => new Set(items).size === items.length, 'Hidden public fields must be unique').optional(),
@@ -115,16 +118,37 @@ const validateDiscount = (value: PropertyInput, ctx: z.RefinementCtx) => {
   }
 }
 
+const validateTypeSpecificFields = (value: PropertyInput, ctx: z.RefinementCtx) => {
+  if (typeof value.floorNumber === 'number' && typeof value.totalFloors === 'number' && value.floorNumber > value.totalFloors) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['floorNumber'], message: 'Floor cannot be higher than total floors' })
+  }
+  if (value.propertyType && value.areaUnit) {
+    const config = PROPERTY_TYPE_FIELDS[value.propertyType as PropertyType]
+    if (config && !(config.areaUnits as readonly string[]).includes(value.areaUnit)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['areaUnit'], message: `${value.areaUnit} is not valid for ${value.propertyType}` })
+    }
+  }
+}
+
 const createBody = z.object({ ...fields, propertyDraftSessionId: z.string().uuid().optional() }).strict().superRefine((value, ctx) => {
   validateDiscount(value, ctx)
+  validateTypeSpecificFields(value, ctx)
   if (value.images?.some((item) => item.assetId) && !value.propertyDraftSessionId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['propertyDraftSessionId'], message: 'Property draft upload session is required for uploaded images' })
   }
-}).transform(canonicalizePostalCode)
-const updateBody = z.object(Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()])))
+}).transform((value) => {
+  const canonical = canonicalizePostalCode(value)
+  return sanitizePropertyTypePayload(canonical, canonical.propertyType as PropertyType)
+})
+
+const optionalFields = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.optional()]))
+const updateBody = z.object({ ...optionalFields, propertyDraftSessionId: z.string().uuid().optional() })
   .strict()
   .refine(value => Object.keys(value).length > 0, 'At least one field is required')
-  .superRefine(validateDiscount)
+  .superRefine((value, ctx) => {
+    validateDiscount(value, ctx)
+    validateTypeSpecificFields(value, ctx)
+  })
   .transform(canonicalizePostalCode)
 
 export const PropertyValidation = {

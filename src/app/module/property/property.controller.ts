@@ -282,11 +282,40 @@ const getPublicPropertyBySlug = catchAsync(async (req: Request, res: Response) =
 const updateProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
-  const result = await PropertyService.updateProperty(organizationId, id, req.body, {
-    id: req.user?._id || req.user?.id,
-    role: req.user?.userRole || req.user?.role || req.tenant?.role,
-    canPublish: Boolean(req.tenant?.permissions.includes('properties.publish')),
-  })
+  const { propertyDraftSessionId, ...propertyPayload } = req.body
+  const actor = propertyActor(req)
+
+  let result: any
+  if (propertyDraftSessionId) {
+    const previous: any = await PropertyService.getPropertyById(organizationId, id)
+    const canTransact = await mongoSupportsTransactions()
+    if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property media claiming requires MongoDB transactions in production')
+    const session = canTransact ? await mongoose.startSession() : null
+    const execute = async () => {
+      await WebsiteBuilderService.validatePropertyDraftAssets(organizationId, propertyDraftSessionId, propertyPayload.images || [], session, id)
+      result = await PropertyService.updateProperty(organizationId, id, propertyPayload, actor, { session, emitEvent: false })
+      await WebsiteBuilderService.claimPropertyDraftAssets(organizationId, propertyDraftSessionId, id, propertyPayload.images || [], session)
+    }
+    try {
+      if (session) await session.withTransaction(execute)
+      else await execute()
+    } finally {
+      if (session) await session.endSession()
+    }
+    if (result) {
+      await PropertyService.emitPropertyUpdated(
+        organizationId,
+        result,
+        String(previous?.status || result.status),
+        Object.keys(propertyPayload),
+      )
+    }
+    void WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId).catch((error) => {
+      logger.warn('[property-media] post-update draft cleanup deferred to worker', { organizationId, propertyId: id, error })
+    })
+  } else {
+    result = await PropertyService.updateProperty(organizationId, id, propertyPayload, actor)
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

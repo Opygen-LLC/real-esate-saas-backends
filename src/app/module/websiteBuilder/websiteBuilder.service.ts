@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
-import sharp, { type Metadata } from 'sharp'
+import sharp, { type Metadata, type OutputInfo } from 'sharp'
 import { isIP } from 'net'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import ApiError from '../../../errors/ApiError'
@@ -215,7 +215,7 @@ const getPreview = async (token: string) => {
   return { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain }, page: { title: page.title, slug: page.slug, draftDocument: page.draftDocument, seo: page.seo }, expiresAt: preview.expiresAt }
 }
 
-type AssetLifecycleOptions = { context?: Extract<WebsiteAssetContext, 'website' | 'property-draft'>; uploadSessionId?: string }
+type AssetLifecycleOptions = { context?: Extract<WebsiteAssetContext, 'website' | 'property-draft'>; uploadSessionId?: string; altText?: string }
 
 const assertDraftSessionId = (value?: string) => {
   if (!value || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -243,8 +243,9 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
 
   // Resolve variant keys first (synchronous)
+  const variantWidths = options.context === 'property-draft' ? [320, 640, 1280] : [640, 1280]
   const variantDefs = payload.mimeType.startsWith('image/')
-    ? [640, 1280].flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, key: `${key}.${width}.${format}` })))
+    ? variantWidths.flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, key: `${key}.${width}.${format}` })))
     : []
 
   // Generate all GCS signed upload URLs in parallel (async with GCS SDK)
@@ -316,7 +317,7 @@ const uploadAssetBuffer = async (
 
   let metadata: Metadata
   try {
-    metadata = await sharp(file.buffer, { failOn: 'error' }).metadata()
+    metadata = await sharp(file.buffer, { failOn: 'error', limitInputPixels: 80_000_000 }).metadata()
   } catch {
     throw new ApiError(400, 'The uploaded file is not a valid image')
   }
@@ -325,42 +326,57 @@ const uploadAssetBuffer = async (
   if (ALLOWED_ASSET_MIME_TYPES.has(declaredMime) && declaredMime !== detectedMime) throw new ApiError(400, 'Uploaded image content does not match its file type')
   const mimeType = detectedMime
 
+  // Normalize/rotate and cap very large originals before they ever reach object
+  // storage. This is intentionally done before the short Mongo claim
+  // transaction used when the property itself is saved.
+  let normalized: { data: Buffer; info: OutputInfo }
+  try {
+    let pipeline = sharp(file.buffer, { failOn: 'error', limitInputPixels: 80_000_000 })
+      .rotate()
+      .resize({ width: 3000, height: 3000, fit: 'inside', withoutEnlargement: true })
+    if (mimeType === 'image/jpeg') pipeline = pipeline.jpeg({ quality: 88, mozjpeg: true })
+    else if (mimeType === 'image/png') pipeline = pipeline.png({ compressionLevel: 9, adaptiveFiltering: true })
+    else if (mimeType === 'image/webp') pipeline = pipeline.webp({ quality: 86 })
+    else pipeline = pipeline.avif({ quality: 65 })
+    normalized = await pipeline.toBuffer({ resolveWithObject: true })
+  } catch {
+    throw new ApiError(400, 'The property photo could not be normalized')
+  }
+
   const signed: any = await presignAsset(organizationId, {
     filename: file.originalname || 'property-image',
     mimeType,
-    size: file.buffer.length,
+    size: normalized.data.length,
   }, options)
   const objectKeys = [signed.original.key, ...(signed.requiredVariants || []).map((variant: any) => variant.key)]
 
   try {
-    await ObjectStorageService.putBuffer(signed.original.key, file.buffer, mimeType)
+    await ObjectStorageService.putBuffer(signed.original.key, normalized.data, mimeType)
 
-    // The API fallback must produce the same optimized media contract as the
-    // direct browser path. Generate variants server-side with Sharp so a CORS or
-    // client-network fallback never downgrades the resulting property gallery.
     const completedVariants: Array<{ key: string; format: 'webp' | 'avif'; width: number; height?: number }> = []
     for (const variant of signed.requiredVariants || []) {
       try {
-        let pipeline = sharp(file.buffer, { failOn: 'error' }).rotate().resize({ width: Number(variant.width), withoutEnlargement: true })
+        let pipeline = sharp(normalized.data, { failOn: 'error', limitInputPixels: 80_000_000 })
+          .resize({ width: Number(variant.width), withoutEnlargement: true })
         pipeline = variant.format === 'avif' ? pipeline.avif({ quality: 62 }) : pipeline.webp({ quality: 84 })
         const rendered = await pipeline.toBuffer({ resolveWithObject: true })
         await ObjectStorageService.putBuffer(variant.key, rendered.data, `image/${variant.format}`)
         completedVariants.push({ key: variant.key, format: variant.format, width: rendered.info.width, height: rendered.info.height })
       } catch (error: any) {
-        // Storage/provider errors must abort the upload; codec-specific failures
-        // may omit only that optimization while preserving the verified original.
+        // Storage failures abort the whole draft. Codec-specific failures may
+        // omit one optimization while preserving the verified normalized image.
         if (error instanceof ApiError && [API_ERROR_CODES.OBJECT_STORAGE_NOT_CONFIGURED, API_ERROR_CODES.OBJECT_STORAGE_UNAVAILABLE].includes(error.code as any)) throw error
       }
     }
 
-    const altText = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
+    const fallbackAlt = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
     return await completeAsset(organizationId, {
       key: signed.original.key,
       originalName: file.originalname || 'property-image',
       mimeType,
-      width: metadata.width,
-      height: metadata.height,
-      altText,
+      width: normalized.info.width,
+      height: normalized.info.height,
+      altText: String(options.altText || fallbackAlt).slice(0, 300),
       variants: completedVariants,
     }, userId)
   } catch (error) {
@@ -450,10 +466,12 @@ const readRemoteImage = async (input: string) => {
 
 const importAssetFromUrl = async (organizationId: string, payload: { url: string; altText?: string }, userId?: string, options: AssetLifecycleOptions = {}) => {
   const remote = await readRemoteImage(payload.url)
-  await EntitlementService.assertStorage(organizationId, remote.size)
-  const signed: any = await presignAsset(organizationId, { filename: remote.filename, mimeType: remote.mimeType, size: remote.size }, options)
-  await ObjectStorageService.putBuffer(signed.original.key, remote.buffer, remote.mimeType)
-  return completeAsset(organizationId, { key: signed.original.key, originalName: remote.filename, mimeType: remote.mimeType, altText: payload.altText || '', variants: [] }, userId)
+  return uploadAssetBuffer(
+    organizationId,
+    { buffer: remote.buffer, mimetype: remote.mimeType, originalname: remote.filename } as Express.Multer.File,
+    userId,
+    { ...options, altText: payload.altText || options.altText },
+  )
 }
 
 
@@ -485,34 +503,70 @@ const validatePropertyDraftAssets = async (
   uploadSessionId: string,
   images: PropertyDraftImageRef[] = [],
   session?: ClientSession | null,
+  existingPropertyId?: string,
 ) => {
   assertDraftSessionId(uploadSessionId)
-  const managedRefs = images.filter((image) => image.assetId || (image.publicId && image.publicId.startsWith(`tenants/${organizationId}/properties/drafts/`)))
+  if (existingPropertyId && !Types.ObjectId.isValid(existingPropertyId)) throw new ApiError(400, 'Property ID is invalid')
+
+  const managedRefs = images.filter((image) => image.assetId || (image.publicId && image.publicId.startsWith(`tenants/${organizationId}/`)))
   if (!managedRefs.length) return []
 
   const assetIds = managedRefs.map((image) => image.assetId).filter((value): value is string => Boolean(value))
-  if (assetIds.some((id) => !Types.ObjectId.isValid(id))) throw new ApiError(400, 'Property draft image reference is invalid')
+  if (assetIds.some((id) => !Types.ObjectId.isValid(id))) throw new ApiError(400, 'Property image reference is invalid')
   const keys = managedRefs.map((image) => image.publicId).filter((value): value is string => Boolean(value))
   const query = WebsiteAsset.find({
     organizationId,
-    context: 'property-draft',
-    uploadSessionId,
-    claimed: false,
     $or: [
       ...(assetIds.length ? [{ _id: { $in: assetIds } }] : []),
       ...(keys.length ? [{ key: { $in: keys } }] : []),
     ],
   })
   if (session) query.session(session)
-  const assets = await query
-  const matchedIds = new Set(assets.map((asset: any) => String(asset._id)))
-  const matchedKeys = new Set(assets.map((asset: any) => String(asset.key)))
-  for (const ref of managedRefs) {
-    if ((ref.assetId && matchedIds.has(ref.assetId)) || (ref.publicId && matchedKeys.has(ref.publicId))) continue
-    throw new ApiError(409, 'A property image is not part of this draft session or has already been claimed')
+  const assets: any[] = await query
+  const byId = new Map(assets.map((asset: any) => [String(asset._id), asset]))
+  const byKey = new Map(assets.map((asset: any) => [String(asset.key), asset]))
+  const claimable: any[] = []
+  const seen = new Set<string>()
+
+  let existingAssetIds = new Set<string>()
+  let existingAssetKeys = new Set<string>()
+  if (existingPropertyId) {
+    const propertyQuery = Property.findOne({ _id: existingPropertyId, organizationId }).select('images.assetId images.publicId')
+    if (session) propertyQuery.session(session)
+    const property: any = await propertyQuery.lean()
+    if (!property) throw new ApiError(404, 'Property not found')
+    existingAssetIds = new Set((property.images || []).map((image: any) => String(image.assetId || '')).filter(Boolean))
+    existingAssetKeys = new Set((property.images || []).map((image: any) => String(image.publicId || '')).filter(Boolean))
   }
-  if (assets.some((asset: any) => asset.status !== 'ready')) throw new ApiError(409, 'All property images must finish processing before the listing can be saved')
-  return assets
+
+  for (const ref of managedRefs) {
+    const asset: any = (ref.assetId && byId.get(String(ref.assetId))) || (ref.publicId && byKey.get(String(ref.publicId)))
+    if (!asset) throw new ApiError(409, 'A property image could not be verified for this tenant')
+
+    if (asset.status !== 'ready') throw new ApiError(409, 'All property images must finish processing before the listing can be saved')
+
+    if (asset.context === 'property-draft') {
+      if (asset.uploadSessionId !== uploadSessionId || asset.claimed) {
+        throw new ApiError(409, 'A property image is not part of this draft session or has already been claimed')
+      }
+      const id = String(asset._id)
+      if (!seen.has(id)) { claimable.push(asset); seen.add(id) }
+      continue
+    }
+
+    if (existingPropertyId) {
+      const alreadyOnProperty = existingAssetIds.has(String(asset._id)) || existingAssetKeys.has(String(asset.key))
+      const explicitlyClaimedByProperty = asset.context === 'property' && asset.claimed === true && String(asset.claimedByPropertyId || '') === String(existingPropertyId)
+      // Rolling-deploy compatibility: older edit flows stored some image assets
+      // with website context. They are safe only when the exact asset is already
+      // referenced by this property; a tenant cannot attach an arbitrary asset.
+      if (alreadyOnProperty || explicitlyClaimedByProperty) continue
+    }
+
+    throw new ApiError(409, 'A property image is already owned by another listing or upload session')
+  }
+
+  return claimable
 }
 
 const claimPropertyDraftAssets = async (
@@ -523,7 +577,7 @@ const claimPropertyDraftAssets = async (
   session?: ClientSession | null,
 ) => {
   if (!Types.ObjectId.isValid(propertyId)) throw new ApiError(400, 'Property ID is invalid')
-  const assets = await validatePropertyDraftAssets(organizationId, uploadSessionId, images, session)
+  const assets = await validatePropertyDraftAssets(organizationId, uploadSessionId, images, session, propertyId)
   if (!assets.length) return { claimed: 0 }
   const ids = assets.map((asset: any) => asset._id)
   const update = WebsiteAsset.updateMany(

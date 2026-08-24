@@ -58,6 +58,8 @@ export interface IProperty {
   bathrooms?: number
   area?: number
   areaUnit: IAreaUnit
+  floorNumber?: number
+  totalFloors?: number
   yearBuilt?: number
   parking?: number
   furnished?: boolean
@@ -77,6 +79,7 @@ export interface IProperty {
   developerName?: string
   handoverDate?: Date
   serviceCharge?: number
+  loadingAccess?: string
   latitude?: number
   longitude?: number
   mapUrl?: string

@@ -11,7 +11,8 @@ import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
-import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus } from './property.constants'
+import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus, type PropertyType } from './property.constants'
+import { propertyTypeUnsetDocument, sanitizePropertyTypePayload } from './propertyTypePolicy'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -19,6 +20,7 @@ import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
+type PropertyUpdateOptions = { session?: ClientSession | null; emitEvent?: boolean }
 
 const isPublicPropertyStatus = (status?: string): status is PropertyStatus =>
   Boolean(status && (PUBLIC_PROPERTY_STATUSES as readonly string[]).includes(status))
@@ -86,7 +88,8 @@ const createProperty = async (
 
   const slug = await generateSlug(organizationId, payload.title, options.session)
   const postalNormalized = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
-  const normalizedPayload = normalizeDiscount(postalNormalized, undefined, Boolean(actor?.canPublish))
+  const typedPayload = sanitizePropertyTypePayload(postalNormalized as Record<string, any>, payload.propertyType as PropertyType) as Partial<IProperty>
+  const normalizedPayload = normalizeDiscount(typedPayload, undefined, Boolean(actor?.canPublish))
   const status: IProperty['status'] = actor?.canPublish ? (normalizedPayload.status || 'Draft') : 'Draft'
   const mediaLinks = normalizePropertyMediaLinks(normalizedPayload.mediaLinks)
   if (normalizedPayload.agentId) {
@@ -350,13 +353,35 @@ const getPublicPropertyDetail = async (
   return { property: toPublicProperty(property), similarProperties: toPublicProperties(similarProperties as any[]) }
 }
 
+const emitPropertyUpdated = async (
+  organizationId: string,
+  result: any,
+  previousStatus: string,
+  changedFields: string[],
+) => DomainEventService.emit({
+  organizationId,
+  aggregateType: 'property',
+  aggregateId: result._id.toString(),
+  eventType: 'property.updated',
+  propertyId: result._id.toString(),
+  payload: {
+    status: result.status,
+    previousStatus,
+    publicVisible: isPublicPropertyStatus(previousStatus) || isPublicPropertyStatus(result.status),
+    changedFields,
+  },
+})
+
 const updateProperty = async (
   organizationId: string,
   id: string,
   payload: Partial<IProperty>,
   actor?: PropertyActor,
+  options: PropertyUpdateOptions = {},
 ): Promise<IProperty | null> => {
-  const existing = await Property.findOne({ _id: id, organizationId })
+  const existingQuery = Property.findOne({ _id: id, organizationId })
+  if (options.session) existingQuery.session(options.session)
+  const existing = await existingQuery
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
   if (existing.quotaLocked && payload.status && isPublicPropertyStatus(payload.status)) {
@@ -365,15 +390,17 @@ const updateProperty = async (
 
   const clearDiscountPrice = payload.isDiscount === false
   payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
+  const effectiveType = (payload.propertyType || existing.propertyType) as PropertyType
+  payload = sanitizePropertyTypePayload(payload as Record<string, any>, effectiveType) as Partial<IProperty>
   payload = normalizeDiscount(payload, existing, Boolean(actor?.canPublish))
 
   if (payload.status !== undefined && payload.status !== existing.status && !actor?.canPublish) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Missing permission: properties.publish')
   }
   if (payload.agentId !== undefined && payload.agentId) {
-    await CrmAssignableMemberService.assertAssignableMember(organizationId, String(payload.agentId), 'property')
+    await CrmAssignableMemberService.assertAssignableMember(organizationId, String(payload.agentId), 'property', options.session)
   }
-  if (payload.title && payload.title !== existing.title) payload.slug = await generateSlug(organizationId, payload.title)
+  if (payload.title && payload.title !== existing.title) payload.slug = await generateSlug(organizationId, payload.title, options.session)
   if (payload.mediaLinks !== undefined) payload.mediaLinks = normalizePropertyMediaLinks(payload.mediaLinks)
 
   payload.currency = 'BDT'
@@ -381,26 +408,26 @@ const updateProperty = async (
   if (payload.description !== undefined) payload.description = sanitizeRichText(payload.description)
   if (payload.status && isPublicPropertyStatus(payload.status) && !isPublicPropertyStatus(existing.status) && !existing.publishedAt) payload.publishedAt = new Date()
 
-  const updateDocument = clearDiscountPrice
-    ? { $set: Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)), $unset: { discountedPrice: 1 } }
-    : payload
-  const result = await Property.findOneAndUpdate({ _id: id, organizationId }, updateDocument, { new: true, runValidators: true, context: 'query' })
-    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  const setDocument = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined))
+  const unsetDocument: Record<string, 1> = propertyTypeUnsetDocument(effectiveType)
+  if (clearDiscountPrice) unsetDocument.discountedPrice = 1
+  // Never unset a field that this update explicitly sets.
+  for (const key of Object.keys(setDocument)) delete unsetDocument[key]
 
-  if (result) {
-    await DomainEventService.emit({
+  const query = Property.findOneAndUpdate(
+    { _id: id, organizationId },
+    { $set: setDocument, ...(Object.keys(unsetDocument).length ? { $unset: unsetDocument } : {}) },
+    { new: true, runValidators: true, context: 'query', ...(options.session ? { session: options.session } : {}) },
+  ).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+
+  const result = await query
+  if (result && options.emitEvent !== false) {
+    await emitPropertyUpdated(
       organizationId,
-      aggregateType: 'property',
-      aggregateId: id,
-      eventType: 'property.updated',
-      propertyId: id,
-      payload: {
-        status: result.status,
-        previousStatus: existing.status,
-        publicVisible: isPublicPropertyStatus(existing.status) || isPublicPropertyStatus(result.status),
-        changedFields: [...Object.keys(payload), ...(clearDiscountPrice ? ['discountedPrice'] : [])],
-      },
-    })
+      result,
+      String(existing.status),
+      [...Object.keys(setDocument), ...Object.keys(unsetDocument)],
+    )
   }
   return result
 }
@@ -501,7 +528,9 @@ const deleteProperty = async (organizationId: string, id: string): Promise<IProp
   return result
 }
 
-export const PropertyService = { emitPropertyCreated,
+export const PropertyService = {
+  emitPropertyCreated,
+  emitPropertyUpdated,
   createProperty,
   getAllProperties,
   getPublicProperties,

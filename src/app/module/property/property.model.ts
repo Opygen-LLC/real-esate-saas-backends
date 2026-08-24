@@ -102,6 +102,8 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       enum: AREA_UNITS,
       default: 'sqft',
     },
+    floorNumber: { type: Number, min: 0, max: 300 },
+    totalFloors: { type: Number, min: 1, max: 300 },
     yearBuilt: {
       type: Number,
       min: 1800,
@@ -154,6 +156,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       khatianNumber: { type: String, default: '' }, holdingTaxPaidThrough: { type: String, default: '' },
     },
     developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0 },
+    loadingAccess: { type: String, default: '', maxlength: 300 },
     latitude: {
       type: Number,
     },
