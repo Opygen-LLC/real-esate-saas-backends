@@ -517,8 +517,10 @@ const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (sessio
   if (await mongoSupportsTransactions()) {
     const session = await mongoose.startSession()
     try {
-      let value: T | undefined
+      let completed = false
+      let value!: T
       await session.withTransaction(async () => {
+        completed = false
         // All quota-sensitive writes touch the same tenant document first. This
         // deliberately creates a transaction write-conflict so concurrent invite
         // and direct-user requests are retried against a fresh quota snapshot.
@@ -529,8 +531,11 @@ const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (sessio
         )
         if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
         value = await work(session)
+        // A successful callback is allowed to intentionally return void/undefined.
+        // Completion must therefore be tracked independently from its return value.
+        completed = true
       })
-      if (value === undefined) throw new ApiError(500, 'Team quota transaction did not complete')
+      if (!completed) throw new ApiError(500, 'Team quota transaction did not complete')
       return value
     } finally {
       await session.endSession()

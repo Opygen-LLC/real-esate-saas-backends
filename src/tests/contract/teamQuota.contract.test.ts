@@ -19,6 +19,9 @@ describe('Phase 2 team quota invariants', () => {
     expect(source).toContain('teamQuotaRevision: 1')
     expect(source).toContain('withTeamMemberQuotaGuard')
     expect(source).toContain('session.withTransaction')
+    expect(source).toContain('let completed = false')
+    expect(source).toContain('completed = true')
+    expect(source).not.toContain("if (value === undefined) throw new ApiError(500, 'Team quota transaction did not complete')")
   })
 
   it('reserves one seat when inviting and does not double-count that reservation during acceptance', () => {

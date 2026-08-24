@@ -132,6 +132,12 @@ describe('Phase 10 final production acceptance matrix', () => {
   it('create, update, cancel and delete publish viewing.changed so every open table/calendar cache refreshes', () => {
     expect(viewingService).toContain("eventType:'viewing.scheduled'")
     expect(viewingService).toContain("eventType:payload.status==='Completed'?'viewing.completed':'viewing.updated'")
+    expect(viewingService).toContain('changeStatusInTransaction')
+    expect(viewingService).toContain('deferPublish:true')
+    expect(viewingService).toContain('leadId:linkedLeadId')
+    expect(viewingService).toContain("payload.date!==undefined&&date!==String(existing.date)")
+    expect(viewingService).toContain("payload.startTime!==undefined&&startTime!==String(existing.startTime)")
+    expect(viewingService).toContain("OperationsQueueService.cancel(organizationId,'viewing_reminder',id,{session})")
     expect(viewingService).toContain("eventType:'viewing.deleted'")
     expect(domainEvents).toContain("'viewing.deleted': { type: 'viewing', title: 'Viewing cancelled' }")
     expect(realtimeService).toContain("viewing: 'viewing.changed'")

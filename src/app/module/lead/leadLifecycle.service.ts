@@ -21,7 +21,7 @@ import {
 
 type ContactChannel = 'call' | 'whatsapp' | 'email' | 'meeting' | 'sms' | 'manual'
 
-type LifecycleEffects = {
+export type LifecycleEffects = {
   events: DomainEventInput[]
   cancelTaskReminderIds: string[]
   refreshTaskReminderIds: string[]
@@ -88,6 +88,11 @@ const runLifecycleMutation = async <T>(
 
   if (result === undefined) throw new ApiError(500, 'Lead lifecycle mutation did not complete')
 
+  await publishDeferredEffects(organizationId, effects)
+  return result
+}
+
+const publishDeferredEffects = async (organizationId: string, effects: LifecycleEffects) => {
   // The database mutation is already committed here. Secondary cache/realtime/queue
   // delivery must not make the caller think the commit failed.
   for (const event of effects.events) {
@@ -111,7 +116,6 @@ const runLifecycleMutation = async <T>(
       logger.warn('lead_lifecycle_post_commit_reminder_refresh_failed', { organizationId, taskIds: effects.refreshTaskReminderIds, error })
     }
   }
-  return result
 }
 
 const loadMutableLead = async (
@@ -432,6 +436,35 @@ const changeStatus = async (
   })
 }
 
+const changeStatusInTransaction = async (
+  organizationId: string,
+  leadId: string,
+  status: string,
+  session: ClientSession,
+  options: { lostReason?: string; reason?: string; actorId?: string; access?: CrmAccessContext } = {},
+): Promise<{ result: LeadLifecycleResult; effects: LifecycleEffects }> => {
+  const newStatus = requireLeadStatus(status)
+  await validateConfiguredStage(organizationId, newStatus, options.lostReason)
+  if (newStatus === LEAD_CONVERSION_STATUS) {
+    throw new ApiError(400, 'Lead conversion cannot be nested inside another transaction')
+  }
+
+  const effects = emptyEffects()
+  const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
+  if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Continue the relationship from Contacts.')
+  await applyStatusChange({
+    organizationId,
+    lead,
+    newStatus,
+    actorId: options.actorId,
+    lostReason: options.lostReason,
+    reason: options.reason,
+    session,
+    effects,
+  })
+  return { result: { lead, contact: null }, effects }
+}
+
 const assignLead = async (
   organizationId: string,
   leadId: string,
@@ -597,6 +630,8 @@ const reengage = async (
 
 export const LeadLifecycleService = {
   changeStatus,
+  changeStatusInTransaction,
+  publishDeferredEffects,
   assignLead,
   scheduleFollowUp,
   recordContact,

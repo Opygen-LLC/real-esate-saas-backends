@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import type { ClientSession } from 'mongoose'
 import config from '../../../config'
 import { logger } from '../../../shared/logger'
 import { Metrics } from '../../../shared/metrics'
@@ -18,25 +19,41 @@ import { OperationsJob, OperationsJobType } from './operationsJob.model'
 
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
 
-const schedule = async (input: { organizationId: string; type: OperationsJobType; entityId: string; runAt: Date; payload?: Record<string, unknown>; maxAttempts?: number }) => {
+type QueueWriteOptions = { session?: ClientSession }
+
+const schedule = async (
+  input: { organizationId: string; type: OperationsJobType; entityId: string; runAt: Date; payload?: Record<string, unknown>; maxAttempts?: number },
+  options: QueueWriteOptions = {},
+) => {
   await OperationsJob.updateMany(
     { organizationId: input.organizationId, type: input.type, entityId: input.entityId, status: 'pending' },
     { $set: { status: 'cancelled' } },
+    options.session ? { session: options.session } : undefined,
   )
   if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder'].includes(input.type)) return null
-  return OperationsJob.create({
+
+  const payload = {
     organizationId: input.organizationId,
     type: input.type,
     entityId: input.entityId,
     runAt: input.runAt,
     payload: input.payload || {},
     maxAttempts: Math.max(1, Math.min(10, input.maxAttempts || 5)),
-  })
+  }
+
+  if (options.session) return (await OperationsJob.create([payload], { session: options.session }))[0]
+  return OperationsJob.create(payload)
 }
 
-const cancel = async (organizationId: string, type: OperationsJobType, entityId: string) => OperationsJob.updateMany(
+const cancel = async (
+  organizationId: string,
+  type: OperationsJobType,
+  entityId: string,
+  options: QueueWriteOptions = {},
+) => OperationsJob.updateMany(
   { organizationId, type, entityId, status: { $in: ['pending', 'processing'] } },
   { $set: { status: 'cancelled' } },
+  options.session ? { session: options.session } : undefined,
 )
 
 const deliver = async (job: any) => {
