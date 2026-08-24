@@ -35,10 +35,14 @@ import { ReviewRoute } from '../module/review/review.route'
 import { WebsiteSubmissionRoute } from '../module/websiteSubmission/websiteSubmission.route'
 import { LeadTopupPricingRoute } from '../module/leadTopupPricing/leadTopupPricing.route'
 import { LeadPurchaseRequestRoute } from '../module/leadPurchaseRequest/leadPurchaseRequest.route'
+import { LeadAddonDefinitionRoute } from '../module/leadAddonDefinition/leadAddonDefinition.route'
+import { LeadAddonSubscriptionRoute } from '../module/leadAddonSubscription/leadAddonSubscription.route'
 
 const router = express.Router()
 
 const moduleRoutes = [
+  { path: '/lead-addons', route: LeadAddonSubscriptionRoute },
+  { path: '/lead-addon-definitions', route: LeadAddonDefinitionRoute },
   { path: '/lead-purchase-requests', route: LeadPurchaseRequestRoute },
   { path: '/lead-topup-pricing', route: LeadTopupPricingRoute },
   { path: '/website-submissions', route: WebsiteSubmissionRoute },

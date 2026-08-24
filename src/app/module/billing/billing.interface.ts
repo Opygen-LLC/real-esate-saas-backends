@@ -1,7 +1,7 @@
 export interface IBilling {
   organizationId: string
   invoiceId: string
-  serviceType: 'subscription' | 'messaging' | 'design' | 'domain' | 'service'
+  serviceType: 'subscription' | 'lead_addon' | 'messaging' | 'design' | 'domain' | 'service'
   serviceName: string
   plan?: string
   planVersion?: number

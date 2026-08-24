@@ -24,6 +24,7 @@ export interface ISubscriptionPlan {
   renewalBonusEnabled: boolean
   maxRenewalLeadBonus: number
   continuityGraceDays: number
+  maxRecurringLeadAddon: number
   hasCustomDomain: boolean
   hasAdvancedAnalytics: boolean
   hasWhatsAppIntegration: boolean

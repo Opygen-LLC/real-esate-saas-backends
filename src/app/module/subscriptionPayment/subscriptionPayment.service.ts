@@ -18,6 +18,7 @@ import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEnti
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { SubscriptionScheduleService, classifySubscriptionChange } from '../subscription/subscriptionSchedule.service'
 import { SubscriptionQuoteService, type SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
 
@@ -351,6 +352,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       payment.quoteSnapshot = quoteSnapshot
     } else {
       SubscriptionQuoteService.assertSnapshotApplicable(org, quoteSnapshot, now)
+      await SubscriptionQuoteService.assertRecurringAddonSnapshotApplicable(payment.organizationId, quoteSnapshot, session)
       if (Math.abs(Number(payment.amount) - Number(quoteSnapshot.dueNow)) > 0.01) {
         throw new ApiError(httpStatus.CONFLICT, 'Payment amount does not match its subscription quote snapshot')
       }
@@ -401,6 +403,19 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         continuityGraceDays: Number(plan.continuityGraceDays || 0),
       },
     }, session)
+
+    if (quoteType === 'renewal' || deferredDowngrade) {
+      await LeadAddonSubscriptionService.renewForSubscriptionPeriod(
+        payment.organizationId,
+        start,
+        end,
+        payment.billingCycle,
+        payment.paymentNumber,
+        String(plan.planId),
+        Number(plan.version || 1),
+        session,
+      )
+    }
 
     if (midCycleImmediateChange && previousBenefit?._id) {
       await LeadTopupGrantService.rebindActiveGrants(

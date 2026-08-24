@@ -4,6 +4,7 @@ import ApiError from '../../../errors/ApiError'
 import { calculateChargeFromBaseAmount } from '../billing/pricing'
 import { Lead } from '../lead/lead.model'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { Organization } from '../organization/organization.model'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
@@ -45,6 +46,12 @@ export interface SubscriptionQuoteSnapshot {
   catalogAmountDueNow: number
   dueNow: number
   nextRenewalPrice: number
+  recurringAddonCapacity: number
+  recurringAddonPriceMonthly: number
+  recurringAddonCyclePrice: number
+  recurringAddonCount: number
+  renewingRecurringAddonCapacity: number
+  renewingRecurringAddonCount: number
   taxSnapshot: {
     invoiceEnabled: boolean
     registrationStatus: 'not_registered' | 'registered'
@@ -156,8 +163,11 @@ const currentLeadCapacity = async (organizationId: string, organization: any, ac
     return Math.max(0, Math.trunc(Number(trialPolicy.maxLeads || 0)))
   }
   if (activePeriod) {
-    const topup = await LeadTopupGrantService.getActiveGrantSummary(organizationId, activePeriod._id, session)
-    return Math.max(0, Math.trunc(Number(activePeriod.totalLeadAllowance || 0))) + topup.topupLeadAllowance
+    const [topup, recurring] = await Promise.all([
+      LeadTopupGrantService.getActiveGrantSummary(organizationId, activePeriod._id, session),
+      LeadAddonSubscriptionService.getActiveSummary(organizationId, session),
+    ])
+    return Math.max(0, Math.trunc(Number(activePeriod.totalLeadAllowance || 0))) + topup.topupLeadAllowance + recurring.recurringLeadAllowance
   }
   const currentPlan = await resolvePlan(String(organization.subscription.plan), Number(organization.subscription.planVersion || 1), session)
   return targetLeadCapacity(currentPlan, inferCycle(null, organization) || 'monthly')
@@ -250,6 +260,24 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
 
   const targetPrice = recurringPrice(targetPlan, input.billingCycle)
   const currentPrice = currentPlan && currentCycle ? recurringPrice(currentPlan, currentCycle) : 0
+  const activeRecurringAddons = currentIsPaid
+    ? await LeadAddonSubscriptionService.getActiveSummary(organizationId, session)
+    : { recurringLeadAllowance: 0, recurringAddonPriceMonthly: 0, recurringAddonCyclePrice: 0, count: 0 }
+  const renewingRecurringAddons = currentIsPaid
+    ? await LeadAddonSubscriptionService.getRenewingSummary(organizationId, input.billingCycle, session)
+    : { recurringLeadAllowance: 0, recurringAddonPriceMonthly: 0, recurringAddonCyclePrice: 0, count: 0 }
+  if (currentIsPaid && currentPlanId !== targetPlan.planId) {
+    const maxRecurringLeadAddon = Math.max(0, Number(targetPlan.maxRecurringLeadAddon || 0))
+    const relevantAddonCapacity = changeType === 'downgrade'
+      ? renewingRecurringAddons.recurringLeadAllowance
+      : activeRecurringAddons.recurringLeadAllowance
+    if (relevantAddonCapacity > maxRecurringLeadAddon) {
+      throw new ApiError(
+        httpStatus.CONFLICT,
+        `Your recurring lead add-ons total ${Number(relevantAddonCapacity).toLocaleString()} leads, but the target plan supports only ${maxRecurringLeadAddon.toLocaleString()}. Cancel or reduce add-ons before changing to that plan.`,
+      )
+    }
+  }
   const periodTotalSeconds = activePaidPeriod && currentStart && currentEnd
     ? Math.max(1, (currentEnd.getTime() - currentStart.getTime()) / 1000)
     : 0
@@ -284,20 +312,20 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
     effectiveAt = currentEnd || now
     // The existing product uses paid/scheduled downgrades: the target period is prepaid
     // now and becomes active at the current billing boundary. No credit/refund is created.
-    catalogAmountDueNow = targetPrice
+    catalogAmountDueNow = targetPrice + renewingRecurringAddons.recurringAddonCyclePrice
     nextRenewalAt = addBillingCycle(effectiveAt, input.billingCycle)
     preserveRenewalDate = true
   } else if (changeType === 'renewal') {
     paymentPurpose = 'renewal'
     effectiveAt = currentEnd || now
-    catalogAmountDueNow = targetPrice
+    catalogAmountDueNow = targetPrice + renewingRecurringAddons.recurringAddonCyclePrice
     nextRenewalAt = addBillingCycle(effectiveAt, input.billingCycle)
     preserveRenewalDate = Boolean(currentEnd)
   }
 
   const tax = await loadTax(session)
   const dueCharge = calculateChargeFromBaseAmount(catalogAmountDueNow, tax)
-  const nextCharge = calculateChargeFromBaseAmount(targetPrice, tax)
+  const nextCharge = calculateChargeFromBaseAmount(targetPrice + renewingRecurringAddons.recurringAddonCyclePrice, tax)
 
   const [leadCapacityBefore, storedLeads, lockedLeadsBefore] = await Promise.all([
     currentLeadCapacity(organizationId, organization, activePeriod, session),
@@ -323,9 +351,12 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
   // A plan change grants the target plan's full capacity immediately; it is never
   // prorated with money. Active, already-paid top-up grants are preserved through a
   // mid-cycle upgrade and therefore remain additive until their original expiry.
+  const recurringCapacityAfter = changeType === 'renewal' || changeType === 'downgrade'
+    ? renewingRecurringAddons.recurringLeadAllowance
+    : activeRecurringAddons.recurringLeadAllowance
   const leadCapacityAfter = (changeType === 'upgrade' || changeType === 'version_change')
-    ? targetPlanCapacity + topupAllowance
-    : targetPlanCapacity
+    ? targetPlanCapacity + topupAllowance + recurringCapacityAfter
+    : targetPlanCapacity + recurringCapacityAfter
   const estimatedLockedLeadsAfter = Math.max(0, Number(storedLeads || 0) - leadCapacityAfter)
   const lockedLeadsUnlocked = Math.max(0, Number(lockedLeadsBefore || 0) - estimatedLockedLeadsAfter)
 
@@ -365,6 +396,12 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
     catalogAmountDueNow: money(catalogAmountDueNow),
     dueNow: dueCharge.amount,
     nextRenewalPrice: nextCharge.amount,
+    recurringAddonCapacity: activeRecurringAddons.recurringLeadAllowance,
+    recurringAddonPriceMonthly: activeRecurringAddons.recurringAddonPriceMonthly,
+    recurringAddonCyclePrice: renewingRecurringAddons.recurringAddonCyclePrice,
+    recurringAddonCount: activeRecurringAddons.count,
+    renewingRecurringAddonCapacity: renewingRecurringAddons.recurringLeadAllowance,
+    renewingRecurringAddonCount: renewingRecurringAddons.count,
     taxSnapshot: dueCharge.taxSnapshot,
     nextRenewalTaxSnapshot: nextCharge.taxSnapshot,
     leadCapacityBefore,
@@ -395,6 +432,24 @@ const assertSnapshotApplicable = (organization: any, snapshot: SubscriptionQuote
   }
 }
 
+
+const assertRecurringAddonSnapshotApplicable = async (
+  organizationId: string,
+  snapshot: SubscriptionQuoteSnapshot,
+  session?: ClientSession,
+) => {
+  if (!snapshot.currentPlan || snapshot.currentPlan.planId === 'trial') return
+  const renewing = await LeadAddonSubscriptionService.getRenewingSummary(
+    organizationId,
+    snapshot.targetPlan.billingCycle,
+    session,
+  )
+  if (Number(renewing.recurringLeadAllowance || 0) !== Number(snapshot.renewingRecurringAddonCapacity || 0)
+    || Math.abs(Number(renewing.recurringAddonCyclePrice || 0) - Number(snapshot.recurringAddonCyclePrice || 0)) > 0.01) {
+    throw new ApiError(httpStatus.CONFLICT, 'Recurring lead add-ons changed after this subscription quote was created. Create a fresh quote before confirming payment.')
+  }
+}
+
 const toPublicQuote = (snapshot: SubscriptionQuoteSnapshot) => {
   const dueTax = { ...snapshot.taxSnapshot } as Record<string, unknown>
   const nextTax = { ...snapshot.nextRenewalTaxSnapshot } as Record<string, unknown>
@@ -403,4 +458,4 @@ const toPublicQuote = (snapshot: SubscriptionQuoteSnapshot) => {
   return { ...snapshot, taxSnapshot: dueTax, nextRenewalTaxSnapshot: nextTax }
 }
 
-export const SubscriptionQuoteService = { quote, assertSnapshotApplicable, addBillingCycle, toPublicQuote }
+export const SubscriptionQuoteService = { quote, assertSnapshotApplicable, assertRecurringAddonSnapshotApplicable, addBillingCycle, toPublicQuote }

@@ -8,6 +8,8 @@ import { Lead } from '../lead/lead.model'
 import { LeadPurchaseRequest } from '../leadPurchaseRequest/leadPurchaseRequest.model'
 import { LeadTopupGrant } from '../leadTopupGrant/leadTopupGrant.model'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
+import { LeadAddonSubscription } from '../leadAddonSubscription/leadAddonSubscription.model'
 import { MetaEvent } from '../metaIntegration/metaEvent.model'
 import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { Organization } from '../organization/organization.model'
@@ -124,6 +126,7 @@ export const getTenant360 = async (organizationId: string) => {
     changeRequests,
     leadPurchaseRequests,
     topupGrants,
+    recurringAddonSubscriptions,
     failedJobs,
     failedJobCount,
     deadMetaEvents,
@@ -158,6 +161,7 @@ export const getTenant360 = async (organizationId: string) => {
     SubscriptionChangeRequest.find({ organizationId: normalizedOrganizationId }).sort({ createdAt: -1, _id: -1 }).limit(20).lean(),
     LeadPurchaseRequest.find({ organizationId: normalizedOrganizationId }).sort({ createdAt: -1, _id: -1 }).limit(20).lean(),
     LeadTopupGrant.find({ organizationId: normalizedOrganizationId }).sort({ createdAt: -1, _id: -1 }).limit(20).lean(),
+    LeadAddonSubscription.find({ organizationId: normalizedOrganizationId }).sort({ createdAt: -1, _id: -1 }).limit(20).lean(),
     OperationsJob.find({ organizationId: normalizedOrganizationId, status: 'failed' }).select('_id type entityId status attempts maxAttempts lastError updatedAt createdAt').sort({ updatedAt: -1, _id: -1 }).limit(20).lean(),
     OperationsJob.countDocuments({ organizationId: normalizedOrganizationId, status: 'failed' }),
     MetaEvent.find({ organizationId: normalizedOrganizationId, status: 'dead' }).select('_id eventName eventId status attempts lastErrorCode lastErrorMessage updatedAt createdAt').sort({ updatedAt: -1, _id: -1 }).limit(20).lean(),
@@ -173,6 +177,9 @@ export const getTenant360 = async (organizationId: string) => {
   const activeTopupSummary = activeBenefitPeriod
     ? await LeadTopupGrantService.getActiveGrantSummary(normalizedOrganizationId, activeBenefitPeriod._id)
     : { topupLeadAllowance: 0, grantCount: 0 }
+  const activeRecurringAddonSummary = organization.subscription?.plan === 'trial'
+    ? { recurringLeadAllowance: 0, recurringAddonPriceMonthly: 0, recurringAddonCyclePrice: 0, count: 0 }
+    : await LeadAddonSubscriptionService.getActiveSummary(normalizedOrganizationId)
 
   const team = users.map((user: any) => toUserDto(user, { includeAccessControl: true, includePermissions: true }))
   const userById = new Map(team.map((user: any) => [String(user._id), user]))
@@ -204,9 +211,10 @@ export const getTenant360 = async (organizationId: string) => {
   const loyaltyCapacity = benefit ? Math.max(0, number(benefit.bonusLeadAllowance)) : 0
   const basePlanCapacity = benefit ? Math.max(0, number(benefit.baseLeadAllowance)) : number(planSnapshot.limits.maxLeads)
   const purchasedTopupCapacity = number(activeTopupSummary.topupLeadAllowance)
+  const recurringAddonCapacity = number(activeRecurringAddonSummary.recurringLeadAllowance)
   const effectiveLeadCapacity = organization.subscription?.plan === 'trial'
     ? number(planSnapshot.limits.maxLeads)
-    : planLeadAllowance + purchasedTopupCapacity
+    : planLeadAllowance + purchasedTopupCapacity + recurringAddonCapacity
 
   const latestConfirmedPayment: any = payments.find((payment: any) => payment.status === 'confirmed' && ['monthly', 'yearly'].includes(payment.billingCycle)) || null
   const currentBillingCycle = benefit?.billingCycle === 'yearly'
@@ -219,7 +227,7 @@ export const getTenant360 = async (organizationId: string) => {
           ? 'monthly'
           : null
   const currentCycleAmount = currentBillingCycle === 'yearly' ? planSnapshot.priceYearly : currentBillingCycle === 'monthly' ? planSnapshot.priceMonthly : 0
-  const monthlyRecurringAmount = planSnapshot.priceMonthly
+  const monthlyRecurringAmount = planSnapshot.priceMonthly + number(activeRecurringAddonSummary.recurringAddonPriceMonthly)
 
   const operationalErrors = [
     ...failedJobs.map((row: any) => ({ source: 'operations_job', id: String(row._id), type: row.type, message: row.lastError || 'Operation failed', at: row.updatedAt || row.createdAt })),
@@ -349,7 +357,11 @@ export const getTenant360 = async (organizationId: string) => {
         activeGrantCount: number(activeTopupSummary.grantCount),
         grants: topupGrants,
         purchaseRequests: leadPurchaseRequests,
-        recurringAddOnsSupported: false,
+        recurringAddOnsSupported: true,
+        recurringLeadCapacity: recurringAddonCapacity,
+        recurringAddonPriceMonthly: number(activeRecurringAddonSummary.recurringAddonPriceMonthly),
+        activeRecurringAddonCount: number(activeRecurringAddonSummary.count),
+        recurringSubscriptions: recurringAddonSubscriptions,
       },
       tenantOverrides: {
         supported: false,
@@ -365,7 +377,7 @@ export const getTenant360 = async (organizationId: string) => {
       basePlanCapacity,
       loyaltyCapacity,
       planLeadAllowance,
-      recurringLeadAddonCapacity: 0,
+      recurringLeadAddonCapacity: recurringAddonCapacity,
       purchasedTopupCapacity,
       adminAdjustmentCapacity: 0,
       effectiveCapacity: effectiveLeadCapacity,
@@ -383,7 +395,7 @@ export const getTenant360 = async (organizationId: string) => {
       currentBillingCycle,
       upcomingRenewal: organization.subscription?.plan === 'trial' ? null : {
         at: organization.subscription?.currentPeriodEnd || benefit?.periodEnd || null,
-        expectedAmount: currentBillingCycle === 'yearly' ? planSnapshot.priceYearly : planSnapshot.priceMonthly,
+        expectedAmount: (currentBillingCycle === 'yearly' ? planSnapshot.priceYearly : planSnapshot.priceMonthly) + number(activeRecurringAddonSummary.recurringAddonCyclePrice),
         currency: 'BDT',
       },
       payments,
@@ -399,6 +411,7 @@ export const getTenant360 = async (organizationId: string) => {
       })),
       subscriptionRequests: changeRequests,
       addOnPayments,
+      recurringAddons: recurringAddonSubscriptions,
     },
     websiteAndDomain: {
       subdomain: organization.sub_domain || '',
@@ -446,7 +459,7 @@ export const getTenant360 = async (organizationId: string) => {
       generatedAt: new Date(),
       customDomainHealthy: !domain || (domain.status === 'verified' && activeDomainTls.has(String(domain.tlsStatus || '').toLowerCase())),
       tenantOverridesAvailable: false,
-      recurringLeadAddOnsAvailable: false,
+      recurringLeadAddOnsAvailable: true,
     },
   }
 }

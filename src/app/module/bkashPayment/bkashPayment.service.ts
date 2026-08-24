@@ -16,6 +16,7 @@ import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEnti
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
 import { SubscriptionQuoteService, type SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
 import { RealtimeService } from '../realtime/realtime.service'
@@ -224,6 +225,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       ;(attempt as any).quoteSnapshot = quoteSnapshot
     } else {
       SubscriptionQuoteService.assertSnapshotApplicable(organization, quoteSnapshot, now)
+      await SubscriptionQuoteService.assertRecurringAddonSnapshotApplicable(attempt.organizationId, quoteSnapshot, session)
       if (Math.abs(Number(attempt.amount) - Number(quoteSnapshot.dueNow)) > 0.01) {
         throw new ApiError(httpStatus.CONFLICT, 'bKash payment amount does not match its authoritative subscription quote')
       }
@@ -275,6 +277,20 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         continuityGraceDays: Number(plan.continuityGraceDays || 0),
       },
     }, session)
+
+
+    if (quoteType === 'renewal' || deferredDowngrade) {
+      await LeadAddonSubscriptionService.renewForSubscriptionPeriod(
+        attempt.organizationId,
+        periodStart,
+        periodEnd,
+        attempt.billingCycle,
+        attempt.paymentId || attempt.invoiceNumber,
+        String(plan.planId),
+        Number(plan.version || 1),
+        session,
+      )
+    }
 
     // A mid-cycle plan upgrade changes the active benefit-period identity. Existing
     // purchased top-up grants are rebound to that new period so customers do not lose
@@ -358,7 +374,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
           organizationId: attempt.organizationId,
           invoiceId: attempt.invoiceNumber,
           serviceType: 'subscription',
-          serviceName: `${attempt.planName} Plan (${attempt.billingCycle})${midCycleImmediateChange ? ' · prorated upgrade' : ''}`,
+          serviceName: `${attempt.planName} Plan (${attempt.billingCycle})${midCycleImmediateChange ? ' · prorated upgrade' : ''}${Number((quoteSnapshot as any).recurringAddonCount || 0) > 0 && (quoteType === 'renewal' || deferredDowngrade) ? ' + recurring lead add-ons' : ''}`,
           plan: attempt.planId,
           planVersion: attempt.planVersion || 1,
           billingCycle: attempt.billingCycle,

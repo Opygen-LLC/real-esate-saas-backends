@@ -10,6 +10,7 @@ import type { BenefitBillingCycle, BenefitPaymentSource } from './subscriptionBe
 import { Lead } from '../lead/lead.model'
 import { activePipelineLeadFilter } from '../lead/leadStatus.contract'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const nonVoidedFilter = () => ({ $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }] })
@@ -322,9 +323,12 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
   const currentRenewalStreak = adjustment
     ? Math.max(1, integer(adjustment.adjustedRenewalStreak))
     : grantedRenewalStreak
-  const topup = await LeadTopupGrantService.getActiveGrantSummary(normalizedOrganizationId, period._id, session)
+  const [topup, recurring] = await Promise.all([
+    LeadTopupGrantService.getActiveGrantSummary(normalizedOrganizationId, period._id, session),
+    LeadAddonSubscriptionService.getActiveSummary(normalizedOrganizationId, session),
+  ])
   const planLeadAllowance = integer(period.totalLeadAllowance)
-  const effectiveLeadAllowance = planLeadAllowance + topup.topupLeadAllowance
+  const effectiveLeadAllowance = planLeadAllowance + topup.topupLeadAllowance + recurring.recurringLeadAllowance
   const activeCapacityUsed = period.leadAllowanceModel === 'active_capacity'
     ? await (session
       ? Lead.countDocuments({ organizationId: normalizedOrganizationId, ...activePipelineLeadFilter() }).session(session)
@@ -350,6 +354,9 @@ const getCurrentLeadEntitlement = async (organizationId: string, session?: Clien
       planLeadAllowance,
       topupLeadAllowance: topup.topupLeadAllowance,
       activeTopupGrantCount: topup.grantCount,
+      recurringLeadAllowance: recurring.recurringLeadAllowance,
+      activeRecurringAddonCount: recurring.count,
+      recurringAddonPriceMonthly: recurring.recurringAddonPriceMonthly,
       effectiveLeadAllowance,
       remainingLeadAllowance,
     },

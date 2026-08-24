@@ -15,7 +15,7 @@ const billingSchema = new Schema<IBilling>(
     },
     serviceType: {
       type: String,
-      enum: ['subscription', 'messaging', 'design', 'domain', 'service'],
+      enum: ['subscription', 'lead_addon', 'messaging', 'design', 'domain', 'service'],
       default: 'subscription',
       required: true,
     },

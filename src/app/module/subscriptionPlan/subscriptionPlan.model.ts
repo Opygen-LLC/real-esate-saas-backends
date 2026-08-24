@@ -37,6 +37,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     renewalBonusEnabled: { type: Boolean, default: false },
     maxRenewalLeadBonus: { type: Number, default: 0, min: 0 },
     continuityGraceDays: { type: Number, default: 0, min: 0, max: 31 },
+    maxRecurringLeadAddon: { type: Number, default: 0, min: 0 },
     hasCustomDomain: { type: Boolean, default: false },
     hasAdvancedAnalytics: { type: Boolean, default: false },
     hasWhatsAppIntegration: { type: Boolean, default: false },

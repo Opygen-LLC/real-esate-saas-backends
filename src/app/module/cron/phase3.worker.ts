@@ -7,6 +7,7 @@ import { Lead } from '../lead/lead.model'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
+import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 
 let running = false
 let cleanupTick = 0
@@ -29,10 +30,11 @@ export const runPhase3Maintenance = async () => {
       OperationsQueueService.schedulePendingDomainChecks(100),
       OperationsQueueService.schedulePendingCalendarSync(50),
     ])
-    const [operations, planVersions, scheduledSubscriptionChanges, sla, leadAllowanceReservations] = await Promise.all([
+    const [operations, planVersions, scheduledSubscriptionChanges, recurringLeadAddons, sla, leadAllowanceReservations] = await Promise.all([
       OperationsQueueService.processDue(config.runtime.worker_batch_size),
       SubscriptionPlanService.applyDuePlanVersions(),
       SubscriptionScheduleService.processDueChanges(Math.max(25, config.runtime.worker_batch_size)),
+      LeadAddonSubscriptionService.applyDueLifecycle(Math.max(25, config.runtime.worker_batch_size)),
       Lead.updateMany({ firstResponseAt: { $exists: false }, responseDueAt: { $lt: new Date() }, slaBreachedAt: { $exists: false } }, { $set: { slaBreachedAt: new Date() } }),
       EntitlementService.cleanupStaleLeadAllowanceReservations(100),
     ])
@@ -55,7 +57,7 @@ export const runPhase3Maintenance = async () => {
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
     Metrics.setGauge('worker_last_duration_ms', lastDurationMs)
-    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, domainBacklog, planVersions, scheduledSubscriptionChanges, slaMarked: sla.modifiedCount, leadAllowanceReservations, assets, propertyDraftAssets }
+    return { scheduled, metaScheduled, domainScheduled, calendarScheduled, operations, backlog, domainBacklog, planVersions, scheduledSubscriptionChanges, recurringLeadAddons, slaMarked: sla.modifiedCount, leadAllowanceReservations, assets, propertyDraftAssets }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     lastDurationMs = performance.now() - started
