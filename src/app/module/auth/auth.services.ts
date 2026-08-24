@@ -675,6 +675,50 @@ const revokeOtherSessions = async (
   return { revokedCount: result.modifiedCount }
 }
 
+
+const resolveRoutingSession = async (token?: string): Promise<{ authenticated: true; userRole: string }> => {
+  if (!token) throw new ApiError(401, 'Authentication required')
+
+  let verified: any
+  try {
+    verified = jwtHelpers.verifyToken(token, config.jwt.refresh_secret as Secret)
+  } catch {
+    throw new ApiError(401, 'Invalid or expired refresh token')
+  }
+
+  if (!verified?.sessionId || !verified?._id) throw new ApiError(401, 'Session is unavailable')
+
+  const authSession: any = await AuthSession.findById(verified.sessionId).select('+refreshTokenHash +tokenHash userId organizationId revokedAt expiresAt')
+  const storedRefreshHash = authSession?.refreshTokenHash || authSession?.tokenHash
+  if (
+    !authSession ||
+    authSession.revokedAt ||
+    authSession.expiresAt <= new Date() ||
+    !storedRefreshHash ||
+    !safeEqual(storedRefreshHash, sha256(token)) ||
+    String(authSession.userId || '') !== String(verified._id)
+  ) {
+    throw new ApiError(401, 'Session is unavailable')
+  }
+
+  const user: any = await User.findById(verified._id).select('_id organizationId userRole status isVerified').lean()
+  if (!user) throw new ApiError(401, 'Account is unavailable')
+  if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
+  if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
+
+  const organizationId = String(user.organizationId || '')
+  if (verified.organizationId && String(verified.organizationId) !== organizationId) throw new ApiError(401, 'Token tenant mismatch')
+  if (authSession.organizationId && String(authSession.organizationId) !== organizationId) throw new ApiError(401, 'Session tenant mismatch')
+
+  if (user.userRole !== 'super-admin') {
+    const organization: any = await Organization.findOne({ organizationId }).select('isBlocked platformAccess.status').lean()
+    if (!organization) throw new ApiError(401, 'Account is unavailable')
+    if (organization.isBlocked) throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
+  }
+
+  return { authenticated: true, userRole: String(user.userRole) }
+}
+
 const refreshToken = async (token: string, meta: RequestMeta = {}): Promise<AuthResult> => {
   let verified: any
   try {
@@ -778,6 +822,7 @@ export const AuthServices = {
   completePasswordReset,
   createRealtimeTicket,
   refreshToken,
+  resolveRoutingSession,
   getCurrentSessionSummary,
   listSessions,
   revokeSession,

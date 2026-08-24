@@ -78,6 +78,19 @@ const getCsrfToken = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const getRoutingSession = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Vary', 'Cookie')
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Routing session is active',
+    data: await AuthServices.resolveRoutingSession(req.cookies?.[config.security.refresh_cookie_name]),
+  })
+})
+
 const getSession = catchAsync(async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
   res.setHeader('Pragma', 'no-cache')
@@ -240,6 +253,7 @@ const logoutUser = catchAsync(async (req: Request, res: Response) => {
 
 export const AuthController = {
   getCsrfToken,
+  getRoutingSession,
   getSession,
   getSessions,
   revokeSession,

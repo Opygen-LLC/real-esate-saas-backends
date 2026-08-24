@@ -7,6 +7,7 @@ import { AuthValidation } from './auth.validation'
 
 const router = express.Router()
 router.get('/csrf-token', AuthController.getCsrfToken)
+router.get('/routing-session', AuthController.getRoutingSession)
 router.get('/session', authMiddlewares.auth(), AuthController.getSession)
 router.get('/sessions', authMiddlewares.auth(), AuthController.getSessions)
 router.delete('/sessions/:sessionId', authMiddlewares.auth(), AuthController.revokeSession)
