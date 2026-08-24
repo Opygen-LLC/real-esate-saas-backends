@@ -24,15 +24,41 @@ export const legacyPlanOrder = (planId: unknown): number | null => {
   return Number.isInteger(value) ? value : null
 }
 
-const nonNegativeIntegerOrNull = (value: unknown): number | null => {
+export const nonNegativeIntegerOrNull = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
 }
 
-export const resolvePlanOrdering = <T extends Record<string, any>>(plan: T): T & { displayOrder: number; upgradeRank: number } => {
+/**
+ * Phase 1 canonical ordering contract.
+ *
+ * tierRank is the only ordering concept new code should consume. Legacy
+ * displayOrder/upgradeRank are returned for old readers and persisted as mirrors
+ * by write paths until the compatibility fields can be removed in a later phase.
+ */
+export const resolvePlanOrdering = <T extends Record<string, any>>(
+  plan: T,
+): T & { tierRank: number; displayOrder: number; upgradeRank: number } => {
   const legacy = legacyPlanOrder(plan?.planId)
-  const displayOrder = nonNegativeIntegerOrNull(plan?.displayOrder) ?? legacy ?? 1000
-  const upgradeRank = nonNegativeIntegerOrNull(plan?.upgradeRank) ?? legacy ?? displayOrder
-  return { ...plan, displayOrder, upgradeRank }
+  const tierRank = nonNegativeIntegerOrNull(plan?.tierRank)
+    ?? nonNegativeIntegerOrNull(plan?.upgradeRank)
+    ?? nonNegativeIntegerOrNull(plan?.displayOrder)
+    ?? legacy
+    ?? 1000
+  const displayOrder = nonNegativeIntegerOrNull(plan?.displayOrder) ?? tierRank
+  const upgradeRank = nonNegativeIntegerOrNull(plan?.upgradeRank) ?? tierRank
+  return { ...plan, tierRank, displayOrder, upgradeRank }
+}
+
+export const mirrorTierRankWrite = <T extends Record<string, any>>(
+  plan: T,
+): T & { tierRank: number; displayOrder: number; upgradeRank: number } => {
+  const resolved = resolvePlanOrdering(plan)
+  return {
+    ...resolved,
+    tierRank: resolved.tierRank,
+    displayOrder: resolved.tierRank,
+    upgradeRank: resolved.tierRank,
+  }
 }

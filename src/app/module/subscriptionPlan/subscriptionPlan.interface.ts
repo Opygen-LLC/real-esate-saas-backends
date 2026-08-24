@@ -7,6 +7,8 @@ export interface ISubscriptionPlan {
   planId: SubscriptionPlanId
   version: number
   name: string
+  tierRank: number
+  // Legacy mirrors kept during Phase 1 for backward compatibility.
   displayOrder: number
   upgradeRank: number
   priceMonthly: number
@@ -17,6 +19,8 @@ export interface ISubscriptionPlan {
   entitlements?: EntitlementConfig
   maxAgents: number
   maxProperties: number
+  baseLeadCapacity: number
+  // Legacy mirrors kept during Phase 1 for backward compatibility.
   maxLeads: number
   leadAllowanceModel: LeadAllowanceModel
   baseMonthlyLeadAllowance: number

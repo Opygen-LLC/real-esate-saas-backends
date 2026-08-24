@@ -19,21 +19,21 @@ const recommendedUpgradePlan = async (currentPlan: string, currentPlanVersion?: 
     const currentQuery = SubscriptionPlan.findOne({
       planId: currentPlan,
       ...(currentPlanVersion ? { version: currentPlanVersion } : { isCurrent: true }),
-    }).select('planId upgradeRank displayOrder')
+    }).select('planId tierRank upgradeRank displayOrder')
     if (session) currentQuery.session(session)
     const current: any = await currentQuery.lean()
     if (!current) return null
-    currentRank = Number(resolvePlanOrdering(current).upgradeRank)
+    currentRank = Number(resolvePlanOrdering(current).tierRank)
   }
 
   const candidatesQuery = SubscriptionPlan.find({ isCurrent: true, isActive: true })
-    .select('planId upgradeRank displayOrder')
+    .select('planId tierRank upgradeRank displayOrder')
   if (session) candidatesQuery.session(session)
   const candidates: any[] = await candidatesQuery.lean()
   const next = candidates
     .map((plan) => resolvePlanOrdering(plan))
-    .filter((plan) => Number(plan.upgradeRank) > currentRank)
-    .sort((a, b) => Number(a.upgradeRank) - Number(b.upgradeRank) || Number(a.displayOrder) - Number(b.displayOrder))[0]
+    .filter((plan) => Number(plan.tierRank) > currentRank)
+    .sort((a, b) => Number(a.tierRank) - Number(b.tierRank))[0]
   return next?.planId ? String(next.planId) : null
 }
 

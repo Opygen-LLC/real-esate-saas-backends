@@ -33,11 +33,11 @@ const planRank = async (planId: string, version?: number | null, session?: Clien
   const query = SubscriptionPlan.findOne({
     planId,
     ...(version && Number(version) > 0 ? { version: Number(version) } : { isCurrent: true }),
-  }).select('planId upgradeRank displayOrder')
+  }).select('planId tierRank upgradeRank displayOrder')
   if (session) query.session(session)
   const plan: any = await query.lean()
   if (!plan) throw new ApiError(httpStatus.CONFLICT, `Subscription plan rank could not be resolved for ${planId}${version ? ` v${version}` : ''}`)
-  return Number(resolvePlanOrdering(plan).upgradeRank)
+  return Number(resolvePlanOrdering(plan).tierRank)
 }
 
 export const classifySubscriptionChange = async (
@@ -51,7 +51,7 @@ export const classifySubscriptionChange = async (
     planRank(requestedPlan, options.requestedPlanVersion, options.session),
   ])
   if (requestedRank === currentRank) {
-    throw new ApiError(httpStatus.CONFLICT, `Plan ranking conflict: ${currentPlan} and ${requestedPlan} have the same upgrade rank`)
+    throw new ApiError(httpStatus.CONFLICT, `Plan ranking conflict: ${currentPlan} and ${requestedPlan} have the same plan tier`)
   }
   return requestedRank < currentRank ? 'downgrade' : 'upgrade'
 }

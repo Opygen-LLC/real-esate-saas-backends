@@ -18,6 +18,9 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     },
     version: { type: Number, required: true, min: 1 },
     name: { type: String, required: true },
+    // Phase 1 canonical ordering field. Historical documents may not have it yet.
+    tierRank: { type: Number, min: 0, index: true },
+    // Legacy mirrors retained until all old readers are retired.
     displayOrder: { type: Number, required: true, min: 0, index: true },
     upgradeRank: { type: Number, required: true, min: 0, index: true },
     priceMonthly: { type: Number, required: true, min: 0 },
@@ -28,6 +31,9 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     entitlements: { type: entitlementConfigSchema, default: undefined },
     maxAgents: { type: Number, default: 3, min: 0 },
     maxProperties: { type: Number, default: 100, min: 0 },
+    // Phase 1 canonical lead-capacity field. Historical documents may not have it yet.
+    baseLeadCapacity: { type: Number, min: 0, index: true },
+    // Legacy mirrors retained until all old readers are retired.
     maxLeads: { type: Number, default: 500, min: 0 },
     // Historical plan versions default to paid-period credits. New cumulative-capacity
     // versions opt in explicitly so grandfathered tenants keep their original semantics.
@@ -65,7 +71,20 @@ subscriptionPlanSchema.index(
   { unique: true, partialFilterExpression: { isCurrent: true } },
 )
 subscriptionPlanSchema.index({ isActive: 1, effectiveFrom: 1, effectiveTo: 1 })
+subscriptionPlanSchema.index({ isCurrent: 1, isActive: 1, tierRank: 1 })
 subscriptionPlanSchema.index({ isCurrent: 1, isActive: 1, displayOrder: 1, upgradeRank: 1 })
+subscriptionPlanSchema.index(
+  { tierRank: 1 },
+  {
+    name: 'current_active_tier_rank_unique',
+    unique: true,
+    partialFilterExpression: {
+      isCurrent: true,
+      isActive: true,
+      tierRank: { $type: 'number' },
+    },
+  },
+)
 subscriptionPlanSchema.index(
   { upgradeRank: 1 },
   {

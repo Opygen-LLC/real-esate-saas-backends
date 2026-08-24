@@ -10,7 +10,8 @@ import { SubscriptionPlan } from './subscriptionPlan.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { normalizeEntitlementWrite, resolveEntitlementSource } from '../entitlement/featureCatalog'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
-import { normalizePaidPlanId, resolvePlanOrdering } from './planIdentity'
+import { mirrorTierRankWrite, normalizePaidPlanId, resolvePlanOrdering } from './planIdentity'
+import { mirrorBaseLeadCapacityWrite, resolveBaseLeadCapacity } from './planLeadCapacity'
 
 type LeadAllowanceConfig = Pick<ISubscriptionPlan,
   'leadAllowanceModel' | 'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
@@ -47,6 +48,7 @@ const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T
   const leadAllowanceModel = entitlementResolved.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
   return {
     ...entitlementResolved,
+    baseLeadCapacity: resolveBaseLeadCapacity(entitlementResolved),
     leadAllowanceModel,
     baseMonthlyLeadAllowance: Number(entitlementResolved.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
     renewalLeadBonus: Number(entitlementResolved.renewalLeadBonus ?? fallback.renewalLeadBonus),
@@ -85,9 +87,20 @@ const validateLeadAllowanceConfig = (plan: Partial<ISubscriptionPlan>) => {
   }
 }
 
+const normalizePlanWrite = <T extends Record<string, any>>(
+  source: T,
+  explicitEntitlements?: unknown,
+) => normalizeLeadAllowanceConfig(
+  mirrorBaseLeadCapacityWrite(
+    mirrorTierRankWrite(
+      normalizeEntitlementWrite(source, explicitEntitlements),
+    ),
+  ),
+)
+
 const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId: SubscriptionPlanId }> = [
   {
-    planId: 'starter', name: 'Starter', displayOrder: 10, upgradeRank: 10, priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
+    planId: 'starter', name: 'Starter', tierRank: 10, displayOrder: 10, upgradeRank: 10, priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
     description: 'Perfect for solo real estate agents and boutique teams starting out.',
     features: ['1–3 Team Agents', '100 Property Listings', '200 Leads / Paid Month', '+50 Leads per Consecutive Renewal', 'Up to 500 Active Pipeline Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
     maxAgents: 3, maxProperties: 100, maxLeads: 500, ...starterLeadAllowanceDefaults, hasCustomDomain: false, hasAdvancedAnalytics: false,
@@ -95,7 +108,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     maxStorageMb: 1024, maxMonthlyVisitors: 10000, isPopular: false, isActive: true,
   },
   {
-    planId: 'professional', name: 'Professional', displayOrder: 20, upgradeRank: 20, priceMonthly: 3490, priceYearly: 34900, currency: 'BDT',
+    planId: 'professional', name: 'Professional', tierRank: 20, displayOrder: 20, upgradeRank: 20, priceMonthly: 3490, priceYearly: 34900, currency: 'BDT',
     description: 'Designed for high-growth real estate teams and established agencies.',
     features: ['Up to 10 Team Agents', '1,000 Property Listings', 'Unlimited Leads & Deals', 'Custom Domain (www.agency.com)', 'Advanced Lead Pipeline & Kanban', 'Viewing Calendar & Booking', 'Advanced Real Estate Analytics', 'Priority Email Support'],
     maxAgents: 10, maxProperties: 1000, maxLeads: 10000, ...neutralLeadAllowanceDefaults(10000), hasCustomDomain: true, hasAdvancedAnalytics: true,
@@ -103,7 +116,7 @@ const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId:
     maxStorageMb: 10240, maxMonthlyVisitors: 100000, isPopular: true, isActive: true,
   },
   {
-    planId: 'agency', name: 'Agency Scale', displayOrder: 30, upgradeRank: 30, priceMonthly: 6990, priceYearly: 69900, currency: 'BDT',
+    planId: 'agency', name: 'Agency Scale', tierRank: 30, displayOrder: 30, upgradeRank: 30, priceMonthly: 6990, priceYearly: 69900, currency: 'BDT',
     description: 'Full-featured enterprise platform for large brokerages and multi-office firms.',
     features: ['Unlimited Team Agents', 'Unlimited Property Listings', 'Unlimited Leads & Contacts', 'Custom Domain + Multi-Branch', 'WhatsApp Integration & SMS Marketing', 'Agent Performance Leaderboards', 'Lead Auto-Routing Rules', 'Dedicated Account Manager & 24/7 Support'],
     maxAgents: 9999, maxProperties: 99999, maxLeads: 999999, ...neutralLeadAllowanceDefaults(999999), hasCustomDomain: true, hasAdvancedAnalytics: true,
@@ -142,7 +155,7 @@ const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
   const rows = await SubscriptionPlan.find(planWindowFilter(now)).lean()
   const plans = rows
     .map((plan: any) => normalizeLeadAllowanceConfig(plan))
-    .sort((a: any, b: any) => Number(a.displayOrder) - Number(b.displayOrder) || Number(a.upgradeRank) - Number(b.upgradeRank) || Number(a.priceMonthly) - Number(b.priceMonthly) || Number(b.version) - Number(a.version)) as ISubscriptionPlan[]
+    .sort((a: any, b: any) => Number(a.tierRank) - Number(b.tierRank) || Number(a.priceMonthly) - Number(b.priceMonthly) || Number(b.version) - Number(a.version)) as ISubscriptionPlan[]
   await Cache.plans.set('catalog', plans, 300)
   return plans
 }
@@ -169,7 +182,7 @@ const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknow
   const limit = Math.min(100, Math.max(1, Number(query.limit || 20)))
   const filter: any = query.planId ? { planId: query.planId } : {}
   if (String(query.currentOnly || '') === 'true') filter.isCurrent = true
-  const allowed = new Set(['createdAt', 'effectiveFrom', 'version', 'planId', 'priceMonthly', 'displayOrder', 'upgradeRank'])
+  const allowed = new Set(['createdAt', 'effectiveFrom', 'version', 'planId', 'priceMonthly', 'tierRank', 'displayOrder', 'upgradeRank'])
   const sortBy = allowed.has(String(query.sortBy || '')) ? String(query.sortBy) : 'createdAt'
   const order: 1 | -1 = String(query.sortOrder || 'desc') === 'asc' ? 1 : -1
   const summaryFilter: any = query.planId ? { planId: query.planId } : {}
@@ -183,16 +196,16 @@ const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknow
   return { data: data.map((plan: any) => normalizeLeadAllowanceConfig(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary: { grandfathered, scheduled } } }
 }
 
-const assertUpgradeRankAvailable = async (planId: string, upgradeRank: number, session?: ClientSession) => {
+const assertTierRankAvailable = async (planId: string, tierRank: number, session?: ClientSession) => {
   const query = SubscriptionPlan.find({ isCurrent: true, isActive: true, planId: { $ne: planId } })
-    .select('planId upgradeRank displayOrder')
+    .select('planId tierRank upgradeRank displayOrder')
   if (session) query.session(session)
   const currentPlans: any[] = await query.lean()
   const conflict = currentPlans
     .map((plan) => resolvePlanOrdering(plan))
-    .find((plan) => Number(plan.upgradeRank) === Number(upgradeRank))
+    .find((plan) => Number(plan.tierRank) === Number(tierRank))
   if (conflict) {
-    throw new ApiError(httpStatus.CONFLICT, `Upgrade rank ${upgradeRank} is already used by ${conflict.planId}. Each current plan family must have a unique upgrade rank.`)
+    throw new ApiError(httpStatus.CONFLICT, `Plan tier ${tierRank} is already used by ${conflict.planId}. Each current active plan family must have a unique tier.`)
   }
 }
 
@@ -202,12 +215,11 @@ const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Pr
   if (await SubscriptionPlan.exists({ planId })) {
     throw new ApiError(httpStatus.CONFLICT, 'This plan family already exists. Create a new version instead.')
   }
-  await assertUpgradeRankAvailable(planId, Number(payload.upgradeRank))
-  const entitlementNormalized = normalizeEntitlementWrite(
+  await assertTierRankAvailable(planId, Number(payload.tierRank))
+  const normalizedPayload = normalizePlanWrite(
     { ...payload, planId } as Record<string, any>,
     payload.entitlements,
   )
-  const normalizedPayload = normalizeLeadAllowanceConfig(entitlementNormalized)
   validateLeadAllowanceConfig(normalizedPayload)
   const result = await SubscriptionPlan.create({
     ...normalizedPayload,
@@ -239,13 +251,12 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
 
   const snapshot = current.toObject()
   const mergedRawSnapshot = { ...snapshot, ...payload, planId: current.planId }
-  const entitlementNormalized = normalizeEntitlementWrite(
+  const mergedCommercialSnapshot = normalizePlanWrite(
     mergedRawSnapshot,
     payload.entitlements,
   )
-  const mergedCommercialSnapshot = normalizeLeadAllowanceConfig(entitlementNormalized)
   validateLeadAllowanceConfig(mergedCommercialSnapshot)
-  await assertUpgradeRankAvailable(String(current.planId), Number(mergedCommercialSnapshot.upgradeRank), session)
+  await assertTierRankAvailable(String(current.planId), Number(mergedCommercialSnapshot.tierRank), session)
   const nextVersion = (latest?.version || current.version || 1) + 1
   const grandfatherExisting = payload.grandfatherExisting ?? true
 
