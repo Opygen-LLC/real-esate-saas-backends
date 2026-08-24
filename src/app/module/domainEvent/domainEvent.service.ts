@@ -4,6 +4,7 @@ import { DomainEvent } from './domainEvent.model'
 import { CacheInvalidationService } from './cacheInvalidation.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { NextRevalidationService } from '../realtime/nextRevalidation.service'
+import { Metrics } from '../../../shared/metrics'
 
 export type DomainEventInput = {
   organizationId: string
@@ -69,42 +70,53 @@ const stringify = (payload: Record<string, unknown> = {}): string => {
  * uncommitted state.
  */
 const publish = async (input: DomainEventInput) => {
-  await CacheInvalidationService.fromEvent(input).catch(() => undefined)
-  RealtimeService.fromDomainEvent(input)
-  await NextRevalidationService.trigger({
-    organizationId: input.organizationId,
-    eventType: input.eventType,
-    publicVisible: input.payload?.publicVisible === true,
-    tenantIdentifier: typeof input.payload?.tenantIdentifier === 'string' ? input.payload.tenantIdentifier : undefined,
-    tenantIdentifiers: Array.isArray(input.payload?.tenantIdentifiers)
-      ? input.payload.tenantIdentifiers.filter((value): value is string => typeof value === 'string')
-      : undefined,
-  })
+  try {
+    await CacheInvalidationService.fromEvent(input).catch(() => undefined)
+    RealtimeService.fromDomainEvent(input)
+    await NextRevalidationService.trigger({
+      organizationId: input.organizationId,
+      eventType: input.eventType,
+      publicVisible: input.payload?.publicVisible === true,
+      tenantIdentifier: typeof input.payload?.tenantIdentifier === 'string' ? input.payload.tenantIdentifier : undefined,
+      tenantIdentifiers: Array.isArray(input.payload?.tenantIdentifiers)
+        ? input.payload.tenantIdentifiers.filter((value): value is string => typeof value === 'string')
+        : undefined,
+    })
+  } catch (error) {
+    Metrics.inc('domain_event_failures_total', { stage: 'publish' })
+    throw error
+  }
 }
 
 const emit = async (input: DomainEventInput, options: EmitOptions = {}) => {
-  const eventPayload = { ...input, payload: input.payload || {}, occurredAt: new Date() }
-  const event = options.session
-    ? (await DomainEvent.create([eventPayload], { session: options.session }))[0]
-    : await DomainEvent.create(eventPayload)
+  let event: any
+  try {
+    const eventPayload = { ...input, payload: input.payload || {}, occurredAt: new Date() }
+    event = options.session
+      ? (await DomainEvent.create([eventPayload], { session: options.session }))[0]
+      : await DomainEvent.create(eventPayload)
 
-  const projection = activityProjection[input.eventType]
-  // CRM history is Activity-backed. Project events linked to either a Lead or Contact;
-  // Contact-only notes/events must not disappear simply because they have no source Lead.
-  if (projection && (input.leadId || input.contactId)) {
-    const activityPayload = {
-      organizationId: input.organizationId,
-      leadId: input.leadId,
-      propertyId: input.propertyId,
-      contactId: input.contactId,
-      agentId: input.actorId,
-      type: projection.type,
-      title: projection.title,
-      content: stringify(input.payload),
-      metadata: { domainEventId: event._id, eventType: input.eventType },
+    const projection = activityProjection[input.eventType]
+    // CRM history is Activity-backed. Project events linked to either a Lead or Contact;
+    // Contact-only notes/events must not disappear simply because they have no source Lead.
+    if (projection && (input.leadId || input.contactId)) {
+      const activityPayload = {
+        organizationId: input.organizationId,
+        leadId: input.leadId,
+        propertyId: input.propertyId,
+        contactId: input.contactId,
+        agentId: input.actorId,
+        type: projection.type,
+        title: projection.title,
+        content: stringify(input.payload),
+        metadata: { domainEventId: event._id, eventType: input.eventType },
+      }
+      if (options.session) await Activity.create([activityPayload], { session: options.session })
+      else await Activity.create(activityPayload)
     }
-    if (options.session) await Activity.create([activityPayload], { session: options.session })
-    else await Activity.create(activityPayload)
+  } catch (error) {
+    Metrics.inc('domain_event_failures_total', { stage: 'persist_or_project' })
+    throw error
   }
 
   if (!options.deferPublish) await publish(input)

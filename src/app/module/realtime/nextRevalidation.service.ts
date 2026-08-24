@@ -1,5 +1,6 @@
 import config from '../../../config'
 import { logger } from '../../../shared/logger'
+import { Metrics } from '../../../shared/metrics'
 
 type RevalidationInput = {
   organizationId: string
@@ -52,6 +53,7 @@ const trigger = async (input: RevalidationInput): Promise<boolean> => {
 
     if (response.ok) return true
 
+    Metrics.inc('next_revalidation_failures_total', { outcome: `http_${response.status}` })
     logger.warn('next_revalidation_failed', {
       status: response.status,
       eventType: input.eventType,
@@ -59,6 +61,7 @@ const trigger = async (input: RevalidationInput): Promise<boolean> => {
     })
     return false
   } catch (error) {
+    Metrics.inc('next_revalidation_failures_total', { outcome: error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'unavailable' })
     logger.warn('next_revalidation_unavailable', {
       eventType: input.eventType,
       organizationId: input.organizationId,

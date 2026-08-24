@@ -22,6 +22,7 @@ import { resolveEntitlementSource } from './featureCatalog'
 import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { applyTenantEntitlementOverride, getActiveTenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.resolver'
+import { Metrics } from '../../../shared/metrics'
 
 type Feature = 'customDomain' | 'advancedAnalytics' | 'whatsAppAutomation' | 'smsAutomation' | 'premiumTemplates' | 'leadAutomations'
 export type LimitedResource = 'properties' | 'teamMembers' | 'leads'
@@ -535,7 +536,10 @@ const withTeamMemberQuotaGuard = async <T>(organizationId: string, work: (sessio
         // Completion must therefore be tracked independently from its return value.
         completed = true
       })
-      if (!completed) throw new ApiError(500, 'Team quota transaction did not complete')
+      if (!completed) {
+        Metrics.inc('team_quota_transaction_failures_total', { reason: 'completion_invariant' })
+        throw new ApiError(500, 'Team quota transaction did not complete')
+      }
       return value
     } finally {
       await session.endSession()

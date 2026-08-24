@@ -4,6 +4,7 @@ import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import { logger } from '../../../shared/logger'
+import { Metrics } from '../../../shared/metrics'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import paginationHelper from '../../helpers/paginationHelper'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
@@ -251,6 +252,9 @@ const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewi
         leadEffects=undefined
         await mutate(session)
       })
+    }catch(error){
+      if(!(error instanceof ApiError)) Metrics.inc('viewing_update_internal_failures_total', { stage: 'transaction' })
+      throw error
     }finally{
       await session.endSession()
     }
@@ -261,7 +265,12 @@ const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewi
     }
   }else{
     if(config.isProduction)throw new ApiError(503,'Viewing mutations require a MongoDB replica set or mongos in production')
-    await mutate(undefined)
+    try{
+      await mutate(undefined)
+    }catch(error){
+      if(!(error instanceof ApiError)) Metrics.inc('viewing_update_internal_failures_total', { stage: 'standalone' })
+      throw error
+    }
   }
 
   const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)})

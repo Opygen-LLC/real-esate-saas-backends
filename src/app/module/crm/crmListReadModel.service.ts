@@ -1,5 +1,6 @@
 import { Types, type PipelineStage, type SortOrder } from 'mongoose'
 import { logger } from '../../../shared/logger'
+import { Metrics } from '../../../shared/metrics'
 import { Activity } from '../activity/activity.model'
 import { Contact } from '../contact/contact.model'
 import { Lead } from '../lead/lead.model'
@@ -702,6 +703,7 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
     ])
     return { rows: rows as T[], total }
   } catch (error) {
+    Metrics.inc('crm_read_model_fallback_total', { entity: 'lead' })
     logger.warn('crm_lead_read_model_failed', { error })
     return readLeadListPageFallback<T>(options)
   }
@@ -729,6 +731,7 @@ export const readContactListPage = async <T = any>(options: ContactListReadModel
     return { rows: rows as T[], total }
   } catch (error) {
     const candidate = error as { code?: unknown; codeName?: unknown; name?: unknown }
+    Metrics.inc('crm_read_model_fallback_total', { entity: 'contact' })
     logger.warn('crm_contact_read_model_failed', {
       organizationId: options.organizationId,
       sortBy: options.sortBy,
