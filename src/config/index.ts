@@ -242,7 +242,9 @@ if (isProduction) {
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (redisEnabled) {
-    requiredInProduction('REDIS_PASSWORD', 8)
+    if (process.env.REDIS_PASSWORD?.trim() || !redisAllowInsecurePrivateNetwork) {
+      requiredInProduction('REDIS_PASSWORD', 8)
+    }
     if (!redisTls) {
       if (!redisAllowInsecurePrivateNetwork) {
         throw new Error('REDIS_TLS must be true in production unless REDIS_ALLOW_INSECURE_PRIVATE_NETWORK=true is explicitly set for an isolated private network')

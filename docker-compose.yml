@@ -12,13 +12,32 @@ services:
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
+      REDIS_HOST: redis
     volumes:
       - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
     ports:
       - "5000:5000"
     depends_on:
+      redis:
+        condition: service_healthy
       clamav:
         condition: service_started
+    networks:
+      - app_network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel notice
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - app_network
 
@@ -62,4 +81,6 @@ volumes:
   caddy_data:
   caddy_config:
   clamav_db:
+  redis_data:
+
 
