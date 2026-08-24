@@ -21,8 +21,8 @@ export interface ISubscriptionPlan {
   maxAgents: number
   maxProperties: number
   baseLeadCapacity: number
-  // Legacy mirrors kept during Phase 1 for backward compatibility.
-  maxLeads: number
+  // Historical immutable versions may still carry this legacy alias.
+  maxLeads?: number
   // Phase 3 fixed-capacity plans use leadPolicyVersion=2 and do not persist
   // the deprecated renewal-growth fields below. Historical immutable versions may.
   leadPolicyVersion?: number

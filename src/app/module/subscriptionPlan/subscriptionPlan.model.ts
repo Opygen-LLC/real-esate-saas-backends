@@ -34,8 +34,9 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     maxProperties: { type: Number, default: 100, min: 0 },
     // Phase 1 canonical lead-capacity field. Historical documents may not have it yet.
     baseLeadCapacity: { type: Number, min: 0, index: true },
-    // Legacy mirrors retained until all old readers are retired.
-    maxLeads: { type: Number, default: 500, min: 0 },
+    // Historical immutable versions may still carry this legacy alias.
+    // No default: Phase 5 new plan versions must not persist maxLeads.
+    maxLeads: { type: Number, default: undefined, min: 0 },
     // Phase 3: new plan versions store only baseLeadCapacity plus a system-owned
     // policy marker. These fields remain in the schema solely to read immutable
     // historical versions that used renewal growth or paid-period credits.

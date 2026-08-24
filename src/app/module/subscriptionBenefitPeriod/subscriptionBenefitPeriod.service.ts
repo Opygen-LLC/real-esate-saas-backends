@@ -13,6 +13,7 @@ import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const BENEFIT_LEDGER_VERSION = 2 as const
 const nonVoidedFilter = () => ({ $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }] })
 
 export interface BenefitPlanSnapshot {
@@ -197,6 +198,22 @@ const createForPaidSubscription = async (input: BenefitPeriodInput, session?: Cl
   const previous = input.continuityMode === 'reset' ? null : await findPreviousConfirmedBenefitPeriod(input.organizationId, session)
   const effectivePrevious = input.continuityMode === 'reset' ? null : await applyLatestSupportStreakAdjustment(input.organizationId, previous, session)
   const allowance = calculateBenefitPeriodAllowance(input.plan, input.billingCycle, input.periodStart, effectivePrevious)
+  const fixedCapacityPolicy = Number(input.plan.leadPolicyVersion || 0) >= 2
+  const recurringAtStart = fixedCapacityPolicy
+    ? (input.periodStart.getTime() > Date.now()
+      ? await LeadAddonSubscriptionService.getRenewingSummary(
+        input.organizationId,
+        input.billingCycle === 'yearly' ? 'yearly' : 'monthly',
+        session,
+      )
+      : await LeadAddonSubscriptionService.getActiveSummary(input.organizationId, session))
+    : null
+  const canonicalCapacitySnapshot = fixedCapacityPolicy ? {
+    ledgerVersion: BENEFIT_LEDGER_VERSION,
+    baseLeadCapacity: allowance.baseLeadAllowance,
+    recurringAddonCapacity: integer(recurringAtStart?.recurringLeadAllowance),
+    effectiveLeadCapacity: allowance.baseLeadAllowance + integer(recurringAtStart?.recurringLeadAllowance),
+  } : {}
 
   try {
     const docs = await SubscriptionBenefitPeriod.create([{
@@ -209,6 +226,7 @@ const createForPaidSubscription = async (input: BenefitPeriodInput, session?: Cl
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
       ...allowance,
+      ...canonicalCapacitySnapshot,
       usedLeadAllowance: 0,
     }], session ? { session } : undefined)
     return { period: docs[0], created: true as const }

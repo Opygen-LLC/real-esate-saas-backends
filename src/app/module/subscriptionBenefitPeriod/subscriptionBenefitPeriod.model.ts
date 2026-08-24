@@ -9,6 +9,11 @@ const subscriptionBenefitPeriodSchema = new Schema<ISubscriptionBenefitPeriod>(
     paymentNumber: { type: String, required: true, trim: true },
     planId: { type: String, required: true, trim: true, lowercase: true, minlength: 3, maxlength: 50, match: PAID_PLAN_ID_PATTERN, index: true },
     planVersion: { type: Number, required: true, min: 1 },
+    // Phase 5 canonical audit snapshot. Historical rows legitimately omit these.
+    ledgerVersion: { type: Number, enum: [2], default: undefined, index: true },
+    baseLeadCapacity: { type: Number, min: 0, default: undefined },
+    recurringAddonCapacity: { type: Number, min: 0, default: undefined },
+    effectiveLeadCapacity: { type: Number, min: 0, default: undefined },
     // Missing historical rows are interpreted as paid-period credits for grandfathering.
     leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: 'paid_period_credits' },
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'one-time'], required: true },

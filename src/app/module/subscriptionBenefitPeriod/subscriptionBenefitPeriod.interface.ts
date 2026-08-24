@@ -9,6 +9,10 @@ export interface ISubscriptionBenefitPeriod {
   paymentNumber: string
   planId: SubscriptionPlanId
   planVersion: number
+  ledgerVersion?: number
+  baseLeadCapacity?: number
+  recurringAddonCapacity?: number
+  effectiveLeadCapacity?: number
   leadAllowanceModel: LeadAllowanceModel
   billingCycle: BenefitBillingCycle
   periodStart: Date
