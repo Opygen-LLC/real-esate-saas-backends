@@ -31,9 +31,15 @@ import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts
 import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { getTenant360 } from './platformAdmin.tenant360.service'
+import { PlatformAdminTenantManagementService } from './platformAdmin.tenantManagement.service'
 
 const safeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const clampLimit = (value: unknown, fallback = 25) => Math.min(100, Math.max(1, Number(value || fallback)))
+const tenantAccessStatus = (org: any): 'active' | 'suspended' | 'archived' | 'pending_deletion' => {
+  const status = String(org.platformAccess?.status || '')
+  if (['active', 'suspended', 'archived', 'pending_deletion'].includes(status)) return status as any
+  return org.isBlocked ? 'suspended' : 'active'
+}
 
 const groupCounts = async (model: any, ids: string[], match: Record<string, unknown> = {}) => {
   const rows = await model.aggregate([
@@ -49,16 +55,19 @@ const getTenantHealth = async (query: any) => {
   const page = Math.max(1, Number(query.page || 1))
   const limit = clampLimit(query.limit, 10)
   const filter: any = {}
-  if (query.status === 'suspended') filter.isBlocked = true
-  if (query.status === 'active') filter.isBlocked = { $ne: true }
+  if (query.status === 'active') filter.$and = [{ $or: [{ 'platformAccess.status': 'active' }, { 'platformAccess.status': { $exists: false }, isBlocked: { $ne: true } }] }]
+  if (query.status === 'suspended') filter.$and = [{ $or: [{ 'platformAccess.status': 'suspended' }, { 'platformAccess.status': { $exists: false }, isBlocked: true }] }]
+  if (query.status === 'archived') filter['platformAccess.status'] = 'archived'
+  if (query.status === 'pending_deletion') filter['platformAccess.status'] = 'pending_deletion'
   if (query.plan) filter['subscription.plan'] = query.plan
   if (query.search) {
     const regex = safeRegex(String(query.search).trim())
     const domainOrganizations = await DomainRecord.distinct('organizationId', { domain: { $regex: regex, $options: 'i' } })
-    filter.$or = [
+    const searchClause = { $or: [
       ...['agencyName', 'email', 'phone', 'organizationId', 'domain', 'sub_domain'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } })),
       ...(domainOrganizations.length ? [{ organizationId: { $in: domainOrganizations } }] : []),
-    ]
+    ] }
+    filter.$and = [...(filter.$and || []), searchClause]
   }
   const [organizations, total] = await Promise.all([
     Organization.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
@@ -88,7 +97,8 @@ const getTenantHealth = async (query: any) => {
     const payment: any = paymentMap.get(org.organizationId)
     const pendingRequest: any = requestMap.get(org.organizationId)
     const errorCount = Number(failedJobs.get(org.organizationId) || 0) + Number(deadMeta.get(org.organizationId) || 0) + (domain?.status === 'failed' || domain?.tlsStatus === 'failed' ? 1 : 0)
-    const health = org.isBlocked ? 'suspended' : (errorCount > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['rejected'].includes(payment?.status)) ? 'attention' : 'healthy'
+    const accessStatus = tenantAccessStatus(org)
+    const health = accessStatus === 'archived' ? 'archived' : accessStatus === 'pending_deletion' ? 'pending_deletion' : accessStatus === 'suspended' ? 'suspended' : (errorCount > 0 || ['past_due', 'expired'].includes(org.subscription?.status) || ['rejected'].includes(payment?.status)) ? 'attention' : 'healthy'
     return {
       _id: org._id,
       organizationId: org.organizationId,
@@ -117,6 +127,7 @@ const getTenantHealth = async (query: any) => {
       lastActivity: eventMap.get(org.organizationId) || { at: org.updatedAt, type: 'organization.updated' },
       errors: errorCount,
       isBlocked: Boolean(org.isBlocked),
+      accessStatus,
       platformAccess: org.platformAccess,
       health,
     }
@@ -127,7 +138,8 @@ const getTenantHealth = async (query: any) => {
 const suspendTenant = async (organizationId: string, actor: { id: string; reason: string; requestId?: string; ip?: string }) => {
   const org: any = await Organization.findOne({ organizationId })
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  if (org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Organization is already suspended')
+  const accessStatus = tenantAccessStatus(org)
+  if (accessStatus !== 'active') throw new ApiError(httpStatus.CONFLICT, `Only active organizations can be suspended (current status: ${accessStatus})`)
   const previousSubscriptionStatus = org.subscription?.status || 'active'
   const previousWebsiteStatus = org.websiteStatus || 'published'
   org.isBlocked = true
@@ -151,7 +163,8 @@ const suspendTenant = async (organizationId: string, actor: { id: string; reason
 const reactivateTenant = async (organizationId: string, actor: { id: string; reason: string; requestId?: string; ip?: string }) => {
   const org: any = await Organization.findOne({ organizationId })
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  if (!org.isBlocked) throw new ApiError(httpStatus.CONFLICT, 'Organization is already active')
+  const accessStatus = tenantAccessStatus(org)
+  if (accessStatus !== 'suspended') throw new ApiError(httpStatus.CONFLICT, `Only suspended organizations can be reactivated (current status: ${accessStatus})`)
   const previous = org.platformAccess?.previousSubscriptionStatus
   const previousWebsiteStatus = org.platformAccess?.previousWebsiteStatus
   const fallback = org.subscription?.plan === 'trial' ? 'trialing' : 'active'
@@ -589,4 +602,12 @@ const endImpersonation = async (token: string, _actorId?: string, requestId?: st
   return { ended: true }
 }
 
-export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }
+
+const updateTenantProfile = PlatformAdminTenantManagementService.updateTenantProfile
+const updateTenantOwner = PlatformAdminTenantManagementService.updateTenantOwner
+const archiveTenant = PlatformAdminTenantManagementService.archiveTenant
+const restoreArchivedTenant = PlatformAdminTenantManagementService.restoreArchivedTenant
+const getTenantDeletionPreview = PlatformAdminTenantManagementService.getDeletionPreview
+const scheduleTenantDeletion = PlatformAdminTenantManagementService.scheduleTenantDeletion
+
+export const PlatformAdminService = { getTenantDetails, getTenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, getTenantDeletionPreview, scheduleTenantDeletion, getSubscriptionRequests, getPaymentLedger, getBenefitPeriodHistory, getTenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, getRevenueDashboard, getAuditLog, getSubscriptionSummary, changeTenantSubscription, manageTenantTrial, searchPlatform, getPlatformNotifications, startImpersonation, verifyImpersonationToken, currentImpersonation, endImpersonation }

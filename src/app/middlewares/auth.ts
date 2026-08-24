@@ -23,8 +23,14 @@ const authenticate = async (req: Request): Promise<void> => {
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
   if (payload.organizationId !== user.organizationId) throw new ApiError(401, 'Token tenant mismatch')
   if (user.userRole !== 'super-admin') {
-    const organizationAvailable = await Organization.exists({ organizationId: user.organizationId, isBlocked: { $ne: true } })
-    if (!organizationAvailable) throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
+    const organization: any = await Organization.findOne({ organizationId: user.organizationId }).select('isBlocked platformAccess.status').lean()
+    if (!organization) throw new ApiError(401, 'Account is unavailable')
+    if (organization.isBlocked) {
+      const accessStatus = String(organization.platformAccess?.status || 'suspended')
+      if (accessStatus === 'archived') throw new ApiError(403, 'Your agency has been archived', '', 'TENANT_ARCHIVED')
+      if (accessStatus === 'pending_deletion') throw new ApiError(403, 'Your agency is pending permanent deletion', '', 'TENANT_PENDING_DELETION')
+      throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
+    }
   }
   const authUser: any = toAuthUserDto(user)
   const accessControl = user.profile?.accessControl || { useRoleDefaults: true, permissions: [] }

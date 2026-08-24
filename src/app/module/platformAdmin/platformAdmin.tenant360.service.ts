@@ -229,9 +229,16 @@ export const getTenant360 = async (organizationId: string) => {
 
   const errorCount = number(failedJobCount) + number(deadMetaEventCount) + ((domain?.status === 'failed' || domain?.tlsStatus === 'failed') ? 1 : 0)
   const subscriptionNeedsAttention = ['past_due', 'grace', 'expired'].includes(String(organization.subscription?.status || ''))
-  const health = organization.isBlocked
-    ? 'suspended'
-    : (errorCount > 0 || subscriptionNeedsAttention ? 'attention' : 'healthy')
+  const accessStatus = ['active', 'suspended', 'archived', 'pending_deletion'].includes(String(organization.platformAccess?.status || ''))
+    ? String(organization.platformAccess.status)
+    : (organization.isBlocked ? 'suspended' : 'active')
+  const health = accessStatus === 'archived'
+    ? 'archived'
+    : accessStatus === 'pending_deletion'
+      ? 'pending_deletion'
+      : accessStatus === 'suspended'
+        ? 'suspended'
+        : (errorCount > 0 || subscriptionNeedsAttention ? 'attention' : 'healthy')
 
   const summarizedUser = (value: unknown) => {
     const user: any = userById.get(String(value || ''))
@@ -257,11 +264,22 @@ export const getTenant360 = async (organizationId: string) => {
       agencyType: organization.agencyType,
       email: organization.email,
       phone: organization.phone,
+      licenseNumber: organization.licenseNumber || '',
+      address: organization.address || '',
+      city: organization.city || '',
+      state: organization.state || '',
+      country: organization.country || '',
+      zipCode: organization.zipCode || '',
+      defaultLanguage: organization.defaultLanguage || 'en',
+      addressDetails: organization.addressDetails || {},
+      operationalSettings: organization.teamSettings || {},
       location: [organization.city, organization.state, organization.country].filter(Boolean).join(', '),
       createdAt: organization.createdAt,
       updatedAt: organization.updatedAt,
       accountAgeDays: Math.max(0, Math.floor((Date.now() - new Date(organization.createdAt || Date.now()).getTime()) / 86_400_000)),
-      status: organization.isBlocked || organization.platformAccess?.status === 'suspended' ? 'suspended' : 'active',
+      status: accessStatus,
+      isBlocked: Boolean(organization.isBlocked),
+      platformAccess: organization.platformAccess || { status: accessStatus },
       health,
       currentPlan: organization.subscription?.plan || 'trial',
       currentPlanName: planSnapshot.displayName,

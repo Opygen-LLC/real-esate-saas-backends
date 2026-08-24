@@ -28,7 +28,7 @@ export interface ISubscription {
 }
 
 export interface IPlatformAccess {
-  status: 'active' | 'suspended'
+  status: 'active' | 'suspended' | 'archived' | 'pending_deletion'
   suspendedAt?: Date | null
   suspendedBy?: string
   suspensionReason?: string
@@ -39,6 +39,18 @@ export interface IPlatformAccess {
   reactivatedAt?: Date | null
   reactivatedBy?: string
   reactivationReason?: string
+  previousAccessStatus?: 'active' | 'suspended' | 'archived' | null
+  archivedAt?: Date | null
+  archivedBy?: string
+  archiveReason?: string
+  restoredAt?: Date | null
+  restoredBy?: string
+  restoreReason?: string
+  deletionRequestId?: string | null
+  deletionRequestedAt?: Date | null
+  deletionRequestedBy?: string
+  deletionReason?: string
+  deletionRetentionUntil?: Date | null
 }
 
 export interface IServiceArea {

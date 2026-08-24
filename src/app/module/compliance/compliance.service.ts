@@ -21,6 +21,11 @@ import mongoose from 'mongoose'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { writeAudit } from '../audit/audit.service'
 import { WebsiteSubmission } from '../websiteSubmission/websiteSubmission.model'
+import { TENANT_DELETION_COLLECTIONS } from './tenantDataCollections'
+import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { RealtimeService } from '../realtime/realtime.service'
+import { ImpersonationSession } from '../platformAdmin/impersonationSession.model'
 
 const sensitiveMap = { nid: 'nidEncrypted', tradeLicense: 'tradeLicenseEncrypted', tin: 'tinEncrypted', bin: 'binEncrypted' } as const
 
@@ -83,9 +88,45 @@ const processRequest = async (id: string, status: string, reason: string, actorI
   request.operatorReason = reason
   request.processedBy = actorId
   request.processedAt = new Date()
-  if (request.type === 'deletion' && ['approved', 'completed'].includes(status)) {
-    request.retentionUntil = new Date(Date.now() + retentionDays * 86400000)
-    await Organization.updateOne({ organizationId: request.organizationId }, { $set: { isBlocked: true } })
+  if (request.type === 'deletion' && status === 'approved') {
+    const now = new Date()
+    request.retentionUntil = new Date(now.getTime() + retentionDays * 86400000)
+    const org: any = await Organization.findOne({ organizationId: request.organizationId })
+    if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found for deletion request')
+
+    const explicitAccess = String(org.platformAccess?.status || '')
+    const previousAccessStatus = ['active', 'suspended', 'archived'].includes(explicitAccess)
+      ? explicitAccess
+      : (org.isBlocked ? 'suspended' : 'active')
+    const previousSubscriptionStatus = org.subscription?.status === 'suspended'
+      ? (org.platformAccess?.previousSubscriptionStatus || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
+      : (org.subscription?.status || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
+    const previousWebsiteStatus = org.websiteStatus === 'suspended'
+      ? (org.platformAccess?.previousWebsiteStatus || 'published')
+      : (org.websiteStatus || 'published')
+
+    org.isBlocked = true
+    org.websiteStatus = 'suspended'
+    if (org.subscription) org.subscription.status = 'suspended'
+    org.platformAccess = {
+      ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
+      status: 'pending_deletion',
+      previousAccessStatus,
+      previousSubscriptionStatus,
+      previousWebsiteStatus,
+      deletionRequestId: String(request._id),
+      deletionRequestedAt: now,
+      deletionRequestedBy: actorId,
+      deletionReason: reason,
+      deletionRetentionUntil: request.retentionUntil,
+    }
+    await org.save()
+    await Promise.all([
+      AuthSession.updateMany({ organizationId: request.organizationId, revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_pending_deletion' } }),
+      ImpersonationSession.updateMany({ organizationId: request.organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actorId } }),
+      CacheInvalidationService.invalidateTenant(request.organizationId),
+    ])
+    RealtimeService.emitOrganization(request.organizationId, { type: 'auth.changed', action: 'revoked', entityId: 'organization_pending_deletion', forceLogout: true })
   }
   await request.save()
   return request
@@ -95,37 +136,66 @@ const executeDueDeletionRequests = async (): Promise<number> => {
   const settings = await PlatformSettings.findOne({ key: 'platform' }).lean()
   if (settings?.privacy?.legalReviewStatus !== 'approved') return 0
   const due = await DataSubjectRequest.find({ type: 'deletion', status: 'approved', retentionUntil: { $lte: new Date() } }).limit(20)
-  const tenantCollections = ['users', 'properties', 'leads', 'contacts', 'activities', 'tasks', 'viewings', 'billings',
-    'bkashpayments', 'complianceprofiles', 'consentrecords', 'banners', 'sections', 'landingpages', 'websiteassets',
-    'websitepages', 'websiterevisions', 'websitesubmissions', 'visitorlogs', 'supporttickets']
   let completed = 0
+
+  const deleteTenant = async (request: any, session?: mongoose.ClientSession) => {
+    const query = User.find({ organizationId: request.organizationId }).select('_id')
+    if (session) query.session(session)
+    const tenantUsers = await query.lean()
+    const userIds = tenantUsers.map((user) => user._id)
+    const options = session ? { session } : undefined
+
+    if (userIds.length) {
+      await Promise.all([
+        AccountCredential.deleteMany({ userId: { $in: userIds } }, options),
+        AuthSession.deleteMany({ userId: { $in: userIds } }, options),
+        OtpChallenge.deleteMany({ userId: { $in: userIds } }, options),
+        UserProfile.deleteMany({ userId: { $in: userIds } }, options),
+        AgencyOwnerProfile.deleteMany({ userId: { $in: userIds } }, options),
+        AgentProfile.deleteMany({ userId: { $in: userIds } }, options),
+        SuperAdminProfile.deleteMany({ userId: { $in: userIds } }, options),
+      ])
+    }
+
+    for (const name of TENANT_DELETION_COLLECTIONS) {
+      await mongoose.connection.collection(name).deleteMany({ organizationId: request.organizationId }, options)
+    }
+    await Organization.deleteOne({ organizationId: request.organizationId }, options)
+
+    request.status = 'completed'
+    request.processedAt = new Date()
+    request.operatorReason = `${request.operatorReason} Retention worker completed deletion.`.trim()
+    await request.save(session ? { session } : undefined)
+    await writeAudit({
+      organizationId: request.organizationId,
+      actorId: 'retention-worker',
+      actorRole: 'system',
+      action: 'privacy.deletion_completed',
+      entityType: 'dataSubjectRequest',
+      entityId: request._id.toString(),
+      reason: 'Approved retention period elapsed; tenant operational data deleted.',
+      metadata: { collectionPolicyVersion: 2 },
+    }, session)
+  }
+
+  const transactionsSupported = await mongoSupportsTransactions()
   for (const request of due) {
+    if (!transactionsSupported) {
+      // Standalone MongoDB cannot provide an all-or-nothing transaction. The
+      // request remains idempotent because every delete is scoped by tenant and
+      // the request is only marked completed after all operational deletes pass.
+      await deleteTenant(request)
+      completed += 1
+      continue
+    }
+
     const session = await mongoose.startSession()
     try {
-      await session.withTransaction(async () => {
-        const tenantUsers = await User.find({ organizationId: request.organizationId }).select('_id').session(session).lean()
-        const userIds = tenantUsers.map((user) => user._id)
-        if (userIds.length) {
-          await Promise.all([
-            AccountCredential.deleteMany({ userId: { $in: userIds } }, { session }),
-            AuthSession.deleteMany({ userId: { $in: userIds } }, { session }),
-            OtpChallenge.deleteMany({ userId: { $in: userIds } }, { session }),
-            UserProfile.deleteMany({ userId: { $in: userIds } }, { session }),
-            AgencyOwnerProfile.deleteMany({ userId: { $in: userIds } }, { session }),
-            AgentProfile.deleteMany({ userId: { $in: userIds } }, { session }),
-            SuperAdminProfile.deleteMany({ userId: { $in: userIds } }, { session }),
-          ])
-        }
-        for (const name of tenantCollections) await mongoose.connection.collection(name).deleteMany({ organizationId: request.organizationId }, { session })
-        await Organization.deleteOne({ organizationId: request.organizationId }, { session })
-        request.status = 'completed'; request.processedAt = new Date(); request.operatorReason = `${request.operatorReason} Retention worker completed deletion.`.trim()
-        await request.save({ session })
-        await writeAudit({ organizationId: request.organizationId, actorId: 'retention-worker', actorRole: 'system',
-          action: 'privacy.deletion_completed', entityType: 'dataSubjectRequest', entityId: request._id.toString(),
-          reason: 'Approved retention period elapsed; tenant operational data deleted.' }, session)
-      })
+      await session.withTransaction(async () => deleteTenant(request, session))
       completed += 1
-    } finally { await session.endSession() }
+    } finally {
+      await session.endSession()
+    }
   }
   return completed
 }

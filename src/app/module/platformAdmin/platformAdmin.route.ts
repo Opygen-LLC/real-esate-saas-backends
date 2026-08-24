@@ -17,6 +17,54 @@ const trialBody = z.object({ body: z.object({
   trialEndsAt: z.string().datetime().optional(), reason: z.string().trim().min(10).max(500),
 }) })
 const reasonBody = z.object({ body: z.object({ reason: z.string().trim().min(10).max(500) }) })
+const tenantProfileBody = z.object({
+  params: z.object({ organizationId: z.string().trim().min(3).max(120) }),
+  body: z.object({
+    agencyName: z.string().trim().min(2).max(120).optional(),
+    agencyType: z.enum(['residential', 'commercial', 'mixed', 'brokerage', 'developer', 'general']).optional(),
+    businessEmail: z.string().trim().email().max(254).optional(),
+    businessPhone: z.string().trim().min(5).max(40).optional(),
+    licenseNumber: z.string().trim().max(100).optional(),
+    address: z.string().trim().max(250).optional(),
+    city: z.string().trim().max(100).optional(),
+    state: z.string().trim().max(100).optional(),
+    country: z.string().trim().max(100).optional(),
+    zipCode: z.string().trim().max(30).optional(),
+    defaultLanguage: z.enum(['en', 'bn']).optional(),
+    addressDetails: z.object({
+      divisionId: z.string().trim().max(80).optional(), division: z.string().trim().max(100).optional(),
+      districtId: z.string().trim().max(80).optional(), district: z.string().trim().max(100).optional(),
+      upazilaId: z.string().trim().max(80).optional(), upazila: z.string().trim().max(100).optional(),
+      areaId: z.string().trim().max(80).optional(), area: z.string().trim().max(120).optional(),
+      road: z.string().trim().max(120).optional(), block: z.string().trim().max(80).optional(),
+      sector: z.string().trim().max(80).optional(), mouza: z.string().trim().max(100).optional(),
+      postalCode: z.string().trim().max(30).optional(), landmark: z.string().trim().max(160).optional(),
+    }).partial().optional(),
+    operationalSettings: z.object({
+      defaultRole: z.enum(['agent', 'staff', 'agency_admin']).optional(),
+      agentsCanViewAllLeads: z.boolean().optional(),
+      leaderboardVisible: z.boolean().optional(),
+      autoAssignLeads: z.boolean().optional(),
+    }).partial().optional(),
+    reason: z.string().trim().min(10).max(500),
+  }).refine((body) => Object.keys(body).some((key) => key !== 'reason' && body[key as keyof typeof body] !== undefined), { message: 'At least one agency field must be provided' }),
+})
+const tenantOwnerBody = z.object({
+  params: z.object({ organizationId: z.string().trim().min(3).max(120) }),
+  body: z.object({
+    name: z.string().trim().min(2).max(120).optional(),
+    email: z.string().trim().email().max(254).optional(),
+    phoneNumber: z.string().trim().min(10).max(30).optional(),
+    reason: z.string().trim().min(10).max(500),
+  }).refine((body) => body.name !== undefined || body.email !== undefined || body.phoneNumber !== undefined, { message: 'At least one owner field must be provided' }),
+})
+const deletionBody = z.object({
+  params: z.object({ organizationId: z.string().trim().min(3).max(120) }),
+  body: z.object({
+    confirmation: z.string().trim().min(3).max(160),
+    reason: z.string().trim().min(10).max(500),
+  }),
+})
 const organizationParams = z.object({ organizationId: z.string().trim().min(3).max(120) })
 const tenantLeadEntitlementParams = z.object({ params: organizationParams })
 const renewalStreakBody = z.object({
@@ -51,6 +99,12 @@ router.patch('/tenants/:organizationId/subscription', authMiddlewares.authSuperA
 router.patch('/tenants/:organizationId/trial', authMiddlewares.authSuperAdmin, validateRequest(trialBody), PlatformAdminController.manageTenantTrial)
 router.get('/tenants/health', authMiddlewares.authSuperAdmin, PlatformAdminController.tenantHealth)
 router.get('/tenants/:organizationId', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.tenantDetails)
+router.patch('/tenants/:organizationId/profile', authMiddlewares.authSuperAdmin, validateRequest(tenantProfileBody), PlatformAdminController.updateTenantProfile)
+router.patch('/tenants/:organizationId/owner', authMiddlewares.authSuperAdmin, validateRequest(tenantOwnerBody), PlatformAdminController.updateTenantOwner)
+router.post('/tenants/:organizationId/archive', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.archiveTenant)
+router.post('/tenants/:organizationId/restore', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.restoreArchivedTenant)
+router.get('/tenants/:organizationId/deletion-preview', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.tenantDeletionPreview)
+router.post('/tenants/:organizationId/delete', authMiddlewares.authSuperAdmin, validateRequest(deletionBody), PlatformAdminController.scheduleTenantDeletion)
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
 router.get('/subscription-requests', authMiddlewares.authSuperAdmin, validateRequest(subscriptionRequestQuery), PlatformAdminController.subscriptionRequests)
