@@ -21,6 +21,23 @@ const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
 
 const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
+
+const getPublicTenantIdentifiers = async (organizationId: string, subdomain?: string): Promise<string[]> => {
+  const [domains, aliases] = await Promise.all([
+    DomainRecord.find({ organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+    SubdomainAlias.find({ organizationId }).select('alias').lean(),
+  ])
+
+  return Array.from(
+    new Set(
+      [organizationId, subdomain, ...domains.map((record: any) => record.domain), ...aliases.map((record: any) => record.alias)]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase())
+        .filter(Boolean)
+    )
+  )
+}
+
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   if (!payload.organizationId) payload.organizationId = `org_${randomUUID()}`
   if (await Organization.exists({ organizationId: payload.organizationId })) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
@@ -57,14 +74,14 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   if (cached) return cached
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
-    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
+    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
     .lean()
 
   if (!org) {
     const alias = await SubdomainAlias.findOne({ alias: cacheKey }).lean()
     if (alias) {
       org = await Organization.findOne({ organizationId: alias.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
         .lean()
     }
   }
@@ -76,7 +93,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     if (verifiedDomain?.organizationId) {
       await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
       org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
         .lean()
     }
   }
@@ -98,6 +115,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     primaryColor: org.primaryColor || '#1877F2',
     secondaryColor: org.secondaryColor || '#0f172a',
     websiteSettings: { renderMode: 'template', ...(org.websiteSettings || {}) },
+    brandingVersion: org.updatedAt ? new Date(org.updatedAt).toISOString() : '',
     stats: { totalProperties, totalAgents },
   }
   const identifiers = [
@@ -152,13 +170,20 @@ const updateBrandingSettings = async (organizationId: string, payload: Partial<I
   })
   const result = await Organization.findOneAndUpdate({ organizationId }, { $set: updateData }, { new: true })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  await CacheInvalidationService.invalidateTenant(organizationId)
+
+  const tenantIdentifiers = await getPublicTenantIdentifiers(organizationId, result.sub_domain)
+  await CacheInvalidationService.invalidateTenant(organizationId, tenantIdentifiers)
   await DomainEventService.emit({
     organizationId,
     aggregateType: 'organization',
     aggregateId: result._id.toString(),
     eventType: 'organization.branding_updated',
-    payload: { fields: Object.keys(updateData) },
+    payload: {
+      fields: Object.keys(updateData),
+      publicVisible: true,
+      tenantIdentifiers,
+      faviconChanged: Object.prototype.hasOwnProperty.call(updateData, 'favicon'),
+    },
   })
   return result
 }

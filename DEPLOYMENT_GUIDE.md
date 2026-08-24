@@ -66,10 +66,16 @@ PORT=5000
 # Cloud MongoDB Connection URL
 DATABASE_URL=mongodb+srv://user:password@your-cluster.mongodb.net/real-estate-saas?retryWrites=true&w=majority
 
-# URLs for Static IP Access
-PUBLIC_API_URL=http://34.131.86.177
-CLIENT_URL=http://34.131.86.177
-ALLOWED_ORIGINS=*
+# Public application URLs
+PUBLIC_API_URL=https://api.example.com
+PUBLIC_SITE_ORIGIN=https://realestate.opygen.com
+CLIENT_URL=https://realestate.opygen.com
+ALLOWED_ORIGINS=https://realestate.opygen.com
+
+# Next.js cache revalidation. Configure the exact same server-only secret in
+# the frontend/Vercel project. Production startup fails if it is missing or short.
+NEXT_REVALIDATE_URL=https://realestate.opygen.com/api/revalidate
+NEXT_REVALIDATE_SECRET=replace_with_a_random_shared_secret_at_least_32_chars
 
 # Modes
 SMS_DEV_MODE=true

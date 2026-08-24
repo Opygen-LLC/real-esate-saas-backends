@@ -71,11 +71,14 @@ const stringify = (payload: Record<string, unknown> = {}): string => {
 const publish = async (input: DomainEventInput) => {
   await CacheInvalidationService.fromEvent(input).catch(() => undefined)
   RealtimeService.fromDomainEvent(input)
-  void NextRevalidationService.trigger({
+  await NextRevalidationService.trigger({
     organizationId: input.organizationId,
     eventType: input.eventType,
     publicVisible: input.payload?.publicVisible === true,
     tenantIdentifier: typeof input.payload?.tenantIdentifier === 'string' ? input.payload.tenantIdentifier : undefined,
+    tenantIdentifiers: Array.isArray(input.payload?.tenantIdentifiers)
+      ? input.payload.tenantIdentifiers.filter((value): value is string => typeof value === 'string')
+      : undefined,
   })
 }
 

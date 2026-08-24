@@ -144,8 +144,9 @@ const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVAT
 const redisHost = process.env.REDIS_HOST || '127.0.0.1'
 const realtimeEnabled = envBoolean('REALTIME_ENABLED', true)
 const nextRevalidateUrl = (process.env.NEXT_REVALIDATE_URL?.trim() || `${publicSiteOrigin}/api/revalidate`).replace(/\/$/, '')
-const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim() || 'real_estate_saas_next_revalidate_secret_key_32bytes_production'
-process.env.NEXT_REVALIDATE_SECRET = nextRevalidateSecret
+const nextRevalidateSecret = isProduction
+  ? requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+  : (process.env.NEXT_REVALIDATE_SECRET?.trim() || '')
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'generic')
