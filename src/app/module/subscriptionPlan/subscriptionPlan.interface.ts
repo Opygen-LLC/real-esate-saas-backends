@@ -23,12 +23,15 @@ export interface ISubscriptionPlan {
   baseLeadCapacity: number
   // Legacy mirrors kept during Phase 1 for backward compatibility.
   maxLeads: number
-  leadAllowanceModel: LeadAllowanceModel
-  baseMonthlyLeadAllowance: number
-  renewalLeadBonus: number
-  renewalBonusEnabled: boolean
-  maxRenewalLeadBonus: number
-  continuityGraceDays: number
+  // Phase 3 fixed-capacity plans use leadPolicyVersion=2 and do not persist
+  // the deprecated renewal-growth fields below. Historical immutable versions may.
+  leadPolicyVersion?: number
+  leadAllowanceModel?: LeadAllowanceModel
+  baseMonthlyLeadAllowance?: number
+  renewalLeadBonus?: number
+  renewalBonusEnabled?: boolean
+  maxRenewalLeadBonus?: number
+  continuityGraceDays?: number
   maxRecurringLeadAddon: number
   hasCustomDomain: boolean
   hasAdvancedAnalytics: boolean

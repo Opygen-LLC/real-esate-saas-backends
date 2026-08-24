@@ -10,6 +10,7 @@ import { Organization } from '../organization/organization.model'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
+import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
@@ -40,7 +41,7 @@ const resolvePlan = async (planId: string, version?: number, session?: ClientSes
   if (session) finder.session(session)
   const plan: any = await finder.lean()
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
-  return plan
+  return resolvePlanLeadPolicy(plan)
 }
 
 const resolveLatestPurchasablePlan = async (planId: string) => {
@@ -395,16 +396,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       billingCycle: payment.billingCycle,
       periodStart: start,
       periodEnd: end,
-      plan: {
-        planId: plan.planId,
-        version: plan.version,
-        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
-        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
-        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
-        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
-        continuityGraceDays: Number(plan.continuityGraceDays || 0),
-      },
+      plan: toBenefitPlanSnapshot(plan),
     }, session)
 
     if (quoteType === 'renewal' || deferredDowngrade) {

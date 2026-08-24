@@ -6,6 +6,7 @@ import { Billing } from '../billing/billing.model'
 import { Organization } from '../organization/organization.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
+import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
 import { BkashPaymentClient } from './bkashPayment.client'
 import { BkashGatewayPayment, IBkashPayment } from './bkashPayment.interface'
 import { BkashPayment } from './bkashPayment.model'
@@ -204,8 +205,9 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
 
     const planQuery = SubscriptionPlan.findOne({ planId: attempt.planId, version: attempt.planVersion || 1 })
     if (session) planQuery.session(session)
-    const plan: any = await planQuery.lean()
-    if (!plan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
+    const storedPlan: any = await planQuery.lean()
+    if (!storedPlan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
+    const plan: any = resolvePlanLeadPolicy(storedPlan)
 
     let quoteSnapshot = (attempt.quoteSnapshot || null) as SubscriptionQuoteSnapshot | null
     if (!quoteSnapshot) {
@@ -266,16 +268,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       billingCycle: attempt.billingCycle,
       periodStart,
       periodEnd,
-      plan: {
-        planId: plan.planId,
-        version: plan.version,
-        leadAllowanceModel: plan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
-        baseMonthlyLeadAllowance: Number(plan.baseMonthlyLeadAllowance || 0),
-        renewalLeadBonus: Number(plan.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(plan.renewalBonusEnabled),
-        maxRenewalLeadBonus: Number(plan.maxRenewalLeadBonus || 0),
-        continuityGraceDays: Number(plan.continuityGraceDays || 0),
-      },
+      plan: toBenefitPlanSnapshot(plan),
     }, session)
 
 

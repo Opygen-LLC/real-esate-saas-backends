@@ -13,6 +13,7 @@ import { Organization } from '../organization/organization.model'
 import { DEFAULT_TRIAL_POLICY, getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { Property } from '../property/property.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanLeadPolicy } from '../subscriptionPlan/planLeadPolicy'
 import { TeamInvitation } from '../teamInvitation/teamInvitation.model'
 import { User } from '../user/user.model'
 import { TEAM_MEMBER_SEAT_ROLES } from './teamSeat.contract'
@@ -110,14 +111,14 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
       const exactQuery = SubscriptionPlan.findOne({ planId: organization.subscription.plan, version: organization.subscription.planVersion })
       exactVersion = await withSession(exactQuery, session).lean()
     }
-    if (exactVersion) plan = resolveEntitlementSource(exactVersion)
+    if (exactVersion) plan = resolvePlanLeadPolicy(resolveEntitlementSource(exactVersion))
     else {
       const currentPlanQuery = SubscriptionPlan.findOne({
         planId: organization.subscription.plan,
         ...activePlanFilter(),
       }).sort({ version: -1 })
       const currentPlan = await withSession(currentPlanQuery, session).lean()
-      plan = currentPlan ? resolveEntitlementSource(currentPlan as Record<string, any>) : null
+      plan = currentPlan ? resolvePlanLeadPolicy(resolveEntitlementSource(currentPlan as Record<string, any>)) : null
     }
   }
 

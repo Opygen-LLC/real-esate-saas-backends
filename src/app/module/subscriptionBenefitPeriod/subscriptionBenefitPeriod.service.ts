@@ -18,12 +18,16 @@ const nonVoidedFilter = () => ({ $or: [{ voidedAt: null }, { voidedAt: { $exists
 export interface BenefitPlanSnapshot {
   planId: SubscriptionPlanId
   version: number
+  // Phase 3 fixed-capacity plans use only these two fields. Legacy fields remain
+  // optional so historical immutable versions keep their original calculation.
+  leadPolicyVersion?: number
+  baseLeadCapacity?: number
   leadAllowanceModel?: LeadAllowanceModel
-  baseMonthlyLeadAllowance: number
-  renewalLeadBonus: number
-  renewalBonusEnabled: boolean
-  maxRenewalLeadBonus: number
-  continuityGraceDays: number
+  baseMonthlyLeadAllowance?: number
+  renewalLeadBonus?: number
+  renewalBonusEnabled?: boolean
+  maxRenewalLeadBonus?: number
+  continuityGraceDays?: number
 }
 
 export interface BenefitPeriodInput {
@@ -89,18 +93,21 @@ export const calculateBenefitPeriodAllowance = (
   periodStart: Date,
   previous: PreviousBenefitPeriodSnapshot | null,
 ): BenefitAllowanceCalculation => {
-  const baseMonthly = integer(plan.baseMonthlyLeadAllowance)
-  const renewalLeadBonus = integer(plan.renewalLeadBonus)
-  const maxRenewalLeadBonus = integer(plan.maxRenewalLeadBonus)
-  const continuityGraceDays = Math.min(31, integer(plan.continuityGraceDays))
+  const fixedCapacityPolicy = Number(plan.leadPolicyVersion || 0) >= 2
+  const baseMonthly = integer(plan.baseLeadCapacity ?? plan.baseMonthlyLeadAllowance)
+  const renewalLeadBonus = fixedCapacityPolicy ? 0 : integer(plan.renewalLeadBonus)
+  const maxRenewalLeadBonus = fixedCapacityPolicy ? 0 : integer(plan.maxRenewalLeadBonus)
+  const continuityGraceDays = fixedCapacityPolicy ? 0 : Math.min(31, integer(plan.continuityGraceDays))
 
-  // Renewal growth is plan-driven for every paid tier. It remains monthly-only: yearly
-  // purchases start with the tier's base active capacity and do not advance the monthly streak.
-  const monthlyBonusConfigured = billingCycle === 'monthly'
+  // Phase 3 plans are deterministic: monthly and yearly use the same base active
+  // capacity and never advance a renewal streak. Historical plans keep their stored
+  // monthly loyalty rules and paid-period-credit semantics.
+  const monthlyBonusConfigured = !fixedCapacityPolicy
+    && billingCycle === 'monthly'
     && Boolean(plan.renewalBonusEnabled)
     && renewalLeadBonus > 0
 
-  const leadAllowanceModel: LeadAllowanceModel = plan.leadAllowanceModel === 'active_capacity'
+  const leadAllowanceModel: LeadAllowanceModel = fixedCapacityPolicy || plan.leadAllowanceModel === 'active_capacity'
     ? 'active_capacity'
     : 'paid_period_credits'
 

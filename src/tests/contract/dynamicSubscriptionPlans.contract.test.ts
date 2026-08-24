@@ -36,14 +36,14 @@ describe('dynamic subscription plan contract', () => {
     expect(pkg).toContain('migrate:dynamic-subscription-plans')
   })
 
-  it('keeps cumulative monthly lead growth configurable with zero meaning unlimited bonus growth', () => {
+  it('uses fixed lead capacity for new dynamic plans while retaining historical renewal calculations', () => {
     const validation = read('src/app/module/subscriptionPlan/subscriptionPlan.validation.ts')
     const benefit = read('src/app/module/subscriptionBenefitPeriod/subscriptionBenefitPeriod.service.ts')
-    expect(validation).toContain('baseMonthlyLeadAllowance')
-    expect(validation).toContain('renewalLeadBonus')
-    expect(validation).toContain('renewalBonusEnabled')
-    expect(validation).toContain('maxRenewalLeadBonus')
-    expect(validation).toContain('continuityGraceDays')
-    expect(benefit).toContain('maxRenewalLeadBonus')
+    const policy = read('src/app/module/subscriptionPlan/planLeadPolicy.ts')
+    expect(validation).toContain('forbiddenRenewalGrowthFields')
+    expect(validation).toContain('renewalLeadBonus: z.never().optional()')
+    expect(policy).toContain('FIXED_LEAD_POLICY_VERSION = 2')
+    expect(benefit).toContain('fixedCapacityPolicy')
+    expect(benefit).toContain('maxRenewalLeadBonus === 0 ? uncappedBonus')
   })
 })

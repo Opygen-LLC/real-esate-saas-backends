@@ -1,6 +1,7 @@
 import type { ClientSession } from 'mongoose'
 import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanLeadPolicy } from '../subscriptionPlan/planLeadPolicy'
 import {
   publishResourceEntitlementReconciliation,
   reconcileResourceEntitlements,
@@ -79,9 +80,9 @@ const resolveCatalogPolicy = async (input: SubscriptionEntitlementInput | null |
   }
 
   const exact = await withSession(SubscriptionPlan.findOne({ planId: plan, version: planVersion }), session).lean()
-  if (exact) return exact as any
+  if (exact) return resolvePlanLeadPolicy(exact as any)
   const current = await withSession(SubscriptionPlan.findOne({ planId: plan, isCurrent: true }).sort({ version: -1 }), session).lean() as any
-  return current || { plan, planVersion }
+  return current ? resolvePlanLeadPolicy(current) : { plan, planVersion }
 }
 
 export const resolveSubscriptionEntitlementSnapshot = async (

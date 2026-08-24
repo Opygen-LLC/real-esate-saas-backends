@@ -36,14 +36,16 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     baseLeadCapacity: { type: Number, min: 0, index: true },
     // Legacy mirrors retained until all old readers are retired.
     maxLeads: { type: Number, default: 500, min: 0 },
-    // Historical plan versions default to paid-period credits. New cumulative-capacity
-    // versions opt in explicitly so grandfathered tenants keep their original semantics.
-    leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: 'paid_period_credits' },
-    baseMonthlyLeadAllowance: { type: Number, default: 0, min: 0 },
-    renewalLeadBonus: { type: Number, default: 0, min: 0 },
-    renewalBonusEnabled: { type: Boolean, default: false },
-    maxRenewalLeadBonus: { type: Number, default: 0, min: 0 },
-    continuityGraceDays: { type: Number, default: 0, min: 0, max: 31 },
+    // Phase 3: new plan versions store only baseLeadCapacity plus a system-owned
+    // policy marker. These fields remain in the schema solely to read immutable
+    // historical versions that used renewal growth or paid-period credits.
+    leadPolicyVersion: { type: Number, enum: [2], default: undefined, index: true },
+    leadAllowanceModel: { type: String, enum: ['paid_period_credits', 'active_capacity'], default: undefined },
+    baseMonthlyLeadAllowance: { type: Number, min: 0, default: undefined },
+    renewalLeadBonus: { type: Number, min: 0, default: undefined },
+    renewalBonusEnabled: { type: Boolean, default: undefined },
+    maxRenewalLeadBonus: { type: Number, min: 0, default: undefined },
+    continuityGraceDays: { type: Number, min: 0, max: 31, default: undefined },
     maxRecurringLeadAddon: { type: Number, default: 0, min: 0 },
     hasCustomDomain: { type: Boolean, default: false },
     hasAdvancedAnalytics: { type: Boolean, default: false },

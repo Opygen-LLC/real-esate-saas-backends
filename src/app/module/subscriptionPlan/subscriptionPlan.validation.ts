@@ -30,6 +30,18 @@ const planEntitlementsInput = z.object({
   premiumTemplates: planBooleanEntitlementInput.optional(),
 }).strict()
 
+// Phase 3: these fields remain readable on historical immutable versions, but they
+// are no longer legal inputs for creating a plan family or a new plan version.
+const forbiddenRenewalGrowthFields = {
+  leadPolicyVersion: z.never().optional(),
+  leadAllowanceModel: z.never().optional(),
+  baseMonthlyLeadAllowance: z.never().optional(),
+  renewalLeadBonus: z.never().optional(),
+  renewalBonusEnabled: z.never().optional(),
+  maxRenewalLeadBonus: z.never().optional(),
+  continuityGraceDays: z.never().optional(),
+}
+
 const commercialShape = {
   name: z.string().trim().min(2).max(80),
   // Phase 1 canonical ordering field. Legacy aliases remain accepted only as compatibility inputs.
@@ -43,18 +55,12 @@ const commercialShape = {
   features: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
   entitlements: planEntitlementsInput.optional(),
   maxTeamMembers: maxTeamMembers.optional(),
-  // Transitional input alias for older dashboard builds. Parsed payloads are normalized to maxAgents for persistence.
+  // Transitional alias for older dashboard builds. Parsed payloads normalize to maxAgents for persistence.
   maxAgents: legacyMaxAgents.optional(),
   maxProperties: nonNegativeInteger,
-  // Phase 1 canonical lead-capacity field. Legacy aliases remain accepted only when they agree.
+  // Phase 1 canonical lead-capacity field. maxLeads remains an accepted compatibility alias.
   baseLeadCapacity: nonNegativeInteger.optional(),
   maxLeads: nonNegativeInteger.optional(),
-  leadAllowanceModel: z.enum(['paid_period_credits', 'active_capacity']).default('paid_period_credits'),
-  baseMonthlyLeadAllowance: nonNegativeInteger.optional(),
-  renewalLeadBonus: nonNegativeInteger,
-  renewalBonusEnabled: z.boolean(),
-  maxRenewalLeadBonus: nonNegativeInteger,
-  continuityGraceDays: z.number().int().min(0).max(31),
   maxRecurringLeadAddon: nonNegativeInteger.default(0),
   hasCustomDomain: z.boolean().default(false),
   hasAdvancedAnalytics: z.boolean().default(false),
@@ -65,6 +71,7 @@ const commercialShape = {
   maxStorageMb: nonNegativeInteger.default(1024),
   maxMonthlyVisitors: nonNegativeInteger.default(10000),
   isPopular: z.boolean().default(false),
+  ...forbiddenRenewalGrowthFields,
 }
 
 type CanonicalAliasInput = {
@@ -73,7 +80,6 @@ type CanonicalAliasInput = {
   upgradeRank?: number
   baseLeadCapacity?: number
   maxLeads?: number
-  baseMonthlyLeadAllowance?: number
   entitlements?: { leads?: { enabled: boolean; limit: number } }
 }
 
@@ -87,15 +93,15 @@ const validateCanonicalAliases = (value: CanonicalAliasInput, ctx: z.RefinementC
   if (requireCanonicalConcepts && rankValues.every((entry) => entry === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Plan tier is required' })
   } else if (!valuesAgree(rankValues)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Conflicting plan tier values were supplied. tierRank, displayOrder and upgradeRank must match during Phase 1 compatibility.' })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tierRank'], message: 'Conflicting plan tier values were supplied. tierRank, displayOrder and upgradeRank must match during compatibility.' })
   }
 
   const entitlementLeadLimit = value.entitlements?.leads?.limit
-  const leadValues = [value.baseLeadCapacity, value.maxLeads, value.baseMonthlyLeadAllowance, entitlementLeadLimit]
+  const leadValues = [value.baseLeadCapacity, value.maxLeads, entitlementLeadLimit]
   if (requireCanonicalConcepts && leadValues.every((entry) => entry === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseLeadCapacity'], message: 'Base lead capacity is required' })
   } else if (!valuesAgree(leadValues)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseLeadCapacity'], message: 'Conflicting lead capacities were supplied. baseLeadCapacity, maxLeads, baseMonthlyLeadAllowance and entitlements.leads.limit must match.' })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseLeadCapacity'], message: 'Conflicting lead capacities were supplied. baseLeadCapacity, maxLeads and entitlements.leads.limit must match.' })
   }
 
   const resolvedLeadCapacity = leadValues.find((entry) => entry !== undefined)
@@ -123,11 +129,10 @@ const normalizeCompatibilityAliases = <T extends Record<string, any>>(value: T) 
     upgradeRank,
     baseLeadCapacity,
     maxLeads,
-    baseMonthlyLeadAllowance,
     ...rest
   } = value
   const resolvedTierRank = tierRank ?? upgradeRank ?? displayOrder
-  const resolvedBaseLeadCapacity = baseLeadCapacity ?? baseMonthlyLeadAllowance ?? maxLeads ?? value.entitlements?.leads?.limit
+  const resolvedBaseLeadCapacity = baseLeadCapacity ?? maxLeads ?? value.entitlements?.leads?.limit
   return {
     ...rest,
     ...(canonicalTeamMembers !== undefined || legacyTeamMembers !== undefined ? { maxAgents: canonicalTeamMembers ?? legacyTeamMembers } : {}),
@@ -136,7 +141,7 @@ const normalizeCompatibilityAliases = <T extends Record<string, any>>(value: T) 
   }
 }
 
-// Phase 2: lifecycle is system-owned. Super Admin edits commercial fields only.
+// Phase 2 lifecycle remains system-owned. Super Admin edits commercial fields only.
 const forbiddenLifecycleCreateFields = {
   status: z.never().optional(),
   isActive: z.never().optional(),
@@ -164,6 +169,7 @@ const createBody = z.object({
 
 const updateBody = z.object({
   ...forbiddenLifecycleUpdateFields,
+  ...forbiddenRenewalGrowthFields,
   name: commercialShape.name.optional(),
   tierRank: tierRankInput.optional(),
   displayOrder: tierRankInput.optional(),
@@ -179,13 +185,7 @@ const updateBody = z.object({
   maxProperties: commercialShape.maxProperties.optional(),
   baseLeadCapacity: nonNegativeInteger.optional(),
   maxLeads: nonNegativeInteger.optional(),
-  leadAllowanceModel: commercialShape.leadAllowanceModel.optional(),
-  baseMonthlyLeadAllowance: nonNegativeInteger.optional(),
-  renewalLeadBonus: commercialShape.renewalLeadBonus.optional(),
-  renewalBonusEnabled: commercialShape.renewalBonusEnabled.optional(),
-  maxRenewalLeadBonus: commercialShape.maxRenewalLeadBonus.optional(),
-  continuityGraceDays: commercialShape.continuityGraceDays.optional(),
-  maxRecurringLeadAddon: commercialShape.maxRecurringLeadAddon.optional(),
+  maxRecurringLeadAddon: nonNegativeInteger.optional(),
   hasCustomDomain: z.boolean().optional(),
   hasAdvancedAnalytics: z.boolean().optional(),
   hasWhatsAppIntegration: z.boolean().optional(),

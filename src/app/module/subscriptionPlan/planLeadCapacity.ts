@@ -28,12 +28,13 @@ export const resolveBaseLeadCapacity = (plan: Record<string, any>): number => (
 )
 
 /**
- * Write compatibility: one canonical number controls every legacy lead-capacity
- * representation. This is intentionally used only for new/updated plan versions.
+ * Write compatibility: one canonical number controls the remaining Phase 1 legacy
+ * lead-capacity mirrors. Phase 3 deliberately stops persisting the deprecated
+ * baseMonthlyLeadAllowance renewal-policy field on new plan versions.
  */
 export const mirrorBaseLeadCapacityWrite = <T extends Record<string, any>>(
   plan: T,
-): T & { baseLeadCapacity: number; maxLeads: number; baseMonthlyLeadAllowance: number; entitlements: EntitlementConfig } => {
+): T & { baseLeadCapacity: number; maxLeads: number; entitlements: EntitlementConfig } => {
   const baseLeadCapacity = resolveBaseLeadCapacity(plan)
   const source = plan.entitlements instanceof Map
     ? Object.fromEntries(plan.entitlements.entries())
@@ -47,7 +48,6 @@ export const mirrorBaseLeadCapacityWrite = <T extends Record<string, any>>(
     ...plan,
     baseLeadCapacity,
     maxLeads: baseLeadCapacity,
-    baseMonthlyLeadAllowance: baseLeadCapacity,
     entitlements,
   }
 }

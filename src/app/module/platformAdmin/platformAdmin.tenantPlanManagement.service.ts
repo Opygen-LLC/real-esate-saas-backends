@@ -9,6 +9,7 @@ import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
 import { classifySubscriptionChange, SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
 import { SubscriptionQuoteService } from '../subscription/subscriptionQuote.service'
 import { TenantEntitlementOverrideService, type TenantEntitlementOverrideInput } from '../tenantEntitlementOverride/tenantEntitlementOverride.service'
@@ -25,7 +26,7 @@ const planByVersion = async (planId: string, version?: number) => {
   else query.isCurrent = true
   const plan: any = await SubscriptionPlan.findOne(query).lean()
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
-  return plan
+  return resolvePlanLeadPolicy(plan)
 }
 
 const effectiveInput = (resolved: any) => ({
@@ -83,11 +84,7 @@ const applyNoChargePlanOverride = async (
     const activeBenefit = sameAssignedVersion ? await activeBenefitQuery.lean() : null
     if (!activeBenefit) await SubscriptionBenefitPeriodService.createForPaidSubscription({
       organizationId, paymentSource: 'manual_admin', paymentNumber: adminReference('ADMIN-PLAN'), billingCycle: input.billingCycle,
-      periodStart: now, periodEnd: end, continuityMode: 'reset', plan: {
-        planId: target.planId, version: target.version, leadAllowanceModel: target.leadAllowanceModel,
-        baseMonthlyLeadAllowance: Number(target.baseMonthlyLeadAllowance ?? target.maxLeads ?? 0), renewalLeadBonus: Number(target.renewalLeadBonus || 0),
-        renewalBonusEnabled: Boolean(target.renewalBonusEnabled), maxRenewalLeadBonus: Number(target.maxRenewalLeadBonus || 0), continuityGraceDays: Number(target.continuityGraceDays || 0),
-      },
+      periodStart: now, periodEnd: end, continuityMode: 'reset', plan: toBenefitPlanSnapshot(target),
     }, session)
 
     const after = await EntitlementService.resolve(organizationId, session, { allowInactive: true })
@@ -124,10 +121,7 @@ const scheduleNoChargeDowngrade = async (
     const end = SubscriptionQuoteService.addBillingCycle(effectiveAt, input.billingCycle)
     await SubscriptionBenefitPeriodService.createForPaidSubscription({
       organizationId, paymentSource: 'manual_admin', paymentNumber: adminReference('ADMIN-SCHEDULE'), billingCycle: input.billingCycle,
-      periodStart: effectiveAt, periodEnd: end, continuityMode: 'reset', plan: {
-        planId: target.planId, version: target.version, leadAllowanceModel: target.leadAllowanceModel,
-        baseMonthlyLeadAllowance: Number(target.baseMonthlyLeadAllowance ?? target.maxLeads ?? 0), renewalLeadBonus: Number(target.renewalLeadBonus || 0), renewalBonusEnabled: Boolean(target.renewalBonusEnabled), maxRenewalLeadBonus: Number(target.maxRenewalLeadBonus || 0), continuityGraceDays: Number(target.continuityGraceDays || 0),
-      },
+      periodStart: effectiveAt, periodEnd: end, continuityMode: 'reset', plan: toBenefitPlanSnapshot(target),
     }, session)
     await SubscriptionScheduleService.scheduleDowngradeOnOrganization(locked, { planId: target.planId, planVersion: target.version, billingCycle: input.billingCycle, effectiveAt, scheduledBy: actor.id, source: 'manual_admin' }, session)
     await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.admin_downgrade_scheduled', entityType: 'organization', entityId: String(locked._id), reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { noCharge: true, targetPlan: target.planId, targetPlanVersion: target.version, billingCycle: input.billingCycle, effectiveAt } }, session)

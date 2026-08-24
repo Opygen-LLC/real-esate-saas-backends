@@ -11,6 +11,7 @@ import { getTrialPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { calculateBenefitPeriodAllowance } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
 import { classifySubscriptionChange, type SubscriptionChangeType } from './subscriptionSchedule.service'
 
 export type SubscriptionQuoteChangeType = SubscriptionChangeType | 'renewal' | 'new_subscription'
@@ -121,7 +122,7 @@ const resolvePlan = async (planId: string, planVersion?: number, session?: Clien
   if (session) query.session(session)
   const plan: any = await query.lean()
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan version not found')
-  return plan
+  return resolvePlanLeadPolicy(plan)
 }
 
 const inferCycle = (period: any, organization: any): QuoteBillingCycle | null => {
@@ -337,16 +338,12 @@ const quote = async (organizationId: string, input: QuoteInput, session?: Client
     : 0
   let targetPlanCapacity = targetLeadCapacity(targetPlan, input.billingCycle)
   if (changeType === 'renewal' && activePeriod) {
-    targetPlanCapacity = calculateBenefitPeriodAllowance({
-      planId: targetPlan.planId,
-      version: Number(targetPlan.version || 1),
-      leadAllowanceModel: targetPlan.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits',
-      baseMonthlyLeadAllowance: Number(targetPlan.baseMonthlyLeadAllowance || 0),
-      renewalLeadBonus: Number(targetPlan.renewalLeadBonus || 0),
-      renewalBonusEnabled: Boolean(targetPlan.renewalBonusEnabled),
-      maxRenewalLeadBonus: Number(targetPlan.maxRenewalLeadBonus || 0),
-      continuityGraceDays: Number(targetPlan.continuityGraceDays || 0),
-    }, input.billingCycle, currentEnd || now, activePeriod).totalLeadAllowance
+    targetPlanCapacity = calculateBenefitPeriodAllowance(
+      toBenefitPlanSnapshot(targetPlan),
+      input.billingCycle,
+      currentEnd || now,
+      activePeriod,
+    ).totalLeadAllowance
   }
   // A plan change grants the target plan's full capacity immediately; it is never
   // prorated with money. Active, already-paid top-up grants are preserved through a

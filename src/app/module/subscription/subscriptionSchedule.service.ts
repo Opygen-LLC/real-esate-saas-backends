@@ -9,6 +9,7 @@ import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
+import { resolvePlanLeadPolicy } from '../subscriptionPlan/planLeadPolicy'
 import { resolvePlanOrdering } from '../subscriptionPlan/planIdentity'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -177,8 +178,9 @@ const applyDueChange = async (
 
     const planQuery = SubscriptionPlan.findOne({ planId: scheduledPlan, version: scheduledPlanVersion })
     if (session) planQuery.session(session)
-    const targetPlan: any = await planQuery.lean()
-    if (!targetPlan) throw new ApiError(httpStatus.CONFLICT, `Scheduled subscription plan ${scheduledPlan} v${scheduledPlanVersion} no longer exists`)
+    const storedTargetPlan: any = await planQuery.lean()
+    if (!storedTargetPlan) throw new ApiError(httpStatus.CONFLICT, `Scheduled subscription plan ${scheduledPlan} v${scheduledPlanVersion} no longer exists`)
+    const targetPlan: any = resolvePlanLeadPolicy(storedTargetPlan)
 
     let scheduledRequest: any = null
     if (scheduledChangeRequestId) {

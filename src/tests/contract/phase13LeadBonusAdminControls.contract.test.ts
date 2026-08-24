@@ -6,12 +6,13 @@ const root = process.cwd()
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8')
 
 describe('Phase 13 Super Admin lead-bonus controls', () => {
-  it('keeps lead entitlement commercial changes inside immutable plan version creation', () => {
+  it('keeps historical renewal fields read-only while immutable plan version creation uses fixed capacity', () => {
     const service = read('src/app/module/subscriptionPlan/subscriptionPlan.service.ts')
     const validation = read('src/app/module/subscriptionPlan/subscriptionPlan.validation.ts')
     for (const field of ['baseMonthlyLeadAllowance', 'renewalLeadBonus', 'maxRenewalLeadBonus', 'continuityGraceDays', 'renewalBonusEnabled']) {
-      expect(validation).toContain(field)
+      expect(validation).toContain(`${field}: z.never().optional()`)
     }
+    expect(service).toContain('applyFixedLeadCapacityPolicyWrite')
     expect(service).toContain('createVersionWrites')
     expect(service).toContain('version: nextVersion')
     expect(service).toContain("current.status = 'grandfathered'")

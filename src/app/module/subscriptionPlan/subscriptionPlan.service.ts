@@ -11,88 +11,29 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { normalizeEntitlementWrite, resolveEntitlementSource } from '../entitlement/featureCatalog'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { mirrorTierRankWrite, normalizePaidPlanId, resolvePlanOrdering } from './planIdentity'
-import { mirrorBaseLeadCapacityWrite, resolveBaseLeadCapacity } from './planLeadCapacity'
+import { mirrorBaseLeadCapacityWrite } from './planLeadCapacity'
+import { applyFixedLeadCapacityPolicyWrite, resolvePlanLeadPolicy } from './planLeadPolicy'
 import { mirrorPlanStatusWrite, resolvePlanStatus } from './planLifecycle'
 
-type LeadAllowanceConfig = Pick<ISubscriptionPlan,
-  'leadAllowanceModel' | 'baseMonthlyLeadAllowance' | 'renewalLeadBonus' | 'renewalBonusEnabled' | 'maxRenewalLeadBonus' | 'continuityGraceDays'
->
-
-const starterLeadAllowanceDefaults: LeadAllowanceConfig = {
-  leadAllowanceModel: 'paid_period_credits',
-  baseMonthlyLeadAllowance: 200,
-  renewalLeadBonus: 50,
-  renewalBonusEnabled: true,
-  maxRenewalLeadBonus: 500,
-  continuityGraceDays: 3,
-}
-
-const neutralLeadAllowanceDefaults = (maxLeads: unknown): LeadAllowanceConfig => ({
-  leadAllowanceModel: 'paid_period_credits',
-  baseMonthlyLeadAllowance: Math.max(0, Number(maxLeads || 0)),
-  renewalLeadBonus: 0,
-  renewalBonusEnabled: false,
-  maxRenewalLeadBonus: 0,
-  continuityGraceDays: 0,
-})
-
-const normalizeLeadAllowanceConfig = <T extends Record<string, any>>(plan: T): T & LeadAllowanceConfig => {
-  // Canonical entitlement values are read first when present. Grandfathered plan
-  // documents without the map transparently resolve from their legacy fields.
+const normalizePlanRead = <T extends Record<string, any>>(plan: T) => {
   const entitlementResolved = resolvePlanOrdering(resolveEntitlementSource(plan))
-  // Preserve legacy Starter fallbacks for old documents that pre-date the loyalty fields,
-  // but never force Professional/Agency bonuses to zero when the immutable plan version
-  // explicitly enables them.
-  const fallback = entitlementResolved.planId === 'starter'
-    ? starterLeadAllowanceDefaults
-    : neutralLeadAllowanceDefaults(entitlementResolved.maxLeads)
-  const leadAllowanceModel = entitlementResolved.leadAllowanceModel === 'active_capacity' ? 'active_capacity' : 'paid_period_credits'
   return {
-    ...entitlementResolved,
+    ...resolvePlanLeadPolicy(entitlementResolved),
     status: resolvePlanStatus(entitlementResolved),
-    baseLeadCapacity: resolveBaseLeadCapacity(entitlementResolved),
-    leadAllowanceModel,
-    baseMonthlyLeadAllowance: Number(entitlementResolved.baseMonthlyLeadAllowance ?? fallback.baseMonthlyLeadAllowance),
-    renewalLeadBonus: Number(entitlementResolved.renewalLeadBonus ?? fallback.renewalLeadBonus),
-    renewalBonusEnabled: Boolean(entitlementResolved.renewalBonusEnabled ?? fallback.renewalBonusEnabled),
-    maxRenewalLeadBonus: Number(entitlementResolved.maxRenewalLeadBonus ?? fallback.maxRenewalLeadBonus),
-    continuityGraceDays: Number(entitlementResolved.continuityGraceDays ?? fallback.continuityGraceDays),
-  } as T & LeadAllowanceConfig
+  }
 }
 
-const validateLeadAllowanceConfig = (plan: Partial<ISubscriptionPlan>) => {
-  const base = Number(plan.baseMonthlyLeadAllowance ?? 0)
-  const bonus = Number(plan.renewalLeadBonus ?? 0)
-  const cap = Number(plan.maxRenewalLeadBonus ?? 0)
-  const grace = Number(plan.continuityGraceDays ?? 0)
-  const enabled = Boolean(plan.renewalBonusEnabled)
-
-  if (![base, bonus, cap, grace].every(Number.isFinite) || [base, bonus, cap, grace].some((value) => value < 0)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Lead allowance values must be non-negative numbers')
-  }
-  if (![base, bonus, cap, grace].every(Number.isInteger)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Lead allowance values must be whole numbers')
-  }
-  if (grace > 31) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Continuity grace period cannot exceed 31 days')
-  }
-  if (enabled && base < 1) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Base monthly lead allowance must be at least 1 when renewal bonus is enabled')
-  }
-  if (enabled && bonus < 1) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Renewal lead bonus must be at least 1 when renewal bonus is enabled')
-  }
-  // maxRenewalLeadBonus=0 is the explicit unlimited sentinel for cumulative plans.
-  // Positive caps retain the historical capped-bonus behavior.
-  if (enabled && cap > 0 && cap < bonus) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum renewal lead bonus must be 0 (unlimited) or at least the per-renewal bonus')
+const validateBaseLeadCapacityConfig = (plan: Partial<ISubscriptionPlan>) => {
+  const base = Number(plan.baseLeadCapacity)
+  if (!Number.isFinite(base) || base < 0 || !Number.isInteger(base)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Base lead capacity must be a non-negative whole number')
   }
 }
 
 const normalizePlanWrite = <T extends Record<string, any>>(
   source: T,
   explicitEntitlements?: unknown,
-) => normalizeLeadAllowanceConfig(
+) => applyFixedLeadCapacityPolicyWrite(
   mirrorBaseLeadCapacityWrite(
     mirrorTierRankWrite(
       normalizeEntitlementWrite(source, explicitEntitlements),
@@ -100,30 +41,33 @@ const normalizePlanWrite = <T extends Record<string, any>>(
   ),
 )
 
+// Fresh environments start on the Phase 3 fixed-capacity contract. Historical
+// migrations remain untouched; existing production tenants continue referencing
+// their immutable assigned versions.
 const defaultPlans: Array<Omit<Partial<ISubscriptionPlan>, 'planId'> & { planId: SubscriptionPlanId }> = [
   {
     planId: 'starter', name: 'Starter', tierRank: 10, displayOrder: 10, upgradeRank: 10, priceMonthly: 500, priceYearly: 5000, currency: 'BDT',
-    description: 'Perfect for solo real estate agents and boutique teams starting out.',
-    features: ['1–3 Team Agents', '100 Property Listings', '200 Leads / Paid Month', '+50 Leads per Consecutive Renewal', 'Up to 500 Active Pipeline Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
-    maxAgents: 3, maxProperties: 100, maxLeads: 500, ...starterLeadAllowanceDefaults, hasCustomDomain: false, hasAdvancedAnalytics: false,
+    description: 'A simple starting plan for small real estate teams.',
+    features: ['Up to 3 Team Members', '10 Property Listings', '200 Active CRM Leads', 'Public Agency Website', 'Basic CRM & Activity Feed', 'Agency Subdomain', 'Standard Support'],
+    maxAgents: 3, maxProperties: 10, baseLeadCapacity: 200, maxLeads: 200, maxRecurringLeadAddon: 0, hasCustomDomain: false, hasAdvancedAnalytics: false,
     hasWhatsAppIntegration: false, hasLeadAutomations: false, hasSmsAutomation: false, hasPremiumTemplates: false,
     maxStorageMb: 1024, maxMonthlyVisitors: 10000, isPopular: false, isActive: true,
   },
   {
-    planId: 'professional', name: 'Professional', tierRank: 20, displayOrder: 20, upgradeRank: 20, priceMonthly: 3490, priceYearly: 34900, currency: 'BDT',
-    description: 'Designed for high-growth real estate teams and established agencies.',
-    features: ['Up to 10 Team Agents', '1,000 Property Listings', 'Unlimited Leads & Deals', 'Custom Domain (www.agency.com)', 'Advanced Lead Pipeline & Kanban', 'Viewing Calendar & Booking', 'Advanced Real Estate Analytics', 'Priority Email Support'],
-    maxAgents: 10, maxProperties: 1000, maxLeads: 10000, ...neutralLeadAllowanceDefaults(10000), hasCustomDomain: true, hasAdvancedAnalytics: true,
-    hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: true, hasPremiumTemplates: true,
-    maxStorageMb: 10240, maxMonthlyVisitors: 100000, isPopular: true, isActive: true,
+    planId: 'professional', name: 'Professional', tierRank: 20, displayOrder: 20, upgradeRank: 20, priceMonthly: 1000, priceYearly: 10000, currency: 'BDT',
+    description: 'More capacity and premium tools for growing real estate teams.',
+    features: ['Up to 5 Team Members', '25 Property Listings', '800 Active CRM Leads', 'Custom Domain', 'Advanced Analytics', 'WhatsApp Integration', 'Lead Automations', 'Priority Support'],
+    maxAgents: 5, maxProperties: 25, baseLeadCapacity: 800, maxLeads: 800, maxRecurringLeadAddon: 0, hasCustomDomain: true, hasAdvancedAnalytics: true,
+    hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: false, hasPremiumTemplates: true,
+    maxStorageMb: 1024, maxMonthlyVisitors: 100000, isPopular: true, isActive: true,
   },
   {
-    planId: 'agency', name: 'Agency Scale', tierRank: 30, displayOrder: 30, upgradeRank: 30, priceMonthly: 6990, priceYearly: 69900, currency: 'BDT',
-    description: 'Full-featured enterprise platform for large brokerages and multi-office firms.',
-    features: ['Unlimited Team Agents', 'Unlimited Property Listings', 'Unlimited Leads & Contacts', 'Custom Domain + Multi-Branch', 'WhatsApp Integration & SMS Marketing', 'Agent Performance Leaderboards', 'Lead Auto-Routing Rules', 'Dedicated Account Manager & 24/7 Support'],
-    maxAgents: 9999, maxProperties: 99999, maxLeads: 999999, ...neutralLeadAllowanceDefaults(999999), hasCustomDomain: true, hasAdvancedAnalytics: true,
+    planId: 'agency', name: 'Agency Scale', tierRank: 30, displayOrder: 30, upgradeRank: 30, priceMonthly: 1500, priceYearly: 15000, currency: 'BDT',
+    description: 'Higher fixed capacity for established agencies and larger teams.',
+    features: ['Up to 10 Team Members', '50 Property Listings', '2,000 Active CRM Leads', 'Custom Domain', 'Advanced Analytics', 'WhatsApp Integration', 'Lead Automations', 'Premium Templates'],
+    maxAgents: 10, maxProperties: 50, baseLeadCapacity: 2000, maxLeads: 2000, maxRecurringLeadAddon: 0, hasCustomDomain: true, hasAdvancedAnalytics: true,
     hasWhatsAppIntegration: true, hasLeadAutomations: true, hasSmsAutomation: true, hasPremiumTemplates: true,
-    maxStorageMb: 51200, maxMonthlyVisitors: 1000000, isPopular: false, isActive: true,
+    maxStorageMb: 5120, maxMonthlyVisitors: 1000000, isPopular: false, isActive: true,
   },
 ]
 
@@ -137,7 +81,7 @@ const ensureDefaults = async (): Promise<void> => {
   if (await SubscriptionPlan.exists({})) return
   const now = new Date()
   await SubscriptionPlan.insertMany(defaultPlans.map((plan) => mirrorPlanStatusWrite({
-    ...normalizeEntitlementWrite(plan as Record<string, any>),
+    ...normalizePlanWrite(plan as Record<string, any>),
     version: 1,
     effectiveFrom: now,
     effectiveTo: null,
@@ -149,11 +93,11 @@ const ensureDefaults = async (): Promise<void> => {
 const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
   await ensureDefaults()
   const cached = await Cache.plans.get<ISubscriptionPlan[]>('catalog')
-  if (cached) return cached.map((plan: any) => normalizeLeadAllowanceConfig(plan)) as ISubscriptionPlan[]
+  if (cached) return cached.map((plan: any) => normalizePlanRead(plan)) as ISubscriptionPlan[]
   const now = new Date()
   const rows = await SubscriptionPlan.find({ isCurrent: true, ...planWindowFilter(now) }).lean()
   const plans = rows
-    .map((plan: any) => normalizeLeadAllowanceConfig(plan))
+    .map((plan: any) => normalizePlanRead(plan))
     .sort((a: any, b: any) => Number(a.tierRank) - Number(b.tierRank) || Number(a.priceMonthly) - Number(b.priceMonthly) || Number(b.version) - Number(a.version)) as ISubscriptionPlan[]
   await Cache.plans.set('catalog', plans, 300)
   return plans
@@ -161,18 +105,21 @@ const getAllPlans = async (): Promise<ISubscriptionPlan[]> => {
 
 const getPlanById = async (planId: string, version?: number): Promise<ISubscriptionPlan | null> => {
   await ensureDefaults()
-  if (version) return SubscriptionPlan.findOne({ planId, version })
-  return SubscriptionPlan.findOne({ planId, isCurrent: true, ...planWindowFilter(new Date()) }).sort({ version: -1 })
+  const row: any = version
+    ? await SubscriptionPlan.findOne({ planId, version }).lean()
+    : await SubscriptionPlan.findOne({ planId, isCurrent: true, ...planWindowFilter(new Date()) }).sort({ version: -1 }).lean()
+  return row ? normalizePlanRead(row) as ISubscriptionPlan : null
 }
 
 const getLatestPurchasablePlan = async (planId: string): Promise<ISubscriptionPlan | null> => {
   await ensureDefaults()
   const now = new Date()
-  return SubscriptionPlan.findOne({
+  const row: any = await SubscriptionPlan.findOne({
     planId,
     isCurrent: true,
     ...planWindowFilter(now),
-  }).sort({ version: -1 })
+  }).sort({ version: -1 }).lean()
+  return row ? normalizePlanRead(row) as ISubscriptionPlan : null
 }
 
 const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknown; page?: unknown; limit?: unknown; sortBy?: unknown; sortOrder?: unknown } = {}) => {
@@ -192,7 +139,7 @@ const getAllPlanVersions = async (query: { planId?: string; currentOnly?: unknow
   ])
   const summary = { current: 0, scheduled: 0, grandfathered: 0, retired: 0 }
   for (const row of summaryRows as any[]) summary[resolvePlanStatus(row)] += 1
-  return { data: data.map((plan: any) => normalizeLeadAllowanceConfig(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary } }
+  return { data: data.map((plan: any) => normalizePlanRead(plan)), meta: { page, limit, total, totalPages: Math.ceil(total / limit), summary } }
 }
 
 const assertTierRankAvailable = async (planId: string, tierRank: number, session?: ClientSession) => {
@@ -219,7 +166,7 @@ const createPlan = async (payload: Partial<ISubscriptionPlan>, actorId = ''): Pr
     { ...payload, planId } as Record<string, any>,
     payload.entitlements,
   )
-  validateLeadAllowanceConfig(normalizedPayload)
+  validateBaseLeadCapacityConfig(normalizedPayload)
   const now = new Date()
   const result = await SubscriptionPlan.create(mirrorPlanStatusWrite({
     ...normalizedPayload,
@@ -262,7 +209,7 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
     { ...snapshot, ...payload, planId: current.planId },
     payload.entitlements,
   )
-  validateLeadAllowanceConfig(mergedCommercialSnapshot)
+  validateBaseLeadCapacityConfig(mergedCommercialSnapshot)
   await assertTierRankAvailable(String(current.planId), Number(mergedCommercialSnapshot.tierRank), session)
   const nextVersion = (latest?.version || current.version || 1) + 1
 
@@ -275,7 +222,6 @@ const createVersionWrites = async (id: string, payload: Partial<ISubscriptionPla
   await current.save(session ? { session } : undefined)
 
   const docs = await SubscriptionPlan.create([mirrorPlanStatusWrite({
-    ...snapshot,
     ...mergedCommercialSnapshot,
     _id: undefined,
     __v: undefined,
