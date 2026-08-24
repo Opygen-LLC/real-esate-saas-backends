@@ -1,3 +1,5 @@
+import type { SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
+
 export type SubscriptionChangeRequestStatus =
   | 'pending_payment'
   | 'payment_submitted'
@@ -17,6 +19,7 @@ export interface ISubscriptionChangeRequest {
   requestedPlanVersion: number
   billingCycle: 'monthly' | 'yearly'
   amount: number
+  quoteSnapshot?: SubscriptionQuoteSnapshot | null
   currency: 'BDT'
   changeType?: 'upgrade' | 'downgrade' | 'version_change'
   status: SubscriptionChangeRequestStatus

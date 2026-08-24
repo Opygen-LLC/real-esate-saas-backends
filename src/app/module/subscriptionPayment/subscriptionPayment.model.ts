@@ -12,6 +12,7 @@ const subscriptionPaymentSchema = new Schema<ISubscriptionPayment>(
     planVersion: { type: Number, required: true, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'one-time'], required: true },
     amount: { type: Number, required: true, min: 0 },
+    quoteSnapshot: { type: Schema.Types.Mixed, default: null },
     currency: { type: String, enum: ['BDT'], default: 'BDT', required: true },
     method: { type: String, enum: ['cash', 'bank', 'bkash', 'nagad', 'other'], required: true },
     reference: { type: String, trim: true, maxlength: 200, default: '' },

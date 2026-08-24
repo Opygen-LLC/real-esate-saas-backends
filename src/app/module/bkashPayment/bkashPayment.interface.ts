@@ -1,3 +1,5 @@
+import type { SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
+
 export type BkashPaymentStatus =
   | 'initialized'
   | 'pending'
@@ -14,6 +16,7 @@ export interface IBkashPayment {
   planVersion: number
   billingCycle: 'monthly' | 'yearly'
   amount: number
+  quoteSnapshot?: SubscriptionQuoteSnapshot | null
   currency: 'BDT'
   maxProperties: number
   maxAgents: number

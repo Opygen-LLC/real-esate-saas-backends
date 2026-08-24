@@ -1,3 +1,4 @@
+import type { SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
 import mongoose from 'mongoose'
 
 export type ManualPaymentMethod = 'cash' | 'bank' | 'bkash' | 'nagad' | 'other'
@@ -13,6 +14,7 @@ export interface ISubscriptionPayment {
   planVersion: number
   billingCycle: SubscriptionBillingCycle
   amount: number
+  quoteSnapshot?: SubscriptionQuoteSnapshot | null
   currency: 'BDT'
   method: ManualPaymentMethod
   reference?: string

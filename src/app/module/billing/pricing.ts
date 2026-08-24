@@ -15,11 +15,10 @@ export type SubscriptionPriceInput = {
   tax?: TaxSettings | null
 }
 
-export const calculateSubscriptionCharge = (input: SubscriptionPriceInput) => {
-  const baseAmount = input.billingCycle === 'yearly' ? Number(input.priceYearly) : Number(input.priceMonthly)
-  if (!Number.isFinite(baseAmount) || baseAmount < 1) throw new Error('Subscription plan price is invalid')
+export const calculateChargeFromBaseAmount = (rawBaseAmount: number, tax?: TaxSettings | null) => {
+  const baseAmount = Number(rawBaseAmount)
+  if (!Number.isFinite(baseAmount) || baseAmount < 0) throw new Error('Subscription charge amount is invalid')
 
-  const tax = input.tax
   const registered = Boolean(tax?.invoiceEnabled && tax.registrationStatus === 'registered')
   const vatRate = registered ? Math.max(0, Math.min(100, Number(tax?.vatRate || 0))) : 0
   const pricesIncludeVat = tax?.pricesIncludeVat ?? true
@@ -44,4 +43,11 @@ export const calculateSubscriptionCharge = (input: SubscriptionPriceInput) => {
       vatAmount: Number(vatAmount.toFixed(2)),
     },
   }
+}
+
+
+export const calculateSubscriptionCharge = (input: SubscriptionPriceInput) => {
+  const baseAmount = input.billingCycle === 'yearly' ? Number(input.priceYearly) : Number(input.priceMonthly)
+  if (!Number.isFinite(baseAmount) || baseAmount < 1) throw new Error('Subscription plan price is invalid')
+  return calculateChargeFromBaseAmount(baseAmount, input.tax)
 }

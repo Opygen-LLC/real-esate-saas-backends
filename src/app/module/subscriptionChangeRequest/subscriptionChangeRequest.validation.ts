@@ -19,5 +19,7 @@ export const subscriptionChangeRequestInputSchema = z.object({
 
 export const agencySubscriptionChangeRequestSchema = z.object({
   planId: paidPlanIdSchema,
+  planVersion: z.number().int().min(1).optional(),
   billingCycle: z.enum(['monthly', 'yearly']),
+  quoteCalculatedAt: z.string().datetime({ offset: true }).optional(),
 }).strict()

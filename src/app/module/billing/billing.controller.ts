@@ -5,6 +5,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import { BillingService } from './billing.service'
 import { requireTenant } from '../../middlewares/auth'
 import { SubscriptionPaymentService } from '../subscriptionPayment/subscriptionPayment.service'
+import { SubscriptionQuoteService } from '../subscription/subscriptionQuote.service'
 
 const getBillingHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await BillingService.getBillingHistory(requireTenant(req), req.query)
@@ -14,6 +15,17 @@ const getBillingHistory = catchAsync(async (req: Request, res: Response) => {
 const getSubscriptionUsage = catchAsync(async (req: Request, res: Response) => {
   const result = await BillingService.getSubscriptionUsage(requireTenant(req))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subscription usage and pending payment state fetched successfully', data: result })
+})
+
+
+const getSubscriptionQuote = catchAsync(async (req: Request, res: Response) => {
+  const quote = await SubscriptionQuoteService.quote(requireTenant(req), req.body)
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Authoritative subscription change quote calculated successfully',
+    data: SubscriptionQuoteService.toPublicQuote(quote),
+  })
 })
 
 const changeSubscriptionPlan = catchAsync(async (req: Request, res: Response) => {
@@ -69,4 +81,4 @@ const getInvoiceReceipt = catchAsync(async (req: Request, res: Response) => {
   res.status(httpStatus.OK).send(receipt.buffer)
 })
 
-export const BillingController = { getBillingHistory, getSubscriptionUsage, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelScheduledDowngrade, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }
+export const BillingController = { getBillingHistory, getSubscriptionUsage, getSubscriptionQuote, changeSubscriptionPlan, getChangeRequests, cancelChangeRequest, cancelScheduledDowngrade, cancelSubscription, getUnacknowledgedConfirmation, acknowledgeSubscriptionConfirmation, getInvoiceReceipt }

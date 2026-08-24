@@ -13,6 +13,7 @@ const subscriptionChangeRequestSchema = new Schema<ISubscriptionChangeRequest>(
     requestedPlanVersion: { type: Number, required: true, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true, min: 0 },
+    quoteSnapshot: { type: Schema.Types.Mixed, default: null },
     currency: { type: String, enum: ['BDT'], default: 'BDT', required: true },
     changeType: { type: String, enum: ['upgrade', 'downgrade', 'version_change'], index: true },
     status: {

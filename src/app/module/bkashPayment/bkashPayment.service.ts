@@ -10,13 +10,14 @@ import { BkashPaymentClient } from './bkashPayment.client'
 import { BkashGatewayPayment, IBkashPayment } from './bkashPayment.interface'
 import { BkashPayment } from './bkashPayment.model'
 import { writeAudit } from '../audit/audit.service'
-import { PlatformSettings } from '../platformSettings/platformSettings.model'
-import { calculateSubscriptionCharge } from '../billing/pricing'
 import { ensurePaymentMatchesAttempt, isCompletedGatewayPayment, trustedBkashCheckoutUrl } from './bkashPayment.verification'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEntitlements, type SubscriptionEntitlementReconciliationResult } from '../entitlement/subscriptionEntitlementReconciliation.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
-import { SubscriptionScheduleService, classifySubscriptionChange } from '../subscription/subscriptionSchedule.service'
+import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
+import { LeadTopupGrantService } from '../leadTopupGrant/leadTopupGrant.service'
+import { SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
+import { SubscriptionQuoteService, type SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 
@@ -57,6 +58,7 @@ const createPayment = async (input: CreatePaymentInput) => {
       amount: existing.amount,
       currency: existing.currency,
       invoiceNumber: existing.invoiceNumber,
+      quote: existing.quoteSnapshot || null,
     }
   }
 
@@ -65,27 +67,24 @@ const createPayment = async (input: CreatePaymentInput) => {
   if (organization.subscription?.scheduledPlan) {
     throw new ApiError(httpStatus.CONFLICT, 'A paid subscription downgrade is already scheduled. Wait until it applies, or use an explicit billing adjustment/refund workflow before starting another checkout.')
   }
-  // A normal same-plan renewal is priced and snapshotted from the tenant's assigned
-  // immutable version. Selecting a different plan family is an explicit catalog change.
+
+  // Same-plan renewals stay pinned to the tenant's immutable assigned version.
+  // Cross-plan checkout resolves the current purchasable target version. The same
+  // quote engine used by manual billing computes the authoritative amount.
   const plan: any = await resolveCheckoutPlan(organization, input.planId)
   if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Subscription plan not found')
-  if (plan.currency !== 'BDT') {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not configured for BDT payments')
-  }
+  if (plan.currency !== 'BDT') throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not configured for BDT payments')
 
-  const settings = await PlatformSettings.findOne({ key: 'platform' }).select('+tax.binEncrypted').lean()
-  let charge
-  try {
-    charge = calculateSubscriptionCharge({
-      priceMonthly: plan.priceMonthly,
-      priceYearly: plan.priceYearly,
-      billingCycle: input.billingCycle,
-      tax: settings?.tax ? { ...(settings.tax as any), binEncrypted: (settings.tax as any)?.binEncrypted || '' } : null,
-    })
-  } catch (error) {
-    throw new ApiError(httpStatus.BAD_REQUEST, error instanceof Error ? error.message : 'Subscription plan price is invalid')
+  const quote = await SubscriptionQuoteService.quote(input.organizationId, {
+    planId: plan.planId,
+    planVersion: Number(plan.version || 1),
+    billingCycle: input.billingCycle,
+  })
+  if (!Number.isFinite(quote.dueNow) || quote.dueNow <= 0) {
+    throw new ApiError(httpStatus.CONFLICT, 'This subscription change has no positive amount due through bKash. Request a fresh billing quote or contact support.')
   }
-  const { amount, taxSnapshot } = charge
+  const publicQuote = SubscriptionQuoteService.toPublicQuote(quote) as SubscriptionQuoteSnapshot
+  const { dueNow: amount, taxSnapshot } = quote
 
   const invoiceNumber = `RE-${Date.now().toString(36).toUpperCase()}-${randomUUID()
     .slice(0, 6)
@@ -96,11 +95,12 @@ const createPayment = async (input: CreatePaymentInput) => {
     attempt = await BkashPayment.create({
       organizationId: input.organizationId,
       initiatedBy: input.initiatedBy,
-      planId: input.planId,
+      planId: plan.planId,
       planName: plan.name,
-      planVersion: plan.version || 1,
+      planVersion: Number(plan.version || 1),
       billingCycle: input.billingCycle,
       amount,
+      quoteSnapshot: publicQuote,
       currency: 'BDT',
       maxProperties: plan.maxProperties,
       maxAgents: plan.maxAgents,
@@ -123,6 +123,7 @@ const createPayment = async (input: CreatePaymentInput) => {
           amount: duplicate.amount,
           currency: duplicate.currency,
           invoiceNumber: duplicate.invoiceNumber,
+          quote: duplicate.quoteSnapshot || null,
         }
       }
     }
@@ -139,14 +140,9 @@ const createPayment = async (input: CreatePaymentInput) => {
     })
 
     if (gatewayPayment.statusCode && gatewayPayment.statusCode !== '0000') {
-      throw new ApiError(
-        httpStatus.BAD_GATEWAY,
-        gatewayPayment.statusMessage || 'bKash rejected the payment request'
-      )
+      throw new ApiError(httpStatus.BAD_GATEWAY, gatewayPayment.statusMessage || 'bKash rejected the payment request')
     }
-    if (!gatewayPayment.paymentID) {
-      throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash returned no payment ID')
-    }
+    if (!gatewayPayment.paymentID) throw new ApiError(httpStatus.BAD_GATEWAY, 'bKash returned no payment ID')
 
     const bkashURL = trustedBkashCheckoutUrl(gatewayPayment.bkashURL)
     attempt.paymentId = gatewayPayment.paymentID
@@ -162,6 +158,7 @@ const createPayment = async (input: CreatePaymentInput) => {
       amount: attempt.amount,
       currency: attempt.currency,
       invoiceNumber: attempt.invoiceNumber,
+      quote: publicQuote,
     }
   } catch (error) {
     attempt.status = 'failed'
@@ -192,6 +189,8 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
   let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
   let deferredDowngrade = false
   let scheduledEffectiveAt: Date | null = null
+  let activatedChangeType: SubscriptionQuoteSnapshot['changeType'] | null = null
+  let renewalDatePreserved = false
 
   await EntitlementService.withTeamMemberQuotaGuard(attempt.organizationId, async (session) => {
     const organizationQuery = Organization.findOne({ organizationId: attempt.organizationId })
@@ -201,23 +200,62 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
 
     const now = new Date()
     const previousSubscription = organization.subscription?.toObject?.() || { ...(organization.subscription || {}) }
-    const currentPeriodEnd = organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null
-    const samePlan = organization.subscription?.plan === attempt.planId
-    const changeType = await classifySubscriptionChange(String(organization.subscription?.plan || 'trial'), String(attempt.planId), { currentPlanVersion: Number(organization.subscription?.planVersion || 1), requestedPlanVersion: Number(attempt.planVersion || 1), session })
-    deferredDowngrade = changeType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
-    const periodStart = new Date(deferredDowngrade && currentPeriodEnd
-      ? currentPeriodEnd
-      : samePlan && currentPeriodEnd && currentPeriodEnd > now
-        ? currentPeriodEnd
-        : now)
-    const periodEnd = new Date(periodStart)
-    if (attempt.billingCycle === 'yearly') periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 1)
-    else periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1)
 
     const planQuery = SubscriptionPlan.findOne({ planId: attempt.planId, version: attempt.planVersion || 1 })
     if (session) planQuery.session(session)
     const plan: any = await planQuery.lean()
     if (!plan) throw new ApiError(httpStatus.CONFLICT, 'The paid subscription plan version no longer exists')
+
+    let quoteSnapshot = (attempt.quoteSnapshot || null) as SubscriptionQuoteSnapshot | null
+    if (!quoteSnapshot) {
+      // Legacy attempts created before this release did not persist an authoritative quote.
+      // Re-quote them at activation time and refuse activation if the gateway amount no
+      // longer matches; this avoids silently over/under-charging a mid-cycle upgrade.
+      const freshQuote = await SubscriptionQuoteService.quote(attempt.organizationId, {
+        planId: plan.planId,
+        planVersion: Number(plan.version || 1),
+        billingCycle: attempt.billingCycle,
+        now,
+      }, session)
+      if (Math.abs(Number(attempt.amount) - Number(freshQuote.dueNow)) > 0.01) {
+        throw new ApiError(httpStatus.CONFLICT, `This bKash payment was created for ৳${Number(attempt.amount).toFixed(2)}, but the authoritative subscription quote is now ৳${Number(freshQuote.dueNow).toFixed(2)}. Contact support for reconciliation.`)
+      }
+      quoteSnapshot = SubscriptionQuoteService.toPublicQuote(freshQuote) as SubscriptionQuoteSnapshot
+      ;(attempt as any).quoteSnapshot = quoteSnapshot
+    } else {
+      SubscriptionQuoteService.assertSnapshotApplicable(organization, quoteSnapshot, now)
+      if (Math.abs(Number(attempt.amount) - Number(quoteSnapshot.dueNow)) > 0.01) {
+        throw new ApiError(httpStatus.CONFLICT, 'bKash payment amount does not match its authoritative subscription quote')
+      }
+    }
+
+    const quoteType = quoteSnapshot.changeType
+    activatedChangeType = quoteType
+    const currentPeriodEnd = organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null
+    deferredDowngrade = quoteType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
+    const midCycleImmediateChange = (quoteType === 'upgrade' || quoteType === 'version_change')
+      && Boolean(quoteSnapshot.preserveRenewalDate && currentPeriodEnd && currentPeriodEnd > now)
+    renewalDatePreserved = midCycleImmediateChange
+
+    const periodStart = deferredDowngrade && currentPeriodEnd
+      ? currentPeriodEnd
+      : quoteType === 'renewal' && currentPeriodEnd && currentPeriodEnd > now
+        ? currentPeriodEnd
+        : now
+    const periodEnd = midCycleImmediateChange && currentPeriodEnd
+      ? currentPeriodEnd
+      : SubscriptionQuoteService.addBillingCycle(periodStart, attempt.billingCycle)
+
+    const previousBenefitQuery = SubscriptionBenefitPeriod.findOne({
+      organizationId: attempt.organizationId,
+      planId: String(organization.subscription?.plan || ''),
+      planVersion: Number(organization.subscription?.planVersion || 1),
+      periodStart: { $lte: now },
+      periodEnd: { $gt: now },
+      $or: [{ voidedAt: null }, { voidedAt: { $exists: false } }],
+    }).sort({ periodStart: -1, _id: -1 })
+    if (session) previousBenefitQuery.session(session)
+    const previousBenefit: any = await previousBenefitQuery.lean()
 
     const benefitPeriodResult = await SubscriptionBenefitPeriodService.createForPaidSubscription({
       organizationId: attempt.organizationId,
@@ -237,6 +275,18 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         continuityGraceDays: Number(plan.continuityGraceDays || 0),
       },
     }, session)
+
+    // A mid-cycle plan upgrade changes the active benefit-period identity. Existing
+    // purchased top-up grants are rebound to that new period so customers do not lose
+    // already-paid lead capacity merely because they upgraded the underlying plan.
+    if (midCycleImmediateChange && previousBenefit?._id) {
+      await LeadTopupGrantService.rebindActiveGrants(
+        attempt.organizationId,
+        previousBenefit._id,
+        (benefitPeriodResult.period as any)._id,
+        session,
+      )
+    }
 
     if (deferredDowngrade) {
       scheduledEffectiveAt = periodStart
@@ -258,12 +308,16 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
         plan: attempt.planId,
         planVersion: attempt.planVersion || 1,
         status: 'active',
+        // Mid-cycle upgrades deliberately keep the old renewal boundary. Money is
+        // prorated; features and lead capacity are granted in full immediately.
         currentPeriodEnd: periodEnd,
         lastPaymentDate: now,
         maxProperties: attempt.maxProperties,
         maxAgents: attempt.maxAgents,
         gracePeriodEnd: null,
+        trialEndsAt: null,
         cancelAtPeriodEnd: false,
+        reminderSentAt: null,
         source: 'bkash',
         revision: Math.max(0, Number(organization.subscription?.revision || 0)) + 1,
       }
@@ -280,14 +334,23 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       }, {
         session,
         actorId: attempt.initiatedBy || 'system:bkash',
-        reason: `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
+        reason: midCycleImmediateChange
+          ? `Mid-cycle ${quoteType} activated for ${attempt.planId} v${attempt.planVersion || 1} without moving the renewal date`
+          : `bKash subscription changed to ${attempt.planId} v${attempt.planVersion || 1}`,
       })
     }
 
     const tax = attempt.taxSnapshot
-    const taxSnapshot = { invoiceEnabled: Boolean(tax?.invoiceEnabled), registrationStatus: tax?.registrationStatus || 'not_registered' as const,
-      operatorLegalName: tax?.operatorLegalName || '', binEncrypted: tax?.binEncrypted || '', vatRate: tax?.vatRate || 0,
-      pricesIncludeVat: tax?.pricesIncludeVat ?? true, netAmount: tax?.baseAmount || attempt.amount, vatAmount: tax?.vatAmount || 0 }
+    const taxSnapshot = {
+      invoiceEnabled: Boolean(tax?.invoiceEnabled),
+      registrationStatus: tax?.registrationStatus || 'not_registered' as const,
+      operatorLegalName: tax?.operatorLegalName || '',
+      binEncrypted: tax?.binEncrypted || '',
+      vatRate: tax?.vatRate || 0,
+      pricesIncludeVat: tax?.pricesIncludeVat ?? true,
+      netAmount: tax?.baseAmount ?? attempt.amount,
+      vatAmount: tax?.vatAmount || 0,
+    }
     await Billing.findOneAndUpdate(
       { paymentId: attempt.paymentId },
       {
@@ -295,7 +358,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
           organizationId: attempt.organizationId,
           invoiceId: attempt.invoiceNumber,
           serviceType: 'subscription',
-          serviceName: `${attempt.planName} Plan (${attempt.billingCycle})`,
+          serviceName: `${attempt.planName} Plan (${attempt.billingCycle})${midCycleImmediateChange ? ' · prorated upgrade' : ''}`,
           plan: attempt.planId,
           planVersion: attempt.planVersion || 1,
           billingCycle: attempt.billingCycle,
@@ -311,30 +374,48 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       },
       { upsert: true, new: true, ...(session ? { session } : {}) }
     )
-    await writeAudit({ organizationId: attempt.organizationId, actorId: attempt.initiatedBy || 'system',
-      action: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.activated', entityType: 'bkashPayment', entityId: attempt.paymentId || '',
-      metadata: { transactionId: payment.trxID || '', planId: attempt.planId, planVersion: attempt.planVersion || 1, billingCycle: attempt.billingCycle,
-        changeType, deferredDowngrade, scheduledEffectiveAt, subscriptionEntitlementReconciliation: reconciliation,
-        teamSeatReconciliation: reconciliation?.teamSeats || null, benefitPeriodId: String((benefitPeriodResult.period as any)._id),
-        benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak, benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance } }, session)
+    await writeAudit({
+      organizationId: attempt.organizationId,
+      actorId: attempt.initiatedBy || 'system',
+      action: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.activated',
+      entityType: 'bkashPayment',
+      entityId: attempt.paymentId || '',
+      metadata: {
+        transactionId: payment.trxID || '',
+        planId: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        billingCycle: attempt.billingCycle,
+        changeType: quoteType,
+        deferredDowngrade,
+        scheduledEffectiveAt,
+        subscriptionEntitlementReconciliation: reconciliation,
+        teamSeatReconciliation: reconciliation?.teamSeats || null,
+        benefitPeriodId: String((benefitPeriodResult.period as any)._id),
+        benefitRenewalStreak: (benefitPeriodResult.period as any).renewalStreak,
+        benefitLeadAllowance: (benefitPeriodResult.period as any).totalLeadAllowance,
+        quote: quoteSnapshot,
+        renewalDatePreserved: midCycleImmediateChange,
+      },
+    }, session)
   })
 
   await CacheInvalidationService.invalidateTenant(attempt.organizationId)
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  if (deferredDowngrade) {
-    RealtimeService.emitOrganization(attempt.organizationId, {
-      type: 'subscription.changed',
-      action: 'scheduled',
-      entityId: attempt.paymentId || attempt.invoiceNumber,
-      eventType: 'subscription.downgrade_scheduled',
-      payload: {
-        plan: attempt.planId,
-        planVersion: attempt.planVersion || 1,
-        billingCycle: attempt.billingCycle,
-        scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
-      },
-    })
-  }
+  RealtimeService.emitOrganization(attempt.organizationId, {
+    type: 'subscription.changed',
+    action: deferredDowngrade ? 'scheduled' : 'confirmed',
+    entityId: attempt.paymentId || attempt.invoiceNumber,
+    eventType: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.payment_confirmed',
+    payload: {
+      plan: attempt.planId,
+      planVersion: attempt.planVersion || 1,
+      billingCycle: attempt.billingCycle,
+      changeType: activatedChangeType,
+      scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
+      currentPeriodEnd: attempt.quoteSnapshot?.currentPeriodEnd ? new Date(attempt.quoteSnapshot.currentPeriodEnd).toISOString() : null,
+      renewalDatePreserved,
+    },
+  })
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {

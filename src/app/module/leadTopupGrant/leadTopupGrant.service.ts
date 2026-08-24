@@ -18,8 +18,24 @@ const getActiveGrantSummary = async (organizationId: string, benefitPeriodId?: u
   return { topupLeadAllowance: Math.max(0, Number(rows[0]?.topupLeadAllowance || 0)), grantCount: Math.max(0, Number(rows[0]?.grantCount || 0)) }
 }
 
+
+const rebindActiveGrants = async (
+  organizationId: string,
+  fromBenefitPeriodId: unknown,
+  toBenefitPeriodId: unknown,
+  session?: ClientSession,
+) => {
+  if (!fromBenefitPeriodId || !toBenefitPeriodId || String(fromBenefitPeriodId) === String(toBenefitPeriodId)) return { modifiedCount: 0 }
+  const result = await LeadTopupGrant.updateMany(
+    { organizationId, benefitPeriodId: fromBenefitPeriodId, ...activeFilter() },
+    { $set: { benefitPeriodId: toBenefitPeriodId } },
+    session ? { session } : undefined,
+  )
+  return { modifiedCount: Math.max(0, Number(result.modifiedCount || 0)) }
+}
+
 const getActiveGrants = async (organizationId: string, benefitPeriodId?: unknown) => LeadTopupGrant.find({ organizationId, ...activeFilter(), ...(benefitPeriodId ? { benefitPeriodId } : {}) })
   .sort({ effectiveAt: -1, _id: -1 })
   .lean()
 
-export const LeadTopupGrantService = { activeFilter, getActiveGrantSummary, getActiveGrants }
+export const LeadTopupGrantService = { activeFilter, getActiveGrantSummary, rebindActiveGrants, getActiveGrants }

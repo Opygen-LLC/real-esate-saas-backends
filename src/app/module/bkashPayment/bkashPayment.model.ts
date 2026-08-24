@@ -19,6 +19,7 @@ const bkashPaymentSchema = new Schema<IBkashPayment>(
     planVersion: { type: Number, required: true, default: 1, min: 1 },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true, min: 1 },
+    quoteSnapshot: { type: Schema.Types.Mixed, default: null },
     currency: { type: String, enum: ['BDT'], default: 'BDT' },
     maxProperties: { type: Number, required: true },
     maxAgents: { type: Number, required: true },
