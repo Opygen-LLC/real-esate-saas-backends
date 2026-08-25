@@ -45,7 +45,11 @@ for (const token of [
   requireText(config + env, token, 'backup configuration')
 }
 
+requireText(config, "process.env.BACKUP_CRON || '30 2 * * *'", '02:30 default backup cron')
+requireText(env, 'BACKUP_CRON=30 2 * * *', '02:30 env backup cron')
+
 for (const composeText of [compose, defaultCompose]) {
+  requireText(composeText, 'BACKUP_CRON: "${BACKUP_CRON:-30 2 * * *}"', '02:30 compose backup cron')
   for (const token of ['database-backup:', 'Dockerfile.backup', 'BACKUP_CRON', 'BACKUP_WORK_DIR']) {
     requireText(composeText, token, 'compose backup service')
   }

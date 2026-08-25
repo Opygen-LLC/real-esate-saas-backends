@@ -402,8 +402,8 @@ const verifyRestore = (
       sourceDocumentsAfter: after.documents,
       restoredDocuments: restoredCount,
       countWithinObservedRange,
-      indexesMatch: Boolean(target) && safeJson(target.indexSignatures) === safeJson(before.indexSignatures),
-      optionsMatch: Boolean(target) && target.optionsSignature === before.optionsSignature,
+      indexesMatch: target ? safeJson(target.indexSignatures) === safeJson(before.indexSignatures) : false,
+      optionsMatch: target ? target.optionsSignature === before.optionsSignature : false,
     }
   })
   const sourceTotalBefore = sourceBefore.reduce((sum, entry) => sum + (entry.documents || 0), 0)
