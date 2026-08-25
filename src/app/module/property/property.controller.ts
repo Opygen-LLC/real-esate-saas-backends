@@ -74,6 +74,20 @@ const exportXlsx = catchAsync(async (req: Request, res: Response) => {
   res.send(workbook)
 })
 
+const emitCreatedAfterCommit = (organizationId: string, result: any, requestId?: string) => {
+  // Property persistence is the critical path. Audit/realtime publication is a
+  // post-commit side effect and must never keep the HTTP request open long
+  // enough for the reverse proxy to turn a successful save into a 502/504.
+  void PropertyService.emitPropertyCreated(organizationId, result).catch((error) => {
+    logger.error('property_post_commit_event_failed', {
+      organizationId,
+      propertyId: result?._id?.toString(),
+      requestId,
+      error,
+    })
+  })
+}
+
 const createProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { propertyDraftSessionId, ...propertyPayload } = req.body
@@ -120,7 +134,7 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
     } finally {
       if (session) await session.endSession()
     }
-    await PropertyService.emitPropertyCreated(organizationId, result)
+    emitCreatedAfterCommit(organizationId, result, req.requestId)
     void WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId).catch((error) => {
       logger.warn('[property-media] post-create draft cleanup deferred to worker', { organizationId, propertyId: result?._id?.toString(), error })
     })
@@ -129,7 +143,7 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
       await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: 1, session })
       return PropertyService.createProperty(organizationId, propertyPayload, actor, { session, emitEvent: false })
     })
-    await PropertyService.emitPropertyCreated(organizationId, result)
+    emitCreatedAfterCommit(organizationId, result, req.requestId)
   }
 
   sendResponse(res, {
