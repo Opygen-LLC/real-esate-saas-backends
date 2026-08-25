@@ -2,9 +2,15 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { normalizeBangladeshPhone } from '../../helpers/identity'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import type { PublicLeadCaptureInput } from '../lead/lead.validation'
 import { Lead } from '../lead/lead.model'
+import { LeadService } from '../lead/lead.service'
+import { Organization } from '../organization/organization.model'
+import { Property } from '../property/property.model'
+import { PrivacyConsentService } from '../privacy/privacyConsent.service'
+import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { Viewing } from '../viewing/viewing.model'
 import type { PublicViewingRequestInput } from '../viewing/viewing.validation'
 import { RealtimeService } from '../realtime/realtime.service'
@@ -55,23 +61,60 @@ const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'su
   return submission
 }
 
-const captureLead = async (payload: PublicLeadCaptureInput, lead: any) => {
+type PublicLeadSubmissionContext = { ip?: string; requestId?: string }
+
+const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadSubmissionContext) => {
+  const { organizationId, privacyConsent, policyVersion } = payload
+  const organization: any = await Organization.findOne({ organizationId }).select('isBlocked websiteStatus').lean()
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Agency not found')
+  if (organization.isBlocked || organization.websiteStatus === 'suspended') {
+    throw new ApiError(423, 'This agency is currently suspended', '', 'TENANT_SUSPENDED')
+  }
+  if (organization.websiteStatus !== 'published') {
+    throw new ApiError(httpStatus.CONFLICT, 'This agency website is not published yet')
+  }
+  if (!privacyConsent) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Privacy consent is required', '', 'VALIDATION_ERROR', undefined, { privacyConsent: ['Privacy consent is required'] })
+  }
+  await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
+  if (payload.propertyInterest) {
+    const propertyBelongsToTenant = await Property.exists({ _id: payload.propertyInterest, organizationId })
+    if (!propertyBelongsToTenant) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Property does not belong to this agency', '', 'VALIDATION_ERROR', undefined, { propertyInterest: ['Select a property from this agency'] })
+    }
+  }
+
+  let normalizedPhone: string
+  try {
+    normalizedPhone = normalizeBangladeshPhone(payload.phone)
+  } catch (error) {
+    throw new ApiError(httpStatus.BAD_REQUEST, (error as Error).message, '', 'VALIDATION_ERROR', undefined, { phone: [(error as Error).message] })
+  }
+
+  // Consent belongs to the public submission lifecycle, not CRM conversion. A
+  // lead may be moved hours or days later, but the visitor's consent must be
+  // recorded at the time the website form is accepted.
+  await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, normalizedPhone, policyVersion, context)
+
   const landingPage = payload.attribution?.landingPage || ''
   return createSubmission({
-    organizationId: payload.organizationId,
+    organizationId,
     submissionType: leadSubmissionType(payload),
     name: payload.name,
-    email: String(lead?.email || payload.email || ''),
-    phone: String(lead?.phone || payload.phone || ''),
+    email: String(payload.email || ''),
+    phone: normalizedPhone,
     message: payload.message || '',
     propertyId: payload.propertyInterest || undefined,
+    budgetMin: payload.budgetMin,
+    budgetMax: payload.budgetMax,
+    propertyType: payload.propertyType || '',
+    locationPreference: payload.locationPreference || '',
     sourcePage: sourcePageFromLandingPage(landingPage, payload.propertyInterest ? '/properties' : ''),
     pageUrl: landingPage,
-    linkedEntityType: 'Lead',
-    linkedEntityId: lead._id,
+    crmTransferStatus: 'PENDING',
     attribution: payload.attribution,
-    privacyConsent: payload.privacyConsent,
-    policyVersion: payload.policyVersion,
+    privacyConsent,
+    policyVersion,
   })
 }
 
@@ -89,6 +132,7 @@ const captureViewing = async (payload: PublicViewingRequestInput, viewing: any) 
     pageUrl: landingPage,
     linkedEntityType: 'Viewing',
     linkedEntityId: viewing._id,
+    crmTransferStatus: 'NOT_APPLICABLE',
     attribution: payload.attribution,
     privacyConsent: payload.privacyConsent,
     policyVersion: payload.policyVersion,
@@ -107,6 +151,7 @@ const captureReview = async (review: any) => createSubmission({
   pageUrl: '',
   linkedEntityType: 'AgencyReview',
   linkedEntityId: review._id,
+  crmTransferStatus: 'NOT_APPLICABLE',
 })
 
 const parseBoundary = (value: string | undefined, field: string): Date | undefined => {
@@ -257,6 +302,7 @@ const list = async (
   const [rows, total] = await Promise.all([
     WebsiteSubmission.find(where)
       .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
+      .populate({ path: 'movedToCrmBy', select: 'name email', match: { organizationId } })
       .sort(paginationHelper.buildStableSort(sortBy, sortOrder))
       .skip(skip)
       .limit(limit)
@@ -270,6 +316,7 @@ const list = async (
 const getById = async (organizationId: string, id: string, options: WebsiteSubmissionReadOptions = {}) => {
   const submission = await WebsiteSubmission.findOne({ _id: id, organizationId })
     .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
+    .populate({ path: 'movedToCrmBy', select: 'name email', match: { organizationId } })
     .lean()
   if (!submission) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
   const [enriched] = await enrichLinkedRecords(organizationId, [submission], options)
@@ -302,7 +349,9 @@ const updateStatus = async (
     { _id: id, organizationId },
     { $set: set },
     { new: true, runValidators: true },
-  ).populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
+  )
+    .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
+    .populate({ path: 'movedToCrmBy', select: 'name email', match: { organizationId } })
 
   if (!submission) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
   RealtimeService.emitOrganization(organizationId, {
@@ -312,6 +361,169 @@ const updateStatus = async (
   })
   const [enriched] = await enrichLinkedRecords(organizationId, [submission.toObject()], options)
   return enriched
+}
+
+const LEAD_SUBMISSION_TYPES: WebsiteSubmissionType[] = ['CONTACT', 'PROPERTY_ENQUIRY', 'GENERAL_LEAD']
+const CRM_TRANSFER_STALE_AFTER_MS = 2 * 60 * 1000
+const LEAD_CAPACITY_CODES = new Set(['LEAD_ALLOWANCE_EXHAUSTED', 'TRIAL_LIMIT_REACHED', 'PLAN_LIMIT_REACHED'])
+const LEAD_ACCESS_INACTIVE_CODES = new Set(['LEAD_BENEFIT_PERIOD_INACTIVE', 'SUBSCRIPTION_INACTIVE'])
+
+const transferStatusOf = (submission: any) => {
+  if (submission.crmTransferStatus) return String(submission.crmTransferStatus)
+  if (submission.linkedEntityType === 'Lead' && submission.linkedEntityId) return 'COMPLETED'
+  return LEAD_SUBMISSION_TYPES.includes(submission.submissionType) ? 'PENDING' : 'NOT_APPLICABLE'
+}
+
+const moveToCrm = async (
+  organizationId: string,
+  id: string,
+  actorId: string | undefined,
+  access: CrmAccessContext,
+  options: WebsiteSubmissionReadOptions = {},
+) => {
+  const current: any = await WebsiteSubmission.findOne({ _id: id, organizationId }).lean()
+  if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
+  if (!LEAD_SUBMISSION_TYPES.includes(current.submissionType)) {
+    throw new ApiError(httpStatus.CONFLICT, 'Only lead-like website submissions can be moved to CRM', '', 'CRM_TRANSFER_NOT_APPLICABLE')
+  }
+  if (current.status === 'SPAM') {
+    throw new ApiError(httpStatus.CONFLICT, 'Mark this submission as New or Read before moving it to CRM', '', 'CRM_TRANSFER_SPAM_BLOCKED')
+  }
+
+  const currentTransferStatus = transferStatusOf(current)
+  if (currentTransferStatus === 'COMPLETED' && current.linkedEntityType === 'Lead' && current.linkedEntityId) {
+    return {
+      submission: await getById(organizationId, id, options),
+      outcome: current.crmTransferOutcome || 'LEGACY',
+      leadId: String(current.linkedEntityId),
+      alreadyMoved: true,
+    }
+  }
+
+  const now = new Date()
+  const staleBefore = new Date(now.getTime() - CRM_TRANSFER_STALE_AFTER_MS)
+  const claim: any = await WebsiteSubmission.findOneAndUpdate(
+    {
+      _id: id,
+      organizationId,
+      submissionType: { $in: LEAD_SUBMISSION_TYPES },
+      $or: [
+        { crmTransferStatus: { $in: ['PENDING', 'FAILED'] } },
+        { crmTransferStatus: { $exists: false }, linkedEntityId: { $exists: false } },
+        { $and: [
+          { crmTransferStatus: 'PROCESSING' },
+          { $or: [{ crmTransferStartedAt: { $lt: staleBefore } }, { crmTransferStartedAt: null }, { crmTransferStartedAt: { $exists: false } }] },
+        ] },
+      ],
+    },
+    {
+      $set: {
+        crmTransferStatus: 'PROCESSING',
+        crmTransferStartedAt: now,
+        crmTransferError: '',
+      },
+    },
+    { new: true, runValidators: true },
+  ).lean()
+
+  if (!claim) {
+    const latest: any = await WebsiteSubmission.findOne({ _id: id, organizationId }).lean()
+    if (latest && transferStatusOf(latest) === 'COMPLETED' && latest.linkedEntityId) {
+      return {
+        submission: await getById(organizationId, id, options),
+        outcome: latest.crmTransferOutcome || 'LEGACY',
+        leadId: String(latest.linkedEntityId),
+        alreadyMoved: true,
+      }
+    }
+    throw new ApiError(httpStatus.CONFLICT, 'This submission is already being moved to CRM. Please refresh in a moment.', '', 'CRM_TRANSFER_IN_PROGRESS')
+  }
+
+  try {
+    const result = await LeadService.createLeadWithOutcome(
+      organizationId,
+      {
+        name: claim.name,
+        phone: claim.phone,
+        email: claim.email || undefined,
+        source: 'Website',
+        propertyInterest: claim.propertyId ? [String(claim.propertyId)] : [],
+        budgetMin: claim.budgetMin,
+        budgetMax: claim.budgetMax,
+        propertyType: claim.propertyType || undefined,
+        locationPreference: claim.locationPreference || undefined,
+        notes: claim.message || '',
+        attribution: claim.attribution || undefined,
+      },
+      actorId,
+      access,
+      { allowanceSource: 'website' },
+    )
+
+    const outcome = result.outcome === 'merged' ? 'MERGED' : 'CREATED'
+    const completedAt = new Date()
+    const updated = await WebsiteSubmission.findOneAndUpdate(
+      { _id: id, organizationId, crmTransferStatus: 'PROCESSING' },
+      {
+        $set: {
+          linkedEntityType: 'Lead',
+          linkedEntityId: (result.lead as any)._id,
+          crmTransferStatus: 'COMPLETED',
+          crmTransferOutcome: outcome,
+          crmTransferStartedAt: null,
+          movedToCrmAt: completedAt,
+          movedToCrmBy: actorId || null,
+          crmTransferError: '',
+          status: 'PROCESSED',
+          readAt: completedAt,
+          processedAt: completedAt,
+        },
+      },
+      { new: true, runValidators: true },
+    )
+    if (!updated) throw new ApiError(httpStatus.CONFLICT, 'Website submission CRM transfer state changed unexpectedly', '', 'CRM_TRANSFER_STATE_CONFLICT')
+
+    RealtimeService.emitOrganization(organizationId, {
+      type: 'website_submission.changed',
+      action: outcome === 'MERGED' ? 'crm_merged' : 'crm_created',
+      entityId: id,
+    })
+
+    return {
+      submission: await getById(organizationId, id, options),
+      outcome,
+      leadId: String((result.lead as any)._id),
+      assignedAgent: result.assignedAgent,
+      alreadyMoved: false,
+    }
+  } catch (error: any) {
+    const code = String(error?.code || '')
+    const capacityBlocked = LEAD_CAPACITY_CODES.has(code)
+    const accessInactive = LEAD_ACCESS_INACTIVE_CODES.has(code)
+    const nextStatus = capacityBlocked || accessInactive ? 'PENDING' : 'FAILED'
+    const safeError = String(error?.message || 'Unable to move submission to CRM').slice(0, 1000)
+    await WebsiteSubmission.updateOne(
+      { _id: id, organizationId, crmTransferStatus: 'PROCESSING' },
+      { $set: { crmTransferStatus: nextStatus, crmTransferStartedAt: null, crmTransferError: safeError } },
+    )
+    RealtimeService.emitOrganization(organizationId, {
+      type: 'website_submission.changed',
+      action: 'crm_move_failed',
+      entityId: id,
+    })
+
+    if (capacityBlocked) {
+      throw new ApiError(
+        Number(error?.statusCode) || httpStatus.CONFLICT,
+        'Your CRM lead capacity is full. This website submission has been kept safely in your Website Submissions inbox.',
+        '',
+        code || 'LEAD_ALLOWANCE_EXHAUSTED',
+        { ...(error?.details || {}), submissionId: id, submissionPreserved: true },
+        error?.fieldErrors,
+      )
+    }
+    throw error
+  }
 }
 
 const toPublicReceipt = (submission: any, linkedEntity: any) => ({
@@ -325,7 +537,8 @@ const toPublicReceipt = (submission: any, linkedEntity: any) => ({
         : 'lead',
   status: 'received' as const,
   submittedAt: new Date(submission.submittedAt || submission.createdAt || Date.now()).toISOString(),
-  linkedEntityId: String(linkedEntity?._id || linkedEntity?.id || submission.linkedEntityId),
+  ...(linkedEntity?._id || linkedEntity?.id || submission.linkedEntityId ? { linkedEntityId: String(linkedEntity?._id || linkedEntity?.id || submission.linkedEntityId) } : {}),
+  ...(submission.crmTransferStatus ? { crmTransferStatus: submission.crmTransferStatus } : {}),
 })
 
 const withPublicReceipt = (linkedEntity: any, submission: any) => {
@@ -340,6 +553,7 @@ export const WebsiteSubmissionService = {
   list,
   getById,
   updateStatus,
+  moveToCrm,
   toPublicReceipt,
   withPublicReceipt,
 }

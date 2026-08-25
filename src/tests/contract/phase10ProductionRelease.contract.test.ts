@@ -29,11 +29,14 @@ describe('Phase 10 production release acceptance contracts', () => {
     expect(read('src/app/module/lead/lead.controller.ts')).toContain('assignedAgent')
   })
 
-  it('keeps website submissions as a tenant-scoped audit inbox rather than replacing CRM records', () => {
+  it('keeps website submissions tenant-scoped and converts lead-like rows through the existing CRM service only on demand', () => {
     expect(submissions).toContain('organizationId')
     expect(submissions).toContain('linkedEntityType')
     expect(submissions).toContain('linkedEntityId')
-    expect(read('src/app/module/websiteSubmission/websiteSubmission.route.ts')).toContain("requirePermission('website.submissions.read')")
+    const routes = read('src/app/module/websiteSubmission/websiteSubmission.route.ts')
+    expect(routes).toContain("requirePermission('website.submissions.read')")
+    expect(routes).toContain("'/:id/move-to-crm'")
+    expect(submissions).toContain('LeadService.createLeadWithOutcome')
   })
 
   it('property import can only preview then confirm and rejects system-owned fields', () => {

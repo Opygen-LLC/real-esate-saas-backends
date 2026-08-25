@@ -20,13 +20,12 @@ const createLead = catchAsync(async (req, res) => sendResponse(res, {
 }))
 
 const publicCaptureLead = catchAsync(async (req, res) => {
-  const lead = await LeadService.publicCaptureLead(req.body, { ip: req.ip, requestId: req.requestId })
-  const submission = await WebsiteSubmissionService.captureLead(req.body, lead)
+  const submission = await WebsiteSubmissionService.captureLead(req.body, { ip: req.ip, requestId: req.requestId })
   sendResponse(res, {
     statusCode: 201,
     success: true,
     message: 'Inquiry submitted successfully.',
-    data: WebsiteSubmissionService.withPublicReceipt(lead, submission),
+    data: { submission: WebsiteSubmissionService.toPublicReceipt(submission, undefined) },
   })
 })
 

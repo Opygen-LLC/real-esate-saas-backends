@@ -20,6 +20,14 @@ router.get(
   WebsiteSubmissionController.getById,
 )
 
+router.post(
+  '/:id/move-to-crm',
+  authMiddlewares.requirePermission('website.submissions.manage'),
+  authMiddlewares.requirePermission('leads.write'),
+  validateRequest(WebsiteSubmissionValidation.idParams),
+  WebsiteSubmissionController.moveToCrm,
+)
+
 router.patch(
   '/:id/status',
   authMiddlewares.requirePermission('website.submissions.manage'),

@@ -49,12 +49,17 @@ describe('Phase 2 CRM Lead management production contract', () => {
     expect(lifecycle).toContain('convertToContactInTransaction')
   })
 
-  it('links website submissions to the already-created or merged CRM Lead rather than creating a second Lead', () => {
+  it('keeps website submissions pending until an explicit CRM conversion reuses canonical Lead creation', () => {
     const leadController = read('src/app/module/lead/lead.controller.ts')
     const submissionService = read('src/app/module/websiteSubmission/websiteSubmission.service.ts')
+    const submissionRoutes = read('src/app/module/websiteSubmission/websiteSubmission.route.ts')
 
-    expect(leadController).toMatch(/LeadService\.publicCaptureLead[\s\S]*WebsiteSubmissionService\.captureLead\(req\.body, lead\)/)
-    expect(submissionService).toContain("linkedEntityType: 'Lead'")
-    expect(submissionService).toContain('linkedEntityId: lead._id')
+    expect(leadController).toMatch(/WebsiteSubmissionService\.captureLead\(req\.body, \{ ip: req\.ip, requestId: req\.requestId \}\)/)
+    expect(leadController).not.toContain('LeadService.publicCaptureLead')
+    expect(submissionService).toContain("crmTransferStatus: 'PENDING'")
+    expect(submissionRoutes).toContain("'/:id/move-to-crm'")
+    expect(submissionService).toContain('LeadService.createLeadWithOutcome')
+    expect(submissionService).toContain("crmTransferOutcome: outcome")
+    expect(submissionService).toContain("status: 'PROCESSED'")
   })
 })

@@ -127,7 +127,13 @@ suite('production journey integration', () => {
       method: 'POST', body: JSON.stringify({ organizationId: organization.organizationId, name: 'Interested Buyer', phone: '01812345678', email: 'buyer@example.com', propertyInterest: propertyId, message: 'Please arrange a viewing', privacyConsent: true, policyVersion: 'phase7-test', attribution: { utmSource: 'phase7-ci', utmCampaign: 'release-gate' } }),
     })
     expect(lead.response.status).toBe(201)
-    const leadId = lead.body?.data?._id
+    const submissionId = lead.body?.data?.submission?.submissionId
+    expect(submissionId).toMatch(/^[a-f0-9]{24}$/)
+    expect(lead.body?.data?.submission).toMatchObject({ crmTransferStatus: 'PENDING' })
+
+    const movedLead = await request(`/api/v1/website-submissions/${submissionId}/move-to-crm`, { method: 'POST', headers: auth, body: '{}' })
+    expect(movedLead.response.status).toBe(200)
+    const leadId = movedLead.body?.data?.leadId
     expect(leadId).toMatch(/^[a-f0-9]{24}$/)
 
     const crm = await request('/api/v1/lead?limit=10', { headers: auth })

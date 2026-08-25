@@ -4,7 +4,7 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import pick from '../../../shared/pick'
 import { requireTenant } from '../../middlewares/auth'
-import { crmRecordReadAccessFromRequest } from '../crm/crmAccess'
+import { crmAccessFromRequest, crmRecordReadAccessFromRequest } from '../crm/crmAccess'
 import { WebsiteSubmissionService } from './websiteSubmission.service'
 
 const readOptions = (req: Request) => {
@@ -41,6 +41,28 @@ const getById = catchAsync(async (req: Request, res: Response) => sendResponse(r
   data: await WebsiteSubmissionService.getById(requireTenant(req), req.params.id, readOptions(req)),
 }))
 
+
+const moveToCrm = catchAsync(async (req: Request, res: Response) => {
+  const actorId = req.user?._id || req.user?.id
+  const result = await WebsiteSubmissionService.moveToCrm(
+    requireTenant(req),
+    req.params.id,
+    actorId,
+    crmAccessFromRequest(req),
+    readOptions(req),
+  )
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.alreadyMoved
+      ? 'Website submission is already linked to CRM'
+      : result.outcome === 'MERGED'
+        ? 'Website submission merged with an existing CRM Lead'
+        : 'Website submission moved to CRM successfully',
+    data: result,
+  })
+})
+
 const updateStatus = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
   statusCode: httpStatus.OK,
   success: true,
@@ -48,4 +70,4 @@ const updateStatus = catchAsync(async (req: Request, res: Response) => sendRespo
   data: await WebsiteSubmissionService.updateStatus(requireTenant(req), req.params.id, req.body.status, readOptions(req)),
 }))
 
-export const WebsiteSubmissionController = { list, getById, updateStatus }
+export const WebsiteSubmissionController = { list, getById, updateStatus, moveToCrm }

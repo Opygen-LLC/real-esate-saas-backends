@@ -1,6 +1,8 @@
 import { Schema, model } from 'mongoose'
 import {
   IWebsiteSubmission,
+  WEBSITE_SUBMISSION_CRM_TRANSFER_OUTCOMES,
+  WEBSITE_SUBMISSION_CRM_TRANSFER_STATUSES,
   WEBSITE_SUBMISSION_LINKED_ENTITY_TYPES,
   WEBSITE_SUBMISSION_STATUSES,
   WEBSITE_SUBMISSION_TYPES,
@@ -29,10 +31,34 @@ const websiteSubmissionSchema = new Schema<IWebsiteSubmission>(
     phone: { type: String, trim: true, maxlength: 40, default: '' },
     message: { type: String, trim: true, maxlength: 5000, default: '' },
     propertyId: { type: Schema.Types.ObjectId, ref: 'Property', index: true },
+    budgetMin: { type: Number, min: 0 },
+    budgetMax: { type: Number, min: 0 },
+    propertyType: { type: String, trim: true, maxlength: 100, default: '' },
+    locationPreference: { type: String, trim: true, maxlength: 300, default: '' },
     sourcePage: { type: String, trim: true, maxlength: 500, default: '' },
     pageUrl: { type: String, trim: true, maxlength: 1200, default: '' },
-    linkedEntityType: { type: String, enum: WEBSITE_SUBMISSION_LINKED_ENTITY_TYPES, required: true, index: true },
-    linkedEntityId: { type: Schema.Types.ObjectId, required: true, index: true },
+    linkedEntityType: { type: String, enum: WEBSITE_SUBMISSION_LINKED_ENTITY_TYPES, index: true },
+    linkedEntityId: { type: Schema.Types.ObjectId, index: true },
+    crmTransferStatus: {
+      type: String,
+      enum: WEBSITE_SUBMISSION_CRM_TRANSFER_STATUSES,
+      default: function (this: any) {
+        if (this.linkedEntityType === 'Lead' && this.linkedEntityId) return 'COMPLETED'
+        if (this.linkedEntityType) return 'NOT_APPLICABLE'
+        return 'PENDING'
+      },
+      required: true,
+      index: true,
+    },
+    crmTransferOutcome: {
+      type: String,
+      enum: WEBSITE_SUBMISSION_CRM_TRANSFER_OUTCOMES,
+      default: function (this: any) { return this.linkedEntityType === 'Lead' && this.linkedEntityId ? 'LEGACY' : undefined },
+    },
+    crmTransferStartedAt: { type: Date, default: null },
+    movedToCrmAt: { type: Date, default: null, index: true },
+    movedToCrmBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    crmTransferError: { type: String, trim: true, maxlength: 1000, default: '' },
     attribution: { type: attributionSchema, default: undefined },
     privacyConsent: { type: Boolean, default: undefined },
     policyVersion: { type: String, trim: true, maxlength: 80, default: '' },
@@ -48,5 +74,6 @@ websiteSubmissionSchema.index({ organizationId: 1, status: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, submissionType: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, propertyId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, linkedEntityType: 1, linkedEntityId: 1, submittedAt: -1 })
+websiteSubmissionSchema.index({ organizationId: 1, crmTransferStatus: 1, submittedAt: -1 })
 
 export const WebsiteSubmission = model<IWebsiteSubmission>('WebsiteSubmission', websiteSubmissionSchema)

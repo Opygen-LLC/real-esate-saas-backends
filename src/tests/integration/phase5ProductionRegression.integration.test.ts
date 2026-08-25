@@ -259,7 +259,7 @@ suite('Phase 5 production regression matrix', () => {
     expect(warningSpy.mock.calls.some((call) => call[0] === 'crm_lead_read_model_failed')).toBe(false)
   })
 
-  it('creates a Website Submission that opens the existing Lead instead of creating a duplicate Lead', async () => {
+  it('moves a pending Website Submission into the existing matching Lead without creating a duplicate', async () => {
     const linkedLead = await Lead.create({
       organizationId,
       name: 'Phase 5 Website Lead',
@@ -270,26 +270,37 @@ suite('Phase 5 production regression matrix', () => {
       assignedAgent: agent._id,
       currency: 'BDT',
     })
-    const before = await Lead.countDocuments({ organizationId })
-    const submission = await WebsiteSubmissionService.captureLead({
+    const submission = await WebsiteSubmission.create({
       organizationId,
-      submissionContext: 'PROPERTY_ENQUIRY',
+      submissionType: 'PROPERTY_ENQUIRY',
+      status: 'READ',
       name: linkedLead.name,
       phone: linkedLead.phone,
-      email: linkedLead.email,
-      propertyInterest: String(property._id),
+      email: linkedLead.email || '',
+      propertyId: property._id,
       message: 'Phase 5 property enquiry',
-      privacyConsent: true,
-      policyVersion: 'phase5-regression',
       attribution: { landingPage: `/properties/${property.slug}` },
-    }, linkedLead)
+      crmTransferStatus: 'PENDING',
+      submittedAt: new Date(),
+    })
+    const before = await Lead.countDocuments({ organizationId })
+    const moved: any = await WebsiteSubmissionService.moveToCrm(
+      organizationId,
+      String(submission._id),
+      String(owner._id),
+      managerAccess(),
+      { includeLeadDetails: true, crmAccess: managerAccess() },
+    )
     const after = await Lead.countDocuments({ organizationId })
     expect(after).toBe(before)
+    expect(moved).toMatchObject({ outcome: 'MERGED', leadId: String(linkedLead._id), alreadyMoved: false })
+    expect(moved.submission).toMatchObject({ crmTransferStatus: 'COMPLETED', crmTransferOutcome: 'MERGED', status: 'PROCESSED' })
+    expect(String(moved.submission.linkedEntityId)).toBe(String(linkedLead._id))
+    expect(moved.submission.linkedRecord).toMatchObject({ type: 'Lead', id: String(linkedLead._id), available: true })
 
-    const enriched: any = await WebsiteSubmissionService.getById(organizationId, String(submission._id), { includeLeadDetails: true, crmAccess: managerAccess() })
-    expect(String(enriched.linkedEntityId)).toBe(String(linkedLead._id))
-    expect(enriched.linkedRecord).toMatchObject({ type: 'Lead', id: String(linkedLead._id), available: true })
-    expect(enriched.linkedRecord.lead._id).toBe(String(linkedLead._id))
+    const repeat: any = await WebsiteSubmissionService.moveToCrm(organizationId, String(submission._id), String(owner._id), managerAccess(), { includeLeadDetails: true, crmAccess: managerAccess() })
+    expect(repeat).toMatchObject({ leadId: String(linkedLead._id), alreadyMoved: true })
+    expect(await Lead.countDocuments({ organizationId })).toBe(before)
   })
 
   it('allows a successful void quota transaction and serializes two concurrent attempts for the final team seat', async () => {

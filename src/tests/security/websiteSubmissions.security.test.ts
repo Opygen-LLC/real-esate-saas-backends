@@ -28,18 +28,18 @@ describe('Website submissions inbox security contract', () => {
   })
 
   it('keeps property links tenant-bound and treats property context as authoritative', () => {
-    const leadService = read('src/app/module/lead/lead.service.ts')
     const submissionService = read('src/app/module/websiteSubmission/websiteSubmission.service.ts')
-    expect(leadService).toMatch(/Property\.exists\(\{_id:propertyInterest,organizationId\}\)/)
+    expect(submissionService).toMatch(/Property\.exists\(\{ _id: payload\.propertyInterest, organizationId \}\)/)
     expect(submissionService).toMatch(/match: \{ organizationId \}/)
     expect(submissionService).toMatch(/if \(payload\.propertyInterest\) return 'PROPERTY_ENQUIRY'/)
   })
 
-  it('public lead, viewing and review controllers create inbox rows without replacing CRM records', () => {
+  it('public lead capture creates only an inbox row, while viewing and review keep their dedicated records', () => {
     const lead = read('src/app/module/lead/lead.controller.ts')
     const viewing = read('src/app/module/viewing/viewing.controller.ts')
     const review = read('src/app/module/review/review.controller.ts')
-    expect(lead).toMatch(/LeadService\.publicCaptureLead[\s\S]*WebsiteSubmissionService\.captureLead/)
+    expect(lead).toMatch(/WebsiteSubmissionService\.captureLead\(req\.body, \{ ip: req\.ip, requestId: req\.requestId \}\)/)
+    expect(lead).not.toMatch(/LeadService\.publicCaptureLead/)
     expect(viewing).toMatch(/ViewingService\.publicRequestViewing[\s\S]*WebsiteSubmissionService\.captureViewing/)
     expect(review).toMatch(/ReviewService\.submit[\s\S]*WebsiteSubmissionService\.captureReview/)
   })
@@ -51,6 +51,17 @@ describe('Website submissions inbox security contract', () => {
     expect(migration).toMatch(/organizationId: 1, submissionType: 1, submittedAt: -1/)
   })
 
+
+  it('requires both inbox management and lead-write authority for CRM conversion', () => {
+    const routes = read('src/app/module/websiteSubmission/websiteSubmission.route.ts')
+    const service = read('src/app/module/websiteSubmission/websiteSubmission.service.ts')
+    expect(routes).toMatch(/'\/:id\/move-to-crm'[\s\S]*requirePermission\('website\.submissions\.manage'\)[\s\S]*requirePermission\('leads\.write'\)/)
+    expect(service).toContain('LeadService.createLeadWithOutcome')
+    expect(service).toContain("{ allowanceSource: 'website' }")
+    expect(service).toContain("crmTransferStatus: 'PROCESSING'")
+    expect(service).toContain("crmTransferStatus: 'COMPLETED'")
+    expect(service).toContain("alreadyMoved: true")
+  })
 
   it('includes submission PII in tenant export and retention deletion', () => {
     const compliance = read('src/app/module/compliance/compliance.service.ts')

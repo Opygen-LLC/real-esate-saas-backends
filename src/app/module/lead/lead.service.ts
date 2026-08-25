@@ -6,10 +6,8 @@ import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common
 import paginationHelper from '../../helpers/paginationHelper'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
-import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import { ActivityService } from '../activity/activity.service'
 import { ActivityExportService } from '../activity/activityExport.service'
-import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { CrmService } from '../crm/crm.service'
 import { readLeadListPage } from '../crm/crmListReadModel.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
@@ -22,13 +20,12 @@ import { logger } from '../../../shared/logger'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
-import { Organization } from '../organization/organization.model'
 import { ILead, ILeadFilter } from './lead.interface'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone, getWeekBoundsInTimeZone } from './leadFollowUpTime'
 import { Lead } from './lead.model'
 import { LeadLifecycleService, type LifecycleEffects } from './leadLifecycle.service'
 import { LeadEntitlementService } from './leadEntitlement.service'
-import type { ManageLeadInput, PublicLeadCaptureInput } from './lead.validation'
+import type { ManageLeadInput } from './lead.validation'
 import {
   LEAD_STATUS,
   LEAD_STATUS_LABELS,
@@ -291,25 +288,6 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
 const createLead=async(organizationId:string,payload:Partial<ILead>,creatorAgentId?:string,access?:CrmAccessContext,options:CreateLeadOptions={}):Promise<ILead>=>{
   const result = await createLeadWithOutcome(organizationId, payload, creatorAgentId, access, options)
   return result.lead
-}
-
-const publicCaptureLead=async(payload:PublicLeadCaptureInput,context:{ip?:string;requestId?:string}):Promise<ILead>=>{
-  const {organizationId,submissionContext:_submissionContext,name,phone,email,propertyInterest,message,privacyConsent,policyVersion,attribution,...rest}=payload
-  if(!organizationId||!name||!phone)throw new ApiError(400,'Organization, client name, and phone are required')
-  const organization:any=await Organization.findOne({organizationId}).select('isBlocked websiteStatus').lean()
-  if(!organization)throw new ApiError(404,'Agency not found')
-  if(organization.isBlocked||organization.websiteStatus==='suspended')throw new ApiError(423,'This agency is currently suspended','', 'TENANT_SUSPENDED')
-  if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
-  if(!privacyConsent) throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})
-  await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
-  if(propertyInterest){
-    const propertyBelongsToTenant=await Property.exists({_id:propertyInterest,organizationId})
-    if(!propertyBelongsToTenant)throw new ApiError(400,'Property does not belong to this agency','','VALIDATION_ERROR',undefined,{propertyInterest:['Select a property from this agency']})
-  }
-  const normalizedPhone=normalizePhone(phone)
-  const lead:any=await createLead(organizationId,{...rest,name,phone:normalizedPhone,email,source:'Website',propertyInterest:propertyInterest?[propertyInterest]:[],notes:message||'',attribution},undefined,undefined,{allowanceSource:'website'})
-  await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, normalizedPhone, policyVersion, context)
-  return lead
 }
 
 const parseFollowUpBoundary = (value: string | undefined, field: string) => {
@@ -752,4 +730,4 @@ const exportCsv = async (organizationId: string, filters: ILeadFilter, access?: 
 const exportXlsx = async (organizationId: string, filters: ILeadFilter, access?: CrmAccessContext) =>
   buildCrmXlsx('Leads', LEAD_EXPORT_COLUMNS, await getLeadExportRows(organizationId, filters, access))
 
-export const LeadService={createLead,createLeadWithOutcome,publicCaptureLead,getAllLeads,getTodayFollowUps,getLeadById,updateLead,manageLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}
+export const LeadService={createLead,createLeadWithOutcome,getAllLeads,getTodayFollowUps,getLeadById,updateLead,manageLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}

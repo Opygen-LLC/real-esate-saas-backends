@@ -13,6 +13,7 @@ let Property: any
 let PlatformSettings: any
 let ReviewInvitation: any
 let WebsiteSubmission: any
+let Lead: any
 let jwtHelpers: any
 let config: any
 let organizationId = ''
@@ -59,6 +60,7 @@ suite('phase 2 public forms and settings contracts', () => {
     ;({ PlatformSettings } = await import('../../app/module/platformSettings/platformSettings.model'))
     ;({ ReviewInvitation } = await import('../../app/module/review/review.model'))
     ;({ WebsiteSubmission } = await import('../../app/module/websiteSubmission/websiteSubmission.model'))
+    ;({ Lead } = await import('../../app/module/lead/lead.model'))
     ;({ jwtHelpers } = await import('../../app/helpers/jwtHelpers'))
     config = (await import('../../config')).default
 
@@ -113,17 +115,32 @@ suite('phase 2 public forms and settings contracts', () => {
     })
   })
 
-  it('accepts the contact form with Bangla phone digits and normalized optional email', async () => {
+  it('accepts the contact form into the inbox first, then moves it to CRM exactly once on demand', async () => {
+    const beforeLeads = await Lead.countDocuments({ organizationId })
     const result = await request('/api/v1/lead/public-capture', {
       method: 'POST',
       body: JSON.stringify({ organizationId, submissionContext: 'CONTACT', name: 'Contact Buyer', phone: '০১৭১২-৩৪৫৬৭৮', email: 'BUYER@EXAMPLE.COM ', message: 'General contact form', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(result.response.status).toBe(201)
-    expect(result.body?.data?.phone).toBe('+8801712345678')
-    expect(result.body?.data?.email).toBe('buyer@example.com')
-    expect(result.body?.data?.submission).toMatchObject({ submissionType: 'lead', status: 'received', linkedEntityId: result.body?.data?._id })
+    expect(result.body?.data?.submission).toMatchObject({ submissionType: 'contact', status: 'received', crmTransferStatus: 'PENDING' })
+    expect(result.body?.data?.submission?.linkedEntityId).toBeUndefined()
     const inbox = await WebsiteSubmission.findById(result.body?.data?.submission?.submissionId).lean()
-    expect(inbox).toMatchObject({ organizationId, submissionType: 'CONTACT', status: 'NEW', linkedEntityType: 'Lead' })
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'CONTACT', status: 'NEW', phone: '+8801712345678', email: 'buyer@example.com', crmTransferStatus: 'PENDING' })
+    expect(inbox?.linkedEntityId).toBeUndefined()
+    expect(await Lead.countDocuments({ organizationId })).toBe(beforeLeads)
+
+    const token = jwtHelpers.createToken({ _id: owner._id.toString(), phoneNumber: owner.phoneNumber, email: owner.email, userRole: owner.userRole, organizationId }, config.jwt.secret, config.jwt.expires_in)
+    const move = await request(`/api/v1/website-submissions/${inbox._id}/move-to-crm`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: '{}' })
+    expect(move.response.status).toBe(200)
+    expect(move.body?.data).toMatchObject({ outcome: 'CREATED', alreadyMoved: false })
+    expect(move.body?.data?.leadId).toMatch(/^[a-f0-9]{24}$/)
+    expect(move.body?.data?.submission).toMatchObject({ status: 'PROCESSED', crmTransferStatus: 'COMPLETED', crmTransferOutcome: 'CREATED' })
+    expect(await Lead.countDocuments({ organizationId })).toBe(beforeLeads + 1)
+
+    const repeat = await request(`/api/v1/website-submissions/${inbox._id}/move-to-crm`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: '{}' })
+    expect(repeat.response.status).toBe(200)
+    expect(repeat.body?.data).toMatchObject({ leadId: move.body?.data?.leadId, alreadyMoved: true })
+    expect(await Lead.countDocuments({ organizationId })).toBe(beforeLeads + 1)
   })
 
   it('accepts the agent contact form contract and returns field errors for invalid identity input', async () => {
@@ -149,9 +166,9 @@ suite('phase 2 public forms and settings contracts', () => {
       body: JSON.stringify({ organizationId, submissionContext: 'PROPERTY_ENQUIRY', name: 'Property Buyer', phone: '01912345678', propertyInterest: property._id.toString(), message: 'Interested in this apartment', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(valid.response.status).toBe(201)
-    expect(valid.body?.data?.propertyInterest?.map(String)).toContain(property._id.toString())
     const inbox = await WebsiteSubmission.findById(valid.body?.data?.submission?.submissionId).lean()
-    expect(inbox).toMatchObject({ organizationId, submissionType: 'PROPERTY_ENQUIRY', status: 'NEW', linkedEntityType: 'Lead' })
+    expect(inbox).toMatchObject({ organizationId, submissionType: 'PROPERTY_ENQUIRY', status: 'NEW', propertyId: property._id, crmTransferStatus: 'PENDING' })
+    expect(inbox?.linkedEntityId).toBeUndefined()
 
     const stale = await request('/api/v1/lead/public-capture', {
       method: 'POST',
