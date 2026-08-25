@@ -25,5 +25,5 @@ const websiteAssetSchema = new Schema<IWebsiteAsset, WebsiteAssetModel>({
 }, { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true } })
 
 websiteAssetSchema.index({ organizationId: 1, key: 1 }, { unique: true })
-websiteAssetSchema.index({ organizationId: 1, context: 1, uploadSessionId: 1, claimed: 1, createdAt: 1 }, { name: 'property_draft_lifecycle' })
+websiteAssetSchema.index({ organizationId: 1, context: 1, uploadSessionId: 1, claimed: 1, lastReferencedAt: 1 }, { name: 'property_draft_lifecycle' })
 export const WebsiteAsset = model<IWebsiteAsset, WebsiteAssetModel>('WebsiteAsset', websiteAssetSchema)

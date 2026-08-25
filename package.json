@@ -122,7 +122,8 @@
     "verify:phase4-template-engine": "node scripts/verify-phase4-template-engine.mjs",
     "migrate:phase5-final-hardening": "ts-node --transpile-only src/app/db/migratePhase5FinalHardening.ts",
     "verify:phase5-final-hardening": "node scripts/verify-phase5-final-hardening.mjs",
-    "test:phase5-final-hardening": "vitest run src/tests/contract/phase5FinalHardening.contract.test.ts src/tests/contract/phase2WebsiteSubmissionCrmConversion.contract.test.ts src/tests/integration/phase5FinanceBilling.integration.test.ts"
+    "test:phase5-final-hardening": "vitest run src/tests/contract/phase5FinalHardening.contract.test.ts src/tests/contract/phase2WebsiteSubmissionCrmConversion.contract.test.ts src/tests/integration/phase5FinanceBilling.integration.test.ts",
+    "migrate:property-draft-activity": "ts-node --transpile-only src/app/db/migratePropertyDraftActivityLifecycle.ts"
   },
   "keywords": [
     "real-estate",

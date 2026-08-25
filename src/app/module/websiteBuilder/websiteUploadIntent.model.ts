@@ -9,9 +9,10 @@ const websiteUploadIntentSchema = new Schema({
   context: { type: String, enum: ['website', 'property-draft'], default: 'website', index: true },
   uploadSessionId: { type: String, default: '', index: true },
   status: { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'pending', index: true },
+  lastReferencedAt: { type: Date, default: Date.now, index: true },
   expiresAt: { type: Date, required: true, index: true },
 }, { timestamps: true })
 
 websiteUploadIntentSchema.index({ status: 1, expiresAt: 1 })
-websiteUploadIntentSchema.index({ organizationId: 1, context: 1, uploadSessionId: 1, expiresAt: 1 }, { name: 'property_draft_intent_lifecycle' })
+websiteUploadIntentSchema.index({ organizationId: 1, context: 1, uploadSessionId: 1, lastReferencedAt: 1 }, { name: 'property_draft_intent_lifecycle' })
 export const WebsiteUploadIntent = model('WebsiteUploadIntent', websiteUploadIntentSchema)

@@ -163,6 +163,16 @@ const deletePropertyDraftAsset = catchAsync(async (req: Request, res: Response) 
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: data.deleted ? 'Draft property image deleted' : 'Draft property image already removed', data })
 })
 
+const getPropertyDraftSession = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.getPropertyDraftSession(requireTenant(req), req.params.sessionId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft media session reconciled', data })
+})
+
+const touchPropertyDraftSession = catchAsync(async (req: Request, res: Response) => {
+  const data = await WebsiteBuilderService.touchPropertyDraftSession(requireTenant(req), req.params.sessionId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft media session refreshed', data })
+})
+
 const cleanupPropertyDraftSession = catchAsync(async (req: Request, res: Response) => {
   const data = await WebsiteBuilderService.cleanupPropertyDraftSession(requireTenant(req), req.params.sessionId)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft media cleaned up', data })
@@ -396,6 +406,8 @@ export const PropertyController = {
   completePropertyImage,
   getPropertyImageAsset,
   deletePropertyDraftAsset,
+  getPropertyDraftSession,
+  touchPropertyDraftSession,
   cleanupPropertyDraftSession,
   getAllProperties,
   getPublicProperties,

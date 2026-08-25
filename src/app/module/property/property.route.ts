@@ -28,6 +28,8 @@ router.post('/assets/presign', authMiddlewares.requirePermission('properties.wri
 router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, propertyImageUpload, PropertyController.uploadPropertyImage)
 router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
 router.post('/assets/import-url', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, validateRequest(PropertyValidation.importImageUrlZodSchema), PropertyController.importPropertyImageUrl)
+router.get('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.getPropertyDraftSession)
+router.post('/assets/session/:sessionId/touch', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.touchPropertyDraftSession)
 router.delete('/assets/session/:sessionId/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.deleteDraftAssetZodSchema), PropertyController.deletePropertyDraftAsset)
 router.delete('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.cleanupDraftSessionZodSchema), PropertyController.cleanupPropertyDraftSession)
 router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.write'), PropertyController.getPropertyImageAsset)

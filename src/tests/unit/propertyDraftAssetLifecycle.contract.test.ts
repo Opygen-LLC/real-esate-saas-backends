@@ -8,12 +8,17 @@ describe('Phase 7 property draft asset lifecycle contract', () => {
   it('persists property-draft ownership fields and production query indexes', () => {
     const model = read('src/app/module/websiteBuilder/websiteAsset.model.ts')
     const migration = read('src/app/db/migratePropertyDraftAssets.ts')
-    for (const token of ["'property-draft'", 'uploadSessionId', 'claimed', 'claimedByPropertyId', 'claimedAt', 'property_draft_lifecycle']) {
+    const activityMigration = read('src/app/db/migratePropertyDraftActivityLifecycle.ts')
+    for (const token of ["'property-draft'", 'uploadSessionId', 'claimed', 'claimedByPropertyId', 'claimedAt', 'lastReferencedAt', 'property_draft_lifecycle']) {
       expect(model).toContain(token)
     }
     expect(migration).toContain("context: 'website', claimed: true")
     expect(migration).toContain('property_draft_intent_lifecycle')
     expect(migration).toContain('property_asset_claim')
+    expect(activityMigration).toContain('PHASE5-PROPERTY-DRAFT-ACTIVITY')
+    expect(activityMigration).toContain('lastReferencedAt')
+    expect(activityMigration).toContain('property_draft_lifecycle')
+    expect(activityMigration).toContain('property_draft_intent_lifecycle')
   })
 
   it('binds property uploads to the tenant/session and exposes only tenant-scoped cleanup routes', () => {
@@ -22,6 +27,8 @@ describe('Phase 7 property draft asset lifecycle contract', () => {
     expect(controller).toContain("{ context: 'property-draft', uploadSessionId }")
     expect(controller).toContain('WebsiteBuilderService.deletePropertyDraftAsset(requireTenant(req)')
     expect(controller).toContain('WebsiteBuilderService.cleanupPropertyDraftSession(requireTenant(req)')
+    expect(route).toContain("router.get('/assets/session/:sessionId'")
+    expect(route).toContain("router.post('/assets/session/:sessionId/touch'")
     expect(route).toContain("'/assets/session/:sessionId/:assetId'")
     expect(route).toContain("'/assets/session/:sessionId'")
     expect(route).toContain("requirePermission('properties.write')")
@@ -55,17 +62,20 @@ describe('Phase 7 property draft asset lifecycle contract', () => {
     expect(service).toContain("intent.status !== 'pending'")
     expect(service).toContain('Upload session was cancelled before the asset was completed')
     expect(service).toContain("intent.status = 'cancelled'")
-    expect(service).toContain("status: 'cancelled', createdAt: { $lte: cutoff }")
+    expect(service).toContain("status: { $in: ['pending', 'cancelled'] }, expiresAt: { $lte: new Date() }")
+    expect(service).toContain('intentionally leaves cancelled intents as')
   })
 
-  it('runs a short TTL cleanup separately from the legacy seven-day orphan sweep', () => {
+  it('uses an activity-based 7-day default TTL with a 14-day safety ceiling', () => {
     const config = read('src/config/index.ts')
     const worker = read('src/app/module/cron/phase3.worker.ts')
     const service = read('src/app/module/websiteBuilder/websiteBuilder.service.ts')
-    expect(config).toContain('PROPERTY_DRAFT_ASSET_TTL_MINUTES || 120')
+    expect(config).toContain('PROPERTY_DRAFT_ASSET_TTL_MINUTES || 7 * 24 * 60')
+    expect(config).toContain('Math.min(14 * 24 * 60')
     expect(config).toContain('PROPERTY_DRAFT_CLEANUP_INTERVAL_MINUTES || 15')
     expect(worker).toContain('cleanupAbandonedPropertyDraftAssets(100)')
-    expect(service).toContain('config.assets.property_draft_ttl_minutes * 60_000')
-    expect(service).toContain('7 * 24 * 60 * 60_000')
+    expect(service).toContain('lastReferencedAt: { $lte: cutoff }')
+    expect(service).toContain('latestActivity > cutoff.getTime()')
+    expect(service).toContain('touchPropertyDraftSession')
   })
 })

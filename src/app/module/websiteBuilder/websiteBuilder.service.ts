@@ -229,6 +229,26 @@ const assertDraftSessionId = (value?: string) => {
   return value
 }
 
+const touchPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
+  assertDraftSessionId(uploadSessionId)
+  const touchedAt = new Date()
+  const [assets, intents] = await Promise.all([
+    WebsiteAsset.updateMany(
+      { organizationId, context: 'property-draft', uploadSessionId, claimed: false },
+      { $set: { lastReferencedAt: touchedAt } },
+    ),
+    WebsiteUploadIntent.updateMany(
+      { organizationId, context: 'property-draft', uploadSessionId, status: { $in: ['pending', 'completed'] } },
+      { $set: { lastReferencedAt: touchedAt } },
+    ),
+  ])
+  return {
+    touchedAt,
+    assets: Number(assets.matchedCount || 0),
+    intents: Number(intents.matchedCount || 0),
+  }
+}
+
 const assetKey = (organizationId: string, filename: string, suffix = '', options: AssetLifecycleOptions = {}) => {
   const safe = filename.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').slice(-100)
   if (options.context === 'property-draft') {
@@ -270,7 +290,8 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
     expiresIn: config.assets.signed_url_ttl_seconds,
   }))
 
-  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...variantDefs.map((v) => v.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, expiresAt: new Date(Date.now() + 60 * 60_000) })
+  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...variantDefs.map((v) => v.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, lastReferencedAt: new Date(), expiresAt: new Date(Date.now() + 60 * 60_000) })
+  if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
   return { original, requiredVariants }
 }
 
@@ -293,6 +314,9 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
     { new: true, upsert: true, setDefaultsOnInsert: true },
   )
   await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
+  if (intent.context === 'property-draft' && intent.uploadSessionId) {
+    await touchPropertyDraftSession(organizationId, String(intent.uploadSessionId))
+  }
   return asset
 }
 
@@ -512,6 +536,7 @@ const validatePropertyDraftAssets = async (
   existingPropertyId?: string,
 ) => {
   assertDraftSessionId(uploadSessionId)
+  await touchPropertyDraftSession(organizationId, uploadSessionId)
   if (existingPropertyId && !Types.ObjectId.isValid(existingPropertyId)) throw new ApiError(400, 'Property ID is invalid')
 
   const managedRefs = images.filter((image) => image.assetId || (image.publicId && image.publicId.startsWith(`tenants/${organizationId}/`)))
@@ -620,7 +645,27 @@ const deletePropertyDraftAsset = async (organizationId: string, uploadSessionId:
   const size = Math.max(0, Number(asset.size || 0))
   await asset.deleteOne()
   await decrementStorageUsage(organizationId, size)
+  await touchPropertyDraftSession(organizationId, uploadSessionId)
   return { id: assetId, deleted: true, bytesReleased: size }
+}
+
+const getPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
+  assertDraftSessionId(uploadSessionId)
+  const activity = await touchPropertyDraftSession(organizationId, uploadSessionId)
+  const [assets, activeIntents] = await Promise.all([
+    WebsiteAsset.find({ organizationId, context: 'property-draft', uploadSessionId, claimed: false })
+      .select('_id key url originalName mimeType status scanStatus variants altText size lastReferencedAt createdAt')
+      .sort({ createdAt: 1 })
+      .lean(),
+    WebsiteUploadIntent.countDocuments({ organizationId, context: 'property-draft', uploadSessionId, status: { $in: ['pending', 'completed'] } }),
+  ])
+  return {
+    sessionId: uploadSessionId,
+    exists: assets.length > 0 || activeIntents > 0,
+    touchedAt: activity.touchedAt,
+    pendingUploads: activeIntents,
+    assets,
+  }
 }
 
 const cleanupPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
@@ -660,16 +705,25 @@ const cleanupPropertyDraftSession = async (organizationId: string, uploadSession
 
 const cleanupAbandonedPropertyDraftAssets = async (limit = 100) => {
   const cutoff = new Date(Date.now() - config.assets.property_draft_ttl_minutes * 60_000)
-  const candidates: any[] = await WebsiteAsset.find({ context: 'property-draft', claimed: false, createdAt: { $lte: cutoff } })
-    .sort({ createdAt: 1 }).limit(limit)
+  const staleActivity = {
+    $or: [
+      { lastReferencedAt: { $lte: cutoff } },
+      { lastReferencedAt: { $exists: false }, createdAt: { $lte: cutoff } },
+    ],
+  }
+  const candidates: any[] = await WebsiteAsset.find({ context: 'property-draft', claimed: false, ...staleActivity })
+    .sort({ lastReferencedAt: 1, createdAt: 1 }).limit(limit)
   const sessions = new Map<string, { organizationId: string; uploadSessionId: string }>()
   for (const asset of candidates) {
     const key = `${asset.organizationId}:${asset.uploadSessionId}`
     if (asset.uploadSessionId) sessions.set(key, { organizationId: asset.organizationId, uploadSessionId: asset.uploadSessionId })
   }
 
-  const staleIntents: any[] = await WebsiteUploadIntent.find({ context: 'property-draft', createdAt: { $lte: cutoff } })
-    .sort({ createdAt: 1 }).limit(limit)
+  const staleIntents: any[] = await WebsiteUploadIntent.find({
+    context: 'property-draft',
+    status: { $in: ['pending', 'completed'] },
+    ...staleActivity,
+  }).sort({ lastReferencedAt: 1, createdAt: 1 }).limit(limit)
   for (const intent of staleIntents) {
     const key = `${intent.organizationId}:${intent.uploadSessionId}`
     if (intent.uploadSessionId) sessions.set(key, { organizationId: intent.organizationId, uploadSessionId: intent.uploadSessionId })
@@ -679,19 +733,44 @@ const cleanupAbandonedPropertyDraftAssets = async (limit = 100) => {
   let reconciled = 0
   let bytesReleased = 0
   let incompleteUploadsDeleted = 0
+  let skippedActive = 0
   for (const sessionInfo of sessions.values()) {
+    // A single old photo must never evict a session that has newer activity.
+    // Recheck the latest activity across both assets and live intents immediately
+    // before destructive cleanup so reopen/touch races resolve in favor of safety.
+    const [sessionAssets, sessionIntents] = await Promise.all([
+      WebsiteAsset.find({ organizationId: sessionInfo.organizationId, context: 'property-draft', uploadSessionId: sessionInfo.uploadSessionId, claimed: false })
+        .select('lastReferencedAt createdAt').lean(),
+      WebsiteUploadIntent.find({ organizationId: sessionInfo.organizationId, context: 'property-draft', uploadSessionId: sessionInfo.uploadSessionId, status: { $in: ['pending', 'completed'] } })
+        .select('lastReferencedAt createdAt').lean(),
+    ])
+    const activityTimes = [...sessionAssets, ...sessionIntents]
+      .map((row: any) => new Date(row.lastReferencedAt || row.createdAt || 0).getTime())
+      .filter((value) => Number.isFinite(value))
+    const latestActivity = activityTimes.length ? Math.max(...activityTimes) : 0
+    if (latestActivity > cutoff.getTime()) { skippedActive += 1; continue }
+
     const result = await cleanupPropertyDraftSession(sessionInfo.organizationId, sessionInfo.uploadSessionId)
     deleted += result.deleted
     reconciled += result.reconciled
     bytesReleased += result.bytesReleased
     incompleteUploadsDeleted += result.incompleteUploadsDeleted
-    await WebsiteUploadIntent.deleteMany({ organizationId: sessionInfo.organizationId, context: 'property-draft', uploadSessionId: sessionInfo.uploadSessionId, status: 'cancelled', createdAt: { $lte: cutoff } })
+    // cleanupPropertyDraftSession intentionally leaves cancelled intents as
+    // tombstones until their short expiresAt window passes; generic intent
+    // expiry cleanup removes them later and blocks late in-flight PUTs meanwhile.
   }
-  return { sessions: sessions.size, checked: candidates.length, deleted, reconciled, bytesReleased, incompleteUploadsDeleted, cutoff }
+  return { sessions: sessions.size, checked: candidates.length, deleted, reconciled, bytesReleased, incompleteUploadsDeleted, skippedActive, cutoff }
 }
 
 const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
-const getAssetById = async (organizationId: string, assetId: string) => { const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId }).lean(); if (!asset) throw new ApiError(404, 'Asset not found'); return asset }
+const getAssetById = async (organizationId: string, assetId: string) => {
+  const asset: any = await WebsiteAsset.findOne({ _id: assetId, organizationId }).lean()
+  if (!asset) throw new ApiError(404, 'Asset not found')
+  if (asset.context === 'property-draft' && asset.uploadSessionId) {
+    await touchPropertyDraftSession(organizationId, String(asset.uploadSessionId))
+  }
+  return asset
+}
 const assetIsReferenced = async (organizationId: string, asset: any) => {
   const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
   const [pages, properties] = await Promise.all([
@@ -716,7 +795,7 @@ const deleteAsset = async (organizationId: string, assetId: string, allowReferen
 }
 
 const cleanupOrphanAssets = async (limit = 100) => {
-  const expiredIntents = await WebsiteUploadIntent.find({ status: 'pending', expiresAt: { $lte: new Date() } }).sort({ expiresAt: 1 }).limit(limit)
+  const expiredIntents = await WebsiteUploadIntent.find({ status: { $in: ['pending', 'cancelled'] }, expiresAt: { $lte: new Date() } }).sort({ expiresAt: 1 }).limit(limit)
   let incompleteDeleted = 0
   for (const intent of expiredIntents) {
     const registered = await WebsiteAsset.exists({ organizationId: intent.organizationId, key: intent.key })
@@ -726,7 +805,7 @@ const cleanupOrphanAssets = async (limit = 100) => {
     }
     await intent.deleteOne()
   }
-  const candidates = await WebsiteAsset.find({ createdAt: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60_000) } }).sort({ createdAt: 1 }).limit(limit)
+  const candidates = await WebsiteAsset.find({ context: { $ne: 'property-draft' }, createdAt: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60_000) } }).sort({ createdAt: 1 }).limit(limit)
   let deleted = 0
   for (const asset of candidates) {
     const referenced = await assetIsReferenced(asset.organizationId, asset)
@@ -826,4 +905,4 @@ const getPropertyShareCard = async (identifier: string, propertyId: string) => {
 }
 
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, getPropertyDraftSession, touchPropertyDraftSession, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }

@@ -23,7 +23,7 @@ let WebsiteAsset: any
 let WebsiteBuilderService: any
 const organizationId = 'phase10-draft-assets'
 
-const createDraftAsset = async (sessionId: string, suffix: string, createdAt = new Date(), size = 1500) => {
+const createDraftAsset = async (sessionId: string, suffix: string, createdAt = new Date(), size = 1500, lastReferencedAt?: Date) => {
   const now = new Date()
   const result = await WebsiteAsset.collection.insertOne({
     organizationId,
@@ -37,6 +37,7 @@ const createDraftAsset = async (sessionId: string, suffix: string, createdAt = n
     status: 'ready',
     variants: [],
     createdAt,
+    lastReferencedAt: lastReferencedAt || createdAt,
     updatedAt: now,
   })
   return String(result.insertedId)
@@ -112,4 +113,30 @@ suite('Phase 10 property draft asset lifecycle integration', () => {
     const org = await Organization.findOne({ organizationId }).lean()
     expect(org.storageUsedBytes).toBe(2500)
   })
+
+  it('activity-based cleanup preserves an old draft session that was recently touched', async () => {
+    removedKeys.length = 0
+    const sessionId = '33333333-3333-4333-8333-333333333333'
+    const old = new Date(Date.now() - 2 * 60 * 60_000)
+    const recent = new Date()
+    const assetId = await createDraftAsset(sessionId, 'recently-touched', old, 600, recent)
+    const result = await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
+    expect(result.skippedActive).toBeGreaterThanOrEqual(0)
+    expect(await WebsiteAsset.exists({ _id: assetId })).toBeTruthy()
+    expect(removedKeys.some((key) => key.includes('recently-touched.jpg'))).toBe(false)
+  })
+
+  it('touch refreshes the entire tenant-scoped draft session activity timestamp', async () => {
+    const sessionId = '44444444-4444-4444-8444-444444444444'
+    const old = new Date(Date.now() - 2 * 60 * 60_000)
+    const firstId = await createDraftAsset(sessionId, 'touch-first', old, 200, old)
+    const secondId = await createDraftAsset(sessionId, 'touch-second', old, 200, old)
+    const before = Date.now()
+    const touched = await WebsiteBuilderService.touchPropertyDraftSession(organizationId, sessionId)
+    expect(touched.assets).toBe(2)
+    const rows = await WebsiteAsset.find({ _id: { $in: [firstId, secondId] } }).lean()
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row: any) => new Date(row.lastReferencedAt).getTime() >= before)).toBe(true)
+  })
+
 })
