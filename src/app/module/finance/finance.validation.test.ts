@@ -84,4 +84,23 @@ describe('invoice field-level validation', () => {
       expect(paths).toContain('body.lineItems.0.unitPrice')
     }
   })
+
+  it('rejects non-finite invoice quantity, rate and discount values', () => {
+    const invalidQuantity = FinanceValidation.createInvoice.safeParse({ body: { ...base, lineItems: [{ description: 'Brokerage service', quantity: 'abc', unitPrice: 50000 }] } })
+    const invalidRate = FinanceValidation.createInvoice.safeParse({ body: { ...base, lineItems: [{ description: 'Brokerage service', quantity: 1, unitPrice: 'Infinity' }] } })
+    const invalidDiscount = FinanceValidation.createInvoice.safeParse({ body: { ...base, discount: 'Infinity' } })
+    expect(invalidQuantity.success).toBe(false)
+    expect(invalidRate.success).toBe(false)
+    expect(invalidDiscount.success).toBe(false)
+  })
+
+  it('uses two-decimal line rounding when validating discount against subtotal', () => {
+    const parsed = FinanceValidation.createInvoice.safeParse({ body: {
+      ...base,
+      lineItems: [{ description: 'Fractional fee', quantity: 1, unitPrice: 0.005 }],
+      discount: 0.01,
+    } })
+    expect(parsed.success).toBe(true)
+  })
+
 })

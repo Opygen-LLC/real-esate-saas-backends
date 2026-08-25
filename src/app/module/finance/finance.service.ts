@@ -20,6 +20,7 @@ import {
   IFinanceTransaction,
   IFinanceVendor,
 } from './finance.interface'
+import { calculateInvoiceMoney, FinanceMoneyValidationError, moneyFromMinorUnits, moneyToMinorUnits } from './finance.money'
 import {
   FinanceBudget,
   FinanceCommission,
@@ -186,14 +187,21 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
 }
 
 const calculateInvoiceAmounts = (lineItems: IFinanceInvoiceLineItem[], discount = 0) => {
-  const normalized = lineItems.map((item) => {
-    const quantity = Number(item.quantity); const unitPrice = Number(item.unitPrice)
-    return { description: item.description.trim(), quantity, unitPrice, amount: Number((quantity * unitPrice).toFixed(2)) }
-  })
-  const subtotal = Number(normalized.reduce((sum, item) => sum + item.amount, 0).toFixed(2))
-  const safeDiscount = Number(discount || 0)
-  if (safeDiscount > subtotal) throw financeFieldError('discount', 'Discount cannot exceed subtotal')
-  return { lineItems: normalized, subtotal, discount: safeDiscount, total: Number((subtotal - safeDiscount).toFixed(2)) }
+  try {
+    return calculateInvoiceMoney(lineItems, discount)
+  } catch (error) {
+    if (error instanceof FinanceMoneyValidationError) throw financeFieldError(error.field, error.message)
+    throw error
+  }
+}
+
+const invoiceMoneyMinorUnits = (value: number, field: string) => {
+  try {
+    return moneyToMinorUnits(value, field)
+  } catch (error) {
+    if (error instanceof FinanceMoneyValidationError) throw financeFieldError(error.field, error.message)
+    throw error
+  }
 }
 
 const refreshOverdueInvoices = async (organizationId: string) => {
@@ -366,15 +374,21 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     const invoice: any = await invoiceQuery
     if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
     if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
-    const amountPaid = Number(payload.amount)
-    const outstanding = Number((invoice.total - invoice.paidAmount).toFixed(2))
-    if (amountPaid > outstanding + 0.001) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${outstanding.toFixed(2)}`)
+    const amountPaidNumber = Number(payload.amount)
+    if (!Number.isFinite(amountPaidNumber) || amountPaidNumber <= 0) throw financeFieldError('amount', 'Enter a valid positive payment amount')
+    const amountPaidMinor = invoiceMoneyMinorUnits(amountPaidNumber, 'amount')
+    const totalMinor = invoiceMoneyMinorUnits(Number(invoice.total || 0), 'amount')
+    const paidMinor = invoiceMoneyMinorUnits(Number(invoice.paidAmount || 0), 'amount')
+    const outstandingMinor = Math.max(0, totalMinor - paidMinor)
+    if (amountPaidMinor > outstandingMinor) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${moneyFromMinorUnits(outstandingMinor).toFixed(2)}`)
+    const amountPaid = moneyFromMinorUnits(amountPaidMinor)
     const paidAt = asDate(payload.paidAt)
     const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, propertyId: invoice.propertyId || undefined, leadId: invoice.leadId || undefined, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
     const transaction = transactionDocs[0]
     invoice.payments.push({ amount: amountPaid, paidAt, paymentMethod: payload.paymentMethod, reference: payload.reference || '', notes: payload.notes || '', recordedBy: actorObjectId(actor.id), transactionId: transaction._id })
-    invoice.paidAmount = Number((invoice.paidAmount + amountPaid).toFixed(2))
-    invoice.status = invoice.paidAmount >= invoice.total ? 'paid' : 'partial'
+    const nextPaidMinor = paidMinor + amountPaidMinor
+    invoice.paidAmount = moneyFromMinorUnits(nextPaidMinor)
+    invoice.status = nextPaidMinor >= totalMinor ? 'paid' : 'partial'
     invoice.updatedBy = actorObjectId(actor.id)
     await invoice.save(session ? { session } : undefined)
     await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
