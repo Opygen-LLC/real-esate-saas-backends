@@ -228,17 +228,24 @@ const assertDraftSessionId = (value?: string) => {
   return value
 }
 
-const touchPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
+const touchPropertyDraftSession = async (
+  organizationId: string,
+  uploadSessionId: string,
+  session?: ClientSession | null,
+) => {
   assertDraftSessionId(uploadSessionId)
   const touchedAt = new Date()
+  const options = session ? { session } : undefined
   const [assets, intents] = await Promise.all([
     WebsiteAsset.updateMany(
       { organizationId, context: 'property-draft', uploadSessionId, claimed: false },
       { $set: { lastReferencedAt: touchedAt } },
+      options,
     ),
     WebsiteUploadIntent.updateMany(
       { organizationId, context: 'property-draft', uploadSessionId, status: { $in: ['pending', 'completed'] } },
       { $set: { lastReferencedAt: touchedAt } },
+      options,
     ),
   ])
   return {
@@ -521,7 +528,10 @@ const validatePropertyDraftAssets = async (
   existingPropertyId?: string,
 ) => {
   assertDraftSessionId(uploadSessionId)
-  await touchPropertyDraftSession(organizationId, uploadSessionId)
+  // Keep the draft heartbeat in the same Mongo transaction as validation/claiming.
+  // Updating these documents outside the session after the transaction has read
+  // them can cause a write-conflict/retry loop and surface as a gateway 502.
+  await touchPropertyDraftSession(organizationId, uploadSessionId, session)
   if (existingPropertyId && !Types.ObjectId.isValid(existingPropertyId)) throw new ApiError(400, 'Property ID is invalid')
 
   const managedRefs = images.filter((image) => image.assetId || (image.publicId && image.publicId.startsWith(`tenants/${organizationId}/`)))
