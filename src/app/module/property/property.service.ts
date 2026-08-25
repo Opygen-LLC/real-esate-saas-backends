@@ -180,7 +180,7 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
 
   if (searchTerm) {
     andConditions.push({
-      $or: ['title', 'description', 'address', 'city', 'state', 'bangladeshAddress.postalCode'].map((field) => ({
+      $or: ['title', 'slug', 'description', 'address', 'city', 'state', 'bangladeshAddress.postalCode'].map((field) => ({
         [field]: { $regex: searchTerm, $options: 'i' },
       })),
     })

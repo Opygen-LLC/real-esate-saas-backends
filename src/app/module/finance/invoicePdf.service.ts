@@ -78,6 +78,12 @@ const renderInvoiceHtml = (invoice: any, organization: any) => {
       </tr>`).join('')
     : '<tr><td colspan="4" class="muted center">No payments recorded</td></tr>'
   const cancelled = invoice.status === 'cancelled'
+  const property = invoice.propertyId && typeof invoice.propertyId === 'object' ? invoice.propertyId : null
+  const propertyAddress = property
+    ? [property.address, property.city, property.state].filter(Boolean).join(', ') ||
+      [property.bangladeshAddress?.area, property.bangladeshAddress?.upazila, property.bangladeshAddress?.district].filter(Boolean).join(', ')
+    : ''
+  const propertyListing = property?.listingType === 'ForSale' ? 'For Sale' : property?.listingType === 'ForRent' ? 'For Rent' : property?.listingType === 'ForLease' ? 'For Lease' : property?.listingType || ''
   return `<!doctype html>
 <html><head><meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'self' data:; img-src data:" />
@@ -136,6 +142,7 @@ ${cancelled ? '<div class="watermark">VOID</div>' : ''}
     <div style="margin-top:8px"><span class="label">Due date</span><div class="value">${date(invoice.dueDate)}</div></div>
   </div>
 </section>
+${property ? `<section class="section"><div class="section-title">Property</div><div class="note"><div class="value">${escapeHtml(property.title || 'Linked property')}</div>${propertyAddress ? `<div class="muted">${escapeHtml(propertyAddress)}</div>` : ''}<div class="muted" style="margin-top:4px">Reference: ${escapeHtml(property.slug || String(property._id || '—'))}${propertyListing ? ` · ${escapeHtml(propertyListing)}` : ''}${property.status ? ` · ${escapeHtml(property.status)}` : ''}${Number.isFinite(Number(property.price)) ? ` · ${amount(property.price)}` : ''}</div></div></section>` : ''}
 <table>
 <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
 <tbody>${lineRows}</tbody>
@@ -148,7 +155,7 @@ ${cancelled ? '<div class="watermark">VOID</div>' : ''}
   <div class="row balance"><span>Outstanding</span><strong>${amount(outstanding)}</strong></div>
 </div>
 <section class="section">
-  <div class="section-title">Payment history</div>
+  <div class="section-title">Payment history${property ? ` · ${escapeHtml(property.title || property.slug || 'Property')}` : ''}</div>
   <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead><tbody>${paymentRows}</tbody></table>
 </section>
 ${invoice.cancelReason ? `<section class="section"><div class="section-title">Void reason</div><div class="note">${multiline(invoice.cancelReason)}</div></section>` : ''}

@@ -9,6 +9,7 @@ let FinanceTransaction: any
 let AuditEvent: any
 let User: any
 let Organization: any
+let Property: any
 let organizationId = ''
 let actor: any
 
@@ -39,6 +40,7 @@ suite('phase 5 finance billing lifecycle', () => {
     ;({ AuditEvent } = await import('../../app/module/audit/audit.model'))
     ;({ User } = await import('../../app/module/user/user.model'))
     ;({ Organization } = await import('../../app/module/organization/organization.model'))
+    ;({ Property } = await import('../../app/module/property/property.model'))
 
     organizationId = 'org_phase5_finance'
     const owner = await User.create({
@@ -122,4 +124,67 @@ suite('phase 5 finance billing lifecycle', () => {
     const paymentAudit = await AuditEvent.findOne({ organizationId, entityId: String(sent._id), action: 'finance.invoice.payment_recorded' }).lean()
     expect(paymentAudit?.metadata?.reference).toBe('BANK-PHASE5-001')
   })
+  it('links only same-organization properties and carries property context into payments and audit history', async () => {
+    const ownProperty = await Property.create({
+      organizationId,
+      title: 'Gulshan Lake Residence',
+      slug: 'gulshan-lake-residence',
+      propertyType: 'Apartment',
+      listingType: 'ForSale',
+      status: 'Available',
+      price: 32000000,
+      currency: 'BDT',
+      areaUnit: 'sqft',
+      address: 'Road 52, Gulshan 2',
+      city: 'Dhaka',
+      images: [],
+      amenities: [],
+      views: 0,
+    })
+    const foreignProperty = await Property.create({
+      organizationId: 'org_foreign_finance',
+      title: 'Foreign Property',
+      slug: 'foreign-property',
+      propertyType: 'Apartment',
+      listingType: 'ForSale',
+      status: 'Available',
+      price: 1000000,
+      currency: 'BDT',
+      areaUnit: 'sqft',
+      images: [],
+      amenities: [],
+      views: 0,
+    })
+
+    await expect(FinanceService.createInvoice(organizationId, actor, {
+      ...invoicePayload('sent'),
+      propertyId: String(foreignProperty._id),
+    })).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+      fieldErrors: { propertyId: ['This property does not belong to your organization.'] },
+    })
+
+    const linked = await FinanceService.createInvoice(organizationId, actor, {
+      ...invoicePayload('sent'),
+      propertyId: String(ownProperty._id),
+    })
+    expect(linked.propertyId?._id?.toString()).toBe(String(ownProperty._id))
+    expect(linked.propertyId?.title).toBe('Gulshan Lake Residence')
+    expect(linked.propertyId?.slug).toBe('gulshan-lake-residence')
+
+    await FinanceService.recordInvoicePayment(organizationId, actor, String(linked._id), {
+      amount: 10000,
+      paidAt: new Date(),
+      paymentMethod: 'bank',
+      reference: 'PROPERTY-LINK-PAYMENT',
+    })
+    const paymentTransaction = await FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', sourceId: linked._id }).lean()
+    expect(paymentTransaction?.propertyId?.toString()).toBe(String(ownProperty._id))
+
+    const createdAudit = await AuditEvent.findOne({ organizationId, entityId: String(linked._id), action: 'finance.invoice.created' }).lean()
+    expect(createdAudit?.metadata?.propertyId).toBe(String(ownProperty._id))
+    expect(createdAudit?.metadata?.propertyReference).toBe('gulshan-lake-residence')
+  })
+
 })

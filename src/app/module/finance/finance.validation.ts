@@ -66,7 +66,7 @@ const createInvoice = z.object({ body: z.object({
   }
   const subtotal = value.lineItems.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0)
   if (Number(value.discount || 0) > subtotal) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed invoice subtotal' })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed subtotal' })
   }
 }) })
 

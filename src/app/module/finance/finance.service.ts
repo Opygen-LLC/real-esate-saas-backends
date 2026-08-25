@@ -9,6 +9,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Organization } from '../organization/organization.model'
+import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
 import {
@@ -191,7 +192,7 @@ const calculateInvoiceAmounts = (lineItems: IFinanceInvoiceLineItem[], discount 
   })
   const subtotal = Number(normalized.reduce((sum, item) => sum + item.amount, 0).toFixed(2))
   const safeDiscount = Number(discount || 0)
-  if (safeDiscount > subtotal) throw financeFieldError('discount', 'Discount cannot exceed invoice subtotal')
+  if (safeDiscount > subtotal) throw financeFieldError('discount', 'Discount cannot exceed subtotal')
   return { lineItems: normalized, subtotal, discount: safeDiscount, total: Number((subtotal - safeDiscount).toFixed(2)) }
 }
 
@@ -204,8 +205,10 @@ const refreshOverdueInvoices = async (organizationId: string) => {
   }, { $set: { status: 'overdue' } })
 }
 
+const INVOICE_PROPERTY_SELECT = 'title slug address city state status listingType price currency bangladeshAddress'
+
 const invoicePopulate = (query: any) => query
-  .populate('propertyId', 'title')
+  .populate('propertyId', INVOICE_PROPERTY_SELECT)
   .populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } })
   .populate('createdBy', 'name email')
   .populate('updatedBy', 'name email')
@@ -216,15 +219,36 @@ const validateInvoiceDates = (issueDate: Date, dueDate?: Date | null) => {
   if (dueDate && dueDate.getTime() < issueDate.getTime()) throw financeFieldError('dueDate', 'Due date cannot be before the issue date')
 }
 
+const resolveInvoiceProperty = async (organizationId: string, value: unknown) => {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value !== 'string' || !mongoose.isValidObjectId(value)) {
+    throw financeFieldError('propertyId', 'Select a valid property')
+  }
+  const property = await Property.findOne({ _id: value, organizationId })
+    .select(INVOICE_PROPERTY_SELECT)
+    .lean()
+  if (!property) {
+    throw financeFieldError('propertyId', 'This property does not belong to your organization.')
+  }
+  return property
+}
+
+const propertyAuditMetadata = (property: any) => property ? {
+  propertyId: String(property._id),
+  propertyTitle: property.title || '',
+  propertyReference: property.slug || '',
+} : { propertyId: null }
+
 const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
   const amounts = calculateInvoiceAmounts(payload.lineItems || [], Number(payload.discount || 0))
   const issueDate = asDate(payload.issueDate)
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
+  const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
   const result = await FinanceInvoice.create({
     ...payload,
     ...amounts,
-    propertyId: cleanOptionalId(payload.propertyId), leadId: cleanOptionalId(payload.leadId),
+    propertyId: property?._id, leadId: cleanOptionalId(payload.leadId),
     dueDate, issueDate,
     invoiceNumber: makeNumber('INV'),
     paidAmount: 0, payments: [], currency: 'BDT',
@@ -233,9 +257,9 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   })
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency }),
+    invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency, ...propertyAuditMetadata(property) }),
   ])
-  return result
+  return invoicePopulate(FinanceInvoice.findById(result._id)).lean()
 }
 
 const listInvoices = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
@@ -251,7 +275,7 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceInvoice.find(where).select('-payments').populate('propertyId', 'title').populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
+    FinanceInvoice.find(where).select('-payments').populate('propertyId', INVOICE_PROPERTY_SELECT).populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
     FinanceInvoice.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
@@ -283,14 +307,19 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
   if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
   if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
-  if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
+  let property: any = undefined
+  if ('propertyId' in payload) {
+    property = await resolveInvoiceProperty(organizationId, payload.propertyId)
+    update.propertyId = property?._id || null
+  }
   if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
   validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
 
   const result: any = await invoicePopulate(FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }))
+  const auditProperty = 'propertyId' in payload ? property : result?.propertyId
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: keys, financialFieldsChanged: amountFieldsChanged }),
+    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: keys, financialFieldsChanged: amountFieldsChanged, ...propertyAuditMetadata(auditProperty) }),
   ])
   return result
 }
@@ -309,7 +338,7 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
   await invoice.save()
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total }),
+    invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
   ])
   return invoicePopulate(FinanceInvoice.findById(id)).lean()
 }
@@ -325,7 +354,7 @@ const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorCo
   await invoice.save()
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Draft invoice ${invoice.invoiceNumber} archived`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber }),
+    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
   ])
   return { _id: invoice._id, invoiceNumber: invoice.invoiceNumber, archivedAt: invoice.archivedAt }
 }
@@ -341,14 +370,14 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     const outstanding = Number((invoice.total - invoice.paidAmount).toFixed(2))
     if (amountPaid > outstanding + 0.001) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${outstanding.toFixed(2)}`)
     const paidAt = asDate(payload.paidAt)
-    const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
+    const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, propertyId: invoice.propertyId || undefined, leadId: invoice.leadId || undefined, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
     const transaction = transactionDocs[0]
     invoice.payments.push({ amount: amountPaid, paidAt, paymentMethod: payload.paymentMethod, reference: payload.reference || '', notes: payload.notes || '', recordedBy: actorObjectId(actor.id), transactionId: transaction._id })
     invoice.paidAmount = Number((invoice.paidAmount + amountPaid).toFixed(2))
     invoice.status = invoice.paidAmount >= invoice.total ? 'paid' : 'partial'
     invoice.updatedBy = actorObjectId(actor.id)
     await invoice.save(session ? { session } : undefined)
-    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), status: invoice.status }, session)
+    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
     return invoice.invoiceNumber
   })
   await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
@@ -362,7 +391,7 @@ const renderInvoiceDocument = async (organizationId: string, actor: FinanceActor
   ])
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const pdf = await renderInvoicePdf(invoice, organization)
-  await invoiceAudit(organizationId, actor, 'finance.invoice.pdf_downloaded', id, 'Invoice PDF downloaded', { invoiceNumber: invoice.invoiceNumber, status: invoice.status })
+  await invoiceAudit(organizationId, actor, 'finance.invoice.pdf_downloaded', id, 'Invoice PDF downloaded', { invoiceNumber: invoice.invoiceNumber, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId._id || invoice.propertyId) : null, propertyReference: invoice.propertyId?.slug || '' })
   return { pdf, filename: `${invoice.invoiceNumber}.pdf` }
 }
 
@@ -565,7 +594,7 @@ const getOverview = async (organizationId: string, query: Record<string, unknown
 
 const getReports = async (organizationId: string, query: Record<string, unknown>) => {
   const { startDate, endDate } = resolveDateRange(query, true)
-  const [summary, monthlyTrend, expenseByCategory, incomeByCategory, vendorSpendRows, commissionByStatus, paymentMethods, budgetRows] = await Promise.all([
+  const [summary, monthlyTrend, expenseByCategory, incomeByCategory, vendorSpendRows, commissionByStatus, paymentMethods, propertyInvoiceRows, budgetRows] = await Promise.all([
     getSummary(organizationId, startDate, endDate),
     aggregateTrend(organizationId, startDate, endDate),
     aggregateCategory(organizationId, 'expense', startDate, endDate),
@@ -573,16 +602,23 @@ const getReports = async (organizationId: string, query: Record<string, unknown>
     FinanceTransaction.aggregate([{ $match: { organizationId, type: 'expense', status: 'paid', vendorId: { $ne: null }, transactionDate: dateCondition(startDate, endDate) } }, { $group: { _id: '$vendorId', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }, { $limit: 20 }]),
     FinanceCommission.aggregate([{ $match: { organizationId, ...(startDate || endDate ? { createdAt: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$status', commissionAmount: { $sum: '$commissionAmount' }, agentShare: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' }, count: { $sum: 1 } } }]),
     FinanceTransaction.aggregate([{ $match: { organizationId, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$paymentMethod', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }]),
+    FinanceInvoice.aggregate([{ $match: { organizationId, archivedAt: null, propertyId: { $ne: null }, status: { $nin: ['cancelled', 'draft'] }, ...(startDate || endDate ? { issueDate: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$propertyId', invoiced: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, count: { $sum: 1 } } }, { $addFields: { outstanding: { $subtract: ['$invoiced', '$paid'] } } }, { $sort: { invoiced: -1 } }, { $limit: 12 }]),
     FinanceBudget.find({ organizationId, status: 'active', ...(startDate || endDate ? { $and: [{ endDate: { $gte: startDate || new Date(0) } }, { startDate: { $lte: endDate || new Date(8640000000000000) } }] } : {}) }).sort({ startDate: 1 }).limit(100).lean(),
   ])
   const vendorIds = vendorSpendRows.map((row) => row._id).filter(Boolean)
-  const vendors = vendorIds.length ? await FinanceVendor.find({ organizationId, _id: { $in: vendorIds } }).select('name category').lean() : []
+  const propertyIds = propertyInvoiceRows.map((row) => row._id).filter(Boolean)
+  const [vendors, properties] = await Promise.all([
+    vendorIds.length ? FinanceVendor.find({ organizationId, _id: { $in: vendorIds } }).select('name category').lean() : [],
+    propertyIds.length ? Property.find({ organizationId, _id: { $in: propertyIds } }).select(INVOICE_PROPERTY_SELECT).lean() : [],
+  ])
   const vendorMap = new Map<string, any>(vendors.map((vendor: any) => [String(vendor._id), vendor]))
+  const propertyMap = new Map<string, any>(properties.map((property: any) => [String(property._id), property]))
   return {
     range: { startDate, endDate }, summary, monthlyTrend, expenseByCategory, incomeByCategory,
     vendorSpend: vendorSpendRows.map((row) => ({ vendorId: row._id, vendorName: vendorMap.get(String(row._id))?.name || 'Unknown vendor', category: vendorMap.get(String(row._id))?.category || '', amount: row.amount, count: row.count })),
     commissions: commissionByStatus.map((row) => ({ status: row._id, commissionAmount: row.commissionAmount, agentShare: row.agentShare, companyShare: row.companyShare, count: row.count })),
     paymentMethods: paymentMethods.map((row) => ({ method: row._id, amount: row.amount, count: row.count })),
+    propertyInvoices: propertyInvoiceRows.map((row) => { const property = propertyMap.get(String(row._id)); return { propertyId: String(row._id), propertyTitle: property?.title || 'Unavailable property', propertyReference: property?.slug || '', address: property?.address || property?.city || '', invoiced: row.invoiced, paid: row.paid, outstanding: row.outstanding, count: row.count } }),
     budgets: await enrichBudgets(organizationId, budgetRows),
   }
 }
