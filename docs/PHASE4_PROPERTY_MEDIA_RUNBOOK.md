@@ -1,43 +1,63 @@
-# Phase 4 — Property Media 2.0 deployment runbook
+# Property Media deployment runbook — Google Cloud Storage
 
-Phase 4 replaces legacy `videos: string[]` property media with server-normalized structured media, enforces a 20-photo gallery, makes object storage and malware scanning production readiness dependencies, and removes fabricated property/legal fallback data from the frontend.
+Property media uses one canonical object-storage provider: **Google Cloud Storage (GCS)**. Property photos, website-builder media and other managed media must use the existing `ObjectStorageService`; production and CI must not introduce a second S3/MinIO media path.
 
-## 1. Before deployment
+## 1. Required production configuration
 
-1. Back up MongoDB and the existing object/media store.
-2. Keep the application on Phase 3 while preparing the media services.
-3. Copy `.env.example` to your production secret-management system and replace every `replace-with-*` value.
-4. In particular configure:
-   - `OBJECT_STORAGE_BUCKET`
-   - `OBJECT_STORAGE_REGION`
-   - `OBJECT_STORAGE_ENDPOINT` — public HTTPS hostname reachable by browsers
-   - `OBJECT_STORAGE_INTERNAL_ENDPOINT` — API-to-storage address; Compose overrides this to `http://minio:9000`
-   - `OBJECT_STORAGE_ACCESS_KEY_ID`
-   - `OBJECT_STORAGE_SECRET_ACCESS_KEY`
-   - `OBJECT_STORAGE_PUBLIC_BASE_URL` — full public object prefix; with path-style MinIO include `/<bucket>`
-   - `OBJECT_STORAGE_BROWSER_ORIGIN` — `https://realestate.opygen.com` for dashboard uploads
-   - `OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT=true` when the API must use a private/internal storage address
-   - `CLAMAV_HOST` / `CLAMAV_PORT`
-5. Do not expose ClamAV port 3310 publicly. The production Compose network keeps it private to the API.
+Configure these canonical variables in the production secret/environment manager:
 
-## 2. Object-storage hostname
+- `GCP_PROJECT_ID` — Google Cloud project that owns the media bucket.
+- `GCP_BUCKET_NAME` — GCS bucket used by the application.
+- `GCP_KEY_FILE` — optional service-account JSON path. Prefer Application Default Credentials on GCE/GKE/Cloud Run when available.
+- `OBJECT_STORAGE_PUBLIC_BASE_URL` — optional HTTPS public prefix. If omitted, the server derives `https://storage.googleapis.com/<GCP_BUCKET_NAME>`.
+- `OBJECT_STORAGE_BROWSER_ORIGIN` — dashboard origin, normally `https://realestate.opygen.com`.
+- `OBJECT_STORAGE_SIGNED_URL_TTL` — signed upload URL lifetime; default is 600 seconds.
+- `CLAMAV_HOST` / `CLAMAV_PORT` when ClamAV is the configured malware-scanning path.
 
-The included production Compose binds MinIO only to loopback:
+Legacy `PROJECTS_ID`, `BUCKET_NAME` and `KEYFILENAME` aliases remain readable only for rolling-deployment compatibility. Do not add `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_INTERNAL_ENDPOINT`, MinIO credentials or S3 credentials to new deployments.
 
-- API: `127.0.0.1:9000`
-- Console: `127.0.0.1:9001`
+## 2. Configure bucket CORS
 
-Reverse-proxy `https://media.realestate.opygen.com` to `http://127.0.0.1:9000` without rewriting the path. An Nginx example is included at `ops/nginx-media.conf.example`.
+The browser uploads directly to signed GCS URLs, so the bucket must allow the dashboard origin to use `PUT`, `GET` and `HEAD`.
 
-The browser-facing hostname must match `OBJECT_STORAGE_ENDPOINT`; changing the host after a presigned URL is issued invalidates its signature.
+The repository contains the canonical policy at:
 
-`ops/minio-cors.xml` permits the central dashboard origin to PUT directly to object storage and GET/HEAD stored media. If the production dashboard origin changes, update that file before starting `minio-init`.
+```text
+ops/gcs-cors.json
+```
 
-## 3. Start and verify media dependencies
+Apply it with Google Cloud CLI:
 
-Start the production stack using your normal Compose deployment. `minio-init` creates the bucket, enables public download for stored website media, and applies bucket CORS. ClamAV runs with a persistent signature database volume.
+```bash
+gcloud storage buckets update gs://$GCP_BUCKET_NAME --cors-file=ops/gcs-cors.json
+```
 
-Before migrating property documents, verify API readiness:
+Verify the active configuration:
+
+```bash
+gcloud storage buckets describe gs://$GCP_BUCKET_NAME --format='default(cors_config)'
+```
+
+Do not use wildcard browser origins in production unless there is an explicit security requirement and review.
+
+## 3. Authentication
+
+Preferred order:
+
+1. Application Default Credentials from the Google runtime/service account.
+2. A least-privilege service-account key mounted into the API container and referenced by `GCP_KEY_FILE`.
+
+The service account must be able to create/read/delete application objects, inspect bucket metadata/CORS, and sign URLs. Never expose the service-account JSON file to the frontend or place its contents in client environment variables.
+
+## 4. Production Compose behavior
+
+`docker-compose.production.yml` starts the API and reverse proxy only. It no longer starts MinIO or a MinIO initialization container. The API talks directly to GCS through `@google-cloud/storage`.
+
+The existing mounted Google credential file remains supported for the current deployment. If the host is moved to a Google-managed runtime with ADC, remove the key-file mount as part of that deployment change and leave `GCP_KEY_FILE` unset.
+
+## 5. Readiness verification
+
+After deployment run:
 
 ```bash
 pnpm verify:media
@@ -49,76 +69,47 @@ Or inspect:
 curl -fsS https://api.faysaldev.com/ready
 ```
 
-Production readiness must report all of the following:
+The object-storage dependency must report:
 
-- `dependencies.objectStorage.configured: true`
-- `dependencies.objectStorage.healthy: true`
-- `dependencies.objectStorage.browserCors.healthy: true`
-- PUT, GET and HEAD CORS probes are healthy for `https://realestate.opygen.com` with `Content-Type` allowed
-- `dependencies.clamav.healthy: true`
+- `provider: "gcs"`
+- `configured: true`
+- `healthy: true`
+- the expected `projectId`
+- the expected `bucket`
+- `browserCors.healthy: true`
+- required CORS methods containing `PUT`, `GET` and `HEAD`
 
-If object storage, its browser CORS policy, or ClamAV is unavailable, `/ready` returns 503 in production. Production also fails at startup when required object-storage configuration is missing, so fix environment configuration before restarting the API.
+The verifier also checks the configured malware-scanning dependency because property assets are not allowed to become usable before the security-processing lifecycle completes.
 
-## 4. Dry-run the property-media migration
+## 6. Property image contract
 
-The migration is intentionally dry-run by default:
+Do not change the property image API shape when changing upload timing. Property create/update continues to receive structured metadata such as:
 
-```bash
-pnpm migrate:phase-4-media
+```ts
+{
+  assetId?: string
+  url: string
+  publicId?: string
+  caption?: string
+  isFeatured?: boolean
+  order?: number
+}
 ```
 
-Review the affected-document count. The migration covers:
-
-- legacy `videos` fields
-- existing `mediaLinks`
-- galleries over 20 photos
-- galleries with multiple featured photos
-
-Invalid legacy hosted-media URLs are backed up and dropped rather than being converted into unsafe embeds.
-
-## 5. Apply the migration
-
-Use a write-disabled maintenance window so an old application instance cannot write legacy property media while the migration runs.
-
-```bash
-pnpm migrate:phase-4-media -- --apply --confirm=APPLY_PROPERTY_MEDIA_2
-```
-
-The migration writes document backups and a manifest under `MIGRATION_BACKUP_DIR` before changing data. It then verifies:
-
-- zero remaining legacy `videos` fields
-- zero galleries over 20 photos
-- zero galleries with more than one featured image
-
-Keep the backup and manifest with the release record.
-
-## 6. Deploy Phase 4 application code
-
-Deploy backend and frontend together after migration verification.
-
-Important behavior after deployment:
-
-- browser file uploads use presigned object-storage PUT URLs
-- URL image import is downloaded by the API, checked for public HTTPS/SSRF safety, validated, stored internally, and scanned
-- photos remain unavailable to property editors until their asset scan is `ready`
-- properties accept at most 20 photos and 10 hosted media links
-- YouTube, Vimeo, Matterport, and Kuula embed URLs are generated only by the backend
-- arbitrary HTTPS media hosts are external links and cannot be selected as hero embeds
-- one hosted media item can be the hero; public details fall back to the featured/first photo when hero media is unavailable
+Raw `File`, `Blob`, base64 image data and multipart file content must never be embedded in the property create/update JSON payload. Draft assets remain tied to `propertyDraftSessionId` and are validated/claimed by the existing property-draft asset lifecycle.
 
 ## 7. Post-deployment checks
 
-1. Upload JPG, PNG, WebP and AVIF files.
-2. Verify a 21st photo is rejected in both the UI and API.
-3. Import a public HTTPS image URL and verify the returned URL points at your own media hostname.
-4. Confirm private/loopback image URLs are rejected.
-5. Add one URL for each supported provider: YouTube, Vimeo, Matterport and Kuula.
-6. Set each supported item as hero and confirm only one remains selected.
-7. Add an arbitrary HTTPS hosted-media URL and confirm it opens externally instead of rendering in an iframe.
-8. Temporarily use an invalid/unavailable hero media item and confirm the property page remains usable with a property photo fallback.
-9. Open `/dashboard/admin/properties/add` at 320, 375 and 430 px, then tablet, laptop and desktop widths. Verify the six-step wizard scrolls horizontally only on narrow screens, form padding stays compact, footer actions remain full-width/tappable on phones, and media/URL controls never cause page overflow.
-10. Open a property with missing specs/legal fields and confirm the UI displays `—`/not-provided states instead of invented values or verification claims.
+1. Verify `/ready` reports the intended GCS project and bucket.
+2. Upload JPG/JPEG, PNG, WebP and AVIF property photos.
+3. Confirm a 21st photo is rejected in both UI and API.
+4. Confirm browser uploads work from `https://realestate.opygen.com` without CORS errors.
+5. Confirm an unapproved browser origin cannot use the bucket CORS policy.
+6. Import an HTTPS image URL and confirm the normalized asset URL points to the configured GCS public prefix.
+7. Confirm malware/security processing reaches `ready` before an asset can be claimed by a property.
+8. Confirm draft cleanup and property deletion remove the corresponding GCS objects and storage accounting is reconciled.
+9. Run `pnpm verify:media` as part of release verification.
 
 ## Rollback
 
-Application rollback requires restoring the Phase 3 application **and** restoring the affected property documents from the Phase 4 migration backup, because Phase 3 still understands the legacy `videos` field while Phase 4 removes it. Do not attempt a code-only rollback after the migration has been applied.
+Rolling back application code does not require switching object-storage providers. GCS remains authoritative. If a deployment fails, restore the previous API/frontend build while preserving the same GCS bucket, credentials and property-media records. Do not re-enable MinIO as a rollback mechanism because that would split media ownership across two providers.

@@ -183,24 +183,23 @@ const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduc
   return raw.replace(/\/$/, '')
 }
 
-const objectStorageRequireInternalEndpoint = envBoolean('OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT', false)
-// S3-compat fields (kept for backwards compatibility — not required when using GCS)
-const objectStorageEndpoint = normalizeStorageUrl('OBJECT_STORAGE_ENDPOINT', process.env.OBJECT_STORAGE_ENDPOINT?.trim() || '', { httpsInProduction: false, allowPath: false })
-const rawObjectStorageInternalEndpoint = process.env.OBJECT_STORAGE_INTERNAL_ENDPOINT?.trim() || ''
-const objectStorageInternalEndpoint = normalizeStorageUrl('OBJECT_STORAGE_INTERNAL_ENDPOINT', rawObjectStorageInternalEndpoint || objectStorageEndpoint, { httpsInProduction: false, allowPrivateHttp: true, allowPath: false })
-const objectStorageBucket = process.env.OBJECT_STORAGE_BUCKET?.trim() || process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
-const objectStorageRegion = process.env.OBJECT_STORAGE_REGION?.trim() || 'auto'
-const objectStorageAccessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim() || ''
-const objectStorageSecretAccessKey = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || ''
-// Derive public base URL from GCS bucket name if not explicitly set
-const gcsBucketName = process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
-const defaultGcsPublicBaseUrl = gcsBucketName ? `https://storage.googleapis.com/${gcsBucketName}` : ''
+// Google Cloud Storage is the single media provider. Legacy PROJECTS_ID / BUCKET_NAME /
+// KEYFILENAME aliases remain readable for rolling deployments, but new deployments
+// should use the canonical GCP_* names below.
+const gcpProjectId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
+const gcpBucketName = process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
+const gcpKeyFile = process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || ''
+const defaultGcsPublicBaseUrl = gcpBucketName ? `https://storage.googleapis.com/${gcpBucketName}` : ''
 const objectStoragePublicBaseUrl = normalizeStorageUrl(
   'OBJECT_STORAGE_PUBLIC_BASE_URL',
   process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || defaultGcsPublicBaseUrl,
-  { httpsInProduction: false },
+  { httpsInProduction: true },
 )
-const objectStorageBrowserOrigin = normalizeStorageUrl('OBJECT_STORAGE_BROWSER_ORIGIN', process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin, { httpsInProduction: false, allowPath: false })
+const objectStorageBrowserOrigin = normalizeStorageUrl(
+  'OBJECT_STORAGE_BROWSER_ORIGIN',
+  process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin,
+  { httpsInProduction: true, allowPath: false },
+)
 
 
 if (!['vercel', 'generic'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic')
@@ -235,13 +234,12 @@ if (isProduction) {
     requiredInProduction('DOMAIN_CNAME_TARGET')
   }
   if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
-  // Object storage: require GCS project + bucket (S3 credentials optional — GCS SDK uses ADC on GCE)
-  const gcsProjId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
-  const gcsBkt = process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
-  if (!gcsProjId) throw new Error('GCP_PROJECT_ID is required in production for Google Cloud Storage')
-  if (!gcsBkt) throw new Error('GCP_BUCKET_NAME is required in production for Google Cloud Storage')
+  // Object storage: GCS is canonical. Authentication may use a mounted service-account
+  // key or Application Default Credentials on Google-managed runtimes.
+  if (!gcpProjectId) throw new Error('GCP_PROJECT_ID is required in production for Google Cloud Storage')
+  if (!gcpBucketName) throw new Error('GCP_BUCKET_NAME is required in production for Google Cloud Storage')
   if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production (or set GCP_BUCKET_NAME to auto-derive it)')
-  if (objectStorageBucket && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,62}$/.test(objectStorageBucket)) throw new Error('OBJECT_STORAGE_BUCKET / GCP_BUCKET_NAME contains unsupported characters or length')
+  if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcpBucketName)) throw new Error('GCP_BUCKET_NAME contains unsupported characters or length')
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   if (realtimeEnabled && !redisEnabled) throw new Error('REDIS_ENABLED/REDIS_HOST is required when realtime is enabled in production')
@@ -403,13 +401,13 @@ export default {
     queue_namespace: process.env.REDIS_QUEUE_NAMESPACE || 'queue',
   },
   assets: {
-    bucket: objectStorageBucket,
-    region: objectStorageRegion,
-    endpoint: objectStorageEndpoint,
-    internal_endpoint: objectStorageInternalEndpoint,
-    require_internal_endpoint: objectStorageRequireInternalEndpoint,
-    access_key_id: objectStorageAccessKeyId,
-    secret_access_key: objectStorageSecretAccessKey,
+    provider: 'gcs' as const,
+    gcp_project_id: gcpProjectId,
+    gcp_bucket_name: gcpBucketName,
+    gcp_key_file: gcpKeyFile,
+    // `bucket` remains as a non-provider-specific alias for existing internal callers.
+    bucket: gcpBucketName,
+    region: 'global',
     public_base_url: objectStoragePublicBaseUrl,
     browser_origin: objectStorageBrowserOrigin,
     signed_url_ttl_seconds: Math.max(60, Math.min(3600, Number(process.env.OBJECT_STORAGE_SIGNED_URL_TTL || 600))),

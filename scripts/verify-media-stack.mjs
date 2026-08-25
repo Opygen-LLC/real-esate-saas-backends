@@ -9,23 +9,27 @@ try {
   const body = await response.json().catch(() => ({}))
   const storage = body?.dependencies?.objectStorage
   const clamav = body?.dependencies?.clamav
-  const probes = Array.isArray(storage?.browserCors?.probes) ? storage.browserCors.probes : []
-  const healthyMethods = new Set(probes.filter((probe) => probe?.healthy).map((probe) => probe?.method))
-  const corsHealthy = storage?.browserCors?.healthy === true && [...requiredCorsMethods].every((method) => healthyMethods.has(method))
+  const configuredMethods = new Set(Array.isArray(storage?.browserCors?.requiredMethods) ? storage.browserCors.requiredMethods : [])
+  const corsHealthy = storage?.browserCors?.healthy === true
+    && [...requiredCorsMethods].every((method) => configuredMethods.has(method))
+  const gcsHealthy = storage?.provider === 'gcs'
+    && storage?.configured === true
+    && storage?.healthy === true
+    && Boolean(storage?.projectId)
+    && Boolean(storage?.bucket)
 
-  if (!response.ok || !storage?.configured || !storage?.healthy || !corsHealthy || !clamav?.healthy) {
+  if (!response.ok || !gcsHealthy || !corsHealthy || !clamav?.healthy) {
     console.error(JSON.stringify({ status: response.status, objectStorage: storage, clamav }, null, 2))
     process.exitCode = 1
   } else {
     console.log(JSON.stringify({
       status: 'ready',
       objectStorage: {
+        provider: storage.provider,
         configured: storage.configured,
         healthy: storage.healthy,
-        endpoint: storage.endpoint,
-        internalEndpoint: storage.internalEndpoint,
+        projectId: storage.projectId,
         bucket: storage.bucket,
-        region: storage.region,
         browserCors: storage.browserCors,
       },
       clamav,

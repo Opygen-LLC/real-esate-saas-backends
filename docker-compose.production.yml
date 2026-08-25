@@ -20,13 +20,15 @@ services:
       VERCEL_REQUIRE_TEAM_ID: ${VERCEL_REQUIRE_TEAM_ID:-false}
       DOMAIN_REPLACEMENT_GRACE_HOURS: ${DOMAIN_REPLACEMENT_GRACE_HOURS:-168}
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
-      OBJECT_STORAGE_INTERNAL_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_REQUIRE_INTERNAL_ENDPOINT: "true"
-      OBJECT_STORAGE_BROWSER_ORIGIN: https://realestate.opygen.com
-      # ClamAV disabled: moved to Cloud Run on-upload trigger (cost audit fix).
-      # Set CLAMAV_HOST in .env to re-enable for environments that need it.
-      CLAMAV_HOST: ""
-      CLAMAV_PORT: 3310
+      # GCS is the single canonical media provider.
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}
+      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:?GCP_BUCKET_NAME is required}
+      GCP_KEY_FILE: ${GCP_KEY_FILE:-/app/opy-realestate-505614-d4e3b5e9f13d.json}
+      OBJECT_STORAGE_BROWSER_ORIGIN: ${OBJECT_STORAGE_BROWSER_ORIGIN:-https://realestate.opygen.com}
+      # CLAMAV_HOST is intentionally controlled by deployment environment.
+      # Leave empty only when another production malware-scanning path is configured.
+      CLAMAV_HOST: ${CLAMAV_HOST:-}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       # MongoDB pool tuned for current scale (cost audit fix)
       MONGO_MIN_POOL_SIZE: ${MONGO_MIN_POOL_SIZE:-1}
       MONGO_MAX_POOL_SIZE: ${MONGO_MAX_POOL_SIZE:-10}
@@ -38,59 +40,6 @@ services:
       - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
     ports:
       - "5000:5000"
-    depends_on:
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    networks:
-      - app_network
-
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
-    command: ["server", "/data", "--console-address", ":9001"]
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-    volumes:
-      - minio_data:/data
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
-    networks:
-      - app_network
-
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-realestate-saas}
-      OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-    volumes:
-      - ./ops/minio-cors.xml:/config/minio-cors.xml:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      KEY="${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}" &&
-      SECRET="${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}" &&
-      BUCKET="${OBJECT_STORAGE_BUCKET:-realestate-saas}" &&
-      [ -z "$KEY" ] && KEY="minioadmin" ;
-      [ -z "$SECRET" ] && SECRET="minioadmin" ;
-      [ -z "$BUCKET" ] && BUCKET="realestate-saas" ;
-      mc alias set local http://minio:9000 "$KEY" "$SECRET" &&
-      mc mb --ignore-existing "local/$BUCKET" &&
-      mc anonymous set download "local/$BUCKET" &&
-      mc cors set "local/$BUCKET" /config/minio-cors.xml
-    restart: "no"
     networks:
       - app_network
 
@@ -117,4 +66,3 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
-  minio_data:

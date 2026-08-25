@@ -32,33 +32,9 @@ services:
       timeout: 3s
       retries: 30
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
-    command: ["server", "/data"]
-    environment:
-      MINIO_ROOT_USER: phase7minio
-      MINIO_ROOT_PASSWORD: phase7-minio-secret-123456
-    ports: ["9000:9000"]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null || exit 1"]
-      interval: 3s
-      timeout: 3s
-      retries: 40
-
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    volumes:
-      - ./ops/minio-cors.xml:/config/minio-cors.xml:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      mc alias set ci http://minio:9000 phase7minio phase7-minio-secret-123456 &&
-      mc mb --ignore-existing ci/real-estate-media &&
-      mc anonymous set download ci/real-estate-media &&
-      mc cors set ci/real-estate-media /config/minio-cors.xml
-
+  # Media integration uses the same GCS adapter as production. CI jobs that run
+  # live storage tests should inject a dedicated GCP project/bucket credential;
+  # unit/contract tests do not boot a second S3/MinIO implementation.
   clamav:
     image: clamav/clamav:1.4.4
     environment:

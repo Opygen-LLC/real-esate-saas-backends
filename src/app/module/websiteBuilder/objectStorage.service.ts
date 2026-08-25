@@ -10,10 +10,11 @@
  * attachments all flow through the same GCS bucket — no MinIO or S3 credentials
  * needed.
  *
- * Env vars consumed (same names the rest of the app expects, mapped to GCS):
- *   GCP_PROJECT_ID   / PROJECTS_ID      — GCS project
- *   GCP_BUCKET_NAME  / BUCKET_NAME      — GCS bucket (e.g. realestate-saas)
- *   GCP_KEY_FILE     / KEYFILENAME      — path to service-account JSON key
+ * Canonical environment variables:
+ *   GCP_PROJECT_ID                         — GCS project
+ *   GCP_BUCKET_NAME                        — GCS bucket (e.g. realestate-saas)
+ *   GCP_KEY_FILE                           — optional path to service-account JSON key
+ * Legacy PROJECTS_ID / BUCKET_NAME / KEYFILENAME aliases are normalized once in config.
  *   OBJECT_STORAGE_PUBLIC_BASE_URL      — public URL prefix for stored objects
  *                                         e.g. https://storage.googleapis.com/realestate-saas
  *   OBJECT_STORAGE_SIGNED_URL_TTL       — presigned URL lifetime in seconds (default 600)
@@ -39,12 +40,10 @@ const resolveKeyFile = (raw: string): string => {
 }
 
 const buildGcsClient = () => {
-  const projectId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
-  const keyFileRaw = process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || ''
   const opts: { projectId?: string; keyFilename?: string } = {}
-  if (projectId) opts.projectId = projectId
-  if (keyFileRaw) {
-    const resolved = resolveKeyFile(keyFileRaw)
+  if (config.assets.gcp_project_id) opts.projectId = config.assets.gcp_project_id
+  if (config.assets.gcp_key_file) {
+    const resolved = resolveKeyFile(config.assets.gcp_key_file)
     if (fs.existsSync(resolved)) opts.keyFilename = resolved
   }
   return new Storage(opts)
@@ -53,14 +52,14 @@ const buildGcsClient = () => {
 let _gcs: Storage | null = null
 const gcs = () => { if (!_gcs) _gcs = buildGcsClient(); return _gcs }
 
-const bucketName = () => process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
+const bucketName = () => config.assets.gcp_bucket_name
 
 // ─── Configuration status ─────────────────────────────────────────────────────
 
 const configurationStatus = () => {
   const missing: string[] = []
-  const projectId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
-  const keyFileRaw = process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || ''
+  const projectId = config.assets.gcp_project_id
+  const keyFileRaw = config.assets.gcp_key_file
   const bucket = bucketName()
   const publicBase = config.assets.public_base_url
 
@@ -72,9 +71,16 @@ const configurationStatus = () => {
     const resolved = resolveKeyFile(keyFileRaw)
     if (!fs.existsSync(resolved)) missing.push(`GCP_KEY_FILE (file not found: ${resolved})`)
   }
-  // If no key file, GCS will fall back to Application Default Credentials (ADC) which is fine on GCE/Cloud Run
-
-  return { configured: missing.length === 0, missing }
+  // If no key file, GCS uses Application Default Credentials (ADC), which is
+  // the preferred production mode on GCE / GKE / Cloud Run.
+  return {
+    provider: 'gcs' as const,
+    configured: missing.length === 0,
+    missing,
+    projectId,
+    bucket,
+    authMode: keyFileRaw ? 'service-account-key' as const : 'application-default-credentials' as const,
+  }
 }
 
 const notConfiguredError = (missing = configurationStatus().missing) => new ApiError(
@@ -340,9 +346,11 @@ const browserCorsHealth = async () => {
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 type StorageHealth = {
+  provider: 'gcs'
   configured: boolean
   healthy: boolean
   latencyMs: number
+  projectId?: string
   detail?: string
   missing?: string[]
   bucket?: string
@@ -354,7 +362,7 @@ let lastHealth: { at: number; value: StorageHealth } | null = null
 const health = async (): Promise<StorageHealth> => {
   const configuration = configurationStatus()
   if (!configuration.configured) {
-    return { configured: false, healthy: false, latencyMs: 0, detail: 'not_configured', missing: configuration.missing }
+    return { provider: 'gcs', configured: false, healthy: false, latencyMs: 0, detail: 'not_configured', missing: configuration.missing, projectId: configuration.projectId, bucket: configuration.bucket }
   }
   const now = Date.now()
   if (lastHealth && now - lastHealth.at < config.assets.health_cache_ms) return lastHealth.value
@@ -364,9 +372,11 @@ const health = async (): Promise<StorageHealth> => {
     const browserCors = await browserCorsHealth()
     const healthy = exists && browserCors.healthy
     const value: StorageHealth = {
+      provider: 'gcs',
       configured: true,
       healthy,
       latencyMs: Math.round(performance.now() - started),
+      projectId: configuration.projectId,
       bucket: bucketName(),
       browserCors,
       ...(!exists ? { detail: 'bucket_not_found' } : !browserCors.healthy ? { detail: 'browser_cors_misconfigured' } : {}),
@@ -375,9 +385,11 @@ const health = async (): Promise<StorageHealth> => {
     return value
   } catch (error: any) {
     const value: StorageHealth = {
+      provider: 'gcs',
       configured: true,
       healthy: false,
       latencyMs: Math.round(performance.now() - started),
+      projectId: configuration.projectId,
       bucket: bucketName(),
       detail: String(error?.message || 'gcs_unreachable').slice(0, 200),
     }
