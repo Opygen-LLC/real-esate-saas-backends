@@ -1,6 +1,5 @@
 import crypto from 'crypto'
 import fs, { FileHandle } from 'fs/promises'
-import fsSync from 'fs'
 import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
@@ -125,18 +124,138 @@ const runCommand = async (
   })
 })
 
+
+type StreamTransferResult = {
+  archiveBytes: number
+  archiveSha256: string
+  dumpStderr: string
+  restoreStdout: string
+  restoreStderr: string
+}
+
+const streamDumpToRestore = async (
+  sourceConfigFile: string,
+  backupConfigFile: string,
+  sourceDatabaseName: string,
+  backupDatabase: string,
+  maxParallelCollections: number,
+  timeoutMs: number,
+): Promise<StreamTransferResult> => new Promise((resolve, reject) => {
+  const dump = spawn('mongodump', [
+    `--config=${sourceConfigFile}`,
+    `--db=${sourceDatabaseName}`,
+    '--archive',
+    '--gzip',
+    `--numParallelCollections=${maxParallelCollections}`,
+  ], {
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, LC_ALL: 'C' },
+  })
+  const restore = spawn('mongorestore', [
+    `--config=${backupConfigFile}`,
+    '--archive',
+    '--gzip',
+    `--nsFrom=${sourceDatabaseName}.*`,
+    `--nsTo=${backupDatabase}.*`,
+    '--drop',
+    '--stopOnError',
+  ], {
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, LC_ALL: 'C' },
+  })
+
+  const hash = crypto.createHash('sha256')
+  let archiveBytes = 0
+  let dumpStderr = ''
+  let restoreStdout = ''
+  let restoreStderr = ''
+  let dumpExit: { code: number | null; signal: NodeJS.Signals | null } | null = null
+  let restoreExit: { code: number | null; signal: NodeJS.Signals | null } | null = null
+  let settled = false
+
+  const append = (current: string, chunk: Buffer): string => `${current}${chunk.toString('utf8')}`.slice(-TOOL_OUTPUT_LIMIT)
+  dump.stderr.on('data', (chunk: Buffer) => { dumpStderr = append(dumpStderr, chunk) })
+  restore.stdout.on('data', (chunk: Buffer) => { restoreStdout = append(restoreStdout, chunk) })
+  restore.stderr.on('data', (chunk: Buffer) => { restoreStderr = append(restoreStderr, chunk) })
+
+  dump.stdout.on('data', (chunk: Buffer) => {
+    archiveBytes += chunk.length
+    hash.update(chunk)
+  })
+  dump.stdout.pipe(restore.stdin)
+  restore.stdin.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EPIPE' && !settled) {
+      dump.kill('SIGTERM')
+      restore.kill('SIGTERM')
+    }
+  })
+
+  const terminate = (): void => {
+    dump.kill('SIGTERM')
+    restore.kill('SIGTERM')
+    setTimeout(() => {
+      dump.kill('SIGKILL')
+      restore.kill('SIGKILL')
+    }, 5_000).unref()
+  }
+
+  const timeout = setTimeout(() => {
+    if (!settled) terminate()
+  }, timeoutMs)
+  timeout.unref()
+
+  const fail = (message: string): void => {
+    if (settled) return
+    settled = true
+    clearTimeout(timeout)
+    terminate()
+    reject(new Error(message))
+  }
+
+  const maybeFinish = (): void => {
+    if (settled || !dumpExit || !restoreExit) return
+    if (dumpExit.code !== 0 || restoreExit.code !== 0) {
+      const detail = safeErrorMessage(
+        restoreStderr || dumpStderr ||
+        `mongodump exit=${dumpExit.code ?? 'null'} signal=${dumpExit.signal || 'none'}; ` +
+        `mongorestore exit=${restoreExit.code ?? 'null'} signal=${restoreExit.signal || 'none'}`,
+      )
+      return fail(`Atlas-to-Atlas backup stream failed: ${detail}`)
+    }
+    if (archiveBytes <= 0) {
+      return fail('Atlas-to-Atlas backup stream produced zero archive bytes')
+    }
+    settled = true
+    clearTimeout(timeout)
+    resolve({
+      archiveBytes,
+      archiveSha256: hash.digest('hex'),
+      dumpStderr,
+      restoreStdout,
+      restoreStderr,
+    })
+  }
+
+  dump.once('error', (error) => fail(`mongodump could not start: ${safeErrorMessage(error)}`))
+  restore.once('error', (error) => fail(`mongorestore could not start: ${safeErrorMessage(error)}`))
+  dump.once('exit', (code, signal) => {
+    dumpExit = { code, signal }
+    maybeFinish()
+  })
+  restore.once('exit', (code, signal) => {
+    restoreExit = { code, signal }
+    if (code !== 0 && dumpExit === null) dump.kill('SIGTERM')
+    maybeFinish()
+  })
+})
+
 const toolVersion = async (command: string, timeoutMs: number): Promise<string> => {
   const result = await runCommand(command, ['--version'], Math.min(timeoutMs, 30_000))
   return (result.stdout || result.stderr).trim().split('\n')[0]?.slice(0, 200) || 'unknown'
 }
 
-const sha256File = async (file: string): Promise<string> => new Promise((resolve, reject) => {
-  const hash = crypto.createHash('sha256')
-  const input = fsSync.createReadStream(file)
-  input.on('error', reject)
-  input.on('data', (chunk) => hash.update(chunk))
-  input.on('end', () => resolve(hash.digest('hex')))
-})
 
 const normalizeIndex = (index: Record<string, unknown>): string => safeJson({
   name: index.name,
@@ -304,11 +423,6 @@ const verifyRestore = (
   }
 }
 
-const writeManifestFile = async (runDir: string, manifest: DatabaseBackupManifest): Promise<string> => {
-  const file = path.join(runDir, 'manifest.json')
-  await fs.writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  return file
-}
 
 const persistRemoteManifest = async (config: DatabaseBackupConfig, manifest: DatabaseBackupManifest): Promise<void> => {
   const connection = await mongoose.createConnection(config.backupDatabaseUrl, {
@@ -331,13 +445,6 @@ const persistRemoteManifest = async (config: DatabaseBackupConfig, manifest: Dat
   }
 }
 
-const safeRemoveArchive = async (archiveRoot: string, archiveFile: string): Promise<boolean> => {
-  const root = path.resolve(archiveRoot)
-  const file = path.resolve(archiveFile)
-  if (!file.startsWith(`${root}${path.sep}`)) return false
-  await fs.rm(path.dirname(file), { recursive: true, force: true })
-  return true
-}
 
 const runRetention = async (
   config: DatabaseBackupConfig,
@@ -378,9 +485,6 @@ const runRetention = async (
         await backupConnection.close()
       }
       deletedBackupDatabases.push(candidate.backupDatabase)
-      if (candidate.archiveFile && await safeRemoveArchive(config.archiveDir, candidate.archiveFile)) {
-        deletedArchiveFiles.push(candidate.archiveFile)
-      }
       await connection.db.collection(MANIFEST_COLLECTION).updateOne(
         { runId: candidate.runId },
         { $set: { retentionDeletedAt: new Date().toISOString() } },
@@ -398,8 +502,8 @@ const runRetention = async (
 }
 
 const acquireLock = async (config: DatabaseBackupConfig): Promise<() => Promise<void>> => {
-  await fs.mkdir(config.archiveDir, { recursive: true, mode: 0o700 })
-  const lockFile = path.join(config.archiveDir, '.database-backup.lock')
+  await fs.mkdir(config.workDir, { recursive: true, mode: 0o700 })
+  const lockFile = path.join(config.workDir, '.database-backup.lock')
   try {
     const stat = await fs.stat(lockFile)
     if (Date.now() - stat.mtimeMs > config.lockStaleMs) await fs.unlink(lockFile)
@@ -465,14 +569,12 @@ export const DatabaseBackupService = {
     const started = new Date()
     const runId = crypto.randomUUID()
     const backupDatabase = buildBackupDatabaseName(config.backupDatabasePrefix, started, config.timezone)
-    const runDir = path.join(config.archiveDir, backupDatabase)
-    const archiveFile = path.join(runDir, `${backupDatabase}.archive.gz`)
     let toolConfigDir = ''
     let sourceConfigFile = ''
     let backupConfigFile = ''
     let restoreVerified = false
     let manifest: DatabaseBackupManifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       status: 'running',
       startedAt: started.toISOString(),
@@ -480,14 +582,13 @@ export const DatabaseBackupService = {
       schedule: config.cron,
       sourceDatabase: config.sourceDatabaseName,
       backupDatabase,
-      archiveFile,
+      transferMode: 'atlas_stream',
       archiveRetained: false,
       gcsProtection: { checked: false, protected: false, mode: config.gcsProtectionMode, message: 'Not checked yet.' },
     }
 
     try {
       await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markStarted(config, { runId, backupDatabase, startedAt: manifest.startedAt }), runId)
-      await fs.mkdir(runDir, { recursive: false, mode: 0o700 })
       toolConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'real-estate-db-backup-'))
       await fs.chmod(toolConfigDir, 0o700)
       sourceConfigFile = await secureToolConfig(toolConfigDir, 'source', config.sourceDatabaseUrl)
@@ -506,30 +607,22 @@ export const DatabaseBackupService = {
         config.maxParallelCollections,
       )
 
-      await runCommand('mongodump', [
-        `--config=${sourceConfigFile}`,
-        `--db=${config.sourceDatabaseName}`,
-        `--archive=${archiveFile}`,
-        '--gzip',
-        `--numParallelCollections=${config.maxParallelCollections}`,
-      ], config.processTimeoutMs)
-
-      const archiveStat = await fs.stat(archiveFile)
-      manifest.archiveBytes = archiveStat.size
-      manifest.archiveSha256 = await sha256File(archiveFile)
-
       // Every recovery point is restored into a unique, verified-empty database.
       await assertBackupDatabaseEmpty(config, backupDatabase)
 
-      await runCommand('mongorestore', [
-        `--config=${backupConfigFile}`,
-        `--archive=${archiveFile}`,
-        '--gzip',
-        `--nsFrom=${config.sourceDatabaseName}.*`,
-        `--nsTo=${backupDatabase}.*`,
-        '--drop',
-        '--stopOnError',
-      ], config.processTimeoutMs)
+      // Stream the compressed native MongoDB archive directly from the primary
+      // Atlas cluster into the secondary Atlas cluster. No database dump is
+      // retained on this host/container.
+      const transfer = await streamDumpToRestore(
+        sourceConfigFile,
+        backupConfigFile,
+        config.sourceDatabaseName,
+        backupDatabase,
+        config.maxParallelCollections,
+        config.processTimeoutMs,
+      )
+      manifest.archiveBytes = transfer.archiveBytes
+      manifest.archiveSha256 = transfer.archiveSha256
 
       manifest.sourceCollectionsAfter = await inspectDatabase(
         config.sourceDatabaseUrl,
@@ -551,12 +644,11 @@ export const DatabaseBackupService = {
       }
       restoreVerified = true
 
-      manifest.archiveRetained = true
+      manifest.archiveRetained = false
       manifest.status = 'success'
       manifest.finishedAt = new Date().toISOString()
       await persistRemoteManifest(config, manifest)
       manifest.retention = await runRetention(config, backupDatabase)
-      await writeManifestFile(runDir, manifest)
       await persistRemoteManifest(config, manifest)
       await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markSuccess(config, {
         runId,
@@ -582,15 +674,12 @@ export const DatabaseBackupService = {
           message: safeErrorMessage(error),
         },
       }
-      await fs.mkdir(runDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
       if (!restoreVerified) {
-        await fs.unlink(archiveFile).catch(() => undefined)
         manifest.archiveRetained = false
         await dropPartialBackupDatabase(config, backupDatabase).catch((dropError) => {
           logger.warn('database_backup_partial_restore_cleanup_failed', { runId, backupDatabase, error: dropError })
         })
       }
-      await writeManifestFile(runDir, manifest).catch(() => undefined)
       await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markFailed(config, {
         runId,
         backupDatabase,

@@ -25,11 +25,12 @@ RUN test "$TARGETARCH" = "amd64" \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system backup \
   && useradd --system --gid backup --home-dir /app --shell /usr/sbin/nologin backup \
-  && mkdir -p /backups /app/logs \
-  && chown -R backup:backup /backups /app
+  && mkdir -p /tmp/real-estate-db-backup /app/logs \
+  && chmod 0700 /tmp/real-estate-db-backup \
+  && chown -R backup:backup /tmp/real-estate-db-backup /app
 COPY --from=build --chown=backup:backup /app/package.json ./package.json
 COPY --from=build --chown=backup:backup /app/node_modules ./node_modules
 COPY --from=build --chown=backup:backup /app/dist ./dist
 USER backup
-HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 CMD node -e "const fs=require('fs');const p='/backups/.scheduler-heartbeat';const s=fs.statSync(p);if(Date.now()-s.mtimeMs>120000)process.exit(1)" || exit 1
+HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 CMD node -e "const fs=require('fs');const p='/tmp/real-estate-db-backup/.scheduler-heartbeat';const s=fs.statSync(p);if(Date.now()-s.mtimeMs>120000)process.exit(1)" || exit 1
 CMD ["node", "--enable-source-maps", "dist/app/module/backup/databaseBackup.scheduler.js"]

@@ -96,8 +96,8 @@ const localMinuteKey = (date: Date, timeZone: string): string => {
 export const startDatabaseBackupScheduler = async (): Promise<void> => {
   const config = loadDatabaseBackupConfig()
   const cron = parseBackupCron(config.cron)
-  const heartbeat = path.join(config.archiveDir, '.scheduler-heartbeat')
-  await fs.mkdir(config.archiveDir, { recursive: true, mode: 0o700 })
+  const heartbeat = path.join(config.workDir, '.scheduler-heartbeat')
+  await fs.mkdir(config.workDir, { recursive: true, mode: 0o700 })
   let stopping = false
   let running = false
   let lastRunMinute = ''

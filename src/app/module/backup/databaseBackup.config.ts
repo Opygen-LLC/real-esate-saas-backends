@@ -13,7 +13,7 @@ export type DatabaseBackupConfig = {
   timezone: string
   retentionDays: number
   minRecoveryPoints: number
-  archiveDir: string
+  workDir: string
   processTimeoutMs: number
   lockStaleMs: number
   maxParallelCollections: number
@@ -138,7 +138,7 @@ export const loadDatabaseBackupConfig = (): DatabaseBackupConfig => {
     timezone: validateTimezone((process.env.BACKUP_TIMEZONE || 'Asia/Dhaka').trim()),
     retentionDays: envInteger('BACKUP_RETENTION_DAYS', 30, 7, 3650),
     minRecoveryPoints: envInteger('BACKUP_MIN_RECOVERY_POINTS', 7, 1, 365),
-    archiveDir: path.resolve(process.env.BACKUP_ARCHIVE_DIR || '/backups'),
+    workDir: path.resolve(process.env.BACKUP_WORK_DIR || '/tmp/real-estate-db-backup'),
     processTimeoutMs: envInteger('BACKUP_PROCESS_TIMEOUT_MINUTES', 120, 5, 720) * 60_000,
     lockStaleMs: envInteger('BACKUP_LOCK_STALE_MINUTES', 360, 30, 2880) * 60_000,
     maxParallelCollections: envInteger('BACKUP_MAX_PARALLEL_COLLECTIONS', 4, 1, 16),

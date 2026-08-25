@@ -1,6 +1,4 @@
 import crypto from 'crypto'
-import fs from 'fs/promises'
-import path from 'path'
 import mongoose from 'mongoose'
 import { DatabaseBackupService } from './databaseBackup.service'
 import { loadDatabaseBackupConfig } from './databaseBackup.config'
@@ -64,8 +62,23 @@ const main = async (): Promise<void> => {
     restoreVerificationPassed: true,
     criticalRecordChecks: checks,
   }
-  const file = path.join(path.dirname(manifest.archiveFile), 'staging-recovery-drill.json')
-  await fs.writeFile(file, `${JSON.stringify(result, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  const control = await mongoose.createConnection(config.backupDatabaseUrl, {
+    dbName: config.manifestDatabaseName,
+    maxPoolSize: 1,
+    minPoolSize: 0,
+    serverSelectionTimeoutMS: 15_000,
+  }).asPromise()
+  try {
+    if (!control.db) throw new Error('Backup control database handle is unavailable')
+    await control.db.collection('database_backup_drills').updateOne(
+      { runId: manifest.runId },
+      { $set: result },
+      { upsert: true },
+    )
+    await control.db.collection('database_backup_drills').createIndex({ verifiedAt: -1 })
+  } finally {
+    await control.close()
+  }
   logger.info('phase7_staging_recovery_drill_passed', result)
 }
 

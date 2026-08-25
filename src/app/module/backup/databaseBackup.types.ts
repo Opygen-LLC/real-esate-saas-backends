@@ -39,7 +39,7 @@ export type RestoreVerificationResult = {
 }
 
 export type DatabaseBackupManifest = {
-  schemaVersion: 1
+  schemaVersion: 2
   runId: string
   status: 'running' | 'success' | 'failed'
   startedAt: string
@@ -48,7 +48,8 @@ export type DatabaseBackupManifest = {
   schedule: string
   sourceDatabase: string
   backupDatabase: string
-  archiveFile: string
+  transferMode: 'atlas_stream'
+  archiveFile?: string
   archiveRetained?: boolean
   archiveBytes?: number
   archiveSha256?: string
