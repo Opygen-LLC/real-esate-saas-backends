@@ -4,7 +4,6 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { requireTenant } from '../../middlewares/auth'
 import { writeAudit } from '../audit/audit.service'
-import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { ComplianceProfile, DataSubjectRequest } from './compliance.model'
 import { ComplianceService } from './compliance.service'
 
@@ -32,8 +31,8 @@ const reviewProfile = catchAsync(async (req: Request, res: Response) => { const 
   await writeAudit({ organizationId: req.params.organizationId, actorId: req.user!._id!, actorRole: 'super-admin', action: 'agency.verification_reviewed',
     entityType: 'complianceProfile', entityId: data._id.toString(), reason: req.body.reason, requestId: req.requestId, ip: req.ip,
     metadata: { status: req.body.status } }); sendResponse(res, { statusCode: 200, success: true, message: 'Agency verification reviewed', data }) })
-const processRequest = catchAsync(async (req: Request, res: Response) => { const settings = await PlatformSettings.findOne({ key: 'platform' });
-  const data = await ComplianceService.processRequest(req.params.id, req.body.status, req.body.reason, req.user!._id!, settings?.privacy?.retentionDays || 365)
+const processRequest = catchAsync(async (req: Request, res: Response) => {
+  const data = await ComplianceService.processRequest(req.params.id, req.body.status, req.body.reason, req.user!._id!)
   await writeAudit({ organizationId: data.organizationId, actorId: req.user!._id!, actorRole: 'super-admin', action: 'privacy.request_processed',
     entityType: 'dataSubjectRequest', entityId: data._id.toString(), reason: req.body.reason, requestId: req.requestId, ip: req.ip,
     metadata: { status: req.body.status, type: data.type } }); sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Data request processed', data }) })

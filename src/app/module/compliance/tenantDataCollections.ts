@@ -1,10 +1,10 @@
 /**
- * Tenant-owned collections deleted by the reviewed retention worker.
+ * Tenant-owned collections deleted by the canonical hard-delete service.
  *
  * Keep this list centralized so new tenant-scoped modules cannot be forgotten
- * when permanent deletion is executed. Audit events and data-subject requests
- * are intentionally excluded because they are the immutable/legal record of
- * the deletion itself.
+ * when permanent deletion is executed. A successful Super Admin hard delete
+ * intentionally leaves no organization-scoped operational, audit, or data-
+ * subject-request records in MongoDB.
  */
 export const TENANT_DELETION_COLLECTIONS = [
   // Core workspace
@@ -87,6 +87,12 @@ export const TENANT_DELETION_COLLECTIONS = [
   // Read-only support sessions contain tenant/user identifiers and are not part
   // of the immutable AuditEvent collection.
   'impersonationsessions',
+
+  // A hard delete is a zero-tenant-data operation. These are deleted through
+  // the raw MongoDB collection API because AuditEvent intentionally blocks
+  // model-level deletes during normal application operation.
+  'auditevents',
+  'datasubjectrequests',
 ] as const
 
 export type TenantDeletionCollection = (typeof TENANT_DELETION_COLLECTIONS)[number]

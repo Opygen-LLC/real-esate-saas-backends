@@ -1,17 +1,14 @@
 import httpStatus from 'http-status'
-import mongoose from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { AccountCredential } from '../accountCredential/accountCredential.model'
 import { writeAudit } from '../audit/audit.service'
 import { AuthSession } from '../auth/authSession.model'
 import { AuthServices } from '../auth/auth.services'
-import { DataSubjectRequest } from '../compliance/compliance.model'
-import { TENANT_DELETION_COLLECTIONS } from '../compliance/tenantDataCollections'
+import { TenantPurgeService } from '../compliance/tenantPurge.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
-import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { User } from '../user/user.model'
 import { ImpersonationSession } from './impersonationSession.model'
@@ -290,144 +287,18 @@ const restoreArchivedTenant = async (organizationId: string, actor: PlatformAdmi
   return org
 }
 
-const getDeletionPreview = async (organizationId: string) => {
-  const org: any = await Organization.findOne({ organizationId }).select('_id organizationId agencyName platformAccess createdAt').lean()
+const getDeletionPreview = async (organizationId: string) => TenantPurgeService.previewOrganization(organizationId)
+
+const hardDeleteTenant = async (organizationId: string, payload: { confirmation: string }, actor: PlatformAdminActor) => {
+  const org: any = await Organization.findOne({ organizationId }).select('_id organizationId agencyName').lean()
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  const settings: any = await PlatformSettings.findOne({ key: 'platform' }).select('privacy').lean()
-  const retentionDays = Math.max(30, Number(settings?.privacy?.retentionDays || 365))
-  const legalReviewStatus = settings?.privacy?.legalReviewStatus || 'required'
-  const existingRequest: any = await DataSubjectRequest.findOne({ organizationId, type: 'deletion', status: { $in: ['requested', 'in_review', 'approved'] } }).sort({ createdAt: -1, _id: -1 }).lean()
-
-  const collectionCountsEntries = await Promise.all(TENANT_DELETION_COLLECTIONS.map(async (name) => {
-    try {
-      const count = await mongoose.connection.collection(name).countDocuments({ organizationId })
-      return [name, count] as const
-    } catch {
-      return [name, 0] as const
-    }
-  }))
-  const collectionCounts = Object.fromEntries(collectionCountsEntries)
-  const totalTenantDocuments = collectionCountsEntries.reduce((sum, [, count]) => sum + Number(count || 0), 0)
-
-  return {
-    organizationId,
-    agencyName: org.agencyName,
-    accessStatus: lifecycleStatus(org),
-    retentionDays,
-    legalReviewStatus,
-    earliestPermanentDeletionAt: existingRequest?.retentionUntil || new Date(Date.now() + retentionDays * 86_400_000),
-    existingRequest: existingRequest ? {
-      _id: existingRequest._id,
-      status: existingRequest.status,
-      retentionUntil: existingRequest.retentionUntil,
-      requestedAt: existingRequest.createdAt,
-    } : null,
-    dataSummary: {
-      totalTenantDocuments,
-      users: Number(collectionCounts.users || 0),
-      properties: Number(collectionCounts.properties || 0),
-      leads: Number(collectionCounts.leads || 0),
-      contacts: Number(collectionCounts.contacts || 0),
-      payments: Number(collectionCounts.subscriptionpayments || 0) + Number(collectionCounts.bkashpayments || 0),
-      domains: Number(collectionCounts.domainrecords || 0),
-      pendingInvitations: Number(collectionCounts.teaminvitations || 0),
-      collectionCounts,
-      auditEventsPreserved: true,
-      deletionRequestPreserved: true,
-    },
-  }
-}
-
-const scheduleTenantDeletion = async (organizationId: string, payload: { confirmation: string }, actor: PlatformAdminActor) => {
-  const org: any = await Organization.findOne({ organizationId })
-  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  if (lifecycleStatus(org) === 'pending_deletion') throw new ApiError(httpStatus.CONFLICT, 'Organization is already pending permanent deletion')
 
   const confirmation = String(payload.confirmation || '').trim()
   if (confirmation !== org.organizationId && confirmation !== org.agencyName) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Confirmation must exactly match the agency name or organization ID')
   }
 
-  const existing = await DataSubjectRequest.exists({ organizationId, type: 'deletion', status: { $in: ['requested', 'in_review', 'approved'] } })
-  if (existing) throw new ApiError(httpStatus.CONFLICT, 'An active deletion request already exists for this organization')
-
-  const settings: any = await PlatformSettings.findOne({ key: 'platform' }).select('privacy').lean()
-  if (settings?.privacy?.legalReviewStatus !== 'approved') {
-    throw new ApiError(httpStatus.CONFLICT, 'Platform privacy/legal review must be approved before permanent tenant deletion can be scheduled')
-  }
-  const retentionDays = Math.max(30, Number(settings?.privacy?.retentionDays || 365))
-  const now = new Date()
-  const retentionUntil = new Date(now.getTime() + retentionDays * 86_400_000)
-
-  const previousAccessStatus = lifecycleStatus(org)
-  const previousSubscriptionStatus = org.subscription?.status === 'suspended'
-    ? (org.platformAccess?.previousSubscriptionStatus || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
-    : (org.subscription?.status || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
-  const previousWebsiteStatus = org.websiteStatus === 'suspended'
-    ? (org.platformAccess?.previousWebsiteStatus || 'published')
-    : (org.websiteStatus || 'published')
-
-  const request: any = await DataSubjectRequest.create({
-    organizationId,
-    requestedBy: actor.id,
-    type: 'deletion',
-    status: 'approved',
-    requestReason: actor.reason,
-    operatorReason: actor.reason,
-    retentionUntil,
-    processedBy: actor.id,
-    processedAt: now,
-  })
-
-  try {
-    org.isBlocked = true
-    org.websiteStatus = 'suspended'
-    if (org.subscription) org.subscription.status = 'suspended'
-    org.platformAccess = {
-      ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
-      status: 'pending_deletion',
-      previousAccessStatus,
-      previousSubscriptionStatus,
-      previousWebsiteStatus,
-      deletionRequestId: String(request._id),
-      deletionRequestedAt: now,
-      deletionRequestedBy: actor.id,
-      deletionReason: actor.reason,
-      deletionRetentionUntil: retentionUntil,
-    }
-    await org.save()
-  } catch (error) {
-    await DataSubjectRequest.deleteOne({ _id: request._id, status: 'approved' }).catch(() => undefined)
-    throw error
-  }
-
-  await Promise.all([
-    AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_pending_deletion' } }),
-    ImpersonationSession.updateMany({ organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actor.id } }),
-    CacheInvalidationService.invalidateTenant(organizationId),
-  ])
-  await writeAudit({
-    organizationId,
-    actorId: actor.id,
-    actorRole: 'super-admin',
-    action: 'organization.deletion_scheduled',
-    entityType: 'dataSubjectRequest',
-    entityId: request._id.toString(),
-    reason: actor.reason,
-    requestId: actor.requestId,
-    ip: actor.ip,
-    metadata: { retentionDays, retentionUntil, previousAccessStatus, previousSubscriptionStatus, previousWebsiteStatus },
-  })
-  RealtimeService.emitOrganization(organizationId, { type: 'auth.changed', action: 'revoked', entityId: 'organization_pending_deletion', forceLogout: true })
-  RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_deletion_scheduled' })
-
-  return {
-    requestId: request._id,
-    organizationId,
-    status: 'pending_deletion',
-    retentionDays,
-    retentionUntil,
-  }
+  return TenantPurgeService.purgeOrganization(organizationId, { id: actor.id, reason: actor.reason })
 }
 
 export const PlatformAdminTenantManagementService = {
@@ -436,5 +307,5 @@ export const PlatformAdminTenantManagementService = {
   archiveTenant,
   restoreArchivedTenant,
   getDeletionPreview,
-  scheduleTenantDeletion,
+  hardDeleteTenant,
 }

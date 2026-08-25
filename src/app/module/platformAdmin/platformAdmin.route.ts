@@ -136,7 +136,7 @@ router.patch('/tenants/:organizationId/owner', authMiddlewares.authSuperAdmin, v
 router.post('/tenants/:organizationId/archive', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.archiveTenant)
 router.post('/tenants/:organizationId/restore', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams, body: reasonBody.shape.body })), PlatformAdminController.restoreArchivedTenant)
 router.get('/tenants/:organizationId/deletion-preview', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.tenantDeletionPreview)
-router.post('/tenants/:organizationId/delete', authMiddlewares.authSuperAdmin, validateRequest(deletionBody), PlatformAdminController.scheduleTenantDeletion)
+router.post('/tenants/:organizationId/hard-delete', authMiddlewares.authSuperAdmin, validateRequest(deletionBody), PlatformAdminController.hardDeleteTenant)
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
 router.get('/subscription-requests', authMiddlewares.authSuperAdmin, validateRequest(subscriptionRequestQuery), PlatformAdminController.subscriptionRequests)
