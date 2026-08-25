@@ -42,5 +42,11 @@ describe('website template contract', () => {
     expect(TemplateRegistry.get('template-5').tier).toBe('free')
     expect(TemplateRegistry.get('template-6').tier).toBe('premium')
     expect(TemplateRegistry.get('template-7').tier).toBe('free')
+    expect(TemplateRegistry.get('template-8').tier).toBe('premium')
+    expect(TemplateRegistry.get('template-9').tier).toBe('premium')
+    expect(TemplateRegistry.get('template-10').tier).toBe('premium')
+    for (const template of TemplateRegistry.list()) {
+      expect(template.supportedPages).toEqual(['home', 'about', 'contact', 'properties', 'propertyDetail', 'agents', 'agentDetail'])
+    }
   })
 })

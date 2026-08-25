@@ -118,7 +118,8 @@
     "smoke:phase5-staging": "node scripts/phase5-staging-smoke.mjs",
     "monitor:phase5-production": "node scripts/phase5-production-watch.mjs",
     "migrate:meta-integration-phase3": "ts-node --transpile-only src/app/db/migrateMetaIntegrationPhase3.ts",
-    "verify:meta-phase3": "node scripts/verify-meta-phase3.mjs"
+    "verify:meta-phase3": "node scripts/verify-meta-phase3.mjs",
+    "verify:phase4-template-engine": "node scripts/verify-phase4-template-engine.mjs"
   },
   "keywords": [
     "real-estate",

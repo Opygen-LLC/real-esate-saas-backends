@@ -44,10 +44,9 @@ const sanitizeDocument = (value: any, key = ''): any => {
   return value
 }
 
-const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
 const defaultDocument = () => buildDefaultWebsiteDocument()
 const applyPublicTemplateEntitlement = (document: any, blocked: boolean) => {
-  if (!blocked || !document || !PREMIUM_TEMPLATE_IDS.has(String(document?.template?.id || ''))) return document
+  if (!blocked || !document || !TemplateRegistry.isPremium(String(document?.template?.id || ''))) return document
   return { ...document, template: { ...(document.template || {}), id: 'template-1', version: '2.0.0' }, entitlementFallback: { reason: 'premium_template_not_in_plan', configuredTemplateId: document?.template?.id || '' } }
 }
 

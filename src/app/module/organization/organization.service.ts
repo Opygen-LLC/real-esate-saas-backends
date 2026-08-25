@@ -17,7 +17,6 @@ import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organiza
 import { Organization } from './organization.model'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
-const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
 
 const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
@@ -109,7 +108,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     defaultLanguage: org.defaultLanguage || 'en',
     metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
     metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
-    templateId: org.entitlementRestrictions?.premiumTemplates && PREMIUM_TEMPLATE_IDS.has(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
+    templateId: org.entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
     configuredTemplateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
     primaryColor: org.primaryColor || '#1877F2',

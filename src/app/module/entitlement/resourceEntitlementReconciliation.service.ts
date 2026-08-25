@@ -9,6 +9,7 @@ import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { Property } from '../property/property.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
+import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
 import { WhatsAppIntegration } from '../whatsapp/whatsapp.model'
 import { propertyCountsTowardQuotaFilter } from './entitlement.service'
 
@@ -47,7 +48,6 @@ export interface ResourceEntitlementReconciliationResult {
 }
 
 const sessionOptions = (session?: ClientSession) => session ? { session } : undefined
-const PREMIUM_TEMPLATE_IDS = new Set(['template-3', 'template-4', 'template-6'])
 
 const propertyPriority = (status: string) => {
   const priorities: Record<string, number> = {
@@ -145,14 +145,14 @@ const reconcileLeads = async (
   ? LeadEntitlementService.reconcileLeadCapacity(organizationId, current.maxLeads, session, actorId)
   : LeadEntitlementService.releaseSubscriptionLeadLocks(organizationId, current.maxLeads, session)
 
-const documentUsesPremiumTemplate = (document: any) => PREMIUM_TEMPLATE_IDS.has(String(document?.template?.id || ''))
+const documentUsesPremiumTemplate = (document: any) => TemplateRegistry.isPremium(String(document?.template?.id || ''))
 
 const tenantUsesPremiumTemplate = async (organizationId: string, session?: ClientSession) => {
   const orgQuery = Organization.findOne({ organizationId }).select('templateId websiteSettings.renderMode')
   const pagesQuery = WebsitePage.find({ organizationId }).select('draftDocument publishedDocument')
   if (session) { orgQuery.session(session); pagesQuery.session(session) }
   const [organization, pages] = await Promise.all([orgQuery.lean(), pagesQuery.lean()])
-  return PREMIUM_TEMPLATE_IDS.has(String((organization as any)?.templateId || ''))
+  return TemplateRegistry.isPremium(String((organization as any)?.templateId || ''))
     || pages.some((page: any) => documentUsesPremiumTemplate(page.draftDocument) || documentUsesPremiumTemplate(page.publishedDocument))
 }
 
