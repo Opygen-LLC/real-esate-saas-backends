@@ -3,18 +3,26 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { decryptField, encryptField } from '../../helpers/fieldEncryption'
+import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { Organization } from '../organization/organization.model'
 import { DomainRecord } from '../domain/domain.model'
 import { MetaIntegration } from './metaIntegration.model'
 import { MetaEvent } from './metaEvent.model'
 import { Resilience } from '../../../shared/resilience'
 
-const ALLOWED_EVENTS = new Set(['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'])
+export const META_EVENT_NAMES = ['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'] as const
+const ALLOWED_EVENTS = new Set<string>(META_EVENT_NAMES)
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 const normalizeEmail = (value?: string) => value?.trim().toLowerCase() || ''
 const normalizePhone = (value?: string) => value?.replace(/[^0-9]/g, '') || ''
 const cleanUrl = (value: string) => {
-  try { const url = new URL(value); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); return url.toString().slice(0, 2048) } catch { throw new ApiError(400, 'Invalid canonical event URL') }
+  try {
+    const url = new URL(value)
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+    return url.toString().slice(0, 2048)
+  } catch {
+    throw new ApiError(400, 'Invalid canonical event URL')
+  }
 }
 
 export const normalizeMetaUserData = (input: Record<string, any> = {}) => {
@@ -59,29 +67,110 @@ export const parseMetaCapiResponse = (ok: boolean, status: number, payload: any)
   return payload
 }
 
+type EffectiveMetaState = {
+  pixelEnabled: boolean
+  capiEnabled: boolean
+  capiStatus: 'not_configured' | 'active' | 'disabled' | 'error'
+  accessTokenConfigured: boolean
+}
+
+const effectiveState = (integration: any): EffectiveMetaState => {
+  const accessTokenConfigured = Boolean(integration?.accessTokenEncrypted)
+  const legacyEnabled = integration?.status !== 'disabled'
+  const pixelEnabled = typeof integration?.pixelEnabled === 'boolean' ? integration.pixelEnabled : legacyEnabled
+  const capiEnabled = typeof integration?.capiEnabled === 'boolean' ? integration.capiEnabled : (legacyEnabled && accessTokenConfigured)
+  const capiStatus = integration?.capiStatus
+    || (!accessTokenConfigured ? 'not_configured' : !capiEnabled ? 'disabled' : integration?.status === 'error' ? 'error' : 'active')
+  return { pixelEnabled, capiEnabled, capiStatus, accessTokenConfigured }
+}
+
 const serialize = (doc: any) => {
   if (!doc) return null
   const value = doc.toObject ? doc.toObject() : { ...doc }
+  const state = effectiveState(value)
   delete value.accessTokenEncrypted
-  return { ...value, accessTokenConfigured: true }
+  return {
+    ...value,
+    pixelEnabled: state.pixelEnabled,
+    capiEnabled: state.capiEnabled,
+    capiStatus: state.capiStatus,
+    accessTokenConfigured: state.accessTokenConfigured,
+    supportedEvents: [...META_EVENT_NAMES],
+  }
 }
 
+const fieldError = (field: string, message: string) => new ApiError(
+  httpStatus.BAD_REQUEST,
+  'Please correct the highlighted fields',
+  '',
+  'VALIDATION_ERROR',
+  undefined,
+  { [field]: [message] },
+)
+
 const save = async (organizationId: string, payload: any) => {
-  const pixelId = String(payload.pixelId || '').trim()
-  if (!/^\d{5,30}$/.test(pixelId)) throw new ApiError(400, 'Please correct the highlighted fields', '', 'VALIDATION_ERROR', undefined, { pixelId: ['Pixel ID must contain 5 to 30 digits'] })
-  const existing = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted')
-  const token = String(payload.accessToken || '').trim()
-  if (!existing && !token) throw new ApiError(400, 'Please correct the highlighted fields', '', 'VALIDATION_ERROR', undefined, { accessToken: ['Meta access token is required when connecting the integration'] })
-  const accessTokenEncrypted = token ? encryptField(token) : existing!.accessTokenEncrypted
-  const result = await MetaIntegration.findOneAndUpdate({ organizationId }, { $set: {
-    pixelId, accessTokenEncrypted, testEventCode: String(payload.testEventCode || '').trim().slice(0, 100),
-    status: payload.status === 'disabled' ? 'disabled' : 'active', consentRequired: payload.consentRequired !== false,
-    enableSchedule: payload.enableSchedule !== false,
-  } }, { new: true, upsert: true, setDefaultsOnInsert: true })
+  const existing: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted')
+  const previous = existing ? effectiveState(existing) : null
+  const pixelId = String(payload.pixelId ?? existing?.pixelId ?? '').trim()
+  if (!/^\d{5,30}$/.test(pixelId)) throw fieldError('pixelId', 'Pixel ID must contain 5 to 30 digits')
+
+  const rawToken = payload.accessToken === undefined ? '' : String(payload.accessToken).trim()
+  const accessTokenEncrypted = rawToken ? encryptField(rawToken) : String(existing?.accessTokenEncrypted || '')
+  const accessTokenConfigured = Boolean(accessTokenEncrypted)
+
+  const pixelEnabled = typeof payload.pixelEnabled === 'boolean'
+    ? payload.pixelEnabled
+    : previous?.pixelEnabled ?? true
+  const capiEnabled = typeof payload.capiEnabled === 'boolean'
+    ? payload.capiEnabled
+    : previous?.capiEnabled ?? false
+
+  if (capiEnabled && !accessTokenConfigured) {
+    throw fieldError('accessToken', 'A Meta Conversions API access token is required before enabling CAPI')
+  }
+
+  const testEventCode = payload.testEventCode === undefined
+    ? String(existing?.testEventCode || '')
+    : String(payload.testEventCode || '').trim().slice(0, 100)
+  const consentRequired = typeof payload.consentRequired === 'boolean'
+    ? payload.consentRequired
+    : existing?.consentRequired !== false
+  const enableSchedule = typeof payload.enableSchedule === 'boolean'
+    ? payload.enableSchedule
+    : existing?.enableSchedule !== false
+
+  let capiStatus: EffectiveMetaState['capiStatus']
+  if (!accessTokenConfigured) capiStatus = 'not_configured'
+  else if (!capiEnabled) capiStatus = 'disabled'
+  else if (rawToken) capiStatus = 'active'
+  else capiStatus = previous?.capiStatus === 'error' ? 'error' : 'active'
+
+  const set: Record<string, unknown> = {
+    pixelId,
+    pixelEnabled,
+    capiEnabled,
+    capiStatus,
+    accessTokenEncrypted,
+    testEventCode,
+    consentRequired,
+    enableSchedule,
+    // Legacy status stays usable for old app versions but no longer carries
+    // CAPI error state, so a server-delivery failure cannot disable the Pixel.
+    status: pixelEnabled || capiEnabled ? 'active' : 'disabled',
+  }
+  if (rawToken) {
+    set['diagnostics.lastCapiError'] = null
+  }
+
+  const result = await MetaIntegration.findOneAndUpdate(
+    { organizationId },
+    { $set: set },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ).select('+accessTokenEncrypted')
   return serialize(result)
 }
 
-const get = async (organizationId: string) => serialize(await MetaIntegration.findOne({ organizationId }))
+const get = async (organizationId: string) => serialize(await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted'))
 
 const resolveOrganization = async (identifier: string) => {
   const direct = await Organization.findOne({ $or: [{ organizationId: identifier }, { sub_domain: identifier }] }).select('organizationId').lean()
@@ -91,32 +180,81 @@ const resolveOrganization = async (identifier: string) => {
   return domain?.organizationId || null
 }
 
+export const resolveCanonicalMetaPublicUrl = async (organizationId: string): Promise<string> => {
+  const [domain, organization] = await Promise.all([
+    DomainRecord.findOne({
+      organizationId,
+      entitlementStatus: { $ne: 'suspended' },
+      status: 'verified',
+      tlsStatus: 'active',
+    }).select('domain').lean(),
+    Organization.findOne({ organizationId }).select('sub_domain').lean(),
+  ])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  return buildTenantWebsiteUrl(String(organization.sub_domain || organizationId), domain?.domain || null)
+}
+
 const publicConfig = async (identifier: string) => {
   const organizationId = await resolveOrganization(identifier)
-  if (!organizationId) return { enabled: false }
-  const integration = await MetaIntegration.findOne({ organizationId, status: 'active' }).lean()
-  if (!integration) return { enabled: false }
-  return { enabled: true, pixelId: integration.pixelId, consentRequired: integration.consentRequired, enableSchedule: integration.enableSchedule }
+  if (!organizationId) return { enabled: false, pixelEnabled: false, capiEnabled: false }
+  const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
+  if (!integration) return { enabled: false, pixelEnabled: false, capiEnabled: false }
+  const state = effectiveState(integration)
+  return {
+    enabled: state.pixelEnabled || state.capiEnabled,
+    pixelEnabled: state.pixelEnabled,
+    capiEnabled: state.capiEnabled,
+    pixelId: integration.pixelId,
+    consentRequired: integration.consentRequired !== false,
+    enableSchedule: integration.enableSchedule !== false,
+  }
+}
+
+const recordBrowserDiagnostic = async (organizationId: string, payload: any, eventId: string) => {
+  if (payload.browserPixelFired !== true) return
+  await MetaIntegration.updateOne({ organizationId }, { $set: {
+    'diagnostics.lastBrowserEvent': {
+      eventName: String(payload.eventName || ''),
+      eventId,
+      at: new Date(),
+      eventSourceUrl: cleanUrl(payload.eventSourceUrl),
+    },
+  } })
 }
 
 const queuePublicEvent = async (identifier: string, payload: any, context: { ip?: string; userAgent?: string }) => {
   const organizationId = await resolveOrganization(identifier)
   if (!organizationId) throw new ApiError(404, 'Agency website not found')
-  const integration = await MetaIntegration.findOne({ organizationId, status: 'active' }).lean()
+  const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
   if (!integration) return { queued: false, reason: 'integration_disabled' }
-  if (integration.consentRequired && payload.consent !== true) return { queued: false, reason: 'consent_required' }
+
+  const state = effectiveState(integration)
+  if (!state.pixelEnabled && !state.capiEnabled) return { queued: false, reason: 'integration_disabled' }
+  if (integration.consentRequired !== false && payload.consent !== true) return { queued: false, reason: 'consent_required' }
+
   const eventName = String(payload.eventName || '')
   if (!ALLOWED_EVENTS.has(eventName)) throw new ApiError(400, 'Unsupported Meta event')
-  if (eventName === 'Schedule' && !integration.enableSchedule) return { queued: false, reason: 'schedule_disabled' }
+  if (eventName === 'Schedule' && integration.enableSchedule === false) return { queued: false, reason: 'schedule_disabled' }
 
   const eventId = String(payload.eventId || randomUUID()).slice(0, 120)
-  const userData = normalizeMetaUserData(payload.userData || {})
+  await recordBrowserDiagnostic(organizationId, payload, eventId)
 
+  if (!state.capiEnabled) return { queued: false, reason: 'capi_disabled', eventId }
+  if (!state.accessTokenConfigured) return { queued: false, reason: 'capi_not_configured', eventId }
+
+  const userData = normalizeMetaUserData(payload.userData || {})
   try {
     const event = await MetaEvent.create({
-      organizationId, eventName, eventId, eventTime: Math.floor(Date.now() / 1000), eventSourceUrl: cleanUrl(payload.eventSourceUrl),
-      userData, clientIpEncrypted: context.ip ? encryptField(context.ip) : '', clientUserAgent: String(context.userAgent || '').slice(0, 1000),
-      customData: payload.customData && typeof payload.customData === 'object' ? payload.customData : {}, testEventCode: integration.testEventCode || '',
+      organizationId,
+      eventName,
+      eventId,
+      eventTime: Math.floor(Date.now() / 1000),
+      eventSourceUrl: cleanUrl(payload.eventSourceUrl),
+      userData,
+      clientIpEncrypted: context.ip ? encryptField(context.ip) : '',
+      clientUserAgent: String(context.userAgent || '').slice(0, 1000),
+      customData: payload.customData && typeof payload.customData === 'object' ? payload.customData : {},
+      testEventCode: integration.testEventCode || '',
     })
     return { queued: true, eventId: event.eventId }
   } catch (error: any) {
@@ -125,38 +263,85 @@ const queuePublicEvent = async (identifier: string, payload: any, context: { ip?
   }
 }
 
+const markCapiError = async (organizationId: string, error: any) => {
+  await MetaIntegration.updateOne({ organizationId }, { $set: {
+    capiStatus: 'error',
+    'diagnostics.lastCapiError': {
+      code: String(error?.code || 'CAPI_ERROR').slice(0, 80),
+      message: String(error?.message || 'Meta CAPI delivery failed').slice(0, 500),
+      at: new Date(),
+    },
+  } })
+}
+
 const sendEvent = async (event: any) => {
-  const integration = await MetaIntegration.findOne({ organizationId: event.organizationId }).select('+accessTokenEncrypted')
-  if (!integration || integration.status === 'disabled') throw new ApiError(409, 'Meta integration is disabled')
+  const integration: any = await MetaIntegration.findOne({ organizationId: event.organizationId }).select('+accessTokenEncrypted')
+  if (!integration) throw new ApiError(409, 'Meta integration is not configured')
+  const state = effectiveState(integration)
+  if (!state.capiEnabled) throw new ApiError(409, 'Meta Conversions API is disabled')
+  if (!state.accessTokenConfigured) throw new ApiError(409, 'Meta Conversions API access token is not configured')
+
   const accessToken = decryptField(integration.accessTokenEncrypted)
   const userData = { ...event.userData }
   if (event.clientIpEncrypted) userData.client_ip_address = decryptField(event.clientIpEncrypted)
   if (event.clientUserAgent) userData.client_user_agent = event.clientUserAgent
   const body = buildMetaCapiBody(event, userData)
-  const response = await Resilience.fetch('meta-capi', `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events?access_token=${encodeURIComponent(accessToken)}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  }, { timeoutMs: config.meta.timeout_ms })
-  const responsePayload = parseMetaCapiResponse(response.ok, response.status, await response.json().catch(() => ({})))
-  integration.lastSuccessAt = new Date(); integration.diagnostics = { lastResponse: { eventsReceived: responsePayload?.events_received ?? null }, updatedAt: new Date() }
-  await integration.save()
-  return responsePayload
+
+  try {
+    const response = await Resilience.fetch(
+      'meta-capi',
+      `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events?access_token=${encodeURIComponent(accessToken)}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+      { timeoutMs: config.meta.timeout_ms },
+    )
+    const responsePayload = parseMetaCapiResponse(response.ok, response.status, await response.json().catch(() => ({})))
+    await MetaIntegration.updateOne({ organizationId: event.organizationId }, { $set: {
+      capiStatus: 'active',
+      lastSuccessAt: new Date(),
+      'diagnostics.lastResponse': { eventsReceived: responsePayload?.events_received ?? null },
+      'diagnostics.lastServerEvent': {
+        eventName: event.eventName,
+        eventId: event.eventId,
+        at: new Date(),
+        eventSourceUrl: event.eventSourceUrl,
+      },
+      'diagnostics.lastCapiError': null,
+      'diagnostics.updatedAt': new Date(),
+    } })
+    return responsePayload
+  } catch (error) {
+    await markCapiError(event.organizationId, error)
+    throw error
+  }
 }
 
 const processOne = async (event: any, alreadyClaimed = false) => {
-  if (!alreadyClaimed) { event.status = 'processing'; event.attempts += 1; event.processingStartedAt = new Date(); await event.save() }
+  if (!alreadyClaimed) {
+    event.status = 'processing'
+    event.attempts += 1
+    event.processingStartedAt = new Date()
+    await event.save()
+  }
   try {
     await sendEvent(event)
-    event.status = 'sent'; event.sentAt = new Date(); event.lastErrorCode = ''; event.lastErrorMessage = ''; await event.save()
+    event.status = 'sent'
+    event.sentAt = new Date()
+    event.lastErrorCode = ''
+    event.lastErrorMessage = ''
+    await event.save()
     return true
   } catch (error: any) {
     event.lastErrorCode = String(error?.code || 'CAPI_ERROR').slice(0, 80)
     event.lastErrorMessage = String(error?.message || 'Meta CAPI delivery failed').slice(0, 500)
     if (event.attempts >= config.meta.max_attempts) event.status = 'dead'
-    else { event.status = 'queued'; event.nextAttemptAt = new Date(Date.now() + metaRetryDelayMs(event.attempts)) }
-    await event.save(); return false
+    else {
+      event.status = 'queued'
+      event.nextAttemptAt = new Date(Date.now() + metaRetryDelayMs(event.attempts))
+    }
+    await event.save()
+    return false
   }
 }
-
 
 const processById = async (eventId: string) => {
   const event: any = await MetaEvent.findById(eventId)
@@ -168,10 +353,9 @@ const processById = async (eventId: string) => {
 }
 
 const processQueue = async (limit = 50) => {
-  // Recover events abandoned by a crashed worker, then atomically claim one job
-  // at a time so multiple API replicas cannot deliver the same CAPI job.
   await MetaEvent.updateMany({ status: 'processing', processingStartedAt: { $lte: new Date(Date.now() - 10 * 60_000) } }, { $set: { status: 'queued', nextAttemptAt: new Date() } })
-  let processed = 0; let sent = 0
+  let processed = 0
+  let sent = 0
   while (processed < limit) {
     const event = await MetaEvent.findOneAndUpdate(
       { status: 'queued', nextAttemptAt: { $lte: new Date() } },
@@ -185,16 +369,80 @@ const processQueue = async (limit = 50) => {
   return { processed, sent, failed: processed - sent }
 }
 
-const test = async (organizationId: string, sourceUrl: string) => {
-  const integration = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted')
+const test = async (organizationId: string) => {
+  const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted')
   if (!integration) throw new ApiError(404, 'Meta integration is not connected')
-  const event = await MetaEvent.create({ organizationId, eventName: 'PageView', eventId: `test_${randomUUID()}`, eventTime: Math.floor(Date.now()/1000), eventSourceUrl: cleanUrl(sourceUrl), userData: {}, customData: { integration_test: true }, testEventCode: integration.testEventCode || '', status: 'queued' })
+  const state = effectiveState(integration)
+  if (!state.capiEnabled) throw new ApiError(409, 'Enable Conversions API before sending a test event')
+  if (!state.accessTokenConfigured) throw fieldError('accessToken', 'Configure a Meta Conversions API access token before testing')
+
+  const eventSourceUrl = cleanUrl(await resolveCanonicalMetaPublicUrl(organizationId))
+  const event = await MetaEvent.create({
+    organizationId,
+    eventName: 'PageView',
+    eventId: `test_${randomUUID()}`,
+    eventTime: Math.floor(Date.now() / 1000),
+    eventSourceUrl,
+    userData: {},
+    customData: { integration_test: true },
+    testEventCode: integration.testEventCode || '',
+    status: 'queued',
+  })
   const ok = await processOne(event)
-  integration.lastTestAt = new Date(); integration.status = ok ? 'active' : 'error'; integration.diagnostics = { ...(integration.diagnostics || {}), lastTest: { ok, at: new Date(), error: ok ? '' : event.lastErrorMessage } }; await integration.save()
-  return { ok, eventId: event.eventId, diagnostics: integration.diagnostics }
+  const lastTest = { ok, at: new Date(), error: ok ? '' : event.lastErrorMessage, eventSourceUrl }
+  await MetaIntegration.updateOne({ organizationId }, { $set: { lastTestAt: lastTest.at, 'diagnostics.lastTest': lastTest } })
+  return { ok, eventId: event.eventId, eventSourceUrl, diagnostics: lastTest }
+}
+
+const diagnostics = async (organizationId: string) => {
+  const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
+  const publicUrl = await resolveCanonicalMetaPublicUrl(organizationId)
+  if (!integration) {
+    return {
+      pixel: { enabled: false, connected: false, pixelId: '' },
+      capi: { enabled: false, status: 'not_configured', accessTokenConfigured: false },
+      publicUrl,
+      supportedEvents: [...META_EVENT_NAMES],
+      lastBrowserEvent: null,
+      lastServerEvent: null,
+      lastSuccessfulCapiAt: null,
+      queue: 0,
+      deadLetters: 0,
+    }
+  }
+
+  const state = effectiveState(integration)
+  const [queue, deadLetters, lastSent] = await Promise.all([
+    MetaEvent.countDocuments({ organizationId, status: { $in: ['queued', 'processing'] } }),
+    MetaEvent.countDocuments({ organizationId, status: 'dead' }),
+    MetaEvent.findOne({ organizationId, status: 'sent' }).select('eventName eventId eventSourceUrl sentAt').sort({ sentAt: -1, _id: -1 }).lean(),
+  ])
+  const diagnosticsValue = integration.diagnostics || {}
+  return {
+    pixel: { enabled: state.pixelEnabled, connected: state.pixelEnabled && Boolean(integration.pixelId), pixelId: integration.pixelId || '' },
+    capi: {
+      enabled: state.capiEnabled,
+      status: state.capiStatus,
+      accessTokenConfigured: state.accessTokenConfigured,
+      lastError: diagnosticsValue.lastCapiError || null,
+      lastTestAt: integration.lastTestAt || null,
+    },
+    publicUrl,
+    supportedEvents: [...META_EVENT_NAMES],
+    lastBrowserEvent: diagnosticsValue.lastBrowserEvent || null,
+    lastServerEvent: diagnosticsValue.lastServerEvent || (lastSent ? {
+      eventName: lastSent.eventName,
+      eventId: lastSent.eventId,
+      at: lastSent.sentAt,
+      eventSourceUrl: lastSent.eventSourceUrl,
+    } : null),
+    lastSuccessfulCapiAt: integration.lastSuccessAt || null,
+    queue,
+    deadLetters,
+  }
 }
 
 const deadLetters = async (organizationId: string) => MetaEvent.find({ organizationId, status: 'dead' }).select('eventName eventId attempts lastErrorCode lastErrorMessage createdAt updatedAt').sort({ updatedAt: -1 }).limit(100).lean()
 const retryDeadLetter = async (organizationId: string, id: string) => MetaEvent.findOneAndUpdate({ _id: id, organizationId, status: 'dead' }, { $set: { status: 'queued', attempts: 0, nextAttemptAt: new Date(), lastErrorCode: '', lastErrorMessage: '' } }, { new: true }).select('eventName eventId status attempts')
 
-export const MetaIntegrationService = { save, get, publicConfig, queuePublicEvent, processById, processQueue, test, deadLetters, retryDeadLetter }
+export const MetaIntegrationService = { save, get, publicConfig, queuePublicEvent, processById, processQueue, test, diagnostics, deadLetters, retryDeadLetter }

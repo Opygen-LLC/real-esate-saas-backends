@@ -116,7 +116,9 @@
     "test:phase5-production": "vitest run src/tests/contract/phase5ProductionRelease.contract.test.ts src/tests/integration/phase5ProductionRegression.integration.test.ts",
     "verify:phase5-production": "node scripts/verify-phase5-production-release.mjs",
     "smoke:phase5-staging": "node scripts/phase5-staging-smoke.mjs",
-    "monitor:phase5-production": "node scripts/phase5-production-watch.mjs"
+    "monitor:phase5-production": "node scripts/phase5-production-watch.mjs",
+    "migrate:meta-integration-phase3": "ts-node --transpile-only src/app/db/migrateMetaIntegrationPhase3.ts",
+    "verify:meta-phase3": "node scripts/verify-meta-phase3.mjs"
   },
   "keywords": [
     "real-estate",

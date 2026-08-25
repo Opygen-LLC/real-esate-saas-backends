@@ -1,0 +1,14 @@
+{
+  "migrationName": "website-submissions-inbox-crm-transfer-v2",
+  "generatedAt": "2026-08-25T09:36:32.543Z",
+  "backfilledLegacyLeadRows": 0,
+  "backfilledNonLeadRows": 0,
+  "appliedIndexes": [
+    "submission_tenant_submitted",
+    "submission_tenant_status_submitted",
+    "submission_tenant_type_submitted",
+    "submission_tenant_property_submitted",
+    "submission_tenant_linked_entity_submitted",
+    "submission_tenant_crm_transfer_submitted"
+  ]
+}
