@@ -17,18 +17,22 @@ describe('AuthValidation password policy', () => {
     expect(AuthValidation.loginZodSchema.safeParse({ body: { email: 'owner@example.com', password: 'legacy8!' } }).success).toBe(true)
   })
 
-  it('accepts an 8-character password when every complexity rule is met', () => {
-    expect(AuthValidation.registerAgencyZodSchema.safeParse(registration('Abcd1!xy')).success).toBe(true)
+  it('accepts any password with at least 8 characters', () => {
+    for (const password of ['abcdefgh', '12345678', '!!!!!!!!', 'password', 'Abcd1!xy']) {
+      expect(AuthValidation.registerAgencyZodSchema.safeParse(registration(password)).success).toBe(true)
+      expect(strongPasswordSchema.safeParse(password).success).toBe(true)
+    }
   })
 
-  it.each([
-    ['short', 'Ab1!xyz'],
-    ['uppercase', 'abcd1!xy'],
-    ['lowercase', 'ABCD1!XY'],
-    ['number', 'Abcdef!x'],
-    ['special character', 'Abcdef1x'],
-  ])('rejects a password missing the %s requirement', (_label, password) => {
-    expect(strongPasswordSchema.safeParse(password).success).toBe(false)
+  it('rejects passwords shorter than 8 characters', () => {
+    expect(strongPasswordSchema.safeParse('1234567').success).toBe(false)
+  })
+
+  it('applies the same minimum length to password reset and change-password', () => {
+    expect(AuthValidation.resetCompleteZodSchema.safeParse({ body: { resetToken: 'x'.repeat(32), newPassword: 'abcdefgh' } }).success).toBe(true)
+    expect(AuthValidation.resetCompleteZodSchema.safeParse({ body: { resetToken: 'x'.repeat(32), newPassword: '1234567' } }).success).toBe(false)
+    expect(AuthValidation.changePasswordZodSchema.safeParse({ body: { oldPassword: 'current', newPassword: 'abcdefgh' } }).success).toBe(true)
+    expect(AuthValidation.changePasswordZodSchema.safeParse({ body: { oldPassword: 'current', newPassword: '1234567' } }).success).toBe(false)
   })
 
   it('uses email for account verification requests', () => {
