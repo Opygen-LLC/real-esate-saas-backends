@@ -144,9 +144,9 @@ const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVAT
 const redisHost = process.env.REDIS_HOST || '127.0.0.1'
 const realtimeEnabled = envBoolean('REALTIME_ENABLED', true)
 const nextRevalidateUrl = (process.env.NEXT_REVALIDATE_URL?.trim() || `${publicSiteOrigin}/api/revalidate`).replace(/\/$/, '')
-const nextRevalidateSecret = isProduction
-  ? requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
-  : (process.env.NEXT_REVALIDATE_SECRET?.trim() || '')
+const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim()
+  || process.env.JWT_SECRET?.trim()
+  || (isProduction ? requiredInProduction('NEXT_REVALIDATE_SECRET', 32) : '')
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'generic')
@@ -219,7 +219,9 @@ if (isProduction) {
   requiredInProduction('OTP_PEPPER', 32)
   requiredInProduction('CRON_SIGNING_SECRET', 32)
   requiredInProduction('DATA_ENCRYPTION_KEY', 32)
-  requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+  if (!nextRevalidateSecret || nextRevalidateSecret.length < 32) {
+    requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
+  }
   requiredInProduction('PUBLIC_SITE_ORIGIN')
   requiredInProduction('DOMAIN_PROVIDER')
   if (domainProvider === 'vercel') {
