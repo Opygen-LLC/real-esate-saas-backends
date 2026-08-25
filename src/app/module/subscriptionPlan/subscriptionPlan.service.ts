@@ -344,6 +344,7 @@ const applyDuePlanVersions = async (): Promise<{ activatedVersions: number; appl
   for (const plan of due) {
     const tenants = await Organization.find({
       'subscription.plan': plan.planId,
+      'platformAccess.status': { $ne: 'pending_deletion' },
       $or: [{ 'subscription.planVersion': { $exists: false } }, { 'subscription.planVersion': { $ne: plan.version } }],
     }).select('organizationId').lean()
 
@@ -357,6 +358,7 @@ const applyDuePlanVersions = async (): Promise<{ activatedVersions: number; appl
           {
             organizationId: tenant.organizationId,
             'subscription.plan': plan.planId,
+            'platformAccess.status': { $ne: 'pending_deletion' },
             $or: [{ 'subscription.planVersion': { $exists: false } }, { 'subscription.planVersion': { $ne: plan.version } }],
           },
           { $set: {

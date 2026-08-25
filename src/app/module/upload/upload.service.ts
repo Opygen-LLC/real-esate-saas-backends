@@ -1,4 +1,4 @@
-import { bucket, storageConfig } from './upload.config'
+import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { randomBytes } from 'crypto'
 import sharp from 'sharp'
 import ApiError from '../../../errors/ApiError'
@@ -30,46 +30,29 @@ const sanitizeImage = async (buffer: Buffer, mimetype: string): Promise<{ buffer
   }
 }
 
-const uploadFile = async (file: Express.Multer.File): Promise<IUploadResult> => {
+const uploadFile = async (organizationId: string, file: Express.Multer.File): Promise<IUploadResult> => {
   if (!file || !file.buffer) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'No file buffer available for upload')
   }
 
   const sanitized = await sanitizeImage(file.buffer, file.mimetype)
 
+  const tenantId = String(organizationId || '').trim()
+  if (!tenantId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization id is required for uploads')
   const originalStem = (file.originalname || 'image').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100) || 'image'
-  const uniqueFileName = `uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${originalStem}.${sanitized.extension}`
-  const blob = bucket.file(uniqueFileName)
-
-  return new Promise((resolve, reject) => {
-    const blobStream = blob.createWriteStream({
-      resumable: false,
-      contentType: sanitized.contentType,
-      metadata: {
-        contentType: sanitized.contentType,
-        // Cache images for 1 year in browsers and CDN (immutable filename via timestamp+random)
-        cacheControl: 'public, max-age=31536000',
-      },
-    })
-
-    blobStream.on('error', (err) => {
-      reject(new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `GCS Upload Error: ${err.message}`))
-    })
-
-    blobStream.on('finish', () => {
-      const publicUrl = `https://storage.googleapis.com/${storageConfig.bucketName}/${blob.name}`
-      resolve({ publicUrl, sizeBytes: sanitized.buffer.length })
-    })
-
-    blobStream.end(sanitized.buffer)
-  })
+  const objectKey = `tenants/${tenantId}/uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${originalStem}.${sanitized.extension}`
+  await ObjectStorageService.putBuffer(objectKey, sanitized.buffer, sanitized.contentType)
+  return {
+    publicUrl: ObjectStorageService.publicUrl(objectKey),
+    sizeBytes: sanitized.buffer.length,
+  }
 }
 
-const uploadMultipleFiles = async (files: Express.Multer.File[]): Promise<IUploadResult[]> => {
+const uploadMultipleFiles = async (organizationId: string, files: Express.Multer.File[]): Promise<IUploadResult[]> => {
   if (!files || files.length === 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'No files provided for upload')
   }
-  const uploadPromises = files.map((file) => uploadFile(file))
+  const uploadPromises = files.map((file) => uploadFile(organizationId, file))
   return Promise.all(uploadPromises)
 }
 

@@ -193,6 +193,34 @@ const del = async (namespace: string, ...keys: string[]): Promise<void> => {
   try { await connection.command(['DEL', ...keys.map((key) => prefix(namespace, key))]) } catch { Metrics.cache(namespace, 'error') }
 }
 
+
+/**
+ * Delete all keys in one application cache namespace that match a relative
+ * pattern. SCAN is used instead of KEYS so tenant purges do not block Redis in
+ * production even when a workspace has accumulated many website-cache keys.
+ */
+const deleteMatching = async (namespace: string, keyPattern: string): Promise<number> => {
+  if (!config.redis.enabled || !keyPattern) return 0
+  let cursor = '0'
+  let deleted = 0
+  try {
+    do {
+      const response = await connection.command(['SCAN', cursor, 'MATCH', prefix(namespace, keyPattern), 'COUNT', 250])
+      if (!Array.isArray(response) || response.length < 2) break
+      cursor = String(response[0] ?? '0')
+      const keys = Array.isArray(response[1]) ? response[1].filter((value): value is string => typeof value === 'string') : []
+      if (keys.length) {
+        await connection.command(['DEL', ...keys])
+        deleted += keys.length
+      }
+    } while (cursor !== '0')
+    return deleted
+  } catch {
+    Metrics.cache(namespace, 'error')
+    return deleted
+  }
+}
+
 export const RedisClient = {
   command: (parts: Array<string | number>) => connection.command(parts),
   ping: () => connection.ping(),
@@ -200,5 +228,6 @@ export const RedisClient = {
   getJson,
   setJson,
   del,
+  deleteMatching,
   key: prefix,
 }

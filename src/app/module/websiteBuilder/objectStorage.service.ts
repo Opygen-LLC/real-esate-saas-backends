@@ -103,6 +103,42 @@ const publicUrl = (key: string): string => {
   return `${config.assets.public_base_url}/${encodePath(key)}`
 }
 
+
+/**
+ * Resolve a storage object key from either a raw key or one of the public GCS
+ * URL shapes used by this application. Unknown/external URLs return null so a
+ * tenant purge can never delete arbitrary third-party objects.
+ */
+const keyFromReference = (value: string): string | null => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+
+  if (!/^https?:\/\//i.test(raw)) {
+    const key = raw.replace(/^\/+/, '')
+    return key && !key.includes('\\') ? key : null
+  }
+
+  const bucket = bucketName()
+  if (!bucket) return null
+  try {
+    const parsed = new URL(raw)
+    const pathname = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''))
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'storage.googleapis.com' && pathname.startsWith(`${bucket}/`)) {
+      return pathname.slice(bucket.length + 1) || null
+    }
+    if (host === `${bucket.toLowerCase()}.storage.googleapis.com`) return pathname || null
+
+    const configuredBase = String(config.assets.public_base_url || '').replace(/\/+$/, '')
+    if (configuredBase && raw.startsWith(`${configuredBase}/`)) {
+      return decodeURIComponent(raw.slice(configuredBase.length + 1)) || null
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 // ─── Signed URL (presign) ─────────────────────────────────────────────────────
 
 const presign = async (
@@ -217,6 +253,55 @@ const remove = async (key: string): Promise<void> => {
   }
 }
 
+
+const exists = async (key: string): Promise<boolean> => {
+  assertConfigured()
+  try {
+    const [present] = await gcs().bucket(bucketName()).file(key).exists()
+    return Boolean(present)
+  } catch (error: any) {
+    if (error instanceof ApiError) throw error
+    throw unavailableError('Google Cloud Storage object existence check failed', {
+      operation: 'exists',
+      reason: String(error?.message || 'gcs_exists_failed').slice(0, 200),
+    })
+  }
+}
+
+/** Delete every object below a tenant-owned prefix. Idempotent by design. */
+const removePrefix = async (prefix: string): Promise<void> => {
+  assertConfigured()
+  const normalized = String(prefix || '').replace(/^\/+/, '')
+  if (!normalized) throw new ApiError(400, 'Storage deletion prefix is required')
+  try {
+    await gcs().bucket(bucketName()).deleteFiles({ prefix: normalized, force: true })
+  } catch (error: any) {
+    if (error instanceof ApiError) throw error
+    throw unavailableError('Google Cloud Storage prefix deletion failed', {
+      operation: 'delete_prefix',
+      prefix: normalized,
+      reason: String(error?.message || 'gcs_prefix_delete_failed').slice(0, 200),
+    })
+  }
+}
+
+const prefixHasObjects = async (prefix: string): Promise<boolean> => {
+  assertConfigured()
+  const normalized = String(prefix || '').replace(/^\/+/, '')
+  if (!normalized) return false
+  try {
+    const [files] = await gcs().bucket(bucketName()).getFiles({ prefix: normalized, maxResults: 1, autoPaginate: false })
+    return files.length > 0
+  } catch (error: any) {
+    if (error instanceof ApiError) throw error
+    throw unavailableError('Google Cloud Storage prefix verification failed', {
+      operation: 'verify_prefix',
+      prefix: normalized,
+      reason: String(error?.message || 'gcs_prefix_verify_failed').slice(0, 200),
+    })
+  }
+}
+
 // ─── CORS health (GCS supports CORS via bucket metadata, not OPTIONS preflight ─
 
 const browserCorsHealth = async () => {
@@ -310,6 +395,10 @@ export const ObjectStorageService = {
   head,
   putBuffer,
   remove,
+  removePrefix,
+  prefixHasObjects,
+  exists,
+  keyFromReference,
   publicUrl,
   browserCorsHealth,
   health,

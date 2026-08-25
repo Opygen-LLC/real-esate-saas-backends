@@ -507,10 +507,16 @@ export const VercelDomainProvider: DomainProvider = {
   },
 
   async removeDomain(domain: string) {
-    if (!providerConfigured()) return
+    if (!providerConfigured()) throw new ApiError(503, 'Vercel domain provider is not configured')
     const results = await Promise.allSettled([removeOne(domain), removeOne(`www.${domain}`)])
     const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (rejected) throw rejected.reason
+  },
+
+  async hasDomain(domain: string) {
+    if (!providerConfigured()) throw new ApiError(503, 'Vercel domain provider is not configured')
+    const [apex, www] = await Promise.all([getProjectDomain(domain), getProjectDomain(`www.${domain}`)])
+    return Boolean(apex || www)
   },
 
   async health(force = false): Promise<DomainProviderHealth> {

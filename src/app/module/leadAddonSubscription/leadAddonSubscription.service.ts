@@ -348,6 +348,11 @@ const applyDueLifecycle = async (limit = 100, now = new Date()) => {
   let cancelled = 0; let paymentFailed = 0
   const touched = new Set<string>()
   for (const row of rows) {
+    const tenantAllowed = await Organization.exists({
+      organizationId: row.organizationId,
+      'platformAccess.status': { $ne: 'pending_deletion' },
+    })
+    if (!tenantAllowed) continue
     touched.add(row.organizationId)
     if (row.status === 'cancel_at_period_end' || row.cancelAtPeriodEnd) { row.status = 'cancelled'; row.cancelAtPeriodEnd = false; row.cancelledAt = row.currentPeriodEnd || now; cancelled += 1 }
     else { row.status = 'payment_failed'; paymentFailed += 1 }

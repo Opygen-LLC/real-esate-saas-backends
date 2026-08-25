@@ -12,6 +12,7 @@ import { MetaIntegrationService } from '../metaIntegration/metaIntegration.servi
 import { Task } from '../task/task.model'
 import { Viewing } from '../viewing/viewing.model'
 import { NotificationService } from '../notification/notification.service'
+import { Organization } from '../organization/organization.model'
 import { SmsService } from '../sms/sms.service'
 import { WebsiteAssetProcessor } from '../websiteBuilder/websiteAssetProcessor.service'
 import sendEmail from '../../helpers/sendEmail'
@@ -21,10 +22,21 @@ const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
 
 type QueueWriteOptions = { session?: ClientSession }
 
+
+const tenantCanRunBackgroundWork = async (organizationId: string) => Boolean(await Organization.exists({
+  organizationId,
+  'platformAccess.status': { $ne: 'pending_deletion' },
+}))
+
 const schedule = async (
   input: { organizationId: string; type: OperationsJobType; entityId: string; runAt: Date; payload?: Record<string, unknown>; maxAttempts?: number },
   options: QueueWriteOptions = {},
 ) => {
+  // Once hard deletion starts, no new tenant background work may be queued.
+  // Existing API requests can still be unwinding on another replica, so this
+  // database-backed barrier closes that race at the durable queue boundary.
+  if (!(await tenantCanRunBackgroundWork(input.organizationId))) return null
+
   await OperationsJob.updateMany(
     { organizationId: input.organizationId, type: input.type, entityId: input.entityId, status: 'pending' },
     { $set: { status: 'cancelled' } },
@@ -56,7 +68,26 @@ const cancel = async (
   options.session ? { session: options.session } : undefined,
 )
 
+
+const cancelOrganization = async (organizationId: string) => {
+  const completedAt = new Date()
+  const result = await OperationsJob.updateMany(
+    { organizationId, status: { $in: ['pending', 'processing'] } },
+    {
+      $set: { status: 'cancelled', completedAt, lastError: 'Cancelled because the organization is being permanently deleted' },
+      $unset: { lockedAt: 1, lockedBy: 1 },
+    },
+  )
+  return { cancelled: result.modifiedCount }
+}
+
 const deliver = async (job: any) => {
+  const [stillClaimed, tenantAllowed] = await Promise.all([
+    OperationsJob.exists({ _id: job._id, status: 'processing', lockedBy: workerId }),
+    tenantCanRunBackgroundWork(job.organizationId),
+  ])
+  if (!stillClaimed || !tenantAllowed) return
+
   if (job.type === 'support_email') {
     const { to, subject, html } = job.payload || {}
     if (to && subject && html) {
@@ -106,7 +137,7 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
   try {
     await deliver(job)
     const completedAt = new Date()
-    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId }, { $set: { status: 'completed', completedAt, lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: 'completed', completedAt, lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
     if (job.type === 'domain_verify') {
       // A later successful lifecycle check supersedes historical dead jobs for
       // the same domain record. Without this cleanup the health endpoint would
@@ -121,7 +152,7 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
   } catch (error) {
     const final = job.attempts >= job.maxAttempts
     const delayMs = Math.min(6 * 60 * 60_000, Math.max(30_000, 2 ** Math.min(job.attempts, 10) * 15_000))
-    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
     Metrics.observeQueue(job.type, final ? 'dead' : 'retry')
     logger.error('[Operations queue] job failed', { jobId: job._id.toString(), type: job.type, final, error })
     return 'failed'
@@ -151,7 +182,7 @@ const schedulePendingCalendarSync = async (limit = 25) => {
   let scheduled = 0
   for (const viewing of candidates) {
     const entityId = viewing._id.toString()
-    if (!existing.has(entityId)) { await schedule({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId, runAt: new Date(Date.now() + 250) }); scheduled += 1 }
+    if (!existing.has(entityId)) { const job = await schedule({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId, runAt: new Date(Date.now() + 250) }); if (job) scheduled += 1 }
   }
   return { scheduled }
 }
@@ -164,8 +195,8 @@ const schedulePendingMeta = async (limit = 100) => {
   for (const event of candidates) {
     const entityId = event._id.toString()
     if (!existing.has(entityId)) {
-      await schedule({ organizationId: event.organizationId, type: 'meta_capi', entityId, runAt: new Date(Date.now() + 250), maxAttempts: config.meta.max_attempts })
-      scheduled += 1
+      const job = await schedule({ organizationId: event.organizationId, type: 'meta_capi', entityId, runAt: new Date(Date.now() + 250), maxAttempts: config.meta.max_attempts })
+      if (job) scheduled += 1
     }
   }
   return { scheduled }
@@ -179,8 +210,8 @@ const schedulePendingDomainChecks = async (limit = 100) => {
   for (const record of candidates) {
     const entityId = record._id.toString()
     if (!existing.has(entityId)) {
-      await schedule({ organizationId: record.organizationId, type: 'domain_verify', entityId, runAt: new Date(Date.now() + 250), maxAttempts: 8 })
-      scheduled += 1
+      const job = await schedule({ organizationId: record.organizationId, type: 'domain_verify', entityId, runAt: new Date(Date.now() + 250), maxAttempts: 8 })
+      if (job) scheduled += 1
     }
   }
   return { scheduled }
@@ -213,4 +244,4 @@ const domainBacklog = async () => {
   return { pending, processing, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
-export const OperationsQueueService = { schedule, cancel, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog }
+export const OperationsQueueService = { schedule, cancel, cancelOrganization, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog }

@@ -63,5 +63,6 @@ export interface DomainProvider {
   getTlsStatus(input: DomainProviderInput): Promise<DomainTlsResult>
   verifyPublicRouting(input: DomainProviderInput): Promise<DomainPublicRoutingResult>
   removeDomain(domain: string): Promise<void>
+  hasDomain(domain: string): Promise<boolean>
   health(force?: boolean): Promise<DomainProviderHealth>
 }

@@ -435,6 +435,7 @@ const processDueChanges = async (limit = 50, now = new Date()) => {
   const due: any[] = await Organization.find({
     'subscription.scheduledPlan': { $type: 'string', $ne: '' },
     'subscription.scheduledEffectiveAt': { $lte: now },
+    'platformAccess.status': { $ne: 'pending_deletion' },
   })
     .select('organizationId')
     .sort({ 'subscription.scheduledEffectiveAt': 1, _id: 1 })

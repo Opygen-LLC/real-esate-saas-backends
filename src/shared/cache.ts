@@ -27,5 +27,9 @@ export const Cache = {
     get: <T>(scope: 'draft' | 'published', organizationId: string, value: string) => RedisClient.getJson<T>(`website-${scope}`, `${safe(organizationId)}:${safe(value)}`),
     set: (scope: 'draft' | 'published', organizationId: string, value: string, data: unknown, ttl: number) => RedisClient.setJson(`website-${scope}`, `${safe(organizationId)}:${safe(value)}`, data, ttl),
     del: (scope: 'draft' | 'published', organizationId: string, value: string) => RedisClient.del(`website-${scope}`, `${safe(organizationId)}:${safe(value)}`),
+    delAll: (organizationId: string) => Promise.all([
+      RedisClient.deleteMatching('website-draft', `${safe(organizationId)}:*`),
+      RedisClient.deleteMatching('website-published', `${safe(organizationId)}:*`),
+    ]).then(() => undefined),
   },
 }

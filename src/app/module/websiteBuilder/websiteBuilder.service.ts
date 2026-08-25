@@ -172,6 +172,11 @@ const processScheduledPublishes = async (limit = 25) => {
     )
     if (!page) break
     due += 1
+    const tenantAllowed = await Organization.exists({
+      organizationId: page.organizationId,
+      'platformAccess.status': { $ne: 'pending_deletion' },
+    })
+    if (!tenantAllowed) continue
     try {
       await performPublish(page.organizationId, page._id.toString())
       published += 1

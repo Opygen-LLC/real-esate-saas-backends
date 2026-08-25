@@ -149,6 +149,17 @@ const disconnectUser = async (userId: string) => {
   }
 }
 
+
+const disconnectOrganization = async (organizationId: string) => {
+  if (!runtime.dashboard || !organizationId) return
+  try {
+    const sockets = await runtime.dashboard.in(`org:${organizationId}`).fetchSockets()
+    sockets.forEach((socket) => socket.disconnect(true))
+  } catch (error) {
+    logger.warn('realtime_disconnect_organization_failed', { organizationId, error })
+  }
+}
+
 export const RealtimeService = {
   configure,
   fromDomainEvent,
@@ -160,4 +171,5 @@ export const RealtimeService = {
   emitAuthorizationChanged,
   emitSessionChanged,
   disconnectUser,
+  disconnectOrganization,
 }

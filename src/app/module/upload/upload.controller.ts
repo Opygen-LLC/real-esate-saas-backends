@@ -55,7 +55,7 @@ const uploadSingle = catchAsync(async (req: Request, res: Response) => {
 
   const organizationId = requireTenant(req)
   await EntitlementService.assertStorage(organizationId, file.size)
-  const result = await StorageService.uploadFile(file)
+  const result = await StorageService.uploadFile(organizationId, file)
   await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: result.sizeBytes } })
 
   res.status(httpStatus.CREATED).json({
@@ -71,7 +71,7 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
 
   const organizationId = requireTenant(req)
   await EntitlementService.assertStorage(organizationId, files.reduce((sum, file) => sum + Number(file.size || 0), 0))
-  const results = await StorageService.uploadMultipleFiles(files)
+  const results = await StorageService.uploadMultipleFiles(organizationId, files)
   await Organization.updateOne({ organizationId }, { $inc: { storageUsedBytes: results.reduce((sum, item) => sum + item.sizeBytes, 0) } })
 
   res.status(httpStatus.CREATED).json({

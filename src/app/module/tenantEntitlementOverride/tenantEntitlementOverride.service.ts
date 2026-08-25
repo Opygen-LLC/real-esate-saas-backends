@@ -167,6 +167,11 @@ const applyDueExpirations = async (limit = 50, now = new Date()) => {
   let expired = 0
   const failed: Array<{ organizationId: string; error: string }> = []
   for (const dueRow of due) {
+    const tenantAllowed = await Organization.exists({
+      organizationId: dueRow.organizationId,
+      'platformAccess.status': { $ne: 'pending_deletion' },
+    })
+    if (!tenantAllowed) continue
     try {
       let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
       await EntitlementService.withTeamMemberQuotaGuard(dueRow.organizationId, async (session) => {

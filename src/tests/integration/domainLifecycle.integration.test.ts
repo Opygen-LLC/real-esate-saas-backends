@@ -44,6 +44,7 @@ vi.mock('../../app/module/domain/providers', () => {
       diagnostics: [diagnostic('public_routing', 'Public routing', providerState.publicActive)],
     })),
     removeDomain: vi.fn(async () => undefined),
+    hasDomain: vi.fn(async () => false),
     health: vi.fn(async () => ({ provider: 'vercel', configured: true, healthy: true, latencyMs: 3, checkedAt: new Date().toISOString() })),
   }
   return { DomainProviderService: { current: () => provider, health: provider.health } }

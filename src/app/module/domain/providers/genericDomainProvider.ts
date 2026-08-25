@@ -244,6 +244,11 @@ export const GenericDomainProvider: DomainProvider = {
     // Nothing to clean up in a generic self-managed setup.
   },
 
+  async hasDomain(_domain: string) {
+    // Generic/self-managed hosting has no provider registration to query.
+    return false
+  },
+
   async health(force = false): Promise<DomainProviderHealth> {
     const now = Date.now()
     if (!force && cachedHealth && now - cachedHealth.at < config.domains.provider_health_cache_ms) {

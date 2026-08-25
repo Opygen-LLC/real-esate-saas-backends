@@ -37,6 +37,10 @@ const invalidateTenant = async (organizationId: string, extraIdentifiers: string
   await Promise.all([
     Cache.tenantPublic.del(...identifiers),
     Cache.tenantResolve.del(...identifiers),
+    // Delete the complete tenant website-cache namespace as well as the
+    // explicit keys below. delAll uses Redis SCAN and catches stale/legacy page
+    // cache keys that are no longer represented by a WebsitePage document.
+    Cache.website.delAll(organizationId),
     ...pages.flatMap((page: any) => [
       WebsiteCache.del('draft', organizationId, String(page._id)),
       WebsiteCache.del('published', organizationId, String(page.slug || '/')),

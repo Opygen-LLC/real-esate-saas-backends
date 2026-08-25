@@ -147,7 +147,7 @@ export const reconcileSubscriptions = async (): Promise<{ transitioned: number; 
   const scheduledChanges = await SubscriptionScheduleService.processDueChanges(100, now)
   const policy = await getTrialPolicy()
   const reminderMs = Math.max(0, Number(policy.reminderDaysBeforeExpiry || 0)) * DAY_MS
-  const organizations = await Organization.find({ 'subscription.status': { $in: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end'] } })
+  const organizations = await Organization.find({ 'subscription.status': { $in: ['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end'] }, 'platformAccess.status': { $ne: 'pending_deletion' } })
   let transitioned = 0
   let reminders = 0
 

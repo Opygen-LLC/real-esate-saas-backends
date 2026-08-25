@@ -7,6 +7,7 @@ import { AuthSession } from '../auth/authSession.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import { ImpersonationSession } from '../platformAdmin/impersonationSession.model'
+import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { User } from '../user/user.model'
 import {
@@ -15,6 +16,7 @@ import {
   TENANT_DELETION_COLLECTIONS,
   USER_LINKED_DELETION_COLLECTIONS,
 } from './tenantDataCollections'
+import { TenantExternalResourcesService } from './tenantExternalResources.service'
 
 const USER_COLLECTION = 'users'
 const ORGANIZATION_COLLECTION = 'organizations'
@@ -62,6 +64,10 @@ const getTenantUserIds = async (organizationId: string, session?: ClientSession)
 
   return users.map((user: any) => user._id as Types.ObjectId)
 }
+
+const tenantOrUserFilter = (organizationId: string, userIds: Types.ObjectId[]) => userIds.length
+  ? { $or: [{ organizationId }, { userId: { $in: userIds } }] }
+  : { organizationId }
 
 const countCollection = async (collectionName: string, filter: Record<string, unknown>) =>
   mongoose.connection.collection(collectionName).countDocuments(filter)
@@ -117,9 +123,10 @@ const previewOrganization = async (rawOrganizationId: string) => {
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
   const userIds = await getTenantUserIds(organizationId)
-  const [collectionCounts, userLinked] = await Promise.all([
+  const [collectionCounts, userLinked, externalResources] = await Promise.all([
     getTenantCollectionCounts(organizationId),
     getUserLinkedCollectionCounts(userIds, organizationId),
+    TenantExternalResourcesService.collect(organizationId, userIds),
   ])
   const scopedDocuments = Object.values(collectionCounts).reduce((sum, count) => sum + Number(count || 0), 0)
 
@@ -144,6 +151,14 @@ const previewOrganization = async (rawOrganizationId: string) => {
       pendingInvitations: Number(collectionCounts.teaminvitations || 0),
       auditEvents: Number(collectionCounts.auditevents || 0),
       dataSubjectRequests: Number(collectionCounts.datasubjectrequests || 0),
+      externalResources: {
+        storagePrefixes: externalResources.storagePrefixes,
+        referencedStorageObjects: externalResources.referencedObjectKeys.length,
+        legacyStorageObjects: externalResources.legacyObjectKeys.length,
+        customDomains: externalResources.domains.length,
+        activeSessions: await countCollection('authsessions', { ...tenantOrUserFilter(organizationId, userIds), revokedAt: null }),
+        queuedOrProcessingJobs: await countCollection('operationsjobs', { organizationId, status: { $in: ['pending', 'processing'] } }),
+      },
       collectionCounts,
       userLinkedCollectionCounts: userLinked.collectionCounts,
     },
@@ -228,6 +243,7 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
   const userIds = await getTenantUserIds(organizationId)
+  const externalManifest = await TenantExternalResourcesService.collect(organizationId, userIds)
   const now = new Date()
 
   // Immediately block the workspace before destructive work starts. If any
@@ -247,12 +263,27 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
   await org.save()
 
   await Promise.all([
-    AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_hard_delete' } }),
-    ImpersonationSession.updateMany({ organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actor.id } }),
-    CacheInvalidationService.invalidateTenant(organizationId),
+    // Refresh tokens are bound to AuthSession rows, so revoking every active
+    // tenant session invalidates both current sessions and future refreshes.
+    AuthSession.updateMany({ ...tenantOrUserFilter(organizationId, userIds), revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_hard_delete' } }),
+    ImpersonationSession.updateMany(userIds.length ? { $or: [{ organizationId }, { targetUserId: { $in: userIds } }], endedAt: null } : { organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actor.id } }),
+    OperationsQueueService.cancelOrganization(organizationId),
+    CacheInvalidationService.invalidateTenant(organizationId, externalManifest.domains),
   ])
   RealtimeService.emitOrganization(organizationId, { type: 'auth.changed', action: 'revoked', entityId: 'organization_hard_delete', forceLogout: true })
-  await Promise.all(userIds.map((userId) => RealtimeService.disconnectUser(String(userId))))
+  await Promise.all([
+    RealtimeService.disconnectOrganization(organizationId),
+    ...userIds.map((userId) => RealtimeService.disconnectUser(String(userId))),
+  ])
+
+  // External resources are removed before MongoDB data so a failed provider or
+  // GCS cleanup leaves a retryable tenant manifest in the database. Both
+  // provider and storage operations are idempotent.
+  await Promise.all([
+    TenantExternalResourcesService.deleteStorage(externalManifest),
+    TenantExternalResourcesService.deleteDomains(externalManifest),
+  ])
+  await TenantExternalResourcesService.verifyDeleted(externalManifest)
 
   const execute = async (session?: ClientSession) => {
     await deleteUserLinkedDocuments(userIds, session)
@@ -276,6 +307,10 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
   }
 
   await verifyPurged(organizationId, userIds)
+  // A second cache pass catches any request that populated a stale tenant key
+  // while the purge was running. At this point the Organization no longer
+  // exists, so only explicit identifiers from the manifest are needed.
+  await CacheInvalidationService.invalidateTenant(organizationId, externalManifest.domains)
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'deleted', entityId: organizationId })
 
   return { organizationId, deleted: true, permanent: true }
