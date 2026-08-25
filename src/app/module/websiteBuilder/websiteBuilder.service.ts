@@ -28,6 +28,7 @@ import { TemplateRegistry } from './templateRegistry'
 import { WebsiteCache } from './websiteCache'
 import { ObjectStorageService } from './objectStorage.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { buildDefaultWebsiteDocument } from './defaultWebsiteDocument'
 import { assertTemplateQuality } from './templateQa'
@@ -238,6 +239,7 @@ const assetKey = (organizationId: string, filename: string, suffix = '', options
 }
 
 const presignAsset = async (organizationId: string, payload: any, options: AssetLifecycleOptions = {}) => {
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
   const size = Number(payload.size)
   if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')

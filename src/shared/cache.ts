@@ -31,5 +31,9 @@ export const Cache = {
       RedisClient.deleteMatching('website-draft', `${safe(organizationId)}:*`),
       RedisClient.deleteMatching('website-published', `${safe(organizationId)}:*`),
     ]).then(() => undefined),
+    countAll: (organizationId: string) => Promise.all([
+      RedisClient.countMatching('website-draft', `${safe(organizationId)}:*`),
+      RedisClient.countMatching('website-published', `${safe(organizationId)}:*`),
+    ]).then((counts) => counts.reduce((sum, value) => sum + value, 0)),
   },
 }

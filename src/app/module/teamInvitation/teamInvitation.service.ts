@@ -13,6 +13,7 @@ import { User } from '../user/user.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionsForRole } from '../user/accessControl'
 import { deleteUserCompanionRecords, ensureUserProfile, getUserAccessControl, syncRoleProfile } from '../user/userProfile.service'
 import { TeamInvitation } from './teamInvitation.model'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const tokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
 const inviteExpiryMs = 48 * 60 * 60 * 1000
@@ -126,6 +127,7 @@ const acceptInvitation = async (token: string, password: string) => {
   const hashedToken = tokenHash(token)
   const preflight: any = await TeamInvitation.findOne({ tokenHash: hashedToken, status: 'pending' }).select('_id organizationId expiresAt').lean()
   if (!preflight) throw new ApiError(404, 'Invitation is invalid, expired, or has already been used')
+  await TenantPurgeBarrier.assertTenantWritable(preflight.organizationId)
   if (new Date(preflight.expiresAt).getTime() <= Date.now()) {
     await TeamInvitation.updateOne({ _id: preflight._id, status: 'pending' }, { $set: { status: 'expired' } })
     throw new ApiError(410, 'This invitation has expired')

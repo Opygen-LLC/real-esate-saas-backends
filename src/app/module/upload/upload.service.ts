@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import sharp from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import httpStatus from 'http-status'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 export interface IUploadResult {
   publicUrl: string
@@ -31,6 +32,7 @@ const sanitizeImage = async (buffer: Buffer, mimetype: string): Promise<{ buffer
 }
 
 const uploadFile = async (organizationId: string, file: Express.Multer.File): Promise<IUploadResult> => {
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!file || !file.buffer) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'No file buffer available for upload')
   }

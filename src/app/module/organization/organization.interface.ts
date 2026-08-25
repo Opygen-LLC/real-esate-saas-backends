@@ -52,6 +52,7 @@ export interface IPlatformAccess {
   deletionRequestedBy?: string
   deletionReason?: string
   deletionRetentionUntil?: Date | null
+  purgeUserIds?: string[]
 }
 
 export interface IServiceArea {

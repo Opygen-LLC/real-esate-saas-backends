@@ -3,6 +3,7 @@ import mongoose, { type Types } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { logger } from '../../../shared/logger'
 import { DomainRecord } from '../domain/domain.model'
+import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { DomainProviderService } from '../domain/providers'
 import { Organization } from '../organization/organization.model'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
@@ -37,6 +38,7 @@ export type TenantExternalResourceManifest = {
   referencedObjectKeys: string[]
   legacyObjectKeys: string[]
   domains: string[]
+  cacheIdentifiers: string[]
 }
 
 const normalizeDomain = (value: unknown): string | null => {
@@ -135,16 +137,26 @@ const collectDomains = async (organizationId: string) => {
 }
 
 const collect = async (organizationId: string, userIds: Types.ObjectId[]): Promise<TenantExternalResourceManifest> => {
-  const [storage, domains] = await Promise.all([
+  const [storage, domains, organization, aliases] = await Promise.all([
     collectStorageReferences(organizationId, userIds),
     collectDomains(organizationId),
+    Organization.findOne({ organizationId }).select('organizationId sub_domain domain').lean(),
+    SubdomainAlias.find({ organizationId }).select('alias').lean(),
   ])
+  const cacheIdentifiers = Array.from(new Set([
+    organizationId,
+    (organization as any)?.sub_domain,
+    (organization as any)?.domain,
+    ...domains,
+    ...aliases.map((row: any) => row.alias),
+  ].filter(Boolean).map((value) => String(value).trim().toLowerCase())))
   return {
     organizationId,
     storagePrefixes: [`tenants/${organizationId}/`, `support/${organizationId}/`],
     referencedObjectKeys: storage.referencedObjectKeys,
     legacyObjectKeys: storage.legacyObjectKeys,
     domains,
+    cacheIdentifiers,
   }
 }
 
@@ -207,20 +219,31 @@ const deleteDomains = async (manifest: TenantExternalResourceManifest) => {
   }
 }
 
-const verifyDeleted = async (manifest: TenantExternalResourceManifest) => {
+const verificationState = async (manifest: TenantExternalResourceManifest) => {
   const provider = DomainProviderService.current()
   const [prefixResults, legacyResults, domainResults] = await Promise.all([
     Promise.all(manifest.storagePrefixes.map(async (prefix) => ({ prefix, exists: await ObjectStorageService.prefixHasObjects(prefix) }))),
     Promise.all(manifest.legacyObjectKeys.map(async (key) => ({ key, exists: await ObjectStorageService.exists(key) }))),
     Promise.all(manifest.domains.map(async (domain) => ({ domain, exists: await provider.hasDomain(domain) }))),
   ])
-
   const remainingStoragePrefixes = prefixResults.filter((entry) => entry.exists).map((entry) => entry.prefix)
   const remainingLegacyObjects = legacyResults.filter((entry) => entry.exists).map((entry) => entry.key)
   const remainingDomains = domainResults.filter((entry) => entry.exists).map((entry) => entry.domain)
+  return {
+    remainingStoragePrefixes,
+    remainingLegacyObjects,
+    remainingDomains,
+    remainingStorageObjects: remainingStoragePrefixes.length + remainingLegacyObjects.length,
+    remainingDomainRegistrations: remainingDomains.length,
+  }
+}
+
+const verifyDeleted = async (manifest: TenantExternalResourceManifest) => {
+  const state = await verificationState(manifest)
+  const { remainingStoragePrefixes, remainingLegacyObjects, remainingDomains } = state
 
   if (remainingStoragePrefixes.length || remainingLegacyObjects.length || remainingDomains.length) {
-    const details = { organizationId: manifest.organizationId, remainingStoragePrefixes, remainingLegacyObjects, remainingDomains }
+    const details = { organizationId: manifest.organizationId, ...state }
     logger.error('tenant_external_resource_verification_failed', details)
     throw new ApiError(
       httpStatus.INTERNAL_SERVER_ERROR,
@@ -237,4 +260,5 @@ export const TenantExternalResourcesService = {
   deleteStorage,
   deleteDomains,
   verifyDeleted,
+  verificationState,
 }

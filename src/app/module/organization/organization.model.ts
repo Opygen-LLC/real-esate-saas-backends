@@ -242,6 +242,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       deletionRequestedBy: { type: String, default: '' },
       deletionReason: { type: String, default: '', maxlength: 500 },
       deletionRetentionUntil: { type: Date, default: null },
+      purgeUserIds: { type: [String], default: [] },
     },
     entitlementRestrictions: {
       premiumTemplates: { type: Boolean, default: false },

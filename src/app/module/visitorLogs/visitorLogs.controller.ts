@@ -6,12 +6,14 @@ import { Organization } from '../organization/organization.model'
 import { VisitorLog } from './visitorLogs.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { requireTenant } from '../../middlewares/auth'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const logVisitor = catchAsync(async (req: Request, res: Response) => {
   const { organizationId, urlPath, referrer, device, browser, os } = req.body
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress
 
   if (organizationId) {
+    await TenantPurgeBarrier.assertTenantWritable(organizationId)
     await EntitlementService.consumeVisitor(organizationId)
     await VisitorLog.create({
       organizationId,

@@ -10,6 +10,7 @@ import { MetaIntegration } from './metaIntegration.model'
 import { MetaEvent } from './metaEvent.model'
 import { Resilience } from '../../../shared/resilience'
 import { emitProductionEvent } from '../../../shared/productionEvents'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 export const META_EVENT_NAMES = ['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'] as const
 const ALLOWED_EVENTS = new Set<string>(META_EVENT_NAMES)
@@ -233,6 +234,7 @@ const recordBrowserDiagnostic = async (organizationId: string, payload: any, eve
 const queuePublicEvent = async (identifier: string, payload: any, context: { ip?: string; userAgent?: string }) => {
   const organizationId = await resolveOrganization(identifier)
   if (!organizationId) throw new ApiError(404, 'Agency website not found')
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
   if (!integration) return { queued: false, reason: 'integration_disabled' }
 

@@ -160,6 +160,40 @@ const disconnectOrganization = async (organizationId: string) => {
   }
 }
 
+
+const disconnectPublicOrganization = async (organizationId: string) => {
+  if (!runtime.public || !organizationId) return
+  try {
+    const sockets = await runtime.public.in(`public:org:${organizationId}`).fetchSockets()
+    sockets.forEach((socket) => socket.disconnect(true))
+  } catch (error) {
+    logger.warn('realtime_disconnect_public_organization_failed', { organizationId, error })
+  }
+}
+
+const countOrganizationSockets = async (organizationId: string): Promise<number> => {
+  if (!organizationId) return 0
+  let total = 0
+  try {
+    if (runtime.dashboard) total += (await runtime.dashboard.in(`org:${organizationId}`).fetchSockets()).length
+    if (runtime.public) total += (await runtime.public.in(`public:org:${organizationId}`).fetchSockets()).length
+  } catch (error) {
+    logger.warn('realtime_count_organization_sockets_failed', { organizationId, error })
+    throw error
+  }
+  return total
+}
+
+const countUserSockets = async (userIds: string[]): Promise<number> => {
+  if (!runtime.dashboard || !userIds.length) return 0
+  let total = 0
+  for (const userId of userIds) {
+    try { total += (await runtime.dashboard.in(`user:${userId}`).fetchSockets()).length }
+    catch (error) { logger.warn('realtime_count_user_sockets_failed', { userId, error }); throw error }
+  }
+  return total
+}
+
 export const RealtimeService = {
   configure,
   fromDomainEvent,
@@ -172,4 +206,7 @@ export const RealtimeService = {
   emitSessionChanged,
   disconnectUser,
   disconnectOrganization,
+  disconnectPublicOrganization,
+  countOrganizationSockets,
+  countUserSockets,
 }

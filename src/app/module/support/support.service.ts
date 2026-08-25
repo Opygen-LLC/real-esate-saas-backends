@@ -9,6 +9,7 @@ import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { scanStoredObject } from '../websiteBuilder/virusScan.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { SupportPriority, SupportStatus, SupportTicket } from './support.model'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const SLA_HOURS: Record<SupportPriority, { firstResponse: number; resolution: number }> = {
   urgent: { firstResponse: 1, resolution: 8 },
@@ -163,6 +164,7 @@ const addInternalNote = async (id: string, authorId: string, note: string) => {
 
 const createAttachmentUpload = async (id: string, input: { originalName: string; mimeType: string; size: number; visibility: 'customer' | 'internal' }, actor: { id: string; role: string; organizationId?: string }) => {
   const ticket = await findAccessible(id, actor.role === 'super-admin' ? undefined : actor.organizationId)
+  await TenantPurgeBarrier.assertTenantWritable(ticket.organizationId)
   if (input.visibility === 'internal' && actor.role !== 'super-admin') throw new ApiError(httpStatus.FORBIDDEN, 'Internal attachments are support-only')
   if (!ALLOWED_ATTACHMENT_TYPES.has(input.mimeType)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported attachment type')
   if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_ATTACHMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Attachment must be between 1 byte and 10 MB')
@@ -177,6 +179,7 @@ const createAttachmentUpload = async (id: string, input: { originalName: string;
 
 const completeAttachmentUpload = async (id: string, attachmentId: string, actor: { id: string; role: string; organizationId?: string }) => {
   const ticket: any = await findAccessible(id, actor.role === 'super-admin' ? undefined : actor.organizationId)
+  await TenantPurgeBarrier.assertTenantWritable(ticket.organizationId)
   const attachment = ticket.attachments.id(attachmentId)
   if (!attachment || (attachment.visibility === 'internal' && actor.role !== 'super-admin')) throw new ApiError(httpStatus.NOT_FOUND, 'Support attachment not found')
   if (attachment.status === 'ready') return presentTicket(ticket, actor.role === 'super-admin')

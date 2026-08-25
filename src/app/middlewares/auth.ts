@@ -10,6 +10,7 @@ import { RequestContext } from '../../shared/requestContext'
 import { effectivePermissionsForUser, Permission, permissionMatrix, permissionsForRole, roleHasPermission } from '../module/user/accessControl'
 import { toAuthUserDto } from '../module/user/userProfile.service'
 import { enforceSubscriptionAccess } from './subscriptionAccess'
+import { TenantPurgeBarrier } from '../module/compliance/tenantPurgeBarrier.service'
 
 const authenticate = async (req: Request): Promise<void> => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
@@ -45,6 +46,7 @@ const auth = (...roles: string[]) => async (req: Request, _res: Response, next: 
     await authenticate(req)
     if (roles.length && !roles.includes(req.user!.userRole!)) throw new ApiError(403, 'Forbidden')
     await enforceSubscriptionAccess(req)
+    await TenantPurgeBarrier.assertRequestWritable(req.method, req.tenant?.organizationId)
     next()
   } catch (error) { next(error) }
 }
@@ -53,6 +55,7 @@ const requirePermission = (permission: Permission) => async (req: Request, _res:
     if (!req.user) await authenticate(req)
     if (!req.tenant?.permissions.includes(permission)) throw new ApiError(403, `Missing permission: ${permission}`)
     await enforceSubscriptionAccess(req)
+    await TenantPurgeBarrier.assertRequestWritable(req.method, req.tenant?.organizationId)
     next()
   } catch (error) { next(error) }
 }
@@ -61,6 +64,7 @@ const requireAnyPermission = (...permissions: Permission[]) => async (req: Reque
     if (!req.user) await authenticate(req)
     if (!permissions.some((permission) => req.tenant?.permissions.includes(permission))) throw new ApiError(403, `Missing one of permissions: ${permissions.join(', ')}`)
     await enforceSubscriptionAccess(req)
+    await TenantPurgeBarrier.assertRequestWritable(req.method, req.tenant?.organizationId)
     next()
   } catch (error) { next(error) }
 }

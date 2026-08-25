@@ -221,6 +221,27 @@ const deleteMatching = async (namespace: string, keyPattern: string): Promise<nu
   }
 }
 
+
+/** Count matching keys without blocking Redis. Used by hard-delete zero-data verification. */
+const countMatching = async (namespace: string, keyPattern: string): Promise<number> => {
+  if (!config.redis.enabled || !keyPattern) return 0
+  let cursor = '0'
+  let count = 0
+  try {
+    do {
+      const response = await connection.command(['SCAN', cursor, 'MATCH', prefix(namespace, keyPattern), 'COUNT', 250])
+      if (!Array.isArray(response) || response.length < 2) break
+      cursor = String(response[0] ?? '0')
+      const keys = Array.isArray(response[1]) ? response[1].filter((value): value is string => typeof value === 'string') : []
+      count += keys.length
+    } while (cursor !== '0')
+    return count
+  } catch (error) {
+    Metrics.cache(namespace, 'error')
+    throw error
+  }
+}
+
 export const RedisClient = {
   command: (parts: Array<string | number>) => connection.command(parts),
   ping: () => connection.ping(),
@@ -229,5 +250,6 @@ export const RedisClient = {
   setJson,
   del,
   deleteMatching,
+  countMatching,
   key: prefix,
 }

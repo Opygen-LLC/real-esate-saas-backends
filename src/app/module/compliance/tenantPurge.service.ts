@@ -65,6 +65,16 @@ const getTenantUserIds = async (organizationId: string, session?: ClientSession)
   return users.map((user: any) => user._id as Types.ObjectId)
 }
 
+const mergePurgeUserIds = (stored: unknown, current: Types.ObjectId[]): Types.ObjectId[] => {
+  const values = new Set<string>()
+  for (const value of Array.isArray(stored) ? stored : []) {
+    const normalized = String(value || '').trim()
+    if (mongoose.isValidObjectId(normalized)) values.add(normalized)
+  }
+  for (const value of current) values.add(String(value))
+  return [...values].map((value) => new mongoose.Types.ObjectId(value))
+}
+
 const tenantOrUserFilter = (organizationId: string, userIds: Types.ObjectId[]) => userIds.length
   ? { $or: [{ organizationId }, { userId: { $in: userIds } }] }
   : { organizationId }
@@ -243,98 +253,82 @@ const deleteOrganizationRoot = async (organizationId: string, session?: ClientSe
   await Organization.deleteOne({ organizationId }, withSession(session))
 }
 
-const verifyPurged = async (organizationId: string, userIds: Types.ObjectId[]) => {
-  const [organizationExists, collectionCounts, userLinked] = await Promise.all([
+const nonZero = (counts: Record<string, number>) => Object.entries(counts)
+  .filter(([, count]) => Number(count || 0) > 0)
+  .reduce<Record<string, number>>((acc, [name, count]) => {
+    acc[name] = Number(count || 0)
+    return acc
+  }, {})
+
+const getZeroStateSnapshot = async (
+  organizationId: string,
+  userIds: Types.ObjectId[],
+  externalManifest: Awaited<ReturnType<typeof TenantExternalResourcesService.collect>>,
+) => {
+  const userIdStrings = userIds.map(String)
+  const [organizationExists, collectionCounts, userLinked, external, organizationSockets, userSockets, redisKeys] = await Promise.all([
     Organization.exists({ organizationId }),
     getTenantCollectionCounts(organizationId),
     getUserLinkedCollectionCounts(userIds, organizationId),
+    TenantExternalResourcesService.verificationState(externalManifest),
+    RealtimeService.countOrganizationSockets(organizationId),
+    RealtimeService.countUserSockets(userIdStrings),
+    CacheInvalidationService.countTenantKeys(organizationId, externalManifest.cacheIdentifiers),
   ])
+  const remainingCollections = nonZero(collectionCounts)
+  const remainingUserLinkedCollections = nonZero(userLinked.collectionCounts)
+  return {
+    organizationExists: Boolean(organizationExists),
+    remainingCollections,
+    remainingUserLinkedCollections,
+    databaseRecords: Object.values(remainingCollections).reduce((sum, value) => sum + value, 0)
+      + Object.values(remainingUserLinkedCollections).reduce((sum, value) => sum + value, 0),
+    activeSessions: Number(collectionCounts.authsessions || 0) + Number(userLinked.collectionCounts.authsessions || 0),
+    operationsJobs: Number(collectionCounts.operationsjobs || 0),
+    activeSockets: organizationSockets + userSockets,
+    redisKeys,
+    gcsTenantObjects: external.remainingStorageObjects,
+    registeredTenantDomains: external.remainingDomainRegistrations,
+    external,
+  }
+}
 
-  const remainingCollections = Object.entries(collectionCounts)
-    .filter(([, count]) => count > 0)
-    .reduce<Record<string, number>>((acc, [name, count]) => {
-      acc[name] = count
-      return acc
-    }, {})
-  const remainingUserLinkedCollections = Object.entries(userLinked.collectionCounts)
-    .filter(([, count]) => count > 0)
-    .reduce<Record<string, number>>((acc, [name, count]) => {
-      acc[name] = count
-      return acc
-    }, {})
+const assertZeroState = async (
+  organizationId: string,
+  userIds: Types.ObjectId[],
+  externalManifest: Awaited<ReturnType<typeof TenantExternalResourcesService.collect>>,
+  options: { organizationMustExist: boolean },
+) => {
+  const snapshot = await getZeroStateSnapshot(organizationId, userIds, externalManifest)
+  const organizationMismatch = options.organizationMustExist ? !snapshot.organizationExists : snapshot.organizationExists
+  const incomplete = organizationMismatch
+    || snapshot.databaseRecords > 0
+    || snapshot.activeSessions > 0
+    || snapshot.operationsJobs > 0
+    || snapshot.activeSockets > 0
+    || snapshot.redisKeys > 0
+    || snapshot.gcsTenantObjects > 0
+    || snapshot.registeredTenantDomains > 0
 
-  if (organizationExists || Object.keys(remainingCollections).length > 0 || Object.keys(remainingUserLinkedCollections).length > 0) {
-    const details = {
-      organizationId,
-      organizationExists: Boolean(organizationExists),
-      remainingCollections,
-      remainingUserLinkedCollections,
-    }
-    logger.error('tenant_hard_delete_verification_failed', details)
+  if (incomplete) {
+    const details = { organizationId, expectedOrganizationExists: options.organizationMustExist, ...snapshot }
+    logger.error('tenant_hard_delete_zero_state_verification_failed', details)
     throw new ApiError(
       httpStatus.INTERNAL_SERVER_ERROR,
-      'Tenant purge did not remove all organization/user database records',
+      'Tenant purge verification found remaining organization data or active resources',
       '',
       'TENANT_PURGE_INCOMPLETE',
       details,
     )
   }
+  return snapshot
 }
 
-const purgeOrganization = async (rawOrganizationId: string, actor: { id: string; reason: string }) => {
-  assertDeletionRegistrySafety()
-  const organizationId = assertOrganizationIdIsPurgeable(rawOrganizationId)
-  const org: any = await Organization.findOne({ organizationId })
-  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-
-  const userIds = await getTenantUserIds(organizationId)
-  const externalManifest = await TenantExternalResourcesService.collect(organizationId, userIds)
-  const now = new Date()
-
-  // Immediately block the workspace before destructive work starts. If any
-  // later step fails, the same hard-delete endpoint is safe to retry.
-  org.isBlocked = true
-  org.websiteStatus = 'suspended'
-  if (org.subscription) org.subscription.status = 'suspended'
-  org.platformAccess = {
-    ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
-    status: 'pending_deletion',
-    deletionRequestedAt: now,
-    deletionRequestedBy: actor.id,
-    deletionReason: actor.reason,
-    deletionRequestId: null,
-    deletionRetentionUntil: null,
-  }
-  await org.save()
-
-  await Promise.all([
-    // Refresh tokens are bound to AuthSession rows, so revoking every active
-    // tenant session invalidates both current sessions and future refreshes.
-    AuthSession.updateMany({ ...tenantOrUserFilter(organizationId, userIds), revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_hard_delete' } }),
-    ImpersonationSession.updateMany(userIds.length ? { $or: [{ organizationId }, { targetUserId: { $in: userIds } }], endedAt: null } : { organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actor.id } }),
-    OperationsQueueService.cancelOrganization(organizationId),
-    CacheInvalidationService.invalidateTenant(organizationId, externalManifest.domains),
-  ])
-  RealtimeService.emitOrganization(organizationId, { type: 'auth.changed', action: 'revoked', entityId: 'organization_hard_delete', forceLogout: true })
-  await Promise.all([
-    RealtimeService.disconnectOrganization(organizationId),
-    ...userIds.map((userId) => RealtimeService.disconnectUser(String(userId))),
-  ])
-
-  // External resources are removed before MongoDB data so a failed provider or
-  // GCS cleanup leaves a retryable tenant manifest in the database. Both
-  // provider and storage operations are idempotent.
-  await Promise.all([
-    TenantExternalResourcesService.deleteStorage(externalManifest),
-    TenantExternalResourcesService.deleteDomains(externalManifest),
-  ])
-  await TenantExternalResourcesService.verifyDeleted(externalManifest)
-
+const deleteTenantDependants = async (organizationId: string, userIds: Types.ObjectId[]) => {
   const execute = async (session?: ClientSession) => {
     await deleteUserLinkedDocuments(userIds, session)
     await deleteTenantScopedDocuments(organizationId, session)
     await deleteTenantUsers(organizationId, session)
-    await deleteOrganizationRoot(organizationId, session)
   }
 
   if (await mongoSupportsTransactions()) {
@@ -344,21 +338,125 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
     } finally {
       await session.endSession()
     }
-  } else {
-    // Standalone MongoDB cannot provide all-or-nothing deletion. Every delete
-    // is tenant/user scoped and idempotent, and zero-data verification is
-    // mandatory before this endpoint can report success.
-    await execute()
+    return
   }
+  await execute()
+}
 
-  await verifyPurged(organizationId, userIds)
-  // A second cache pass catches any request that populated a stale tenant key
-  // while the purge was running. At this point the Organization no longer
-  // exists, so only explicit identifiers from the manifest are needed.
-  await CacheInvalidationService.invalidateTenant(organizationId, externalManifest.domains)
+const convergePurgeBoundaries = async (
+  organizationId: string,
+  userIds: Types.ObjectId[],
+  externalManifest: Awaited<ReturnType<typeof TenantExternalResourcesService.collect>>,
+  actorId: string,
+) => {
+  const now = new Date()
+  await Promise.all([
+    AuthSession.updateMany(
+      { ...tenantOrUserFilter(organizationId, userIds), revokedAt: null },
+      { $set: { revokedAt: now, revokeReason: 'tenant_hard_delete' } },
+    ),
+    ImpersonationSession.updateMany(
+      userIds.length
+        ? { $or: [{ organizationId }, { targetUserId: { $in: userIds } }], endedAt: null }
+        : { organizationId, endedAt: null },
+      { $set: { endedAt: now, endedBy: actorId } },
+    ),
+    OperationsQueueService.cancelOrganization(organizationId),
+    CacheInvalidationService.invalidateTenant(organizationId, externalManifest.cacheIdentifiers),
+  ])
+
+  RealtimeService.emitOrganization(organizationId, {
+    type: 'auth.changed',
+    action: 'revoked',
+    entityId: 'organization_hard_delete',
+    forceLogout: true,
+  })
+  await Promise.all([
+    RealtimeService.disconnectOrganization(organizationId),
+    RealtimeService.disconnectPublicOrganization(organizationId),
+    ...userIds.map((userId) => RealtimeService.disconnectUser(String(userId))),
+  ])
+
+  // All operations below are intentionally idempotent. Re-running the purge is
+  // safe if files/domains/sessions/jobs were already removed by an earlier try.
+  await Promise.all([
+    TenantExternalResourcesService.deleteStorage(externalManifest),
+    TenantExternalResourcesService.deleteDomains(externalManifest),
+  ])
+  await TenantExternalResourcesService.verifyDeleted(externalManifest)
+}
+
+const purgeOrganization = async (rawOrganizationId: string, actor: { id: string; reason: string }) => {
+  assertDeletionRegistrySafety()
+  const organizationId = assertOrganizationIdIsPurgeable(rawOrganizationId)
+  const org: any = await Organization.findOne({ organizationId })
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+
+  const currentUserIds = await getTenantUserIds(organizationId)
+  const userIds = mergePurgeUserIds(org.platformAccess?.purgeUserIds, currentUserIds)
+  const externalManifest = await TenantExternalResourcesService.collect(organizationId, userIds)
+  const now = new Date()
+
+  // Lock first. This state is checked by authenticated write middleware,
+  // public-write barriers and background workers. The user-id manifest remains
+  // only on this locked Organization root so a failed purge can be retried even
+  // after the User documents themselves have already been deleted.
+  org.isBlocked = true
+  org.websiteStatus = 'suspended'
+  if (org.subscription) org.subscription.status = 'suspended'
+  org.platformAccess = {
+    ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
+    status: 'pending_deletion',
+    deletionRequestedAt: org.platformAccess?.deletionRequestedAt || now,
+    deletionRequestedBy: actor.id,
+    deletionReason: actor.reason,
+    deletionRequestId: null,
+    deletionRetentionUntil: null,
+    purgeUserIds: userIds.map(String),
+  }
+  await org.save()
+
+  await convergePurgeBoundaries(organizationId, userIds, externalManifest, actor.id)
+
+  // Remove tenant/user records, then converge once more to catch a request that
+  // was already in flight when the lock was written. The Organization root is
+  // deliberately retained until every dependent boundary verifies at zero.
+  await deleteTenantDependants(organizationId, userIds)
+  await convergePurgeBoundaries(organizationId, userIds, externalManifest, actor.id)
+  await deleteTenantDependants(organizationId, userIds)
+
+  await assertZeroState(organizationId, userIds, externalManifest, { organizationMustExist: true })
+
+  // Organization is deleted last, after MongoDB, GCS, domains, sessions,
+  // sockets, Redis and jobs have all converged to zero.
+  await deleteOrganizationRoot(organizationId)
+
+  // Final cache/socket convergence after the root disappears. This also catches
+  // stale reads that repopulated cache keys during the destructive window.
+  await Promise.all([
+    CacheInvalidationService.invalidateTenant(organizationId, externalManifest.cacheIdentifiers),
+    RealtimeService.disconnectOrganization(organizationId),
+    RealtimeService.disconnectPublicOrganization(organizationId),
+    ...userIds.map((userId) => RealtimeService.disconnectUser(String(userId))),
+  ])
+
+  const verification = await assertZeroState(organizationId, userIds, externalManifest, { organizationMustExist: false })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'deleted', entityId: organizationId })
 
-  return { organizationId, deleted: true, permanent: true }
+  return {
+    organizationId,
+    deleted: true,
+    permanent: true,
+    verification: {
+      databaseRecords: verification.databaseRecords,
+      gcsTenantObjects: verification.gcsTenantObjects,
+      registeredTenantDomains: verification.registeredTenantDomains,
+      activeSessions: verification.activeSessions,
+      activeSockets: verification.activeSockets,
+      redisKeys: verification.redisKeys,
+      operationsJobs: verification.operationsJobs,
+    },
+  }
 }
 
 export const TenantPurgeService = { previewOrganization, purgeOrganization }

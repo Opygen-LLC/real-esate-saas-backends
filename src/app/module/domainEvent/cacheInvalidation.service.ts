@@ -1,4 +1,5 @@
 import { Cache } from '../../../shared/cache'
+import { RedisClient } from '../../../shared/redisClient'
 import { DomainRecord } from '../domain/domain.model'
 import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { Organization } from '../organization/organization.model'
@@ -49,6 +50,17 @@ const invalidateTenant = async (organizationId: string, extraIdentifiers: string
   ])
 }
 
+const countTenantKeys = async (organizationId: string, extraIdentifiers: string[] = []) => {
+  if (!organizationId || organizationId === '__platform__') return 0
+  const identifiers = Array.from(new Set([organizationId, ...extraIdentifiers].filter(Boolean).map((value) => String(value).trim().toLowerCase())))
+  const [websiteCount, publicCounts, resolveCounts] = await Promise.all([
+    Cache.website.countAll(organizationId),
+    Promise.all(identifiers.map((identifier) => RedisClient.countMatching('tenant-public', encodeURIComponent(identifier).slice(0, 320)))),
+    Promise.all(identifiers.map((identifier) => RedisClient.countMatching('tenant-resolve', encodeURIComponent(identifier).slice(0, 320)))),
+  ])
+  return websiteCount + publicCounts.reduce((sum, value) => sum + value, 0) + resolveCounts.reduce((sum, value) => sum + value, 0)
+}
+
 const fromEvent = async (event: CacheEvent): Promise<void> => {
   if (event.aggregateType === 'subscription_plan' || event.eventType.startsWith('plan.')) {
     await Cache.plans.del('catalog')
@@ -57,4 +69,4 @@ const fromEvent = async (event: CacheEvent): Promise<void> => {
   if (['organization', 'website', 'domain', 'property'].includes(event.aggregateType)) await invalidateTenant(event.organizationId)
 }
 
-export const CacheInvalidationService = { fromEvent, invalidateTenant }
+export const CacheInvalidationService = { fromEvent, invalidateTenant, countTenantKeys }

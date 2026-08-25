@@ -22,6 +22,7 @@ import {
 } from './websiteSubmission.interface'
 import { WebsiteSubmission } from './websiteSubmission.model'
 import { emitProductionEvent } from '../../../shared/productionEvents'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -49,6 +50,7 @@ const leadSubmissionType = (payload: PublicLeadCaptureInput): WebsiteSubmissionT
 }
 
 const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'submittedAt'> & { submittedAt?: Date }) => {
+  await TenantPurgeBarrier.assertTenantWritable(payload.organizationId)
   const submission = await WebsiteSubmission.create({
     ...payload,
     status: 'NEW',
@@ -74,6 +76,7 @@ const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadS
   const { organizationId, privacyConsent, policyVersion } = payload
   const organization: any = await Organization.findOne({ organizationId }).select('isBlocked websiteStatus').lean()
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Agency not found')
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (organization.isBlocked || organization.websiteStatus === 'suspended') {
     throw new ApiError(423, 'This agency is currently suspended', '', 'TENANT_SUSPENDED')
   }

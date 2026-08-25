@@ -12,6 +12,7 @@ import { normalizeSubdomain, RESERVED_SUBDOMAINS } from '../../helpers/identity'
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { SubdomainAlias } from './subdomainAlias.model'
 import { DomainProviderService, type DomainDiagnostic } from './providers'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const ACTIVE_RECHECK_MS = 6 * 60 * 60_000
 const TLS_RECHECK_MS = 2 * 60_000
@@ -444,6 +445,7 @@ const promoteCandidate = async (record: any, result: any) => {
 }
 
 const add = async (organizationId: string, input: string) => {
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   await EntitlementService.assertFeature(organizationId, 'customDomain')
   const domain = normalizeDomain(input)
   const conflicting: any = await DomainRecord.findOne({

@@ -8,10 +8,12 @@ import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { FraudReport } from './fraudReport.model'
 import ApiError from '../../../errors/ApiError'
+import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const reportFraud = catchAsync(async (req: Request, res: Response) => {
   const org = await Organization.findOne({ organizationId: req.body.organizationId }).select('organizationId')
   if (!org || !await Property.exists({ _id: req.body.propertyId, organizationId: org.organizationId })) throw new ApiError(404, 'Listing not found')
+  await TenantPurgeBarrier.assertTenantWritable(org.organizationId)
   let reporterPhone = ''
   try { reporterPhone = req.body.reporterPhone ? normalizeBangladeshPhone(req.body.reporterPhone) : '' }
   catch { throw new ApiError(400, 'Reporter phone must be a valid Bangladesh mobile number') }
