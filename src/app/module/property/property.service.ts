@@ -17,6 +17,7 @@ import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } fr
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './publicProperty.serializer'
+import { logger } from '../../../shared/logger'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
@@ -69,7 +70,23 @@ const generateSlug = async (organizationId: string, title: string, session?: Cli
   return slug
 }
 
-const emitPropertyCreated = async (organizationId: string, result: any) => DomainEventService.emit({
+const persistPropertyEvent = async (input: Parameters<typeof DomainEventService.emit>[0]) => {
+  // Persist the audit/event record before responding, but never keep the
+  // property mutation request open for Redis cache scans or public-site
+  // revalidation. Those are post-commit side effects and a slow provider must
+  // not turn a successful property write into a reverse-proxy 502/504.
+  await DomainEventService.emit(input, { deferPublish: true })
+  void DomainEventService.publish(input).catch((error) => {
+    logger.warn('property_post_commit_publish_failed', {
+      organizationId: input.organizationId,
+      propertyId: input.propertyId || input.aggregateId,
+      eventType: input.eventType,
+      error,
+    })
+  })
+}
+
+const emitPropertyCreated = async (organizationId: string, result: any) => persistPropertyEvent({
   organizationId,
   aggregateType: 'property',
   aggregateId: result._id.toString(),
@@ -364,7 +381,7 @@ const emitPropertyUpdated = async (
   result: any,
   previousStatus: string,
   changedFields: string[],
-) => DomainEventService.emit({
+) => persistPropertyEvent({
   organizationId,
   aggregateType: 'property',
   aggregateId: result._id.toString(),
@@ -456,7 +473,7 @@ const updatePropertyStatus = async (
 
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true, context: 'query' })
   if (result) {
-    await DomainEventService.emit({
+    await persistPropertyEvent({
       organizationId,
       aggregateType: 'property',
       aggregateId: id,
@@ -501,7 +518,7 @@ const setQuotaAccess = async (
   })
 
   if (result) {
-    await DomainEventService.emit({
+    await persistPropertyEvent({
       organizationId,
       aggregateType: 'property',
       aggregateId: id,
@@ -517,7 +534,7 @@ const setQuotaAccess = async (
 const reorderPropertyImages = async (organizationId: string, id: string, images: IPropertyImage[]): Promise<IProperty | null> => {
   const result = await Property.findOneAndUpdate({ _id: id, organizationId }, { images }, { new: true, runValidators: true, context: 'query' })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
-  await DomainEventService.emit({
+  await persistPropertyEvent({
     organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.updated', propertyId: id,
     payload: { changedFields: ['images'], status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
   })
@@ -527,7 +544,7 @@ const reorderPropertyImages = async (organizationId: string, id: string, images:
 const deleteProperty = async (organizationId: string, id: string): Promise<IProperty | null> => {
   const result = await Property.findOneAndDelete({ _id: id, organizationId })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
-  await DomainEventService.emit({
+  await persistPropertyEvent({
     organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.deleted', propertyId: id,
     payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },
   })

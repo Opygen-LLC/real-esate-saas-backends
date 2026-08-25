@@ -2,9 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
 import dns from 'dns/promises'
-import sharp, { type Metadata, type OutputInfo } from 'sharp'
+import sharp, { type Metadata } from 'sharp'
 import { isIP } from 'net'
-import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { Cache } from '../../../shared/cache'
@@ -356,45 +355,25 @@ const uploadAssetBuffer = async (
   if (ALLOWED_ASSET_MIME_TYPES.has(declaredMime) && declaredMime !== detectedMime) throw new ApiError(400, 'Uploaded image content does not match its file type')
   const mimeType = detectedMime
 
-  // Normalize/rotate and cap very large originals before they ever reach object
-  // storage. This is intentionally done before the short Mongo claim
-  // transaction used when the property itself is saved.
-  let normalized: { data: Buffer; info: OutputInfo }
-  try {
-    let pipeline = sharp(file.buffer, { failOn: 'error', limitInputPixels: 80_000_000 })
-      .rotate()
-      .resize({ width: 3000, height: 3000, fit: 'inside', withoutEnlargement: true })
-    if (mimeType === 'image/jpeg') pipeline = pipeline.jpeg({ quality: 88, mozjpeg: true })
-    else if (mimeType === 'image/png') pipeline = pipeline.png({ compressionLevel: 9, adaptiveFiltering: true })
-    else if (mimeType === 'image/webp') pipeline = pipeline.webp({ quality: 86 })
-    else pipeline = pipeline.avif({ quality: 65 })
-    normalized = await pipeline.toBuffer({ resolveWithObject: true })
-  } catch {
-    throw new ApiError(400, 'The property photo could not be normalized')
-  }
-
-  // The server fallback must not depend on GCS URL-signing. A browser can be
-  // unable to use a signed PUT (CORS, corporate proxy, missing signBlob
-  // permission) while this API still has perfectly valid bucket read/write
-  // credentials. Prepare the exact same upload-intent lifecycle directly.
+  // The server fallback is a reliability path, not an image-rendering worker.
+  // Keep it deliberately light: validate the image with Sharp, then store the
+  // original bytes only. Generating six WebP/AVIF renditions inline caused
+  // large CPU/RAM spikes when two fallback uploads ran concurrently and could
+  // restart a small API container immediately before POST /property. Browser
+  // direct uploads can still provide optimized renditions; Next/Image also
+  // optimizes the original at delivery time.
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
-  await EntitlementService.assertStorage(organizationId, normalized.data.length)
+  await EntitlementService.assertStorage(organizationId, file.buffer.length)
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })
-  const variantWidths = context === 'property-draft' ? [320, 640, 1280] : [640, 1280]
-  const variantDefs = variantWidths.flatMap((width) => (['webp', 'avif'] as const).map((format) => ({
-    width,
-    format,
-    key: `${originalKey}.${width}.${format}`,
-  })))
-  const objectKeys = [originalKey, ...variantDefs.map((variant) => variant.key)]
+  const objectKeys = [originalKey]
 
   await WebsiteUploadIntent.create({
     organizationId,
     key: originalKey,
     objectKeys,
-    declaredSize: normalized.data.length,
+    declaredSize: file.buffer.length,
     mimeType,
     context,
     uploadSessionId,
@@ -404,33 +383,16 @@ const uploadAssetBuffer = async (
   if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
 
   try {
-    await ObjectStorageService.putBuffer(originalKey, normalized.data, mimeType)
-
-    const completedVariants: Array<{ key: string; format: 'webp' | 'avif'; width: number; height?: number }> = []
-    for (const variant of variantDefs) {
-      try {
-        let pipeline = sharp(normalized.data, { failOn: 'error', limitInputPixels: 80_000_000 })
-          .resize({ width: Number(variant.width), withoutEnlargement: true })
-        pipeline = variant.format === 'avif' ? pipeline.avif({ quality: 62 }) : pipeline.webp({ quality: 84 })
-        const rendered = await pipeline.toBuffer({ resolveWithObject: true })
-        await ObjectStorageService.putBuffer(variant.key, rendered.data, `image/${variant.format}`)
-        completedVariants.push({ key: variant.key, format: variant.format, width: rendered.info.width, height: rendered.info.height })
-      } catch (error: any) {
-        // Storage failures abort the whole draft. Codec-specific failures may
-        // omit one optimization while preserving the verified normalized image.
-        if (error instanceof ApiError && [API_ERROR_CODES.OBJECT_STORAGE_NOT_CONFIGURED, API_ERROR_CODES.OBJECT_STORAGE_UNAVAILABLE].includes(error.code as any)) throw error
-      }
-    }
-
+    await ObjectStorageService.putBuffer(originalKey, file.buffer, mimeType)
     const fallbackAlt = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
     return await completeAsset(organizationId, {
       key: originalKey,
       originalName: file.originalname || 'property-image',
       mimeType,
-      width: normalized.info.width,
-      height: normalized.info.height,
+      width: metadata.width,
+      height: metadata.height,
       altText: String(options.altText || fallbackAlt).slice(0, 300),
-      variants: completedVariants,
+      variants: [],
     }, userId)
   } catch (error) {
     await Promise.allSettled(objectKeys.map((key: string) => ObjectStorageService.remove(key)))
@@ -675,18 +637,23 @@ const deletePropertyDraftAsset = async (organizationId: string, uploadSessionId:
 const getPropertyDraftSession = async (organizationId: string, uploadSessionId: string) => {
   assertDraftSessionId(uploadSessionId)
   const activity = await touchPropertyDraftSession(organizationId, uploadSessionId)
-  const [assets, activeIntents] = await Promise.all([
+  const [assets, activeIntents, claimedAssets] = await Promise.all([
     WebsiteAsset.find({ organizationId, context: 'property-draft', uploadSessionId, claimed: false })
       .select('_id key url originalName mimeType status scanStatus variants altText size lastReferencedAt createdAt')
       .sort({ createdAt: 1 })
       .lean(),
     WebsiteUploadIntent.countDocuments({ organizationId, context: 'property-draft', uploadSessionId, status: { $in: ['pending', 'completed'] } }),
+    WebsiteAsset.find({ organizationId, context: 'property', uploadSessionId, claimed: true, claimedByPropertyId: { $ne: null } })
+      .select('claimedByPropertyId')
+      .lean(),
   ])
+  const claimedPropertyIds = Array.from(new Set(claimedAssets.map((asset: any) => String(asset.claimedByPropertyId || '')).filter(Boolean)))
   return {
     sessionId: uploadSessionId,
-    exists: assets.length > 0 || activeIntents > 0,
+    exists: assets.length > 0 || activeIntents > 0 || claimedPropertyIds.length > 0,
     touchedAt: activity.touchedAt,
     pendingUploads: activeIntents,
+    claimedPropertyId: claimedPropertyIds.length === 1 ? claimedPropertyIds[0] : undefined,
     assets,
   }
 }

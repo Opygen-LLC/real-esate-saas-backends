@@ -85,6 +85,22 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
 
   let result: any
   if (propertyDraftSessionId) {
+    // A gateway can lose the response after the Mongo transaction commits.
+    // Treat the persistent draft-session id as an idempotency key: if its
+    // assets are already claimed by one property, return that property instead
+    // of creating a duplicate or failing the user's retry with a 409.
+    const existingDraft = await WebsiteBuilderService.getPropertyDraftSession(organizationId, propertyDraftSessionId)
+    if (existingDraft.claimedPropertyId) {
+      result = await PropertyService.getPropertyById(organizationId, existingDraft.claimedPropertyId)
+      sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Property listing was already created from this draft',
+        data: result,
+      })
+      return
+    }
+
     const canTransact = await mongoSupportsTransactions()
     if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property media claiming requires MongoDB transactions in production')
     const session = canTransact ? await mongoose.startSession() : null
