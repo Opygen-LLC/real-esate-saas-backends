@@ -100,33 +100,69 @@ const recordInvoicePayment = z.object({ body: z.object({
 const voidInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() })
 const archiveInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict() })
 
+const commissionMoneyFields = {
+  grossDealValue: z.coerce.number().nonnegative().max(1_000_000_000_000),
+  commissionRate: z.coerce.number().min(0).max(100).optional(),
+  agentSplitPercent: z.coerce.number().min(0).max(100).optional(),
+  manualOverride: z.boolean().optional(),
+  commissionAmount: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
+  agentShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
+  companyShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
+}
+
+const validateCreateCommissionMode = (value: any, ctx: z.RefinementCtx) => {
+  const autoMode = value.manualOverride === false || (value.manualOverride === undefined && value.agentSplitPercent !== undefined)
+  if (autoMode) {
+    if (value.commissionRate === undefined || value.commissionRate <= 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commissionRate'], message: 'Commission rate must be greater than zero for automatic calculation' })
+    }
+    if (value.agentSplitPercent === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['agentSplitPercent'], message: 'Agent split percentage is required for automatic calculation' })
+    }
+    return
+  }
+
+  if (value.commissionAmount === undefined || value.commissionAmount <= 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commissionAmount'], message: 'Enter a valid total commission amount' })
+  }
+  if (value.agentShare === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['agentShare'], message: 'Enter a valid agent share' })
+  }
+  if (value.companyShare === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['companyShare'], message: 'Enter a valid company share' })
+  }
+  if (value.commissionAmount !== undefined && value.agentShare !== undefined && value.companyShare !== undefined) {
+    const commissionMinor = Math.round(value.commissionAmount * 100)
+    const sharesMinor = Math.round(value.agentShare * 100) + Math.round(value.companyShare * 100)
+    if (commissionMinor !== sharesMinor) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['agentShare'], message: 'Agent share and company share must equal the commission amount' })
+    }
+  }
+}
+
 const createCommission = z.object({ body: z.object({
   agentId: objectId,
   propertyId: optionalObjectId,
   leadId: optionalObjectId,
   dealReference: z.string().trim().max(200).optional(),
-  grossDealValue: z.coerce.number().nonnegative().max(1_000_000_000_000),
-  commissionRate: z.coerce.number().min(0).max(100).optional(),
-  commissionAmount: z.coerce.number().nonnegative().max(1_000_000_000_000),
-  agentShare: z.coerce.number().nonnegative().max(1_000_000_000_000),
-  companyShare: z.coerce.number().nonnegative().max(1_000_000_000_000),
+  ...commissionMoneyFields,
   status: z.enum(['pending', 'approved']).optional(),
   dueDate: dateInput.optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional(),
-}).strict().refine((value) => Math.abs((value.agentShare + value.companyShare) - value.commissionAmount) < 0.01, {
-  message: 'Agent share and company share must equal the commission amount', path: ['agentShare'],
-}) })
+}).strict().superRefine(validateCreateCommissionMode) })
 
 const updateCommission = z.object({ body: z.object({
   agentId: objectId.optional(),
   propertyId: optionalObjectId,
   leadId: optionalObjectId,
   dealReference: z.string().trim().max(200).optional(),
-  grossDealValue: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
-  commissionRate: z.coerce.number().min(0).max(100).optional(),
-  commissionAmount: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
-  agentShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
-  companyShare: z.coerce.number().nonnegative().max(1_000_000_000_000).optional(),
+  grossDealValue: commissionMoneyFields.grossDealValue.optional(),
+  commissionRate: commissionMoneyFields.commissionRate,
+  agentSplitPercent: commissionMoneyFields.agentSplitPercent,
+  manualOverride: commissionMoneyFields.manualOverride,
+  commissionAmount: commissionMoneyFields.commissionAmount,
+  agentShare: commissionMoneyFields.agentShare,
+  companyShare: commissionMoneyFields.companyShare,
   status: z.enum(['pending', 'approved']).optional(),
   dueDate: dateInput.optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional(),

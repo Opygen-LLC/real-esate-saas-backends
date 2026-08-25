@@ -26,6 +26,45 @@ describe('FinanceValidation', () => {
     expect(parsed.success).toBe(false)
   })
 
+  it('accepts automatic commission input without client-derived money fields', () => {
+    const parsed = FinanceValidation.createCommission.safeParse({ body: {
+      agentId: '64f0c1234567890abcdef123',
+      grossDealValue: 20_000_000,
+      commissionRate: 2.5,
+      agentSplitPercent: 60,
+      manualOverride: false,
+      status: 'pending',
+    } })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('requires rate and agent split for automatic commission calculation', () => {
+    const parsed = FinanceValidation.createCommission.safeParse({ body: {
+      agentId: '64f0c1234567890abcdef123',
+      grossDealValue: 20_000_000,
+      manualOverride: false,
+      status: 'pending',
+    } })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      const paths = parsed.error.issues.map((issue) => issue.path.join('.'))
+      expect(paths).toContain('body.commissionRate')
+      expect(paths).toContain('body.agentSplitPercent')
+    }
+  })
+
+  it('accepts explicit manual override amounts only when shares match the total', () => {
+    const valid = FinanceValidation.createCommission.safeParse({ body: {
+      agentId: '64f0c1234567890abcdef123',
+      grossDealValue: 20_000_000,
+      manualOverride: true,
+      commissionAmount: 500_000,
+      agentShare: 300_000,
+      companyShare: 200_000,
+    } })
+    expect(valid.success).toBe(true)
+  })
+
   it('rejects budgets whose end date is before the start date', () => {
     const parsed = FinanceValidation.createBudget.safeParse({ body: {
       name: 'Marketing budget', category: 'Marketing', amount: 100000, period: 'monthly',

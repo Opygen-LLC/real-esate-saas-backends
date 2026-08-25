@@ -78,3 +78,90 @@ export const calculateInvoiceMoney = (lineItems: InvoiceMoneyLineInput[], discou
     total: moneyFromMinorUnits(totalMinor),
   }
 }
+
+const PERCENT_SCALE = 10_000
+const PERCENT_DENOMINATOR = 100 * PERCENT_SCALE
+
+const normalizePercent = (value: number, field: string, options: { allowZero?: boolean } = {}) => {
+  if (!Number.isFinite(value)) throw new FinanceMoneyValidationError(field, 'Enter a valid percentage')
+  if (value < 0 || value > 100) throw new FinanceMoneyValidationError(field, 'Percentage must be between 0 and 100')
+  if (!options.allowZero && value <= 0) throw new FinanceMoneyValidationError(field, 'Percentage must be greater than zero')
+  const scaled = Math.round(value * PERCENT_SCALE)
+  if (!Number.isSafeInteger(scaled)) throw new FinanceMoneyValidationError(field, 'Percentage is too precise to calculate safely')
+  return scaled
+}
+
+const percentageOfMinorUnits = (amountMinor: number, percent: number, field: string, options: { allowZero?: boolean } = {}) => {
+  const scaledPercent = normalizePercent(percent, field, options)
+  const quotient = Math.floor(amountMinor / PERCENT_DENOMINATOR)
+  const remainder = amountMinor % PERCENT_DENOMINATOR
+  const whole = quotient * scaledPercent
+  const fractional = Math.round((remainder * scaledPercent) / PERCENT_DENOMINATOR)
+  const result = whole + fractional
+  if (!Number.isSafeInteger(result) || result < 0) throw new FinanceMoneyValidationError(field, 'Calculated amount is too large')
+  return result
+}
+
+export type AutomaticCommissionInput = {
+  grossDealValue: number
+  commissionRate: number
+  agentSplitPercent: number
+}
+
+export const calculateAutomaticCommission = (input: AutomaticCommissionInput) => {
+  const grossDealMinor = moneyToMinorUnits(Number(input.grossDealValue), 'grossDealValue')
+  if (grossDealMinor <= 0) throw new FinanceMoneyValidationError('grossDealValue', 'Gross deal value must be greater than zero')
+
+  const commissionMinor = percentageOfMinorUnits(grossDealMinor, Number(input.commissionRate), 'commissionRate')
+  if (commissionMinor <= 0) throw new FinanceMoneyValidationError('commissionRate', 'Calculated commission must be greater than zero')
+
+  const agentShareMinor = percentageOfMinorUnits(
+    commissionMinor,
+    Number(input.agentSplitPercent),
+    'agentSplitPercent',
+    { allowZero: true },
+  )
+  const companyShareMinor = commissionMinor - agentShareMinor
+
+  return {
+    grossDealValue: moneyFromMinorUnits(grossDealMinor),
+    commissionRate: Math.round(Number(input.commissionRate) * PERCENT_SCALE) / PERCENT_SCALE,
+    agentSplitPercent: Math.round(Number(input.agentSplitPercent) * PERCENT_SCALE) / PERCENT_SCALE,
+    commissionAmount: moneyFromMinorUnits(commissionMinor),
+    agentShare: moneyFromMinorUnits(agentShareMinor),
+    companyShare: moneyFromMinorUnits(companyShareMinor),
+  }
+}
+
+export type ManualCommissionInput = {
+  grossDealValue: number
+  commissionRate?: number
+  commissionAmount: number
+  agentShare: number
+  companyShare: number
+}
+
+export const normalizeManualCommission = (input: ManualCommissionInput) => {
+  const grossDealMinor = moneyToMinorUnits(Number(input.grossDealValue), 'grossDealValue')
+  if (grossDealMinor < 0) throw new FinanceMoneyValidationError('grossDealValue', 'Gross deal value cannot be negative')
+
+  if (input.commissionRate !== undefined) normalizePercent(Number(input.commissionRate), 'commissionRate', { allowZero: true })
+
+  const commissionMinor = moneyToMinorUnits(Number(input.commissionAmount), 'commissionAmount')
+  const agentShareMinor = moneyToMinorUnits(Number(input.agentShare), 'agentShare')
+  const companyShareMinor = moneyToMinorUnits(Number(input.companyShare), 'companyShare')
+  if (commissionMinor <= 0) throw new FinanceMoneyValidationError('commissionAmount', 'Enter a valid total commission amount')
+  if (agentShareMinor < 0) throw new FinanceMoneyValidationError('agentShare', 'Enter a valid agent share')
+  if (companyShareMinor < 0) throw new FinanceMoneyValidationError('companyShare', 'Enter a valid company share')
+  if (agentShareMinor + companyShareMinor !== commissionMinor) {
+    throw new FinanceMoneyValidationError('agentShare', 'Agent share and company share must equal the commission amount')
+  }
+
+  return {
+    grossDealValue: moneyFromMinorUnits(grossDealMinor),
+    commissionRate: input.commissionRate === undefined ? undefined : Math.round(Number(input.commissionRate) * PERCENT_SCALE) / PERCENT_SCALE,
+    commissionAmount: moneyFromMinorUnits(commissionMinor),
+    agentShare: moneyFromMinorUnits(agentShareMinor),
+    companyShare: moneyFromMinorUnits(companyShareMinor),
+  }
+}

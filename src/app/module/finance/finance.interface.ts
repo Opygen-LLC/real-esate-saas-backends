@@ -89,6 +89,8 @@ export interface IFinanceCommission {
   dealReference?: string
   grossDealValue: number
   commissionRate?: number
+  agentSplitPercent?: number
+  manualOverride?: boolean
   commissionAmount: number
   agentShare: number
   companyShare: number

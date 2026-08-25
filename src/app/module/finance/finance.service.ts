@@ -20,7 +20,7 @@ import {
   IFinanceTransaction,
   IFinanceVendor,
 } from './finance.interface'
-import { calculateInvoiceMoney, FinanceMoneyValidationError, moneyFromMinorUnits, moneyToMinorUnits } from './finance.money'
+import { calculateAutomaticCommission, calculateInvoiceMoney, FinanceMoneyValidationError, moneyFromMinorUnits, moneyToMinorUnits, normalizeManualCommission } from './finance.money'
 import {
   FinanceBudget,
   FinanceCommission,
@@ -198,6 +198,42 @@ const calculateInvoiceAmounts = (lineItems: IFinanceInvoiceLineItem[], discount 
 const invoiceMoneyMinorUnits = (value: number, field: string) => {
   try {
     return moneyToMinorUnits(value, field)
+  } catch (error) {
+    if (error instanceof FinanceMoneyValidationError) throw financeFieldError(error.field, error.message)
+    throw error
+  }
+}
+
+const calculateCommissionAmounts = (payload: Partial<IFinanceCommission>, existing?: IFinanceCommission) => {
+  const manualOverride = payload.manualOverride ?? existing?.manualOverride
+  const agentSplitPercent = payload.agentSplitPercent ?? existing?.agentSplitPercent
+  const autoMode = manualOverride === false || (manualOverride === undefined && agentSplitPercent !== undefined && !existing)
+
+  try {
+    if (autoMode) {
+      const grossDealValue = Number(payload.grossDealValue ?? existing?.grossDealValue)
+      const commissionRate = Number(payload.commissionRate ?? existing?.commissionRate)
+      if (agentSplitPercent === undefined) throw new FinanceMoneyValidationError('agentSplitPercent', 'Agent split percentage is required for automatic calculation')
+      const calculated = calculateAutomaticCommission({
+        grossDealValue,
+        commissionRate,
+        agentSplitPercent: Number(agentSplitPercent),
+      })
+      return { ...calculated, manualOverride: false }
+    }
+
+    const normalized = normalizeManualCommission({
+      grossDealValue: Number(payload.grossDealValue ?? existing?.grossDealValue),
+      commissionRate: payload.commissionRate ?? existing?.commissionRate,
+      commissionAmount: Number(payload.commissionAmount ?? existing?.commissionAmount),
+      agentShare: Number(payload.agentShare ?? existing?.agentShare),
+      companyShare: Number(payload.companyShare ?? existing?.companyShare),
+    })
+    return {
+      ...normalized,
+      agentSplitPercent: agentSplitPercent === undefined ? undefined : Number(agentSplitPercent),
+      manualOverride: manualOverride === true ? true : undefined,
+    }
   } catch (error) {
     if (error instanceof FinanceMoneyValidationError) throw financeFieldError(error.field, error.message)
     throw error
@@ -417,9 +453,18 @@ const ensureAgent = async (organizationId: string, agentId: string) => {
 
 const createCommission = async (organizationId: string, actorId: string, payload: Partial<IFinanceCommission>) => {
   await ensureAgent(organizationId, String(payload.agentId))
-  const commissionAmount = Number(payload.commissionAmount || 0), agentShare = Number(payload.agentShare || 0), companyShare = Number(payload.companyShare || 0)
-  if (Math.abs((agentShare + companyShare) - commissionAmount) > 0.01) throw financeFieldError('agentShare', 'Agent share and company share must equal the commission amount')
-  const result = await FinanceCommission.create({ ...payload, organizationId, commissionNumber: makeNumber('COM'), propertyId: cleanOptionalId(payload.propertyId), leadId: cleanOptionalId(payload.leadId), dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined, currency: 'BDT', createdBy: actorObjectId(actorId) })
+  const calculated = calculateCommissionAmounts(payload)
+  const result = await FinanceCommission.create({
+    ...payload,
+    ...calculated,
+    organizationId,
+    commissionNumber: makeNumber('COM'),
+    propertyId: cleanOptionalId(payload.propertyId),
+    leadId: cleanOptionalId(payload.leadId),
+    dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined,
+    currency: 'BDT',
+    createdBy: actorObjectId(actorId),
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', result._id.toString(), 'finance.commission.created', `Commission ${result.commissionNumber} created`)
   return result.populate('agentId', 'name email')
 }
@@ -447,9 +492,8 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
   if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
-  const nextAmount = Number(payload.commissionAmount ?? existing.commissionAmount), nextAgent = Number(payload.agentShare ?? existing.agentShare), nextCompany = Number(payload.companyShare ?? existing.companyShare)
-  if (Math.abs((nextAgent + nextCompany) - nextAmount) > 0.01) throw financeFieldError('agentShare', 'Agent share and company share must equal the commission amount')
-  const update: any = { ...payload, updatedBy: actorObjectId(actorId) }
+  const calculated = calculateCommissionAmounts(payload, existing)
+  const update: any = { ...payload, ...calculated, updatedBy: actorObjectId(actorId) }
   if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null

@@ -107,6 +107,8 @@ const commissionSchema = new Schema<IFinanceCommission>(
     dealReference: { type: String, trim: true, maxlength: 200, default: '' },
     grossDealValue: { type: Number, required: true, min: 0 },
     commissionRate: { type: Number, min: 0, max: 100 },
+    agentSplitPercent: { type: Number, min: 0, max: 100 },
+    manualOverride: { type: Boolean },
     commissionAmount: { type: Number, required: true, min: 0 },
     agentShare: { type: Number, required: true, min: 0 },
     companyShare: { type: Number, required: true, min: 0 },
