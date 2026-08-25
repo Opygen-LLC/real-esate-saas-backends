@@ -6,12 +6,13 @@ const root = path.resolve(__dirname, '../../..')
 const read = (file: string): string => fs.readFileSync(path.join(root, file), 'utf8')
 
 describe('Daily Atlas-to-Atlas database disaster-recovery backup', () => {
-  it('runs as a dedicated production service at 02:55 Asia/Dhaka in both deployment compose paths', () => {
+  it('runs as a dedicated production service at 03:15 Asia/Dhaka in both deployment compose paths', () => {
     for (const file of ['docker-compose.yml', 'docker-compose.production.yml']) {
       const compose = read(file)
       expect(compose).toContain('database-backup:')
-      expect(compose).toContain('Dockerfile.backup')
-      expect(compose).toContain('BACKUP_CRON: "${BACKUP_CRON:-55 2 * * *}"')
+      expect(compose).toContain('dockerfile: Dockerfile')
+      expect(compose).toContain('target: backup-runtime')
+      expect(compose).toContain('BACKUP_CRON: "${BACKUP_CRON:-15 3 * * *}"')
       expect(compose).toContain('BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Dhaka}')
       expect(compose).toContain('BACKUP_ALLOW_SAME_CLUSTER: "false"')
       expect(compose).toContain('BACKUP_WORK_DIR: /tmp/real-estate-db-backup')

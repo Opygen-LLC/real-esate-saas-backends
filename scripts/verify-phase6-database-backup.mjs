@@ -15,7 +15,7 @@ const scheduler = read('src/app/module/backup/databaseBackup.scheduler.ts')
 const config = read('src/app/module/backup/databaseBackup.config.ts')
 const compose = read('docker-compose.production.yml')
 const defaultCompose = read('docker-compose.yml')
-const dockerfile = read('Dockerfile.backup')
+const dockerfile = read('Dockerfile')
 const env = read('.env.example')
 const pkg = JSON.parse(read('package.json'))
 
@@ -45,12 +45,12 @@ for (const token of [
   requireText(config + env, token, 'backup configuration')
 }
 
-requireText(config, "process.env.BACKUP_CRON || '55 2 * * *'", '02:55 default backup cron')
-requireText(env, 'BACKUP_CRON=55 2 * * *', '02:55 env backup cron')
+requireText(config, "process.env.BACKUP_CRON || '15 3 * * *'", '03:15 default backup cron')
+requireText(env, 'BACKUP_CRON=15 3 * * *', '03:15 env backup cron')
 
 for (const composeText of [compose, defaultCompose]) {
-  requireText(composeText, 'BACKUP_CRON: "${BACKUP_CRON:-55 2 * * *}"', '02:55 compose backup cron')
-  for (const token of ['database-backup:', 'Dockerfile.backup', 'BACKUP_CRON', 'BACKUP_WORK_DIR']) {
+  requireText(composeText, 'BACKUP_CRON: "${BACKUP_CRON:-15 3 * * *}"', '03:15 compose backup cron')
+  for (const token of ['database-backup:', 'dockerfile: Dockerfile', 'target: backup-runtime', 'BACKUP_CRON', 'BACKUP_WORK_DIR']) {
     requireText(composeText, token, 'compose backup service')
   }
   rejectText(composeText, 'database_backup_archives', 'backup archives must not use a persistent Docker volume')
@@ -58,6 +58,9 @@ for (const composeText of [compose, defaultCompose]) {
 }
 
 for (const token of [
+  'FROM node:22-alpine AS build',
+  'FROM node:22-alpine AS api-runtime',
+  'FROM node:22-bookworm-slim AS backup-runtime',
   'MONGODB_DATABASE_TOOLS_VERSION=100.18.0',
   'mongodb-database-tools-debian12-x86_64',
   'USER node',
@@ -87,5 +90,7 @@ rejectText(service, 'insertMany(', 'backup service must not perform model-by-mod
 rejectText(service, '--archive=', 'backup service must stream the archive rather than write it to disk')
 rejectText(service, 'createWriteStream(', 'backup service must not persist database archive bytes locally')
 rejectText(service, 'writeManifestFile', 'backup manifest must live in the secondary Atlas control database')
+
+if (fs.existsSync(path.join(root, 'Dockerfile.backup'))) throw new Error('Dockerfile.backup is obsolete; delete it and use the shared Dockerfile backup-runtime target')
 
 console.log('Direct Atlas-to-Atlas database backup architecture verification passed.')

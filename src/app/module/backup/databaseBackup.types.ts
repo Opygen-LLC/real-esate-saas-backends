@@ -49,7 +49,6 @@ export type DatabaseBackupManifest = {
   sourceDatabase: string
   backupDatabase: string
   transferMode: 'atlas_stream'
-  archiveFile?: string
   archiveRetained?: boolean
   archiveBytes?: number
   archiveSha256?: string

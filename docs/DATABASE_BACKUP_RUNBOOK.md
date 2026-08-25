@@ -4,7 +4,7 @@
 
 The `database-backup` service is a dedicated scheduler that runs separately from API replicas.
 
-At **02:55 Asia/Dhaka every day** it:
+At **03:15 Asia/Dhaka every day** it:
 
 1. connects to the primary application database from `DATABASE_URL`;
 2. inventories collections, document counts, collection options, and indexes;
@@ -36,7 +36,7 @@ If the password contains reserved URI characters such as `@`, `:`, `/`, `?`, `#`
 Recommended backup settings:
 
 ```env
-BACKUP_CRON=55 2 * * *
+BACKUP_CRON=15 3 * * *
 BACKUP_TIMEZONE=Asia/Dhaka
 BACKUP_DATABASE_PREFIX=real_estate_saas_backup
 BACKUP_MANIFEST_DATABASE_NAME=real_estate_saas_backup_control
@@ -138,7 +138,7 @@ No database archive is written there.
 
 ## Run an immediate backup test
 
-Do not wait until 02:55 for the first validation.
+Do not wait until 03:15 for the first validation.
 
 After configuring the real backup Atlas password:
 
@@ -266,3 +266,9 @@ docker volume rm YOUR_PROJECT_database_backup_archives
 ```
 
 Do this only after confirming a successful secondary-Atlas recovery point.
+
+## Docker deployment build performance
+
+The API and database-backup services intentionally use two runtime targets from the same `Dockerfile` (`api-runtime` and `backup-runtime`). They share the same dependency-install/TypeScript build stage, so Docker BuildKit can reuse that expensive work instead of running a second `pnpm install` and full TypeScript compile for the backup service.
+
+`update.sh` also rebuilds the `database-backup` runtime only when backup-runtime inputs changed or the image is missing. Routine API-only deployments reuse the existing backup image. Do not restore the old `Dockerfile.backup`; it is obsolete.
