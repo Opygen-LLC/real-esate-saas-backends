@@ -1,0 +1,153 @@
+# ============================================================
+# COMBINED Docker Compose — Backend + Frontend + Caddy + Redis
+# Use this when both services run on the same server.
+#
+# Usage:
+#   cp backend/.env.production .env
+#   cp frontend/.env.production .env.frontend
+#   docker compose -f docker-compose.combined.yml up -d
+# ============================================================
+
+services:
+  # ── Backend Node.js API ─────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: api-runtime
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      PUBLIC_API_URL: https://realestate.opygen.com
+      PUBLIC_SITE_ORIGIN: https://realestate.opygen.com
+      CLIENT_URL: https://realestate.opygen.com
+      ALLOWED_ORIGINS: https://realestate.opygen.com
+      WORKER_ENABLED: "true"
+      COOKIE_SECURE: "true"
+      COOKIE_SAME_SITE: "none"
+      REDIS_HOST: redis
+      REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME}
+      GCP_KEY_FILE: /app/opy-realestate-505614-d4e3b5e9f13d.json
+      OBJECT_STORAGE_BROWSER_ORIGIN: https://realestate.opygen.com
+      NEXT_REVALIDATE_URL: https://realestate.opygen.com/api/revalidate
+      NEXT_REVALIDATE_SECRET: ${NEXT_REVALIDATE_SECRET}
+      DOMAIN_PROVIDER: ${DOMAIN_PROVIDER:-generic}
+      DOMAIN_A_TARGET: ${DOMAIN_A_TARGET:-64.29.17.65}
+      DOMAIN_CNAME_TARGET: ${DOMAIN_CNAME_TARGET:-realestate.opygen.com}
+      LOG_LEVEL: warn
+    volumes:
+      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
+    expose:
+      - "5000"
+    networks:
+      - app_network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── Frontend Next.js ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_PROPERTY_BACKGROUND_UPLOAD_ENABLED: "true"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Points to backend container via Docker DNS
+      API_PROXY_TARGET: http://api:5000
+      NEXT_PUBLIC_API_URL: http://api:5000
+      NEXT_PUBLIC_USE_API_PROXY: "true"
+      NEXT_REVALIDATE_SECRET: ${NEXT_REVALIDATE_SECRET}
+    expose:
+      - "3000"
+    networks:
+      - app_network
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+
+  # ── Redis ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Database backup scheduler ───────────────────────────
+  database-backup:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: backup-runtime
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL}
+      BACKUP_CRON: "${BACKUP_CRON:-15 3 * * *}"
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Dhaka}
+      BACKUP_WORK_DIR: /tmp/real-estate-db-backup
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:-}
+      GCP_KEY_FILE: /app/opy-realestate-505614-d4e3b5e9f13d.json
+    volumes:
+      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
+    networks:
+      - app_network
+
+  # ── Caddy HTTPS reverse proxy ───────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - api
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:

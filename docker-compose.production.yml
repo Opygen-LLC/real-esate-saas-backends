@@ -13,37 +13,73 @@ services:
       WORKER_ENABLED: "true"
       DOMAIN_PROVIDER: ${DOMAIN_PROVIDER:?DOMAIN_PROVIDER is required}
       PUBLIC_SITE_ORIGIN: ${PUBLIC_SITE_ORIGIN:?PUBLIC_SITE_ORIGIN is required}
+      # PUBLIC_API_URL must point to the HTTPS domain — this is what the backend
+      # uses to build invitation links, cookie settings, and CORS validation.
+      PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
+      CLIENT_URL: ${CLIENT_URL:?CLIENT_URL is required}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}
       NEXT_REVALIDATE_URL: ${NEXT_REVALIDATE_URL:-https://realestate.opygen.com/api/revalidate}
       NEXT_REVALIDATE_SECRET: ${NEXT_REVALIDATE_SECRET:?NEXT_REVALIDATE_SECRET is required}
-      VERCEL_PROJECT_ID_OR_NAME: ${VERCEL_PROJECT_ID_OR_NAME:?VERCEL_PROJECT_ID_OR_NAME is required}
-      VERCEL_API_TOKEN: ${VERCEL_API_TOKEN:?VERCEL_API_TOKEN is required}
+      VERCEL_PROJECT_ID_OR_NAME: ${VERCEL_PROJECT_ID_OR_NAME:-}
+      VERCEL_API_TOKEN: ${VERCEL_API_TOKEN:-}
       VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
       VERCEL_REQUIRE_TEAM_ID: ${VERCEL_REQUIRE_TEAM_ID:-false}
       DOMAIN_REPLACEMENT_GRACE_HOURS: ${DOMAIN_REPLACEMENT_GRACE_HOURS:-168}
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
-      # GCS is the single canonical media provider.
+      # GCS media storage
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}
       GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:?GCP_BUCKET_NAME is required}
       GCP_KEY_FILE: ${GCP_KEY_FILE:-/app/opy-realestate-505614-d4e3b5e9f13d.json}
       OBJECT_STORAGE_BROWSER_ORIGIN: ${OBJECT_STORAGE_BROWSER_ORIGIN:-https://realestate.opygen.com}
-      # CLAMAV_HOST is intentionally controlled by deployment environment.
-      # Leave empty only when another production malware-scanning path is configured.
       CLAMAV_HOST: ${CLAMAV_HOST:-}
       CLAMAV_PORT: ${CLAMAV_PORT:-3310}
-      # MongoDB pool tuned for current scale (cost audit fix)
+      # MongoDB pool
       MONGO_MIN_POOL_SIZE: ${MONGO_MIN_POOL_SIZE:-1}
       MONGO_MAX_POOL_SIZE: ${MONGO_MAX_POOL_SIZE:-10}
-      # Worker poll interval reduced to save Atlas ops (cost audit fix)
+      # Cookie settings — must match domain/HTTPS setup
+      COOKIE_SECURE: "true"
+      COOKIE_SAME_SITE: "none"
+      # Worker
       WORKER_POLL_MS: ${WORKER_POLL_MS:-30000}
-      # Log level set to warn to reduce CPU/stdout volume (cost audit fix)
       LOG_LEVEL: ${LOG_LEVEL:-warn}
+      # Redis
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_TLS: ${REDIS_TLS:-false}
+      REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
     volumes:
       - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
-    ports:
-      - "5000:5000"
+    # Do NOT expose port 5000 directly to the host in production —
+    # only Caddy (the reverse proxy) should reach the API container.
+    expose:
+      - "5000"
     networks:
       - app_network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   database-backup:
     build:
@@ -90,7 +126,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - app_network
 
@@ -101,3 +138,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  redis_data:
