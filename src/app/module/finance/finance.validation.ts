@@ -60,7 +60,15 @@ const createInvoice = z.object({ body: z.object({
   notes: z.string().trim().max(3000).optional(),
   propertyId: optionalObjectId,
   leadId: optionalObjectId,
-}).strict() })
+}).strict().superRefine((value, ctx) => {
+  if (value.dueDate && new Date(value.dueDate) < new Date(value.issueDate)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dueDate'], message: 'Due date cannot be before the issue date' })
+  }
+  const subtotal = value.lineItems.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0)
+  if (Number(value.discount || 0) > subtotal) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed invoice subtotal' })
+  }
+}) })
 
 const updateInvoice = z.object({ body: z.object({
   clientName: z.string().trim().min(2).max(160).optional(),

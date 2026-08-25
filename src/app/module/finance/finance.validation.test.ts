@@ -51,3 +51,37 @@ it('requires the dedicated cancellation contract and rejects generic cancellatio
   expect(FinanceValidation.cancelCommission.safeParse({ body: { reason: '' } }).success).toBe(false)
   expect(FinanceValidation.updateCommission.safeParse({ body: { status: 'cancelled' } }).success).toBe(false)
 })
+
+
+describe('invoice field-level validation', () => {
+  const base = {
+    clientName: 'Example Client',
+    issueDate: '2026-08-25',
+    dueDate: '2026-08-30',
+    lineItems: [{ description: 'Brokerage service', quantity: 1, unitPrice: 50000 }],
+    discount: 0,
+  }
+
+  it('reports dueDate when the due date is before the issue date', () => {
+    const parsed = FinanceValidation.createInvoice.safeParse({ body: { ...base, dueDate: '2026-08-20' } })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) expect(parsed.error.issues.some((issue) => issue.path.join('.') === 'body.dueDate')).toBe(true)
+  })
+
+  it('reports discount when discount exceeds the calculated subtotal', () => {
+    const parsed = FinanceValidation.createInvoice.safeParse({ body: { ...base, discount: 60000 } })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) expect(parsed.error.issues.some((issue) => issue.path.join('.') === 'body.discount')).toBe(true)
+  })
+
+  it('reports nested line item paths', () => {
+    const parsed = FinanceValidation.createInvoice.safeParse({ body: { ...base, lineItems: [{ description: '', quantity: 0, unitPrice: -1 }] } })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      const paths = parsed.error.issues.map((issue) => issue.path.join('.'))
+      expect(paths).toContain('body.lineItems.0.description')
+      expect(paths).toContain('body.lineItems.0.quantity')
+      expect(paths).toContain('body.lineItems.0.unitPrice')
+    }
+  })
+})

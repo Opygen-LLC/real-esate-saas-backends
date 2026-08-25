@@ -68,10 +68,10 @@ const serialize = (doc: any) => {
 
 const save = async (organizationId: string, payload: any) => {
   const pixelId = String(payload.pixelId || '').trim()
-  if (!/^\d{5,30}$/.test(pixelId)) throw new ApiError(400, 'Pixel ID must contain digits only')
+  if (!/^\d{5,30}$/.test(pixelId)) throw new ApiError(400, 'Please correct the highlighted fields', '', 'VALIDATION_ERROR', undefined, { pixelId: ['Pixel ID must contain 5 to 30 digits'] })
   const existing = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted')
   const token = String(payload.accessToken || '').trim()
-  if (!existing && !token) throw new ApiError(400, 'Meta access token is required when connecting the integration')
+  if (!existing && !token) throw new ApiError(400, 'Please correct the highlighted fields', '', 'VALIDATION_ERROR', undefined, { accessToken: ['Meta access token is required when connecting the integration'] })
   const accessTokenEncrypted = token ? encryptField(token) : existing!.accessTokenEncrypted
   const result = await MetaIntegration.findOneAndUpdate({ organizationId }, { $set: {
     pixelId, accessTokenEncrypted, testEventCode: String(payload.testEventCode || '').trim().slice(0, 100),

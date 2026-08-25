@@ -36,6 +36,8 @@ const cleanOptionalId = (value: unknown): string | undefined => {
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const asString = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+const financeFieldError = (field: string, message: string) =>
+  new ApiError(httpStatus.BAD_REQUEST, 'Please correct the highlighted fields', '', 'VALIDATION_ERROR', undefined, { [field]: [message] })
 const asDate = (value: unknown, fallback = new Date()) => {
   const parsed = value ? new Date(String(value)) : fallback
   if (Number.isNaN(parsed.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid date')
@@ -189,7 +191,7 @@ const calculateInvoiceAmounts = (lineItems: IFinanceInvoiceLineItem[], discount 
   })
   const subtotal = Number(normalized.reduce((sum, item) => sum + item.amount, 0).toFixed(2))
   const safeDiscount = Number(discount || 0)
-  if (safeDiscount > subtotal) throw new ApiError(httpStatus.BAD_REQUEST, 'Discount cannot exceed invoice subtotal')
+  if (safeDiscount > subtotal) throw financeFieldError('discount', 'Discount cannot exceed invoice subtotal')
   return { lineItems: normalized, subtotal, discount: safeDiscount, total: Number((subtotal - safeDiscount).toFixed(2)) }
 }
 
@@ -211,7 +213,7 @@ const invoicePopulate = (query: any) => query
   .populate('payments.recordedBy', 'name email')
 
 const validateInvoiceDates = (issueDate: Date, dueDate?: Date | null) => {
-  if (dueDate && dueDate.getTime() < issueDate.getTime()) throw new ApiError(httpStatus.BAD_REQUEST, 'Due date cannot be before the issue date')
+  if (dueDate && dueDate.getTime() < issueDate.getTime()) throw financeFieldError('dueDate', 'Due date cannot be before the issue date')
 }
 
 const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
@@ -337,7 +339,7 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
     const amountPaid = Number(payload.amount)
     const outstanding = Number((invoice.total - invoice.paidAmount).toFixed(2))
-    if (amountPaid > outstanding + 0.001) throw new ApiError(httpStatus.BAD_REQUEST, `Payment exceeds the outstanding amount of BDT ${outstanding.toFixed(2)}`)
+    if (amountPaid > outstanding + 0.001) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${outstanding.toFixed(2)}`)
     const paidAt = asDate(payload.paidAt)
     const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
     const transaction = transactionDocs[0]
@@ -373,7 +375,7 @@ const ensureAgent = async (organizationId: string, agentId: string) => {
 const createCommission = async (organizationId: string, actorId: string, payload: Partial<IFinanceCommission>) => {
   await ensureAgent(organizationId, String(payload.agentId))
   const commissionAmount = Number(payload.commissionAmount || 0), agentShare = Number(payload.agentShare || 0), companyShare = Number(payload.companyShare || 0)
-  if (Math.abs((agentShare + companyShare) - commissionAmount) > 0.01) throw new ApiError(httpStatus.BAD_REQUEST, 'Agent share and company share must equal the commission amount')
+  if (Math.abs((agentShare + companyShare) - commissionAmount) > 0.01) throw financeFieldError('agentShare', 'Agent share and company share must equal the commission amount')
   const result = await FinanceCommission.create({ ...payload, organizationId, commissionNumber: makeNumber('COM'), propertyId: cleanOptionalId(payload.propertyId), leadId: cleanOptionalId(payload.leadId), dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined, currency: 'BDT', createdBy: actorObjectId(actorId) })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', result._id.toString(), 'finance.commission.created', `Commission ${result.commissionNumber} created`)
   return result.populate('agentId', 'name email')
@@ -403,7 +405,7 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
   if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
   if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
   const nextAmount = Number(payload.commissionAmount ?? existing.commissionAmount), nextAgent = Number(payload.agentShare ?? existing.agentShare), nextCompany = Number(payload.companyShare ?? existing.companyShare)
-  if (Math.abs((nextAgent + nextCompany) - nextAmount) > 0.01) throw new ApiError(httpStatus.BAD_REQUEST, 'Agent share and company share must equal the commission amount')
+  if (Math.abs((nextAgent + nextCompany) - nextAmount) > 0.01) throw financeFieldError('agentShare', 'Agent share and company share must equal the commission amount')
   const update: any = { ...payload, updatedBy: actorObjectId(actorId) }
   if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
@@ -476,7 +478,7 @@ const archiveVendor = (organizationId: string, actorId: string, id: string) => u
 
 const createBudget = async (organizationId: string, actorId: string, payload: Partial<IFinanceBudget>) => {
   const startDate = asDate(payload.startDate), endDate = asDate(payload.endDate)
-  if (endDate < startDate) throw new ApiError(httpStatus.BAD_REQUEST, 'End date must be after start date')
+  if (endDate < startDate) throw financeFieldError('endDate', 'End date cannot be before start date')
   const result = await FinanceBudget.create({ ...payload, organizationId, startDate, endDate, currency: 'BDT', createdBy: actorObjectId(actorId) })
   await emitFinanceEvent(organizationId, actorId, 'finance_budget', result._id.toString(), 'finance.budget.created', `Budget ${result.name} created`)
   return result
@@ -505,7 +507,7 @@ const updateBudget = async (organizationId: string, actorId: string, id: string,
   const existing: any = await FinanceBudget.findOne({ _id: id, organizationId })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
   const startDate = payload.startDate ? asDate(payload.startDate) : existing.startDate, endDate = payload.endDate ? asDate(payload.endDate) : existing.endDate
-  if (endDate < startDate) throw new ApiError(httpStatus.BAD_REQUEST, 'End date must be after start date')
+  if (endDate < startDate) throw financeFieldError('endDate', 'End date cannot be before start date')
   const result = await FinanceBudget.findOneAndUpdate({ _id: id, organizationId }, { ...payload, startDate, endDate, updatedBy: actorObjectId(actorId) }, { new: true, runValidators: true }).lean()
   await emitFinanceEvent(organizationId, actorId, 'finance_budget', id, 'finance.budget.updated', `Budget ${result?.name || id} updated`)
   return (await enrichBudgets(organizationId, result ? [result] : []))[0]
