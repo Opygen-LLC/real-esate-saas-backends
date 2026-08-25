@@ -373,18 +373,41 @@ const uploadAssetBuffer = async (
     throw new ApiError(400, 'The property photo could not be normalized')
   }
 
-  const signed: any = await presignAsset(organizationId, {
-    filename: file.originalname || 'property-image',
+  // The server fallback must not depend on GCS URL-signing. A browser can be
+  // unable to use a signed PUT (CORS, corporate proxy, missing signBlob
+  // permission) while this API still has perfectly valid bucket read/write
+  // credentials. Prepare the exact same upload-intent lifecycle directly.
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
+  await EntitlementService.assertStorage(organizationId, normalized.data.length)
+  const context = options.context || 'website'
+  const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
+  const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })
+  const variantWidths = context === 'property-draft' ? [320, 640, 1280] : [640, 1280]
+  const variantDefs = variantWidths.flatMap((width) => (['webp', 'avif'] as const).map((format) => ({
+    width,
+    format,
+    key: `${originalKey}.${width}.${format}`,
+  })))
+  const objectKeys = [originalKey, ...variantDefs.map((variant) => variant.key)]
+
+  await WebsiteUploadIntent.create({
+    organizationId,
+    key: originalKey,
+    objectKeys,
+    declaredSize: normalized.data.length,
     mimeType,
-    size: normalized.data.length,
-  }, options)
-  const objectKeys = [signed.original.key, ...(signed.requiredVariants || []).map((variant: any) => variant.key)]
+    context,
+    uploadSessionId,
+    lastReferencedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60_000),
+  })
+  if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
 
   try {
-    await ObjectStorageService.putBuffer(signed.original.key, normalized.data, mimeType)
+    await ObjectStorageService.putBuffer(originalKey, normalized.data, mimeType)
 
     const completedVariants: Array<{ key: string; format: 'webp' | 'avif'; width: number; height?: number }> = []
-    for (const variant of signed.requiredVariants || []) {
+    for (const variant of variantDefs) {
       try {
         let pipeline = sharp(normalized.data, { failOn: 'error', limitInputPixels: 80_000_000 })
           .resize({ width: Number(variant.width), withoutEnlargement: true })
@@ -401,7 +424,7 @@ const uploadAssetBuffer = async (
 
     const fallbackAlt = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
     return await completeAsset(organizationId, {
-      key: signed.original.key,
+      key: originalKey,
       originalName: file.originalname || 'property-image',
       mimeType,
       width: normalized.info.width,
@@ -411,7 +434,7 @@ const uploadAssetBuffer = async (
     }, userId)
   } catch (error) {
     await Promise.allSettled(objectKeys.map((key: string) => ObjectStorageService.remove(key)))
-    await WebsiteUploadIntent.deleteOne({ organizationId, key: signed.original.key, status: 'pending' }).catch(() => undefined)
+    await WebsiteUploadIntent.deleteOne({ organizationId, key: originalKey, status: 'pending' }).catch(() => undefined)
     throw error
   }
 }

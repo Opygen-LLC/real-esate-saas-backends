@@ -2,7 +2,6 @@ import net from 'net'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { ObjectStorageService } from './objectStorage.service'
-import { Resilience } from '../../../shared/resilience'
 
 const writeChunk = (socket: net.Socket, chunk: Buffer) => {
   const size = Buffer.alloc(4)
@@ -64,10 +63,10 @@ export const scanStoredObject = async (key: string): Promise<{ status: 'clean' |
     return { status: 'skipped', detail: 'CLAMAV_HOST is not configured in development' }
   }
 
-  const url = await ObjectStorageService.presignDownload(key, 180)
-  const response = await Resilience.fetch('object-storage', url, {}, { timeoutMs: 15000 })
-
-  if (!response.ok || !response.body) throw new ApiError(502, 'Unable to read uploaded asset for virus scanning')
+  // Read with the server's GCS credentials instead of creating another signed
+  // URL. This keeps malware processing working on runtimes whose service
+  // account can read/write the bucket but is not allowed to sign URLs.
+  const body = await ObjectStorageService.readBuffer(key)
 
   return withClamSocket<{ status: 'clean'; detail: string }>((socket, resolve, reject) => {
     let result = ''
@@ -80,7 +79,10 @@ export const scanStoredObject = async (key: string): Promise<{ status: 'clean' |
     socket.write('zINSTREAM\0')
     ;(async () => {
       try {
-        for await (const chunk of response.body as any) writeChunk(socket, Buffer.from(chunk))
+        const chunkSize = 256 * 1024
+        for (let offset = 0; offset < body.length; offset += chunkSize) {
+          writeChunk(socket, body.subarray(offset, Math.min(body.length, offset + chunkSize)))
+        }
         socket.write(Buffer.alloc(4))
         socket.end()
       } catch (error) { reject(error) }

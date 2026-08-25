@@ -69,7 +69,13 @@ const configurationStatus = () => {
 
   if (keyFileRaw) {
     const resolved = resolveKeyFile(keyFileRaw)
-    if (!fs.existsSync(resolved)) missing.push(`GCP_KEY_FILE (file not found: ${resolved})`)
+    try {
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+        missing.push(`GCP_KEY_FILE (regular file not found: ${resolved})`)
+      }
+    } catch {
+      missing.push(`GCP_KEY_FILE (regular file not found: ${resolved})`)
+    }
   }
   // If no key file, GCS uses Application Default Credentials (ADC), which is
   // the preferred production mode on GCE / GKE / Cloud Run.
@@ -225,6 +231,28 @@ const putBuffer = async (key: string, body: Buffer, contentType: string): Promis
   }
 }
 
+const readBuffer = async (key: string, maxBytes = 25 * 1024 * 1024): Promise<Buffer> => {
+  assertConfigured()
+  try {
+    const file = gcs().bucket(bucketName()).file(key)
+    const [metadata] = await file.getMetadata()
+    const declaredSize = Number(metadata.size || 0)
+    if (declaredSize > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
+    const [body] = await file.download()
+    if (body.length > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
+    return body
+  } catch (error: any) {
+    if (error instanceof ApiError) throw error
+    const code = error?.code ?? error?.response?.status
+    if (code === 404) throw new ApiError(409, 'Uploaded object is not available (404)')
+    if (code === 403 || code === 401) throw unavailableError('Google Cloud Storage rejected the media read request', { operation: 'read', status: code })
+    throw unavailableError('Google Cloud Storage media read failed', {
+      operation: 'read',
+      reason: String(error?.message || 'gcs_read_failed').slice(0, 200),
+    })
+  }
+}
+
 const head = async (key: string) => {
   assertConfigured()
   try {
@@ -370,7 +398,11 @@ const health = async (): Promise<StorageHealth> => {
   try {
     const [exists] = await gcs().bucket(bucketName()).exists()
     const browserCors = await browserCorsHealth()
-    const healthy = exists && browserCors.healthy
+    // Bucket reachability is a server-readiness dependency. Browser CORS is a
+    // direct-upload optimization: property media now has a hardened API upload
+    // fallback, so a bad CORS rule must not evict an otherwise healthy API
+    // instance from the load balancer.
+    const healthy = exists
     const value: StorageHealth = {
       provider: 'gcs',
       configured: true,
@@ -405,6 +437,7 @@ export const ObjectStorageService = {
   presignUpload,
   presignDownload,
   head,
+  readBuffer,
   putBuffer,
   remove,
   removePrefix,
