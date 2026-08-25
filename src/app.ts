@@ -69,7 +69,7 @@ app.use(express.urlencoded({ extended: true, limit: '256kb' }))
 app.use(csrfProtection)
 
 app.get('/', (_req: Request, res: Response) => {
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS 26 Aug 5:05AM', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS 26 Aug 5:25AM', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
 })
 
 app.get('/health', async (_req, res) => {
