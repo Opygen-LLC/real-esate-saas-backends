@@ -193,12 +193,12 @@ const defaultGcsPublicBaseUrl = gcpBucketName ? `https://storage.googleapis.com/
 const objectStoragePublicBaseUrl = normalizeStorageUrl(
   'OBJECT_STORAGE_PUBLIC_BASE_URL',
   process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || defaultGcsPublicBaseUrl,
-  { httpsInProduction: true },
+  { httpsInProduction: false },
 )
 const objectStorageBrowserOrigin = normalizeStorageUrl(
   'OBJECT_STORAGE_BROWSER_ORIGIN',
   process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin,
-  { httpsInProduction: true, allowPath: false },
+  { httpsInProduction: false, allowPath: false },
 )
 
 
