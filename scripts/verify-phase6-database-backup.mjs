@@ -45,11 +45,11 @@ for (const token of [
   requireText(config + env, token, 'backup configuration')
 }
 
-requireText(config, "process.env.BACKUP_CRON || '30 2 * * *'", '02:30 default backup cron')
-requireText(env, 'BACKUP_CRON=30 2 * * *', '02:30 env backup cron')
+requireText(config, "process.env.BACKUP_CRON || '55 2 * * *'", '02:55 default backup cron')
+requireText(env, 'BACKUP_CRON=55 2 * * *', '02:55 env backup cron')
 
 for (const composeText of [compose, defaultCompose]) {
-  requireText(composeText, 'BACKUP_CRON: "${BACKUP_CRON:-30 2 * * *}"', '02:30 compose backup cron')
+  requireText(composeText, 'BACKUP_CRON: "${BACKUP_CRON:-55 2 * * *}"', '02:55 compose backup cron')
   for (const token of ['database-backup:', 'Dockerfile.backup', 'BACKUP_CRON', 'BACKUP_WORK_DIR']) {
     requireText(composeText, token, 'compose backup service')
   }
@@ -60,7 +60,7 @@ for (const composeText of [compose, defaultCompose]) {
 for (const token of [
   'MONGODB_DATABASE_TOOLS_VERSION=100.18.0',
   'mongodb-database-tools-debian12-x86_64',
-  'USER backup',
+  'USER node',
   '/tmp/real-estate-db-backup/.scheduler-heartbeat',
 ]) {
   requireText(dockerfile, token, 'backup image')

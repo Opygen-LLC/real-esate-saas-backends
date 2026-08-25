@@ -134,7 +134,7 @@ export const loadDatabaseBackupConfig = (): DatabaseBackupConfig => {
     sourceDatabaseName,
     backupDatabasePrefix,
     manifestDatabaseName,
-    cron: (process.env.BACKUP_CRON || '30 2 * * *').trim(),
+    cron: (process.env.BACKUP_CRON || '55 2 * * *').trim(),
     timezone: validateTimezone((process.env.BACKUP_TIMEZONE || 'Asia/Dhaka').trim()),
     retentionDays: envInteger('BACKUP_RETENTION_DAYS', 30, 7, 3650),
     minRecoveryPoints: envInteger('BACKUP_MIN_RECOVERY_POINTS', 7, 1, 365),

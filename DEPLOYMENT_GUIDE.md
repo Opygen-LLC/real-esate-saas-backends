@@ -168,7 +168,7 @@ Required production values:
 
 ```env
 BACKUP_DATABASE_URL=mongodb+srv://...different-cluster.../backup-control
-BACKUP_CRON=0 3 * * *
+BACKUP_CRON=55 2 * * *
 BACKUP_TIMEZONE=Asia/Dhaka
 BACKUP_RETENTION_DAYS=30
 BACKUP_MIN_RECOVERY_POINTS=7
