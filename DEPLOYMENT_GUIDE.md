@@ -159,3 +159,20 @@ docker compose up -d --build
 | **1-Command Redeploy** | `./update.sh` |
 | **Restart Backend Container Only** | `docker compose restart api` |
 | **Stop All Containers Cleanly** | `docker compose down` |
+
+## Daily database disaster-recovery backup
+
+Production now includes a dedicated `database-backup` service. It runs independently from API replicas, uses MongoDB Database Tools, restores every recovery point into a dated database on a separate MongoDB cluster, verifies the restore, records a SHA-256/manifest, and applies retention only after a successful verification.
+
+Required production values:
+
+```env
+BACKUP_DATABASE_URL=mongodb+srv://...different-cluster.../backup-control
+BACKUP_CRON=0 3 * * *
+BACKUP_TIMEZONE=Asia/Dhaka
+BACKUP_RETENTION_DAYS=30
+BACKUP_MIN_RECOVERY_POINTS=7
+```
+
+Do not point `BACKUP_DATABASE_URL` at the production cluster. The production worker refuses a same-cluster target. See `docs/DATABASE_BACKUP_RUNBOOK.md` for deployment, manual smoke backup, recovery-drill, strict point-in-time consistency, and GCS media-protection guidance.
+

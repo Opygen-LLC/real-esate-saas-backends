@@ -43,7 +43,7 @@
     "verify:phase5-finance": "node scripts/verify-phase5-finance.mjs",
     "verify:phase7-architecture": "node scripts/verify-phase7-architecture.mjs",
     "test:journey": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase7ReleaseJourney.integration.test.ts",
-    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase10 && pnpm test:integration && pnpm test:migrations && pnpm verify:phase10 && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance && pnpm verify:phase5-subscription-editing && pnpm verify:subscription-release && pnpm test:subscription-release && pnpm verify:phase5-production",
+    "verify:release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase10 && pnpm test:integration && pnpm test:migrations && pnpm verify:phase10 && pnpm verify:phase7-architecture && pnpm verify:phase1-user-auth && pnpm verify:phase2-property && pnpm verify:phase3-auth-routing && pnpm verify:phase4-realtime && pnpm verify:phase6-performance && pnpm verify:phase5-subscription-editing && pnpm verify:subscription-release && pnpm test:subscription-release && pnpm verify:phase5-production && pnpm verify:phase6-backup && pnpm test:phase6-backup",
     "migrate:user-auth-architecture": "ts-node --transpile-only src/app/db/migratePhase1UserAuthArchitecture.ts",
     "verify:phase1-user-auth": "node scripts/verify-phase1-user-auth-architecture.mjs",
     "migrate:phase2-property-correctness": "ts-node --transpile-only src/app/db/migratePhase2PropertyCorrectness.ts",
@@ -123,7 +123,13 @@
     "migrate:phase5-final-hardening": "ts-node --transpile-only src/app/db/migratePhase5FinalHardening.ts",
     "verify:phase5-final-hardening": "node scripts/verify-phase5-final-hardening.mjs",
     "test:phase5-final-hardening": "vitest run src/tests/contract/phase5FinalHardening.contract.test.ts src/tests/contract/phase2WebsiteSubmissionCrmConversion.contract.test.ts src/tests/integration/phase5FinanceBilling.integration.test.ts",
-    "migrate:property-draft-activity": "ts-node --transpile-only src/app/db/migratePropertyDraftActivityLifecycle.ts"
+    "migrate:property-draft-activity": "ts-node --transpile-only src/app/db/migratePropertyDraftActivityLifecycle.ts",
+    "backup:database": "node --enable-source-maps dist/app/module/backup/databaseBackup.runner.js",
+    "backup:scheduler": "node --enable-source-maps dist/app/module/backup/databaseBackup.scheduler.js",
+    "backup:database:dev": "ts-node --transpile-only src/app/module/backup/databaseBackup.runner.ts",
+    "backup:scheduler:dev": "ts-node --transpile-only src/app/module/backup/databaseBackup.scheduler.ts",
+    "verify:phase6-backup": "node scripts/verify-phase6-database-backup.mjs",
+    "test:phase6-backup": "vitest run src/tests/contract/phase6DatabaseBackup.contract.test.ts"
   },
   "keywords": [
     "real-estate",

@@ -43,6 +43,40 @@ services:
     networks:
       - app_network
 
+
+  database-backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL must point to a separate MongoDB cluster}
+      BACKUP_SOURCE_DATABASE_NAME: ${BACKUP_SOURCE_DATABASE_NAME:-}
+      BACKUP_CRON: "${BACKUP_CRON:-0 3 * * *}"
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Dhaka}
+      BACKUP_DATABASE_PREFIX: ${BACKUP_DATABASE_PREFIX:-real_estate_saas_backup}
+      BACKUP_MANIFEST_DATABASE_NAME: ${BACKUP_MANIFEST_DATABASE_NAME:-real_estate_saas_backup_control}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_MIN_RECOVERY_POINTS: ${BACKUP_MIN_RECOVERY_POINTS:-7}
+      BACKUP_ARCHIVE_DIR: /backups
+      BACKUP_PROCESS_TIMEOUT_MINUTES: ${BACKUP_PROCESS_TIMEOUT_MINUTES:-120}
+      BACKUP_LOCK_STALE_MINUTES: ${BACKUP_LOCK_STALE_MINUTES:-360}
+      BACKUP_MAX_PARALLEL_COLLECTIONS: ${BACKUP_MAX_PARALLEL_COLLECTIONS:-4}
+      BACKUP_ALLOW_SAME_CLUSTER: "false"
+      BACKUP_GCS_PROTECTION_MODE: ${BACKUP_GCS_PROTECTION_MODE:-warn}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:-}
+      GCP_KEY_FILE: ${GCP_KEY_FILE:-/app/opy-realestate-505614-d4e3b5e9f13d.json}
+    volumes:
+      - database_backup_archives:/backups
+      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
+    networks:
+      - app_network
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -66,3 +100,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  database_backup_archives:
