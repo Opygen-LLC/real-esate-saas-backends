@@ -8,6 +8,7 @@ import mongoose from 'mongoose'
 import { Storage } from '@google-cloud/storage'
 import { logger } from '../../../shared/logger'
 import { DatabaseBackupConfig, loadDatabaseBackupConfig } from './databaseBackup.config'
+import { DatabaseBackupStatusStore } from './databaseBackup.status'
 import {
   BackupCollectionInventory,
   BackupCollectionVerification,
@@ -417,6 +418,31 @@ const acquireLock = async (config: DatabaseBackupConfig): Promise<() => Promise<
   return async () => { await fs.unlink(lockFile).catch(() => undefined) }
 }
 
+
+const assertBackupDatabaseEmpty = async (config: DatabaseBackupConfig, databaseName: string): Promise<void> => {
+  const connection = await mongoose.createConnection(config.backupDatabaseUrl, {
+    dbName: databaseName,
+    maxPoolSize: 1,
+    minPoolSize: 0,
+    serverSelectionTimeoutMS: 15_000,
+  }).asPromise()
+  try {
+    if (!connection.db) throw new Error(`Backup database handle is unavailable for ${databaseName}`)
+    const existing = await connection.db.listCollections({}, { nameOnly: true }).toArray()
+    if (existing.length > 0) throw new Error(`Refusing to restore into non-empty backup database ${databaseName}`)
+  } finally {
+    await connection.close()
+  }
+}
+
+const persistPrimaryStatusSafely = async (work: () => Promise<void>, runId: string): Promise<void> => {
+  try {
+    await work()
+  } catch (error) {
+    logger.warn('database_backup_primary_status_write_failed', { runId, error: safeErrorMessage(error) })
+  }
+}
+
 const dropPartialBackupDatabase = async (config: DatabaseBackupConfig, databaseName: string): Promise<void> => {
   if (!databaseName.startsWith(`${config.backupDatabasePrefix}_`)) return
   const connection = await mongoose.createConnection(config.backupDatabaseUrl, {
@@ -460,6 +486,7 @@ export const DatabaseBackupService = {
     }
 
     try {
+      await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markStarted(config, { runId, backupDatabase, startedAt: manifest.startedAt }), runId)
       await fs.mkdir(runDir, { recursive: false, mode: 0o700 })
       toolConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'real-estate-db-backup-'))
       await fs.chmod(toolConfigDir, 0o700)
@@ -490,6 +517,9 @@ export const DatabaseBackupService = {
       const archiveStat = await fs.stat(archiveFile)
       manifest.archiveBytes = archiveStat.size
       manifest.archiveSha256 = await sha256File(archiveFile)
+
+      // Every recovery point is restored into a unique, verified-empty database.
+      await assertBackupDatabaseEmpty(config, backupDatabase)
 
       await runCommand('mongorestore', [
         `--config=${backupConfigFile}`,
@@ -528,6 +558,13 @@ export const DatabaseBackupService = {
       manifest.retention = await runRetention(config, backupDatabase)
       await writeManifestFile(runDir, manifest)
       await persistRemoteManifest(config, manifest)
+      await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markSuccess(config, {
+        runId,
+        backupDatabase,
+        startedAt: manifest.startedAt,
+        finishedAt: manifest.finishedAt!,
+        restoreVerified: Boolean(manifest.restoreVerification?.passed),
+      }), runId)
       logger.info('database_backup_completed', {
         runId,
         backupDatabase,
@@ -554,6 +591,13 @@ export const DatabaseBackupService = {
         })
       }
       await writeManifestFile(runDir, manifest).catch(() => undefined)
+      await persistPrimaryStatusSafely(() => DatabaseBackupStatusStore.markFailed(config, {
+        runId,
+        backupDatabase,
+        startedAt: manifest.startedAt,
+        finishedAt: manifest.finishedAt!,
+        error: manifest.error?.message || 'Database backup failed',
+      }), runId)
       await persistRemoteManifest(config, manifest).catch((persistError) => {
         logger.error('database_backup_failure_manifest_persist_failed', { runId, error: persistError })
       })

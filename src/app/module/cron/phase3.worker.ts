@@ -16,6 +16,11 @@ let lastRunAt = 0
 let lastSuccessAt = 0
 let lastDurationMs = 0
 let lastError = ''
+let lastPropertyDraftCleanupAttemptAt = 0
+let lastPropertyDraftCleanupSuccessAt = 0
+let lastPropertyDraftCleanupDurationMs = 0
+let lastPropertyDraftCleanupError = ''
+let lastPropertyDraftCleanupResult: Record<string, number> | null = null
 let interval: NodeJS.Timeout | null = null
 let initial: NodeJS.Timeout | null = null
 
@@ -52,9 +57,31 @@ export const runPhase3Maintenance = async () => {
     const cleanupEvery = Math.max(1, Math.round(24 * 60 * 60 * 1000 / config.runtime.worker_poll_ms))
     const propertyDraftCleanupEvery = Math.max(1, Math.round(config.assets.property_draft_cleanup_interval_minutes * 60_000 / config.runtime.worker_poll_ms))
     const assets = cleanupTick % cleanupEvery === 0 ? await WebsiteBuilderService.cleanupOrphanAssets(100) : { checked: 0, deleted: 0 }
-    const propertyDraftAssets = cleanupTick % propertyDraftCleanupEvery === 0
-      ? await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
-      : { sessions: 0, checked: 0, deleted: 0, reconciled: 0, bytesReleased: 0, incompleteUploadsDeleted: 0 }
+    let propertyDraftAssets: any = { sessions: 0, checked: 0, deleted: 0, reconciled: 0, bytesReleased: 0, incompleteUploadsDeleted: 0 }
+    if (cleanupTick % propertyDraftCleanupEvery === 0) {
+      lastPropertyDraftCleanupAttemptAt = Date.now()
+      const cleanupStarted = performance.now()
+      try {
+        propertyDraftAssets = await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
+        lastPropertyDraftCleanupSuccessAt = Date.now()
+        lastPropertyDraftCleanupDurationMs = performance.now() - cleanupStarted
+        lastPropertyDraftCleanupError = ''
+        lastPropertyDraftCleanupResult = {
+          sessions: Number(propertyDraftAssets.sessions || 0),
+          checked: Number(propertyDraftAssets.checked || 0),
+          deleted: Number(propertyDraftAssets.deleted || 0),
+          reconciled: Number(propertyDraftAssets.reconciled || 0),
+          bytesReleased: Number(propertyDraftAssets.bytesReleased || 0),
+          incompleteUploadsDeleted: Number(propertyDraftAssets.incompleteUploadsDeleted || 0),
+        }
+        Metrics.setGauge('property_draft_cleanup_last_success_timestamp_seconds', lastPropertyDraftCleanupSuccessAt / 1000)
+        Metrics.setGauge('property_draft_cleanup_last_duration_ms', lastPropertyDraftCleanupDurationMs)
+      } catch (error) {
+        lastPropertyDraftCleanupDurationMs = performance.now() - cleanupStarted
+        lastPropertyDraftCleanupError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
+        throw error
+      }
+    }
     lastSuccessAt = Date.now(); lastError = ''
     lastDurationMs = performance.now() - started
     Metrics.setGauge('worker_last_success_timestamp_seconds', lastSuccessAt / 1000)
@@ -70,7 +97,23 @@ export const runPhase3Maintenance = async () => {
 export const getWorkerHealth = () => {
   const grace = Math.max(30_000, config.runtime.worker_poll_ms * 4)
   const healthy = !config.runtime.worker_enabled || (lastSuccessAt > 0 ? Date.now() - lastSuccessAt < grace : Date.now() - lastRunAt < grace)
-  return { enabled: config.runtime.worker_enabled, scheduled: Boolean(interval), healthy, running, lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null, lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : null, lastDurationMs: Math.round(lastDurationMs), lastError }
+  return {
+    enabled: config.runtime.worker_enabled,
+    scheduled: Boolean(interval),
+    healthy,
+    running,
+    lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null,
+    lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : null,
+    lastDurationMs: Math.round(lastDurationMs),
+    lastError,
+    propertyDraftCleanup: {
+      lastAttemptAt: lastPropertyDraftCleanupAttemptAt ? new Date(lastPropertyDraftCleanupAttemptAt).toISOString() : null,
+      lastSuccessfulDraftCleanupAt: lastPropertyDraftCleanupSuccessAt ? new Date(lastPropertyDraftCleanupSuccessAt).toISOString() : null,
+      lastDurationMs: Math.round(lastPropertyDraftCleanupDurationMs),
+      lastError: lastPropertyDraftCleanupError,
+      lastResult: lastPropertyDraftCleanupResult,
+    },
+  }
 }
 
 export const startPhase3Worker = () => {

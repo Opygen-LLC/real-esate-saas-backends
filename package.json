@@ -129,7 +129,11 @@
     "backup:database:dev": "ts-node --transpile-only src/app/module/backup/databaseBackup.runner.ts",
     "backup:scheduler:dev": "ts-node --transpile-only src/app/module/backup/databaseBackup.scheduler.ts",
     "verify:phase6-backup": "node scripts/verify-phase6-database-backup.mjs",
-    "test:phase6-backup": "vitest run src/tests/contract/phase6DatabaseBackup.contract.test.ts"
+    "test:phase6-backup": "vitest run src/tests/contract/phase6DatabaseBackup.contract.test.ts",
+    "backup:staging-drill": "node --enable-source-maps dist/app/module/backup/databaseBackup.drill.js",
+    "backup:staging-drill:dev": "ts-node --transpile-only src/app/module/backup/databaseBackup.drill.ts",
+    "test:phase7-property-media": "vitest run src/tests/unit/propertyDraftAssetLifecycle.contract.test.ts src/tests/contract/phase7PropertyMediaResilience.contract.test.ts src/tests/integration/propertyDraftAssetLifecycle.integration.test.ts",
+    "verify:phase7-property-media": "node scripts/verify-phase7-property-media-resilience.mjs"
   },
   "keywords": [
     "real-estate",

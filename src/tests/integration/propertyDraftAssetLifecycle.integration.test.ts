@@ -21,6 +21,7 @@ let mongoose: typeof import('mongoose')
 let Organization: any
 let WebsiteAsset: any
 let WebsiteBuilderService: any
+let WebsiteUploadIntent: any
 const organizationId = 'phase10-draft-assets'
 
 const createDraftAsset = async (sessionId: string, suffix: string, createdAt = new Date(), size = 1500, lastReferencedAt?: Date) => {
@@ -61,6 +62,7 @@ suite('Phase 10 property draft asset lifecycle integration', () => {
     ;({ Organization } = await import('../../app/module/organization/organization.model'))
     ;({ WebsiteAsset } = await import('../../app/module/websiteBuilder/websiteAsset.model'))
     ;({ WebsiteBuilderService } = await import('../../app/module/websiteBuilder/websiteBuilder.service'))
+    ;({ WebsiteUploadIntent } = await import('../../app/module/websiteBuilder/websiteUploadIntent.model'))
     await Organization.create({
       organizationId,
       agencyName: 'Phase 10 Draft Asset Realty',
@@ -137,6 +139,34 @@ suite('Phase 10 property draft asset lifecycle integration', () => {
     const rows = await WebsiteAsset.find({ _id: { $in: [firstId, secondId] } }).lean()
     expect(rows).toHaveLength(2)
     expect(rows.every((row: any) => new Date(row.lastReferencedAt).getTime() >= before)).toBe(true)
+  })
+
+
+  it('session reconciliation is tenant scoped and cleanup is idempotent', async () => {
+    const sessionId = '55555555-5555-4555-8555-555555555555'
+    const assetId = await createDraftAsset(sessionId, 'tenant-a', new Date(), 100)
+    await WebsiteAsset.collection.insertOne({ organizationId: 'other-tenant', context: 'property-draft', uploadSessionId: sessionId, claimed: false, key: 'tenants/other-tenant/properties/drafts/x.jpg', url: 'https://media.example.test/x.jpg', mimeType: 'image/jpeg', size: 100, status: 'ready', variants: [], createdAt: new Date(), lastReferencedAt: new Date(), updatedAt: new Date() })
+    const reconciled = await WebsiteBuilderService.getPropertyDraftSession(organizationId, sessionId)
+    expect(reconciled.assets.map((a:any)=>String(a._id))).toContain(assetId)
+    expect(reconciled.assets.every((a:any)=>a.key.includes(organizationId))).toBe(true)
+    const first = await WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, sessionId)
+    const second = await WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, sessionId)
+    expect(first.deleted).toBeGreaterThanOrEqual(1)
+    expect(second.deleted).toBe(0)
+    expect(await WebsiteAsset.exists({ organizationId: 'other-tenant', uploadSessionId: sessionId })).toBeTruthy()
+  })
+
+  it('explicit cleanup keeps cancelled intent tombstones and generic orphan cleanup ignores property drafts', async () => {
+    const sessionId = '66666666-6666-4666-8666-666666666666'
+    const assetId = await createDraftAsset(sessionId, 'old-draft', new Date(Date.now()-10*24*60*60_000), 100)
+    const asset:any = await WebsiteAsset.findById(assetId).lean()
+    await WebsiteUploadIntent.create({ organizationId, key: asset.key, objectKeys:[asset.key], declaredSize:100, mimeType:'image/jpeg', context:'property-draft', uploadSessionId:sessionId, status:'pending', lastReferencedAt:new Date(), expiresAt:new Date(Date.now()+60*60_000) })
+    await WebsiteBuilderService.cleanupOrphanAssets(100)
+    expect(await WebsiteAsset.exists({ _id: assetId })).toBeTruthy()
+    await WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, sessionId)
+    const tombstone = await WebsiteUploadIntent.findOne({ organizationId, key: asset.key }).lean()
+    expect(tombstone?.status).toBe('cancelled')
+    expect(new Date(tombstone.expiresAt).getTime()).toBeGreaterThan(Date.now())
   })
 
 })

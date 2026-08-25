@@ -19,6 +19,7 @@ import sendEmail from '../../helpers/sendEmail'
 import { OperationsJob, OperationsJobType } from './operationsJob.model'
 
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
+let assetFinalizeFailuresSinceStart = 0
 
 type QueueWriteOptions = { session?: ClientSession }
 
@@ -154,6 +155,10 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
     const delayMs = Math.min(6 * 60 * 60_000, Math.max(30_000, 2 ** Math.min(job.attempts, 10) * 15_000))
     await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
     Metrics.observeQueue(job.type, final ? 'dead' : 'retry')
+    if (job.type === 'asset_finalize') {
+      assetFinalizeFailuresSinceStart += 1
+      Metrics.inc('property_media_upload_failures_total', { stage: 'asset_finalize', outcome: final ? 'dead' : 'retry' })
+    }
     logger.error('[Operations queue] job failed', { jobId: job._id.toString(), type: job.type, final, error })
     return 'failed'
   }
@@ -234,6 +239,24 @@ const backlog = async () => {
   return { pending, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
+
+const assetBacklog = async () => {
+  const [pending, processing, failed, oldest] = await Promise.all([
+    OperationsJob.countDocuments({ type: 'asset_finalize', status: 'pending' }),
+    OperationsJob.countDocuments({ type: 'asset_finalize', status: 'processing' }),
+    OperationsJob.countDocuments({ type: 'asset_finalize', status: 'failed' }),
+    OperationsJob.findOne({ type: 'asset_finalize', status: 'pending' }).sort({ runAt: 1 }).select('runAt').lean(),
+  ])
+  return {
+    pending,
+    processing,
+    failed,
+    pendingAssetFinalizationCount: pending + processing,
+    oldestPendingAt: (oldest as any)?.runAt || null,
+    uploadFailuresSinceStart: assetFinalizeFailuresSinceStart,
+  }
+}
+
 const domainBacklog = async () => {
   const [pending, processing, failed, oldest] = await Promise.all([
     OperationsJob.countDocuments({ type: 'domain_verify', status: 'pending' }),
@@ -244,4 +267,4 @@ const domainBacklog = async () => {
   return { pending, processing, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
-export const OperationsQueueService = { schedule, cancel, cancelOrganization, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog }
+export const OperationsQueueService = { schedule, cancel, cancelOrganization, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog, assetBacklog }

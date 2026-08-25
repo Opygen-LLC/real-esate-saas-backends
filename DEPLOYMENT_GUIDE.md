@@ -176,3 +176,20 @@ BACKUP_MIN_RECOVERY_POINTS=7
 
 Do not point `BACKUP_DATABASE_URL` at the production cluster. The production worker refuses a same-cluster target. See `docs/DATABASE_BACKUP_RUNBOOK.md` for deployment, manual smoke backup, recovery-drill, strict point-in-time consistency, and GCS media-protection guidance.
 
+
+
+## Phase 7 rollout and recovery drill
+
+The client defaults `NEXT_PUBLIC_PROPERTY_BACKGROUND_UPLOAD_ENABLED=true`. Set it to `false` at client build time for a rollback-safe Step-3-gated mode; Publish remains finalization-only.
+
+Before release, run the staging DR drill only against staging with writes paused:
+
+```bash
+export NODE_ENV=staging
+export BACKUP_DRILL_CONFIRM=PHASE7-STAGING-DRILL
+export BACKUP_DRILL_EXPECT_QUIESCENT=true
+pnpm build
+pnpm backup:staging-drill
+```
+
+The drill performs the normal native `mongodump` -> empty dated database `mongorestore`, collection/count/index verification, then SHA-256 fingerprints selected critical records. Never set the drill confirmation in production. `/health` reports backup status, last successful property-draft cleanup, asset-finalization backlog and in-process finalization failure count.

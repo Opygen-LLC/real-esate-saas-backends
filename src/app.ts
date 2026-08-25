@@ -22,6 +22,7 @@ import { corsOptionsDelegate } from './app/middlewares/corsPolicy'
 import { PrivacyPolicyService } from './app/module/privacy/privacyPolicy.service'
 import { DomainProviderService } from './app/module/domain/providers'
 import { OperationsQueueService } from './app/module/operationsQueue/operationsQueue.service'
+import { DatabaseBackupStatusStore, type DatabaseBackupOperationStatus } from './app/module/backup/databaseBackup.status'
 import { httpLogLevelForStatus, requestRoute } from './shared/httpObservability'
 
 const app: Application = express()
@@ -71,7 +72,34 @@ app.get('/', (_req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS 25 Aug 3:53PM', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
 })
 
-app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString(), objectStorage: ObjectStorageService.configurationStatus() }))
+app.get('/health', async (_req, res) => {
+  const mongo = mongoose.connection.readyState === 1
+  const worker = getWorkerHealth()
+  const emptyDatabaseBackupStatus: DatabaseBackupOperationStatus = { _id: 'database_backup', status: 'never_run', updatedAt: '' }
+  const [databaseBackup, propertyMedia] = await Promise.all([
+    mongo ? DatabaseBackupStatusStore.readCurrent().catch(() => emptyDatabaseBackupStatus) : Promise.resolve(emptyDatabaseBackupStatus),
+    mongo ? OperationsQueueService.assetBacklog().catch(() => ({ pending: 0, processing: 0, failed: 0, pendingAssetFinalizationCount: 0, oldestPendingAt: null, uploadFailuresSinceStart: 0 })) : Promise.resolve({ pending: 0, processing: 0, failed: 0, pendingAssetFinalizationCount: 0, oldestPendingAt: null, uploadFailuresSinceStart: 0 }),
+  ])
+  res.status(200).json({
+    status: 'ok',
+    uptimeSeconds: Math.round(process.uptime()),
+    startedAt: new Date(startedAt).toISOString(),
+    objectStorage: ObjectStorageService.configurationStatus(),
+    operations: {
+      lastDatabaseBackupAt: databaseBackup.lastDatabaseBackupAt || null,
+      databaseBackup: {
+        status: databaseBackup.status,
+        lastDatabaseBackupAt: databaseBackup.lastDatabaseBackupAt || null,
+        lastDurationMs: databaseBackup.lastDurationMs ?? null,
+        restoreVerified: databaseBackup.restoreVerified ?? null,
+        backupDatabase: databaseBackup.backupDatabase || null,
+        lastError: databaseBackup.lastError || '',
+      },
+      propertyDraftCleanup: worker.propertyDraftCleanup,
+      propertyMedia,
+    },
+  })
+})
 app.get('/ready', async (_req, res) => {
   const mongo = mongoose.connection.readyState === 1
   const [transactions, redis, email, objectStorage, clamav, privacy, domainProvider, domainQueue] = await Promise.all([
