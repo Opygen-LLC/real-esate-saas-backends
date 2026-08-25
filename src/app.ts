@@ -68,7 +68,7 @@ app.use(express.urlencoded({ extended: true, limit: '256kb' }))
 app.use(csrfProtection)
 
 app.get('/', (_req: Request, res: Response) => {
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS 25 Aug 3:27AM', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Welcome to the Real Estate SaaS 25 Aug 3:53PM', data: { status: 'operational', version: '1.0.0', timestamp: new Date().toISOString() } })
 })
 
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok', uptimeSeconds: Math.round(process.uptime()), startedAt: new Date(startedAt).toISOString(), objectStorage: ObjectStorageService.configurationStatus() }))
