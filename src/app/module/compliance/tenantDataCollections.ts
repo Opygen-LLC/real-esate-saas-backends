@@ -1,10 +1,19 @@
 /**
- * Tenant-owned collections deleted by the canonical hard-delete service.
+ * Central registry for permanent tenant deletion.
  *
- * Keep this list centralized so new tenant-scoped modules cannot be forgotten
- * when permanent deletion is executed. A successful Super Admin hard delete
- * intentionally leaves no organization-scoped operational, audit, or data-
- * subject-request records in MongoDB.
+ * `TENANT_DELETION_COLLECTIONS` contains every MongoDB collection whose
+ * documents are scoped by `organizationId` and must be removed during a Super
+ * Admin hard delete. The Organization document itself is deliberately not in
+ * this list: it is deleted last by the purge service after all tenant/user data
+ * has been removed.
+ *
+ * `USER_LINKED_DELETION_COLLECTIONS` covers records that must also be deleted
+ * by tenant user id. Some of these collections are tenant-scoped too; keeping
+ * them here additionally removes malformed/legacy records that still point at
+ * a deleted tenant user but are missing or carry an incorrect organizationId.
+ *
+ * Platform/global collections are explicitly listed as protected so a future
+ * registry edit cannot accidentally include them in a tenant purge.
  */
 export const TENANT_DELETION_COLLECTIONS = [
   // Core workspace
@@ -19,6 +28,8 @@ export const TENANT_DELETION_COLLECTIONS = [
   'notifications',
   'authsessions',
   'otpchallenges',
+  'agencyownerprofiles',
+  'agentprofiles',
 
   // CRM / assignments / imports
   'crmconfigs',
@@ -34,9 +45,6 @@ export const TENANT_DELETION_COLLECTIONS = [
   'subscriptionpayments',
   'leadpurchaserequests',
   'leadtopupgrants',
-  // Reserved future recurring-add-on collection names. deleteMany against a
-  // non-existent Mongo collection is harmless and keeps retention future-safe.
-  'recurringleadaddons',
   'leadaddonsubscriptions',
   'tenantentitlementoverrides',
 
@@ -76,23 +84,51 @@ export const TENANT_DELETION_COLLECTIONS = [
   'smsmessages',
   'whatsappintegrations',
 
-  // Reviews / moderation / support / compliance profile
+  // Reviews / moderation / support / privacy / compliance
   'reviewinvitations',
   'agencyreviews',
   'fraudreports',
   'supporttickets',
   'complianceprofiles',
   'consentrecords',
-
-  // Read-only support sessions contain tenant/user identifiers and are not part
-  // of the immutable AuditEvent collection.
   'impersonationsessions',
 
-  // A hard delete is a zero-tenant-data operation. These are deleted through
-  // the raw MongoDB collection API because AuditEvent intentionally blocks
-  // model-level deletes during normal application operation.
+  // A hard delete is a zero-tenant-data operation. These collections are
+  // intentionally deleted as well; they are not preserved after tenant purge.
   'auditevents',
   'datasubjectrequests',
 ] as const
 
+/**
+ * Records that must be removed by userId before the tenant users are deleted.
+ * Auth/OTP/profile collections are included even when they also have an
+ * organizationId so legacy or malformed rows cannot survive a tenant purge.
+ */
+export const USER_LINKED_DELETION_COLLECTIONS = [
+  'accountcredentials',
+  'userprofiles',
+  'agencyownerprofiles',
+  'agentprofiles',
+  'authsessions',
+  'otpchallenges',
+] as const
+
+/**
+ * Platform-wide collections that must never be part of a tenant purge.
+ */
+export const PROTECTED_PLATFORM_COLLECTIONS = [
+  'superadminprofiles',
+  'platformsettings',
+  'subscriptionplans',
+  'leadaddondefinitions',
+  'leadtopuppricings',
+] as const
+
+/**
+ * Organization ids reserved for platform/system identity and therefore not
+ * valid hard-delete targets even if a malformed Organization row exists.
+ */
+export const PROTECTED_ORGANIZATION_IDS = ['platform', '__platform__'] as const
+
 export type TenantDeletionCollection = (typeof TENANT_DELETION_COLLECTIONS)[number]
+export type UserLinkedDeletionCollection = (typeof USER_LINKED_DELETION_COLLECTIONS)[number]

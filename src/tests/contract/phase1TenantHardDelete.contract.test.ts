@@ -30,8 +30,9 @@ describe('Phase 1 Super Admin hard-delete contracts', () => {
     expect(registry).toContain("'auditevents'")
     expect(registry).toContain("'datasubjectrequests'")
     expect(purge).toContain('verifyPurged')
-    expect(purge).toContain('AccountCredential.deleteMany')
-    expect(purge).toContain('UserProfile.deleteMany')
+    expect(registry).toContain("'accountcredentials'")
+    expect(registry).toContain("'userprofiles'")
+    expect(purge).toContain('deleteUserLinkedDocuments')
     expect(purge).toContain('Organization.deleteOne')
   })
 

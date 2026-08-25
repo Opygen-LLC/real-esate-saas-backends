@@ -1,72 +1,125 @@
 import httpStatus from 'http-status'
-import mongoose, { type ClientSession } from 'mongoose'
+import mongoose, { type ClientSession, type Types } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
+import { logger } from '../../../shared/logger'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
-import { AccountCredential } from '../accountCredential/accountCredential.model'
-import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
-import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { AuthSession } from '../auth/authSession.model'
-import { OtpChallenge } from '../auth/otpChallenge.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
-import { RealtimeService } from '../realtime/realtime.service'
-import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
-import { User } from '../user/user.model'
-import { UserProfile } from '../userProfile/userProfile.model'
 import { ImpersonationSession } from '../platformAdmin/impersonationSession.model'
-import { TENANT_DELETION_COLLECTIONS } from './tenantDataCollections'
+import { RealtimeService } from '../realtime/realtime.service'
+import { User } from '../user/user.model'
+import {
+  PROTECTED_ORGANIZATION_IDS,
+  PROTECTED_PLATFORM_COLLECTIONS,
+  TENANT_DELETION_COLLECTIONS,
+  USER_LINKED_DELETION_COLLECTIONS,
+} from './tenantDataCollections'
+
+const USER_COLLECTION = 'users'
+const ORGANIZATION_COLLECTION = 'organizations'
 
 const withSession = (session?: ClientSession) => (session ? { session } : undefined)
+const protectedOrganizationIds = new Set<string>(PROTECTED_ORGANIZATION_IDS)
+const protectedPlatformCollections = new Set<string>(PROTECTED_PLATFORM_COLLECTIONS)
+const tenantDeletionCollections = new Set<string>(TENANT_DELETION_COLLECTIONS)
 
-const getTenantUserIds = async (organizationId: string, session?: ClientSession) => {
+const assertDeletionRegistrySafety = () => {
+  if (tenantDeletionCollections.has(ORGANIZATION_COLLECTION)) {
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Tenant deletion registry must not contain the organizations collection')
+  }
+
+  const protectedCollision = [...TENANT_DELETION_COLLECTIONS, ...USER_LINKED_DELETION_COLLECTIONS]
+    .find((name) => protectedPlatformCollections.has(name))
+
+  if (protectedCollision) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      `Tenant deletion registry contains protected platform collection: ${protectedCollision}`,
+      '',
+      'TENANT_PURGE_REGISTRY_UNSAFE',
+    )
+  }
+}
+
+const assertOrganizationIdIsPurgeable = (organizationId: string) => {
+  const normalized = String(organizationId || '').trim()
+  if (!normalized) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization id is required')
+  if (protectedOrganizationIds.has(normalized)) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Platform/system organizations cannot be permanently deleted')
+  }
+  return normalized
+}
+
+const getTenantUserIds = async (organizationId: string, session?: ClientSession): Promise<Types.ObjectId[]> => {
   const query = User.find({ organizationId }).select('_id userRole').lean()
   if (session) query.session(session)
   const users = await query
+
   if (users.some((user: any) => user.userRole === 'super-admin')) {
     throw new ApiError(httpStatus.CONFLICT, 'Organizations containing a Super Admin account cannot be permanently deleted')
   }
-  return users.map((user: any) => user._id)
+
+  return users.map((user: any) => user._id as Types.ObjectId)
 }
 
-const countUserLinkedDocuments = async (userIds: any[]) => {
-  if (!userIds.length) return { total: 0, additionalToTenantScoped: 0 }
-  const filter = { userId: { $in: userIds } }
-  const [accountCredentials, authSessions, otpChallenges, userProfiles, ownerProfiles, agentProfiles, superAdminProfiles] = await Promise.all([
-    AccountCredential.countDocuments(filter),
-    AuthSession.countDocuments(filter),
-    OtpChallenge.countDocuments(filter),
-    UserProfile.countDocuments(filter),
-    AgencyOwnerProfile.countDocuments(filter),
-    AgentProfile.countDocuments(filter),
-    SuperAdminProfile.countDocuments(filter),
-  ])
-  return {
-    total: accountCredentials + authSessions + otpChallenges + userProfiles + ownerProfiles + agentProfiles + superAdminProfiles,
-    // authSessions and otpChallenges are already included in the tenant-scoped
-    // collection registry; the remaining user-linked records are not.
-    additionalToTenantScoped: accountCredentials + userProfiles + ownerProfiles + agentProfiles + superAdminProfiles,
-  }
-}
+const countCollection = async (collectionName: string, filter: Record<string, unknown>) =>
+  mongoose.connection.collection(collectionName).countDocuments(filter)
 
-const getCollectionCounts = async (organizationId: string) => {
+const getTenantCollectionCounts = async (organizationId: string) => {
   const entries = await Promise.all(TENANT_DELETION_COLLECTIONS.map(async (name) => {
-    try {
-      const count = await mongoose.connection.collection(name).countDocuments({ organizationId })
-      return [name, count] as const
-    } catch {
-      return [name, 0] as const
-    }
+    const count = await countCollection(name, { organizationId })
+    return [name, count] as const
   }))
   return Object.fromEntries(entries) as Record<string, number>
 }
 
-const previewOrganization = async (organizationId: string) => {
+const getUserLinkedCollectionCounts = async (userIds: Types.ObjectId[], organizationId: string) => {
+  if (!userIds.length) {
+    return {
+      collectionCounts: {} as Record<string, number>,
+      total: 0,
+      additionalToTenantScoped: 0,
+    }
+  }
+
+  const entries = await Promise.all(USER_LINKED_DELETION_COLLECTIONS.map(async (name) => {
+    const count = await countCollection(name, { userId: { $in: userIds } })
+    return [name, count] as const
+  }))
+  const collectionCounts = Object.fromEntries(entries) as Record<string, number>
+  const total = Object.values(collectionCounts).reduce((sum, count) => sum + Number(count || 0), 0)
+
+  const additionalEntries = await Promise.all(USER_LINKED_DELETION_COLLECTIONS.map(async (name) => {
+    if (!tenantDeletionCollections.has(name)) return [name, Number(collectionCounts[name] || 0)] as const
+
+    // These rows are already counted by the organizationId registry when their
+    // tenant scope is correct. Count only malformed/legacy rows here so the
+    // deletion preview total remains a true record count instead of double
+    // counting the same MongoDB document.
+    const count = await countCollection(name, {
+      userId: { $in: userIds },
+      organizationId: { $ne: organizationId },
+    })
+    return [name, count] as const
+  }))
+
+  const additionalToTenantScoped = Object.values(Object.fromEntries(additionalEntries) as Record<string, number>)
+    .reduce((sum, count) => sum + Number(count || 0), 0)
+
+  return { collectionCounts, total, additionalToTenantScoped }
+}
+
+const previewOrganization = async (rawOrganizationId: string) => {
+  assertDeletionRegistrySafety()
+  const organizationId = assertOrganizationIdIsPurgeable(rawOrganizationId)
   const org: any = await Organization.findOne({ organizationId }).select('_id organizationId agencyName platformAccess').lean()
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+
   const userIds = await getTenantUserIds(organizationId)
   const [collectionCounts, userLinked] = await Promise.all([
-    getCollectionCounts(organizationId),
-    countUserLinkedDocuments(userIds),
+    getTenantCollectionCounts(organizationId),
+    getUserLinkedCollectionCounts(userIds, organizationId),
   ])
   const scopedDocuments = Object.values(collectionCounts).reduce((sum, count) => sum + Number(count || 0), 0)
 
@@ -78,6 +131,8 @@ const previewOrganization = async (organizationId: string) => {
     permanent: true,
     recoverable: false,
     dataSummary: {
+      // +1 is the Organization root document, which is intentionally deleted
+      // last and therefore not part of TENANT_DELETION_COLLECTIONS.
       totalTenantDocuments: scopedDocuments + userLinked.additionalToTenantScoped + 1,
       userLinkedDocuments: userLinked.total,
       users: Number(collectionCounts.users || 0),
@@ -90,49 +145,85 @@ const previewOrganization = async (organizationId: string) => {
       auditEvents: Number(collectionCounts.auditevents || 0),
       dataSubjectRequests: Number(collectionCounts.datasubjectrequests || 0),
       collectionCounts,
+      userLinkedCollectionCounts: userLinked.collectionCounts,
     },
   }
 }
 
-const deleteUserLinkedDocuments = async (userIds: any[], session?: ClientSession) => {
+const deleteUserLinkedDocuments = async (userIds: Types.ObjectId[], session?: ClientSession) => {
   if (!userIds.length) return
-  const filter = { userId: { $in: userIds } }
   const options = withSession(session)
-  await Promise.all([
-    AccountCredential.deleteMany(filter, options),
-    AuthSession.deleteMany(filter, options),
-    OtpChallenge.deleteMany(filter, options),
-    UserProfile.deleteMany(filter, options),
-    AgencyOwnerProfile.deleteMany(filter, options),
-    AgentProfile.deleteMany(filter, options),
-    SuperAdminProfile.deleteMany(filter, options),
-  ])
+  const filter = { userId: { $in: userIds } }
+
+  // Delete by userId before deleting User rows. This catches account/profile
+  // records with no organizationId as well as malformed legacy auth/profile
+  // rows whose tenant id no longer matches the owning user.
+  for (const name of USER_LINKED_DELETION_COLLECTIONS) {
+    await mongoose.connection.collection(name).deleteMany(filter, options)
+  }
 }
 
-const deleteTenantCollections = async (organizationId: string, session?: ClientSession) => {
+const deleteTenantScopedDocuments = async (organizationId: string, session?: ClientSession) => {
   const options = withSession(session)
+
+  // Users are deleted explicitly after all tenant and user-linked dependants.
   for (const name of TENANT_DELETION_COLLECTIONS) {
+    if (name === USER_COLLECTION) continue
     await mongoose.connection.collection(name).deleteMany({ organizationId }, options)
   }
-  await Organization.deleteOne({ organizationId }, options)
 }
 
-const verifyPurged = async (organizationId: string, userIds: any[]) => {
+const deleteTenantUsers = async (organizationId: string, session?: ClientSession) => {
+  await User.deleteMany({ organizationId }, withSession(session))
+}
+
+const deleteOrganizationRoot = async (organizationId: string, session?: ClientSession) => {
+  // The Organization is the final major MongoDB record removed. Keeping this
+  // separate prevents losing the tenant root before dependent cleanup finishes.
+  await Organization.deleteOne({ organizationId }, withSession(session))
+}
+
+const verifyPurged = async (organizationId: string, userIds: Types.ObjectId[]) => {
   const [organizationExists, collectionCounts, userLinked] = await Promise.all([
     Organization.exists({ organizationId }),
-    getCollectionCounts(organizationId),
-    countUserLinkedDocuments(userIds),
+    getTenantCollectionCounts(organizationId),
+    getUserLinkedCollectionCounts(userIds, organizationId),
   ])
+
   const remainingCollections = Object.entries(collectionCounts)
     .filter(([, count]) => count > 0)
-    .reduce<Record<string, number>>((acc, [name, count]) => { acc[name] = count; return acc }, {})
+    .reduce<Record<string, number>>((acc, [name, count]) => {
+      acc[name] = count
+      return acc
+    }, {})
+  const remainingUserLinkedCollections = Object.entries(userLinked.collectionCounts)
+    .filter(([, count]) => count > 0)
+    .reduce<Record<string, number>>((acc, [name, count]) => {
+      acc[name] = count
+      return acc
+    }, {})
 
-  if (organizationExists || userLinked.total > 0 || Object.keys(remainingCollections).length > 0) {
-    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'TENANT_PURGE_INCOMPLETE')
+  if (organizationExists || Object.keys(remainingCollections).length > 0 || Object.keys(remainingUserLinkedCollections).length > 0) {
+    const details = {
+      organizationId,
+      organizationExists: Boolean(organizationExists),
+      remainingCollections,
+      remainingUserLinkedCollections,
+    }
+    logger.error('tenant_hard_delete_verification_failed', details)
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      'Tenant purge did not remove all organization/user database records',
+      '',
+      'TENANT_PURGE_INCOMPLETE',
+      details,
+    )
   }
 }
 
-const purgeOrganization = async (organizationId: string, actor: { id: string; reason: string }) => {
+const purgeOrganization = async (rawOrganizationId: string, actor: { id: string; reason: string }) => {
+  assertDeletionRegistrySafety()
+  const organizationId = assertOrganizationIdIsPurgeable(rawOrganizationId)
   const org: any = await Organization.findOne({ organizationId })
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
@@ -165,7 +256,9 @@ const purgeOrganization = async (organizationId: string, actor: { id: string; re
 
   const execute = async (session?: ClientSession) => {
     await deleteUserLinkedDocuments(userIds, session)
-    await deleteTenantCollections(organizationId, session)
+    await deleteTenantScopedDocuments(organizationId, session)
+    await deleteTenantUsers(organizationId, session)
+    await deleteOrganizationRoot(organizationId, session)
   }
 
   if (await mongoSupportsTransactions()) {
@@ -176,9 +269,9 @@ const purgeOrganization = async (organizationId: string, actor: { id: string; re
       await session.endSession()
     }
   } else {
-    // Standalone MongoDB cannot provide all-or-nothing deletion, so each delete
-    // remains tenant-scoped/idempotent and the final zero-data verification is
-    // mandatory before success is returned.
+    // Standalone MongoDB cannot provide all-or-nothing deletion. Every delete
+    // is tenant/user scoped and idempotent, and zero-data verification is
+    // mandatory before this endpoint can report success.
     await execute()
   }
 
