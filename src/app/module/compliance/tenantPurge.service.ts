@@ -116,6 +116,32 @@ const getUserLinkedCollectionCounts = async (userIds: Types.ObjectId[], organiza
   return { collectionCounts, total, additionalToTenantScoped }
 }
 
+const sumCollectionCounts = (counts: Record<string, number>, names: readonly string[]) =>
+  names.reduce((sum, name) => sum + Number(counts[name] || 0), 0)
+
+const FINANCE_PREVIEW_COLLECTIONS = [
+  'financetransactions',
+  'financeinvoices',
+  'financecommissions',
+  'financevendors',
+  'financebudgets',
+] as const
+
+const WEBSITE_PREVIEW_COLLECTIONS = [
+  'banners',
+  'sections',
+  'landingpages',
+  'websiteassets',
+  'websitepages',
+  'websiterevisions',
+  'websitesubmissions',
+  'websitepreviewtokens',
+  'websiteuploadintents',
+  'visitorlogs',
+] as const
+
+const DOMAIN_PREVIEW_COLLECTIONS = ['domainrecords', 'domainevents', 'subdomainaliases'] as const
+
 const previewOrganization = async (rawOrganizationId: string) => {
   assertDeletionRegistrySafety()
   const organizationId = assertOrganizationIdIsPurgeable(rawOrganizationId)
@@ -129,6 +155,21 @@ const previewOrganization = async (rawOrganizationId: string) => {
     TenantExternalResourcesService.collect(organizationId, userIds),
   ])
   const scopedDocuments = Object.values(collectionCounts).reduce((sum, count) => sum + Number(count || 0), 0)
+  // +1 is the Organization root document, which is intentionally deleted
+  // last and therefore not part of TENANT_DELETION_COLLECTIONS.
+  const totalTenantDocuments = scopedDocuments + userLinked.additionalToTenantScoped + 1
+  const users = Number(collectionCounts.users || 0)
+  const properties = Number(collectionCounts.properties || 0)
+  const leads = Number(collectionCounts.leads || 0)
+  const contacts = Number(collectionCounts.contacts || 0)
+  const tasks = Number(collectionCounts.tasks || 0)
+  const viewings = Number(collectionCounts.viewings || 0)
+  const payments = Number(collectionCounts.subscriptionpayments || 0) + Number(collectionCounts.bkashpayments || 0)
+  const financeRecords = sumCollectionCounts(collectionCounts, FINANCE_PREVIEW_COLLECTIONS)
+  const websiteRecords = sumCollectionCounts(collectionCounts, WEBSITE_PREVIEW_COLLECTIONS)
+  const domainDocuments = sumCollectionCounts(collectionCounts, DOMAIN_PREVIEW_COLLECTIONS)
+  const auditEvents = Number(collectionCounts.auditevents || 0)
+  const displayedDatabaseRecords = users + properties + leads + contacts + tasks + viewings + payments + financeRecords + websiteRecords + domainDocuments + auditEvents
 
   return {
     organizationId,
@@ -138,18 +179,22 @@ const previewOrganization = async (rawOrganizationId: string) => {
     permanent: true,
     recoverable: false,
     dataSummary: {
-      // +1 is the Organization root document, which is intentionally deleted
-      // last and therefore not part of TENANT_DELETION_COLLECTIONS.
-      totalTenantDocuments: scopedDocuments + userLinked.additionalToTenantScoped + 1,
+      totalTenantDocuments,
       userLinkedDocuments: userLinked.total,
-      users: Number(collectionCounts.users || 0),
-      properties: Number(collectionCounts.properties || 0),
-      leads: Number(collectionCounts.leads || 0),
-      contacts: Number(collectionCounts.contacts || 0),
-      payments: Number(collectionCounts.subscriptionpayments || 0) + Number(collectionCounts.bkashpayments || 0),
-      domains: Number(collectionCounts.domainrecords || 0),
+      users,
+      properties,
+      leads,
+      contacts,
+      tasks,
+      viewings,
+      payments,
+      financeRecords,
+      websiteRecords,
+      files: externalResources.referencedObjectKeys.length,
+      domains: externalResources.domains.length,
+      otherRecords: Math.max(0, totalTenantDocuments - displayedDatabaseRecords),
       pendingInvitations: Number(collectionCounts.teaminvitations || 0),
-      auditEvents: Number(collectionCounts.auditevents || 0),
+      auditEvents,
       dataSubjectRequests: Number(collectionCounts.datasubjectrequests || 0),
       externalResources: {
         storagePrefixes: externalResources.storagePrefixes,

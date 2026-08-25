@@ -61,9 +61,9 @@ const tenantOwnerBody = z.object({
 const deletionBody = z.object({
   params: z.object({ organizationId: z.string().trim().min(3).max(120) }),
   body: z.object({
-    confirmation: z.string().trim().min(3).max(160),
-    reason: z.string().trim().min(10).max(500),
-  }),
+    organizationId: z.string().trim().min(3).max(120),
+    confirmationText: z.literal('DELETE PERMANENTLY'),
+  }).strict(),
 })
 const organizationParams = z.object({ organizationId: z.string().trim().min(3).max(120) })
 

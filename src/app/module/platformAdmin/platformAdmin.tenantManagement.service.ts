@@ -289,16 +289,28 @@ const restoreArchivedTenant = async (organizationId: string, actor: PlatformAdmi
 
 const getDeletionPreview = async (organizationId: string) => TenantPurgeService.previewOrganization(organizationId)
 
-const hardDeleteTenant = async (organizationId: string, payload: { confirmation: string }, actor: PlatformAdminActor) => {
-  const org: any = await Organization.findOne({ organizationId }).select('_id organizationId agencyName').lean()
-  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+const hardDeleteTenant = async (organizationId: string, payload: { organizationId: string; confirmationText: string }, actor: PlatformAdminActor) => {
+  const routeOrganizationId = String(organizationId || '').trim()
+  const confirmedOrganizationId = String(payload.organizationId || '').trim()
+  const confirmationText = String(payload.confirmationText || '').trim()
 
-  const confirmation = String(payload.confirmation || '').trim()
-  if (confirmation !== org.organizationId && confirmation !== org.agencyName) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Confirmation must exactly match the agency name or organization ID')
+  if (confirmedOrganizationId !== routeOrganizationId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID confirmation does not match the organization being deleted')
+  }
+  if (confirmationText !== 'DELETE PERMANENTLY') {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Confirmation text must exactly match DELETE PERMANENTLY')
   }
 
-  return TenantPurgeService.purgeOrganization(organizationId, { id: actor.id, reason: actor.reason })
+  const org: any = await Organization.findOne({ organizationId: routeOrganizationId }).select('_id organizationId').lean()
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (String(org.organizationId) !== confirmedOrganizationId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID confirmation does not match the stored organization')
+  }
+
+  return TenantPurgeService.purgeOrganization(routeOrganizationId, {
+    id: actor.id,
+    reason: 'Super Admin permanent organization deletion',
+  })
 }
 
 export const PlatformAdminTenantManagementService = {
