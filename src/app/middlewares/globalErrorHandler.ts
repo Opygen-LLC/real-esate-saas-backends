@@ -11,6 +11,7 @@ import handleZodError from '../../errors/handleZodError'
 import { IGenericErrorMessage } from '../../interfaces/common'
 import { errorLogger } from '../../shared/logger'
 import { httpErrorEvent, httpLogLevelForStatus, isUnexpectedServerError, requestRoute } from '../../shared/httpObservability'
+import { emitProductionEvent } from '../../shared/productionEvents'
 
 const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   let statusCode = 500
@@ -77,6 +78,17 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     errorLogger.log(level, event, { ...commonLogMeta, error })
   } else {
     errorLogger.log(level, event, { ...commonLogMeta, errorMessage: message })
+  }
+
+  if (code === API_ERROR_CODES.VALIDATION_ERROR) {
+    emitProductionEvent('form_validation_failed', {
+      method: req.method,
+      route: requestRoute(req),
+      organizationId: req.tenant?.organizationId,
+      fields: Object.keys(fieldErrors).slice(0, 50),
+      fieldCount: Object.keys(fieldErrors).length,
+      requestId: req.requestId,
+    })
   }
 
   res.locals.apiErrorCode = code

@@ -119,7 +119,10 @@
     "monitor:phase5-production": "node scripts/phase5-production-watch.mjs",
     "migrate:meta-integration-phase3": "ts-node --transpile-only src/app/db/migrateMetaIntegrationPhase3.ts",
     "verify:meta-phase3": "node scripts/verify-meta-phase3.mjs",
-    "verify:phase4-template-engine": "node scripts/verify-phase4-template-engine.mjs"
+    "verify:phase4-template-engine": "node scripts/verify-phase4-template-engine.mjs",
+    "migrate:phase5-final-hardening": "ts-node --transpile-only src/app/db/migratePhase5FinalHardening.ts",
+    "verify:phase5-final-hardening": "node scripts/verify-phase5-final-hardening.mjs",
+    "test:phase5-final-hardening": "vitest run src/tests/contract/phase5FinalHardening.contract.test.ts src/tests/contract/phase2WebsiteSubmissionCrmConversion.contract.test.ts src/tests/integration/phase5FinanceBilling.integration.test.ts"
   },
   "keywords": [
     "real-estate",

@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import { Cache } from '../../../shared/cache'
+import { emitProductionEvent } from '../../../shared/productionEvents'
 import paginationHelper from '../../helpers/paginationHelper'
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
@@ -130,6 +131,9 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
 
 const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
+  const previousTemplate = payload.templateId
+    ? await Organization.findOne({ organizationId }).select('templateId').lean()
+    : null
 
   const websiteSettings = payload.websiteSettings ? definedEntries(payload.websiteSettings as Record<string, unknown>) : undefined
   const updateData: Record<string, unknown> = definedEntries({
@@ -153,6 +157,14 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   await CacheInvalidationService.invalidateTenant(organizationId)
   await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData) } })
+  if (payload.templateId && String(previousTemplate?.templateId || 'template-1') !== String(payload.templateId)) {
+    emitProductionEvent('website_template_changed', {
+      organizationId,
+      fromTemplateId: String(previousTemplate?.templateId || 'template-1'),
+      toTemplateId: String(payload.templateId),
+      cacheInvalidated: true,
+    })
+  }
   return result
 }
 

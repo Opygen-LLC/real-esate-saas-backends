@@ -7,4 +7,9 @@ const clientError = catchAsync(async (req: Request, res: Response) => {
   res.status(202).json({ success: true, message: 'Error report accepted', data })
 })
 
-export const ObservabilityController = { clientError }
+const operationalEvent = catchAsync(async (req: Request, res: Response) => {
+  const data = await ObservabilityService.reportOperationalEvent(req.body)
+  res.status(202).json({ success: true, message: 'Operational event accepted', data })
+})
+
+export const ObservabilityController = { clientError, operationalEvent }

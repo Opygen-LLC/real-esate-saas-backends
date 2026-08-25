@@ -1,5 +1,6 @@
 import config from '../../../config'
 import { logger } from '../../../shared/logger'
+import { emitProductionEvent } from '../../../shared/productionEvents'
 import { Resilience } from '../../../shared/resilience'
 
 type ClientError = {
@@ -10,6 +11,17 @@ type ClientError = {
   digest?: string
   userAgent?: string
   buildId?: string
+}
+
+type OperationalEventInput = {
+  event: 'form_validation_failed' | 'website_template_render_failed'
+  route?: string
+  templateId?: string
+  fields?: string[]
+  firstField?: string
+  source?: 'client' | 'server'
+  digest?: string
+  errorName?: string
 }
 
 const stripQuery = (value?: string): string => {
@@ -30,6 +42,10 @@ const sanitize = (input: ClientError) => ({
   buildId: String(input.buildId || '').slice(0, 160),
 })
 
+const sanitizeFieldName = (value: unknown) => String(value || '')
+  .replace(/[^a-zA-Z0-9_.\[\]-]/g, '')
+  .slice(0, 120)
+
 const reportClientError = async (input: ClientError): Promise<{ accepted: true }> => {
   const event = sanitize(input)
   logger.error('client_error', { event })
@@ -46,4 +62,19 @@ const reportClientError = async (input: ClientError): Promise<{ accepted: true }
   return { accepted: true }
 }
 
-export const ObservabilityService = { reportClientError }
+const reportOperationalEvent = async (input: OperationalEventInput): Promise<{ accepted: true }> => {
+  const fields = Array.from(new Set((input.fields || []).map(sanitizeFieldName).filter(Boolean))).slice(0, 50)
+  emitProductionEvent(input.event, {
+    route: stripQuery(input.route),
+    templateId: String(input.templateId || '').slice(0, 40),
+    fields,
+    fieldCount: fields.length,
+    firstField: sanitizeFieldName(input.firstField),
+    source: input.source || 'client',
+    digest: String(input.digest || '').slice(0, 160),
+    errorName: String(input.errorName || '').replace(/[^a-zA-Z0-9_. -]/g, '').slice(0, 80),
+  }, input.event === 'website_template_render_failed' ? 'error' : 'info')
+  return { accepted: true }
+}
+
+export const ObservabilityService = { reportClientError, reportOperationalEvent }

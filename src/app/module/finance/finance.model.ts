@@ -96,6 +96,7 @@ invoiceSchema.index({ organizationId: 1, invoiceNumber: 1 }, { unique: true })
 invoiceSchema.index({ organizationId: 1, status: 1, dueDate: 1 })
 invoiceSchema.index({ organizationId: 1, issueDate: -1 })
 invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })
+invoiceSchema.index({ organizationId: 1, propertyId: 1, createdAt: -1 })
 
 const commissionSchema = new Schema<IFinanceCommission>(
   {

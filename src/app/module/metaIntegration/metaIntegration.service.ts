@@ -9,6 +9,7 @@ import { DomainRecord } from '../domain/domain.model'
 import { MetaIntegration } from './metaIntegration.model'
 import { MetaEvent } from './metaEvent.model'
 import { Resilience } from '../../../shared/resilience'
+import { emitProductionEvent } from '../../../shared/productionEvents'
 
 export const META_EVENT_NAMES = ['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'] as const
 const ALLOWED_EVENTS = new Set<string>(META_EVENT_NAMES)
@@ -167,6 +168,13 @@ const save = async (organizationId: string, payload: any) => {
     { $set: set },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   ).select('+accessTokenEncrypted')
+
+  if (pixelEnabled && (!previous?.pixelEnabled || String(existing?.pixelId || '') !== pixelId)) {
+    emitProductionEvent('meta_pixel_configured', { organizationId, pixelEnabled: true, pixelId })
+  }
+  if (capiEnabled && (!previous?.capiEnabled || Boolean(rawToken))) {
+    emitProductionEvent('meta_capi_configured', { organizationId, capiEnabled: true, accessTokenConfigured: true })
+  }
   return serialize(result)
 }
 
@@ -264,14 +272,16 @@ const queuePublicEvent = async (identifier: string, payload: any, context: { ip?
 }
 
 const markCapiError = async (organizationId: string, error: any) => {
+  const errorCode = String(error?.code || 'CAPI_ERROR').slice(0, 80)
   await MetaIntegration.updateOne({ organizationId }, { $set: {
     capiStatus: 'error',
     'diagnostics.lastCapiError': {
-      code: String(error?.code || 'CAPI_ERROR').slice(0, 80),
+      code: errorCode,
       message: String(error?.message || 'Meta CAPI delivery failed').slice(0, 500),
       at: new Date(),
     },
   } })
+  emitProductionEvent('meta_capi_failed', { organizationId, errorCode }, 'error')
 }
 
 const sendEvent = async (event: any) => {

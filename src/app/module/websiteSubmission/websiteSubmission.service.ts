@@ -21,6 +21,7 @@ import {
   WebsiteSubmissionType,
 } from './websiteSubmission.interface'
 import { WebsiteSubmission } from './websiteSubmission.model'
+import { emitProductionEvent } from '../../../shared/productionEvents'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -57,6 +58,12 @@ const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'su
     type: 'website_submission.changed',
     action: 'created',
     entityId: submission._id.toString(),
+  })
+  emitProductionEvent('website_submission_received', {
+    organizationId: payload.organizationId,
+    submissionId: submission._id.toString(),
+    submissionType: payload.submissionType,
+    crmTransferStatus: payload.crmTransferStatus || 'NOT_APPLICABLE',
   })
   return submission
 }
@@ -488,6 +495,12 @@ const moveToCrm = async (
       action: outcome === 'MERGED' ? 'crm_merged' : 'crm_created',
       entityId: id,
     })
+    emitProductionEvent(outcome === 'MERGED' ? 'website_submission_crm_merged' : 'website_submission_moved_to_crm', {
+      organizationId,
+      submissionId: id,
+      leadId: String((result.lead as any)._id),
+      outcome,
+    })
 
     return {
       submission: await getById(organizationId, id, options),
@@ -511,6 +524,13 @@ const moveToCrm = async (
       action: 'crm_move_failed',
       entityId: id,
     })
+    emitProductionEvent('website_submission_crm_failed', {
+      organizationId,
+      submissionId: id,
+      errorCode: code || 'CRM_TRANSFER_FAILED',
+      preserved: capacityBlocked || accessInactive,
+      nextStatus,
+    }, capacityBlocked || accessInactive ? 'warn' : 'error')
 
     if (capacityBlocked) {
       throw new ApiError(

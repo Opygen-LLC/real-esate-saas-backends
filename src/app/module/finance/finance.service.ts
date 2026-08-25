@@ -29,6 +29,7 @@ import {
   FinanceVendor,
 } from './finance.model'
 import { renderInvoicePdf } from './invoicePdf.service'
+import { emitProductionEvent } from '../../../shared/productionEvents'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -186,11 +187,14 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
   return existing
 }
 
-const calculateInvoiceAmounts = (lineItems: IFinanceInvoiceLineItem[], discount = 0) => {
+const calculateInvoiceAmounts = (organizationId: string, lineItems: IFinanceInvoiceLineItem[], discount = 0) => {
   try {
     return calculateInvoiceMoney(lineItems, discount)
   } catch (error) {
-    if (error instanceof FinanceMoneyValidationError) throw financeFieldError(error.field, error.message)
+    if (error instanceof FinanceMoneyValidationError) {
+      emitProductionEvent('invoice_calculation_rejected', { organizationId, field: error.field, reason: error.message }, 'warn')
+      throw financeFieldError(error.field, error.message)
+    }
     throw error
   }
 }
@@ -284,7 +288,7 @@ const propertyAuditMetadata = (property: any) => property ? {
 } : { propertyId: null }
 
 const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
-  const amounts = calculateInvoiceAmounts(payload.lineItems || [], Number(payload.discount || 0))
+  const amounts = calculateInvoiceAmounts(organizationId, payload.lineItems || [], Number(payload.discount || 0))
   const issueDate = asDate(payload.issueDate)
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
@@ -303,6 +307,8 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`),
     invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency, ...propertyAuditMetadata(property) }),
   ])
+  emitProductionEvent('invoice_created', { organizationId, invoiceId: result._id.toString(), status: result.status, propertyLinked: Boolean(property) })
+  if (property) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: result._id.toString(), propertyId: String(property._id), action: 'created' })
   return invoicePopulate(FinanceInvoice.findById(result._id)).lean()
 }
 
@@ -348,7 +354,7 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
 
   const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
   const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined
-  if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
+  if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
   if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
   let property: any = undefined
@@ -365,6 +371,11 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
     invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: keys, financialFieldsChanged: amountFieldsChanged, ...propertyAuditMetadata(auditProperty) }),
   ])
+  if ('propertyId' in payload && property) {
+    const previousPropertyId = existing.propertyId ? String(existing.propertyId) : ''
+    const nextPropertyId = String(property._id)
+    if (previousPropertyId !== nextPropertyId) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: id, propertyId: nextPropertyId, action: 'updated' })
+  }
   return result
 }
 
@@ -431,6 +442,7 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     return invoice.invoiceNumber
   })
   await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
+  emitProductionEvent('invoice_payment_recorded', { organizationId, invoiceId: id })
   return getInvoiceById(organizationId, id)
 }
 
