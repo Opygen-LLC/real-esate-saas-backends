@@ -2,12 +2,11 @@ import { sendSms } from '../../helpers/sendOtp'
 import { logger } from '../../../shared/logger'
 import { Metrics } from '../../../shared/metrics'
 import { writeAudit } from '../audit/audit.service'
-import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
 import { getTrialPolicy, type TrialPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionScheduleService } from './subscriptionSchedule.service'
-import { RealtimeService } from '../realtime/realtime.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -131,36 +130,15 @@ const applyBoundaryTransition = async (organization: any, now: Date, policy: Tri
     plan: String(updated.subscription?.plan || 'trial'),
   })
 
-  // Access decisions change at the same instant as the lifecycle boundary.
-  // Invalidate tenant/public caches immediately, but never roll back a valid
-  // billing transition merely because the cache layer is temporarily degraded.
-  try {
-    await CacheInvalidationService.invalidateTenant(String(updated.organizationId))
-  } catch (error) {
-    Metrics.inc('tenant_access_cache_invalidation_failures_total', { source: 'subscription_boundary' })
-    logger.warn('[Subscription lifecycle] tenant cache invalidation failed', {
-      organizationId: updated.organizationId,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-
-  const isTrial = String(updated.subscription?.plan || 'trial') === 'trial'
-  const runtimeReason = isTrial
-    ? (transition.nextStatus === 'grace' ? 'TRIAL_ENDED' : 'TRIAL_EXPIRED')
-    : (transition.nextStatus === 'grace' ? 'SUBSCRIPTION_GRACE' : 'SUBSCRIPTION_EXPIRED')
-  try {
-    await RealtimeService.revokeTenantRuntimeAccess({
-      organizationId: String(updated.organizationId),
-      reason: runtimeReason,
-      subscriptionStatus: transition.nextStatus,
-    })
-  } catch (error) {
-    Metrics.inc('tenant_access_realtime_revoke_failures_total', { source: 'subscription_boundary' })
-    logger.warn('[Subscription lifecycle] realtime access revoke failed', {
-      organizationId: updated.organizationId,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
+  // Publish all post-commit access side effects through one coordinator. The
+  // billing transition is already durable here; cache/realtime/queue failures
+  // are retriable runtime concerns and must never roll the subscription back.
+  await TenantAccessTransitionService.sync({
+    organizationId: String(updated.organizationId),
+    organization: updated,
+    source: 'subscription_boundary',
+    eventType: 'subscription.status_changed',
+  })
 
   return { changed: true as const, organization: updated }
 }

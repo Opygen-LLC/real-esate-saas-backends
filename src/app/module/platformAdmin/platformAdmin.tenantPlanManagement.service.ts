@@ -6,6 +6,7 @@ import { publishSubscriptionEntitlementReconciliation, reconcileOrganizationEnti
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { SubscriptionBenefitPeriodService } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.service'
 import { SubscriptionBenefitPeriod } from '../subscriptionBenefitPeriod/subscriptionBenefitPeriod.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
@@ -94,7 +95,7 @@ const applyNoChargePlanOverride = async (
     response = { organizationId, plan: target.planId, planVersion: target.version, billingCycle: input.billingCycle, currentPeriodEnd: end, noCharge: true, reconciliation }
   })
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_plan_override', eventType: 'subscription.admin_plan_override_applied' })
   RealtimeService.emitOrganization(organizationId, { type: 'subscription.changed', action: 'admin_plan_override', entityId: organizationId })
   return response
 }

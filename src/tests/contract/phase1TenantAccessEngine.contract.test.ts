@@ -8,7 +8,7 @@ const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'u
 describe('Phase 1 central tenant access engine contract', () => {
   it('centralizes effective workspace/public/background access and precedence', () => {
     const types = read('src/app/module/tenantAccess/tenantAccess.types.ts')
-    const service = read('src/app/module/tenantAccess/tenantAccess.service.ts')
+    const service = read('src/app/module/tenantAccess/tenantAccess.policy.ts')
 
     for (const field of [
       'workspaceAllowed',

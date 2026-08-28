@@ -9,7 +9,7 @@ describe('phase 3 subscription access contract', () => {
   it('enforces one global operational subscription guard with recovery routes', () => {
     const auth = read('src/app/middlewares/auth.ts')
     const guard = read('src/app/middlewares/subscriptionAccess.ts')
-    const tenantAccess = read('src/app/module/tenantAccess/tenantAccess.service.ts')
+    const tenantAccess = read('src/app/module/tenantAccess/tenantAccess.policy.ts')
     const tenantTypes = read('src/app/module/tenantAccess/tenantAccess.types.ts')
 
     expect(tenantTypes).toContain("['trialing', 'active', 'cancel_at_period_end']")
@@ -55,7 +55,7 @@ describe('phase 3 subscription access contract', () => {
     expect(realtime).toContain("type: 'subscription.changed'")
     expect(realtime).toContain('disconnectOrganization(organizationId)')
     expect(realtime).toContain('disconnectPublicOrganization(organizationId)')
-    expect(lifecycle).toContain('RealtimeService.revokeTenantRuntimeAccess')
+    expect(lifecycle).toContain('TenantAccessTransitionService.sync')
   })
 
   it('separates trial grace from paid renewal grace and uses the contractual period boundary', () => {

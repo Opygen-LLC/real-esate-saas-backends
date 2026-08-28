@@ -17,6 +17,7 @@ export interface IWebsitePage {
   publishedDocument?: Record<string, any>
   status: 'draft' | 'published' | 'scheduled'
   scheduledPublishAt?: Date | null
+  accessDeferredAt?: Date | null
   publishedAt?: Date | null
   publishedVersion?: number
   seo?: IWebsiteSeo

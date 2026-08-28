@@ -9,7 +9,7 @@ import { WebsiteCache } from '../websiteBuilder/websiteCache'
 type CacheEvent = { organizationId: string; aggregateType: string; eventType: string; payload?: Record<string, unknown> }
 
 const invalidateTenant = async (organizationId: string, extraIdentifiers: string[] = []) => {
-  if (!organizationId || organizationId === '__platform__') return
+  if (!organizationId || organizationId === '__platform__') return [] as string[]
 
   const [org, domains, aliases, pages] = await Promise.all([
     Organization.findOne({ organizationId }).select('organizationId sub_domain domain').lean(),
@@ -48,6 +48,7 @@ const invalidateTenant = async (organizationId: string, extraIdentifiers: string
     ]),
     WebsiteCache.del('published', organizationId, '/'),
   ])
+  return identifiers
 }
 
 const countTenantKeys = async (organizationId: string, extraIdentifiers: string[] = []) => {

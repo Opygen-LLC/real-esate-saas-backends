@@ -20,8 +20,9 @@ const operationsJobSchema = new Schema({
   lockedBy: { type: String, default: '' },
   completedAt: Date,
   lastError: { type: String, default: '' },
+  accessDeferredAt: { type: Date, default: null, index: true },
 }, { timestamps: true })
-operationsJobSchema.index({ status: 1, runAt: 1 })
+operationsJobSchema.index({ status: 1, accessDeferredAt: 1, runAt: 1 })
 operationsJobSchema.index({ organizationId: 1, type: 1, entityId: 1, status: 1 })
 operationsJobSchema.index({ status: 1, lockedAt: 1 })
 export const OperationsJob = model('OperationsJob', operationsJobSchema)

@@ -52,6 +52,7 @@ export const runPhase3Maintenance = async () => {
     const [backlog, domainBacklog] = await Promise.all([OperationsQueueService.backlog(), OperationsQueueService.domainBacklog()])
     Metrics.setGauge('operations_queue_pending', backlog.pending)
     Metrics.setGauge('operations_queue_failed', backlog.failed)
+    Metrics.setGauge('operations_queue_deferred_access', backlog.deferredAccess)
     Metrics.setGauge('operations_queue_oldest_age_seconds', backlog.oldestPendingAt ? Math.max(0, (Date.now() - new Date(backlog.oldestPendingAt).getTime()) / 1000) : 0)
     Metrics.setGauge('domain_queue_pending', domainBacklog.pending)
     Metrics.setGauge('domain_queue_processing', domainBacklog.processing)

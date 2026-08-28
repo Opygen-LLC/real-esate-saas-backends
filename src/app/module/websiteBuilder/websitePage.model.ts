@@ -9,6 +9,7 @@ const websitePageSchema = new Schema<IWebsitePage, WebsitePageModel>({
   publishedDocument: { type: Schema.Types.Mixed, default: null },
   status: { type: String, enum: ['draft', 'published', 'scheduled'], default: 'draft', index: true },
   scheduledPublishAt: { type: Date, default: null, index: true },
+  accessDeferredAt: { type: Date, default: null, index: true },
   publishedAt: { type: Date, default: null },
   publishedVersion: { type: Number, default: 0 },
   seo: { type: Schema.Types.Mixed, default: {} },
@@ -16,5 +17,5 @@ const websitePageSchema = new Schema<IWebsitePage, WebsitePageModel>({
 }, { timestamps: true, toJSON: { virtuals: true } })
 
 websitePageSchema.index({ organizationId: 1, slug: 1 }, { unique: true })
-websitePageSchema.index({ status: 1, scheduledPublishAt: 1 })
+websitePageSchema.index({ status: 1, accessDeferredAt: 1, scheduledPublishAt: 1 })
 export const WebsitePage = model<IWebsitePage, WebsitePageModel>('WebsitePage', websitePageSchema)

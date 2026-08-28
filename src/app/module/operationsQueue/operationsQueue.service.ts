@@ -13,6 +13,9 @@ import { Task } from '../task/task.model'
 import { Viewing } from '../viewing/viewing.model'
 import { NotificationService } from '../notification/notification.service'
 import { Organization } from '../organization/organization.model'
+import { evaluateTenantAccessOrganization, tenantPlatformStatusOf } from '../tenantAccess/tenantAccess.policy'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { isAccessControlledOperationType } from '../tenantAccess/tenantAccessTransition.service'
 import { SmsService } from '../sms/sms.service'
 import { WebsiteAssetProcessor } from '../websiteBuilder/websiteAssetProcessor.service'
 import sendEmail from '../../helpers/sendEmail'
@@ -23,11 +26,42 @@ let assetFinalizeFailuresSinceStart = 0
 
 type QueueWriteOptions = { session?: ClientSession }
 
+const tenantCanRunBackgroundWork = async (
+  organizationId: string,
+  type: OperationsJobType,
+  options: QueueWriteOptions = {},
+) => {
+  const accessControlled = isAccessControlledOperationType(type)
 
-const tenantCanRunBackgroundWork = async (organizationId: string) => Boolean(await Organization.exists({
-  organizationId,
-  'platformAccess.status': { $ne: 'pending_deletion' },
-}))
+  // Never start request-time lifecycle reconciliation from inside a caller's
+  // Mongo transaction. The authenticated request boundary has already done that
+  // reconciliation; use the transaction's organization snapshot here instead.
+  if (options.session) {
+    const organization: any = await Organization.findOne({ organizationId })
+      .select('organizationId isBlocked platformAccess.status websiteStatus subscription')
+      .session(options.session)
+      .lean()
+    if (!organization || tenantPlatformStatusOf(organization) === 'pending_deletion') return false
+    return !accessControlled || evaluateTenantAccessOrganization(organization).backgroundBusinessWorkAllowed
+  }
+
+  if (accessControlled) {
+    try {
+      return (await TenantAccessService.evaluate(organizationId, { actorId: 'system:operations-queue' }))
+        .backgroundBusinessWorkAllowed
+    } catch {
+      return false
+    }
+  }
+
+  // Maintenance work remains independent from subscription access so domain/TLS
+  // verification, support delivery and already-started asset finalization survive
+  // a temporary trial/subscription lock. Permanent deletion is the hard barrier.
+  const organization: any = await Organization.findOne({ organizationId })
+    .select('organizationId isBlocked platformAccess.status')
+    .lean()
+  return Boolean(organization && tenantPlatformStatusOf(organization) !== 'pending_deletion')
+}
 
 const schedule = async (
   input: { organizationId: string; type: OperationsJobType; entityId: string; runAt: Date; payload?: Record<string, unknown>; maxAttempts?: number },
@@ -36,7 +70,7 @@ const schedule = async (
   // Once hard deletion starts, no new tenant background work may be queued.
   // Existing API requests can still be unwinding on another replica, so this
   // database-backed barrier closes that race at the durable queue boundary.
-  if (!(await tenantCanRunBackgroundWork(input.organizationId))) return null
+  if (!(await tenantCanRunBackgroundWork(input.organizationId, input.type, options))) return null
 
   await OperationsJob.updateMany(
     { organizationId: input.organizationId, type: input.type, entityId: input.entityId, status: 'pending' },
@@ -83,11 +117,13 @@ const cancelOrganization = async (organizationId: string) => {
 }
 
 const deliver = async (job: any) => {
-  const [stillClaimed, tenantAllowed] = await Promise.all([
-    OperationsJob.exists({ _id: job._id, status: 'processing', lockedBy: workerId }),
-    tenantCanRunBackgroundWork(job.organizationId),
-  ])
-  if (!stillClaimed || !tenantAllowed) return
+  const stillClaimed = await OperationsJob.exists({ _id: job._id, status: 'processing', lockedBy: workerId })
+  if (!stillClaimed) return
+  if (!(await tenantCanRunBackgroundWork(job.organizationId, job.type))) {
+    const error: any = new Error('Tenant runtime access is inactive')
+    error.code = 'TENANT_ACCESS_DEFERRED'
+    throw error
+  }
 
   if (job.type === 'support_email') {
     const { to, subject, html } = job.payload || {}
@@ -127,12 +163,19 @@ const deliver = async (job: any) => {
 }
 
 const claimOne = async () => OperationsJob.findOneAndUpdate(
-  { type: { $ne: 'support_email' }, runAt: { $lte: new Date() }, $or: [{ status: 'pending' }, { status: 'processing', lockedAt: { $lte: new Date(Date.now() - 10 * 60_000) } }] },
+  {
+    runAt: { $lte: new Date() },
+    accessDeferredAt: null,
+    $or: [
+      { status: 'pending' },
+      { status: 'processing', lockedAt: { $lte: new Date(Date.now() - 10 * 60_000) } },
+    ],
+  },
   { $set: { status: 'processing', lockedAt: new Date(), lockedBy: workerId }, $inc: { attempts: 1 } },
   { new: true, sort: { runAt: 1 } },
 )
 
-const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
+const processOne = async (): Promise<'completed' | 'failed' | 'deferred' | 'empty'> => {
   const job: any = await claimOne()
   if (!job) return 'empty'
   try {
@@ -150,7 +193,19 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
     }
     Metrics.observeQueue(job.type, 'completed')
     return 'completed'
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'TENANT_ACCESS_DEFERRED') {
+      await OperationsJob.updateOne(
+        { _id: job._id, lockedBy: workerId, status: 'processing' },
+        {
+          $set: { status: 'pending', accessDeferredAt: new Date(), lastError: 'Deferred while tenant runtime access is inactive' },
+          $inc: { attempts: -1 },
+          $unset: { lockedAt: 1, lockedBy: 1 },
+        },
+      )
+      Metrics.observeQueue(job.type, 'deferred')
+      return 'deferred'
+    }
     const final = job.attempts >= job.maxAttempts
     const delayMs = Math.min(6 * 60 * 60_000, Math.max(30_000, 2 ** Math.min(job.attempts, 10) * 15_000))
     await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
@@ -165,18 +220,19 @@ const processOne = async (): Promise<'completed' | 'failed' | 'empty'> => {
 }
 
 const processDue = async (limit = config.runtime.worker_batch_size, concurrency = 6) => {
-  let completed = 0; let failed = 0; let claimed = 0
+  let completed = 0; let failed = 0; let deferred = 0; let claimed = 0
   const worker = async () => {
     while (claimed < limit) {
       claimed += 1
       const result = await processOne()
       if (result === 'empty') return
       if (result === 'completed') completed += 1
+      else if (result === 'deferred') deferred += 1
       else failed += 1
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, limit) }, () => worker()))
-  return { completed, failed }
+  return { completed, failed, deferred }
 }
 
 const schedulePendingCalendarSync = async (limit = 25) => {
@@ -193,7 +249,7 @@ const schedulePendingCalendarSync = async (limit = 25) => {
 }
 
 const schedulePendingMeta = async (limit = 100) => {
-  const candidates: any[] = await MetaEvent.find({ status: 'queued', nextAttemptAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextAttemptAt: 1 }).limit(limit).lean()
+  const candidates: any[] = await MetaEvent.find({ status: 'queued', accessDeferredAt: null, nextAttemptAt: { $lte: new Date() } }).select('_id organizationId').sort({ nextAttemptAt: 1 }).limit(limit).lean()
   const ids = candidates.map((item) => item._id.toString())
   const existing = new Set((await OperationsJob.find({ type: 'meta_capi', entityId: { $in: ids }, status: { $in: ['pending', 'processing'] } }).select('entityId').lean()).map((job: any) => job.entityId))
   let scheduled = 0
@@ -202,6 +258,7 @@ const schedulePendingMeta = async (limit = 100) => {
     if (!existing.has(entityId)) {
       const job = await schedule({ organizationId: event.organizationId, type: 'meta_capi', entityId, runAt: new Date(Date.now() + 250), maxAttempts: config.meta.max_attempts })
       if (job) scheduled += 1
+      else await MetaEvent.updateOne({ _id: event._id, status: 'queued' }, { $set: { accessDeferredAt: new Date() } })
     }
   }
   return { scheduled }
@@ -232,11 +289,13 @@ const resolveFailedDomainChecks = async (entityId: string) => {
 }
 
 const backlog = async () => {
-  const [pending, failed, oldest] = await Promise.all([
-    OperationsJob.countDocuments({ status: 'pending' }), OperationsJob.countDocuments({ status: 'failed' }),
-    OperationsJob.findOne({ status: 'pending' }).sort({ runAt: 1 }).select('runAt').lean(),
+  const [pending, deferredAccess, failed, oldest] = await Promise.all([
+    OperationsJob.countDocuments({ status: 'pending', accessDeferredAt: null }),
+    OperationsJob.countDocuments({ status: 'pending', accessDeferredAt: { $ne: null } }),
+    OperationsJob.countDocuments({ status: 'failed' }),
+    OperationsJob.findOne({ status: 'pending', accessDeferredAt: null }).sort({ runAt: 1 }).select('runAt').lean(),
   ])
-  return { pending, failed, oldestPendingAt: (oldest as any)?.runAt || null }
+  return { pending, deferredAccess, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
 

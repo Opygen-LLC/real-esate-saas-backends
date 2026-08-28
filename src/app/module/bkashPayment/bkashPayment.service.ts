@@ -21,7 +21,7 @@ import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddon
 import { SubscriptionScheduleService } from '../subscription/subscriptionSchedule.service'
 import { SubscriptionQuoteService, type SubscriptionQuoteSnapshot } from '../subscription/subscriptionQuote.service'
 import { RealtimeService } from '../realtime/realtime.service'
-import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 
 
 const PAID_RENEWAL_STATUSES = new Set(['active', 'grace', 'cancel_at_period_end'])
@@ -417,8 +417,12 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     }, session)
   })
 
-  await CacheInvalidationService.invalidateTenant(attempt.organizationId)
   await publishSubscriptionEntitlementReconciliation(reconciliation)
+  await TenantAccessTransitionService.sync({
+    organizationId: attempt.organizationId,
+    source: 'bkash_payment_confirmation',
+    eventType: 'subscription.payment_confirmed',
+  })
   RealtimeService.emitOrganization(attempt.organizationId, {
     type: 'subscription.changed',
     action: deferredDowngrade ? 'scheduled' : 'confirmed',
@@ -449,7 +453,14 @@ const handleCallback = async (paymentId: string, callbackStatus: string) => {
   if (callbackStatus !== 'success') {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Unexpected bKash callback status')
   }
-  if (attempt.status === 'succeeded') return { status: attempt.status, paymentId }
+  if (attempt.status === 'succeeded') {
+    await TenantAccessTransitionService.sync({
+      organizationId: attempt.organizationId,
+      source: 'bkash_payment_confirmation_retry',
+      eventType: 'subscription.payment_confirmed',
+    })
+    return { status: attempt.status, paymentId }
+  }
 
   const staleLock = new Date(Date.now() - 2 * 60 * 1000)
   const locked = await BkashPayment.findOneAndUpdate(

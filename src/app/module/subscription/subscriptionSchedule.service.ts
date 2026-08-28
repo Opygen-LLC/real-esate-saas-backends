@@ -5,6 +5,7 @@ import ApiError from '../../../errors/ApiError'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { writeAudit } from '../audit/audit.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { Organization } from '../organization/organization.model'
 import { RealtimeService } from '../realtime/realtime.service'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
@@ -291,10 +292,12 @@ const applyDueChange = async (
   })
 
   if (result.applied) {
-    await Promise.all([
-      publishSubscriptionEntitlementReconciliation(reconciliation),
-      CacheInvalidationService.invalidateTenant(organizationId),
-    ])
+    await publishSubscriptionEntitlementReconciliation(reconciliation)
+    await TenantAccessTransitionService.sync({
+      organizationId,
+      source: 'scheduled_subscription_change',
+      eventType: 'subscription.scheduled_change_applied',
+    })
     RealtimeService.emitOrganization(organizationId, {
       type: 'subscription.changed',
       action: 'applied',

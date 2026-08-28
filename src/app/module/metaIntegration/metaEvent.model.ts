@@ -18,8 +18,9 @@ const metaEventSchema = new Schema({
   lastErrorMessage: { type: String, default: '' },
   sentAt: { type: Date, default: null },
   processingStartedAt: { type: Date, default: null, index: true },
+  accessDeferredAt: { type: Date, default: null, index: true },
 }, { timestamps: true })
 
 metaEventSchema.index({ organizationId: 1, eventId: 1, eventName: 1 }, { unique: true })
-metaEventSchema.index({ status: 1, nextAttemptAt: 1 })
+metaEventSchema.index({ status: 1, accessDeferredAt: 1, nextAttemptAt: 1 })
 export const MetaEvent = model('MetaEvent', metaEventSchema)

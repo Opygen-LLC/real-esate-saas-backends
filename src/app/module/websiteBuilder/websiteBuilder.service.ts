@@ -152,43 +152,72 @@ const publishPage = performPublish
 
 const schedulePublish = async (organizationId: string, pageId: string, publishAt: Date, userId?: string) => {
   if (publishAt.getTime() < Date.now() + 60_000) throw new ApiError(400, 'Scheduled publish time must be at least one minute in the future')
-  const page = await WebsitePage.findOneAndUpdate({ _id: pageId, organizationId }, { $set: { scheduledPublishAt: publishAt, status: 'scheduled', ...(userId ? { updatedBy: userId } : {}) } }, { new: true })
+  const page = await WebsitePage.findOneAndUpdate(
+    { _id: pageId, organizationId },
+    {
+      $set: { scheduledPublishAt: publishAt, status: 'scheduled', ...(userId ? { updatedBy: userId } : {}) },
+      $unset: { accessDeferredAt: 1 },
+    },
+    { new: true },
+  )
   if (!page) throw new ApiError(404, 'Website page not found')
   await WebsiteCache.del('draft', organizationId, pageId)
   return page
 }
 
 const processScheduledPublishes = async (limit = 25) => {
-  // Claim due pages by moving their scheduled time forward. This keeps multiple
-  // API replicas from publishing the same scheduled revision concurrently while
-  // still allowing a crashed worker to be retried after the lease expires.
+  // Access-deferred pages keep their original scheduledPublishAt. Recovery only
+  // clears accessDeferredAt, so overdue pages resume on the next worker tick and
+  // future pages never publish early because a tenant renewed.
   let due = 0
   let published = 0
+  let deferred = 0
   while (due < limit) {
     const now = new Date()
-    const page = await WebsitePage.findOneAndUpdate(
-      { status: 'scheduled', scheduledPublishAt: { $lte: now } },
-      { $set: { scheduledPublishAt: new Date(now.getTime() + 10 * 60_000) } },
-      { sort: { scheduledPublishAt: 1 }, new: true },
-    )
-    if (!page) break
+    const candidate: any = await WebsitePage.findOne({
+      status: 'scheduled',
+      accessDeferredAt: null,
+      scheduledPublishAt: { $lte: now },
+    }).sort({ scheduledPublishAt: 1, _id: 1 })
+    if (!candidate) break
     due += 1
-    const tenantAllowed = await Organization.exists({
-      organizationId: page.organizationId,
-      'platformAccess.status': { $ne: 'pending_deletion' },
+
+    const access = await TenantAccessService.evaluate(String(candidate.organizationId), {
+      actorId: 'system:scheduled-publish',
     })
-    if (!tenantAllowed) continue
+    if (!access.backgroundBusinessWorkAllowed) {
+      await WebsitePage.updateOne(
+        { _id: candidate._id, status: 'scheduled', accessDeferredAt: null },
+        { $set: { accessDeferredAt: now } },
+      )
+      deferred += 1
+      continue
+    }
+
+    const originalScheduledPublishAt = candidate.scheduledPublishAt
+    const claimed: any = await WebsitePage.findOneAndUpdate(
+      {
+        _id: candidate._id,
+        status: 'scheduled',
+        accessDeferredAt: null,
+        scheduledPublishAt: originalScheduledPublishAt,
+      },
+      { $set: { scheduledPublishAt: new Date(now.getTime() + 10 * 60_000) } },
+      { new: true },
+    )
+    if (!claimed) continue
+
     try {
-      await performPublish(page.organizationId, page._id.toString())
+      await performPublish(String(claimed.organizationId), claimed._id.toString())
       published += 1
     } catch {
       await WebsitePage.updateOne(
-        { _id: page._id, organizationId: page.organizationId, status: 'scheduled' },
+        { _id: claimed._id, organizationId: claimed.organizationId, status: 'scheduled' },
         { $set: { scheduledPublishAt: new Date(Date.now() + 60_000) } },
       )
     }
   }
-  return { due, published }
+  return { due, published, deferred }
 }
 
 const listRevisions = async (organizationId: string, pageId: string) => WebsiteRevision.find({ organizationId, pageId }).select('-document').sort({ version: -1 }).limit(100)

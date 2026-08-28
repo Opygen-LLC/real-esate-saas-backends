@@ -5,13 +5,13 @@ import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { writeAudit } from '../audit/audit.service'
-import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import { SubscriptionChangeRequest } from '../subscriptionChangeRequest/subscriptionChangeRequest.model'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { SubscriptionPlanService } from '../subscriptionPlan/subscriptionPlan.service'
 import { resolvePlanLeadPolicy, toBenefitPlanSnapshot } from '../subscriptionPlan/planLeadPolicy'
 import { RealtimeService } from '../realtime/realtime.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { SubscriptionPayment } from './subscriptionPayment.model'
 import { ISubscriptionPayment, ManualPaymentMethod } from './subscriptionPayment.interface'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -519,10 +519,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
   })
 
   const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType, idempotent } = transactionResult
-  if (!idempotent) {
-    await CacheInvalidationService.invalidateTenant(organizationId)
-    await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
-  }
+  if (!idempotent) await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
   const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
   if (!idempotent && decision.status === 'confirmed' && result) {
     RealtimeService.emitOrganization(organizationId, {
@@ -540,6 +537,13 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         periodStart: result.periodStart ? new Date(result.periodStart).toISOString() : null,
         periodEnd: result.periodEnd ? new Date(result.periodEnd).toISOString() : null,
       },
+    })
+  }
+  if (decision.status === 'confirmed') {
+    await TenantAccessTransitionService.sync({
+      organizationId,
+      source: idempotent ? 'manual_payment_confirmation_retry' : 'manual_payment_confirmation',
+      eventType: 'subscription.payment_confirmed',
     })
   }
   return result

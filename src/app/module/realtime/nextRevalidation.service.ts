@@ -18,7 +18,7 @@ const normalizeTenantIdentifiers = (input: RevalidationInput): string[] =>
     new Set(
       [input.tenantIdentifier, ...(input.tenantIdentifiers || [])]
         .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-        .map((value) => value.trim().toLowerCase())
+        .map((value) => value.trim().toLowerCase().slice(0, 160))
     )
   ).slice(0, 20)
 

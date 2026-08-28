@@ -19,6 +19,7 @@ import { RealtimeService } from '../realtime/realtime.service'
 import { ImpersonationSession } from './impersonationSession.model'
 import { AuthSession } from '../auth/authSession.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { SubscriptionPlan } from '../subscriptionPlan/subscriptionPlan.model'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionPayment } from '../subscriptionPayment/subscriptionPayment.model'
@@ -159,14 +160,12 @@ const suspendTenant = async (organizationId: string, actor: { id: string; reason
   }
   if (org.subscription) org.subscription.status = 'suspended'
   await org.save()
-  await Promise.all([
-    AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_suspended' } }),
-    CacheInvalidationService.invalidateTenant(organizationId),
-  ])
-  await RealtimeService.revokeTenantRuntimeAccess({
+  await AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_suspended' } })
+  await TenantAccessTransitionService.sync({
     organizationId,
-    reason: 'PLATFORM_SUSPENDED',
-    subscriptionStatus: 'suspended',
+    organization: org,
+    source: 'platform_suspend',
+    eventType: 'organization.suspended',
   })
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.suspended', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { previousSubscriptionStatus, previousWebsiteStatus } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_suspended' })
@@ -191,7 +190,7 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
   org.platformAccess = { ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'active', reactivatedAt: new Date(), reactivatedBy: actor.id, reactivationReason: actor.reason, suspensionSource: null, suspensionUserId: null }
   if (org.subscription) org.subscription.status = restored
   await org.save()
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await TenantAccessTransitionService.sync({ organizationId, organization: org, source: 'platform_reactivate', eventType: 'organization.reactivated' })
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.reactivated', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { restoredSubscriptionStatus: restored, restoredWebsiteStatus: org.websiteStatus } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_reactivated' })
   return org
@@ -446,7 +445,7 @@ const changeTenantSubscription = async (
   })
 
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_assignment', eventType: 'subscription.plan_changed' })
   return response
 }
 
@@ -521,7 +520,7 @@ const manageTenantTrial = async (
   })
 
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_update', eventType: 'subscription.trial_updated' })
   return response
 }
 

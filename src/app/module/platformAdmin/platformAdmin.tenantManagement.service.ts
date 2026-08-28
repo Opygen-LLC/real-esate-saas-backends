@@ -7,6 +7,7 @@ import { AuthSession } from '../auth/authSession.model'
 import { AuthServices } from '../auth/auth.services'
 import { TenantPurgeService } from '../compliance/tenantPurge.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
 import { RealtimeService } from '../realtime/realtime.service'
@@ -229,8 +230,8 @@ const archiveTenant = async (organizationId: string, actor: PlatformAdminActor) 
   await Promise.all([
     AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: now, revokeReason: 'tenant_archived' } }),
     ImpersonationSession.updateMany({ organizationId, endedAt: null }, { $set: { endedAt: now, endedBy: actor.id } }),
-    CacheInvalidationService.invalidateTenant(organizationId),
   ])
+  await TenantAccessTransitionService.sync({ organizationId, organization: org, source: 'platform_archive', eventType: 'organization.archived' })
   await writeAudit({
     organizationId,
     actorId: actor.id,
@@ -270,7 +271,7 @@ const restoreArchivedTenant = async (organizationId: string, actor: PlatformAdmi
     restoreReason: actor.reason,
   }
   await org.save()
-  await CacheInvalidationService.invalidateTenant(organizationId)
+  await TenantAccessTransitionService.sync({ organizationId, organization: org, source: 'platform_archive_restore', eventType: 'organization.archive_restored' })
   await writeAudit({
     organizationId,
     actorId: actor.id,
