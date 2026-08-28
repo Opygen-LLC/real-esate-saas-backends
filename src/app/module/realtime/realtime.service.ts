@@ -171,6 +171,41 @@ const disconnectPublicOrganization = async (organizationId: string) => {
   }
 }
 
+
+const revokeTenantRuntimeAccess = async (input: { organizationId: string; reason: string; subscriptionStatus?: string }) => {
+  const organizationId = String(input.organizationId || '').trim()
+  if (!organizationId) return
+
+  // Give connected clients one sanitized cache hint before the server forcibly
+  // removes them from tenant rooms. Security does not rely on delivery of this
+  // event; the disconnect below is authoritative and prevents further CRM or
+  // public-site realtime traffic for the locked tenant.
+  emitOrganization(organizationId, {
+    type: 'subscription.changed',
+    action: 'status_changed',
+    entityId: input.subscriptionStatus || input.reason,
+    payload: {
+      status: input.subscriptionStatus || 'inactive',
+      reason: input.reason,
+      workspaceAllowed: false,
+    },
+  })
+  emitPublicOrganization(organizationId, {
+    type: 'organization.changed',
+    action: 'status_changed',
+    entityId: 'tenant_access',
+  })
+
+  // Let Socket.IO enqueue the invalidation packets before disconnecting. The
+  // access boundary is already committed in MongoDB, and new handshakes are
+  // denied independently by TenantAccessService.
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  await Promise.allSettled([
+    disconnectOrganization(organizationId),
+    disconnectPublicOrganization(organizationId),
+  ])
+}
+
 const countOrganizationSockets = async (organizationId: string): Promise<number> => {
   if (!organizationId) return 0
   let total = 0
@@ -207,6 +242,7 @@ export const RealtimeService = {
   disconnectUser,
   disconnectOrganization,
   disconnectPublicOrganization,
+  revokeTenantRuntimeAccess,
   countOrganizationSockets,
   countUserSockets,
 }

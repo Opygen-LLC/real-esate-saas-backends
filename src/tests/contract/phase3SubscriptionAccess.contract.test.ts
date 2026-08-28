@@ -25,6 +25,39 @@ describe('phase 3 subscription access contract', () => {
     expect(auth.match(/await enforceSubscriptionAccess\(req\)/g)?.length || 0).toBeGreaterThanOrEqual(3)
   })
 
+
+  it('locks dashboard and public realtime with the canonical tenant access decision', () => {
+    const guard = read('src/app/middlewares/subscriptionAccess.ts')
+    const server = read('src/app/module/realtime/realtime.server.ts')
+    const realtime = read('src/app/module/realtime/realtime.service.ts')
+    const lifecycle = read('src/app/module/subscription/subscriptionLifecycle.service.ts')
+
+    expect(guard).not.toContain("path === '/auth/realtime-ticket'")
+    for (const route of [
+      '/auth/session',
+      '/auth/change-password',
+      '/auth/sessions',
+      '/users/me/profile',
+      '/users/me/access',
+      '/organization',
+      '/billing',
+      '/subscription',
+      '/website-price',
+      '/support',
+      '/bkash',
+    ]) expect(guard).toContain(route)
+
+    expect(server).toContain('TenantAccessService.evaluate')
+    expect(server).toContain('access.workspaceAllowed')
+    expect(server).toContain('REALTIME_SUBSCRIPTION_INACTIVE')
+    expect(server).toContain('access.publicWebsiteAllowed')
+    expect(realtime).toContain('revokeTenantRuntimeAccess')
+    expect(realtime).toContain("type: 'subscription.changed'")
+    expect(realtime).toContain('disconnectOrganization(organizationId)')
+    expect(realtime).toContain('disconnectPublicOrganization(organizationId)')
+    expect(lifecycle).toContain('RealtimeService.revokeTenantRuntimeAccess')
+  })
+
   it('separates trial grace from paid renewal grace and uses the contractual period boundary', () => {
     const policy = read('src/app/module/platformSettings/trialPolicy.service.ts')
     const lifecycle = read('src/app/module/subscription/subscriptionLifecycle.service.ts')

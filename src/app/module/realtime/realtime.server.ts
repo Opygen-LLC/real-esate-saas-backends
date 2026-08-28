@@ -10,6 +10,7 @@ import { Organization } from '../organization/organization.model'
 import { DomainRecord } from '../domain/domain.model'
 import { User } from '../user/user.model'
 import { RealtimeService } from './realtime.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 let io: SocketIOServer | undefined
 let pubClient: any
@@ -31,15 +32,23 @@ const safeOrigin = async (origin?: string): Promise<boolean> => {
     candidates.push(hostname.slice(0, -(publicHost.length + 1)))
   }
 
-  const direct = await Organization.exists({
-    isBlocked: { $ne: true },
-    websiteStatus: { $ne: 'suspended' },
+  const direct: any = await Organization.findOne({
     $or: [
       { sub_domain: { $in: candidates } },
       { organizationId: { $in: candidates } },
     ],
-  })
-  if (direct) return true
+  }).select('organizationId').lean()
+  if (direct?.organizationId) {
+    try {
+      const access = await TenantAccessService.evaluate(String(direct.organizationId), {
+        reconcileSubscription: true,
+        actorId: 'system:realtime-origin',
+      })
+      return access.publicWebsiteAllowed
+    } catch {
+      return false
+    }
+  }
 
   const domain: any = await DomainRecord.findOne({
     domain: hostname,
@@ -48,7 +57,15 @@ const safeOrigin = async (origin?: string): Promise<boolean> => {
     tlsStatus: 'active',
   }).select('organizationId').lean()
   if (!domain?.organizationId) return false
-  return Boolean(await Organization.exists({ organizationId: domain.organizationId, isBlocked: { $ne: true }, websiteStatus: { $ne: 'suspended' } }))
+  try {
+    const access = await TenantAccessService.evaluate(String(domain.organizationId), {
+      reconcileSubscription: true,
+      actorId: 'system:realtime-origin',
+    })
+    return access.publicWebsiteAllowed
+  } catch {
+    return false
+  }
 }
 
 const redisOptions = (): any => ({
@@ -85,27 +102,37 @@ const resolveTenant = async (identifier: string) => {
   const normalized = identifier.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0]
   if (!normalized || normalized.length > 253 || !/^[a-z0-9.-]+$/.test(normalized)) return null
   const subdomain = normalized.includes('.') ? normalized.split('.')[0] : normalized
-  const direct = await Organization.findOne({
-    isBlocked: { $ne: true },
-    websiteStatus: { $ne: 'suspended' },
+  let organization: any = await Organization.findOne({
     $or: [
       { organizationId: normalized },
       { sub_domain: normalized },
       { sub_domain: subdomain },
     ],
   }).select('organizationId sub_domain domain customDomain websiteStatus').lean()
-  if (direct) return direct
 
-  const domain: any = await DomainRecord.findOne({
-    domain: normalized,
-    entitlementStatus: { $ne: 'suspended' },
-    status: 'verified',
-    tlsStatus: 'active',
-  }).select('organizationId').lean()
-  if (!domain?.organizationId) return null
-  return Organization.findOne({ organizationId: domain.organizationId, isBlocked: { $ne: true }, websiteStatus: { $ne: 'suspended' } })
-    .select('organizationId sub_domain domain customDomain websiteStatus')
-    .lean()
+  if (!organization) {
+    const domain: any = await DomainRecord.findOne({
+      domain: normalized,
+      entitlementStatus: { $ne: 'suspended' },
+      status: 'verified',
+      tlsStatus: 'active',
+    }).select('organizationId').lean()
+    if (!domain?.organizationId) return null
+    organization = await Organization.findOne({ organizationId: domain.organizationId })
+      .select('organizationId sub_domain domain customDomain websiteStatus')
+      .lean()
+  }
+
+  if (!organization?.organizationId) return null
+  try {
+    const access = await TenantAccessService.evaluate(String(organization.organizationId), {
+      reconcileSubscription: true,
+      actorId: 'system:realtime-public-subscribe',
+    })
+    return access.publicWebsiteAllowed ? organization : null
+  } catch {
+    return null
+  }
 }
 
 const initializeRealtimeServer = async (httpServer: HttpServer) => {
@@ -138,8 +165,13 @@ const initializeRealtimeServer = async (httpServer: HttpServer) => {
       if (!user || user.status !== 'active' || !user.isVerified) return next(new Error('REALTIME_ACCOUNT_UNAVAILABLE'))
       if (payload.organizationId !== user.organizationId || payload.userRole !== user.userRole) return next(new Error('REALTIME_AUTH_CHANGED'))
       if (user.userRole !== 'super-admin') {
-        const tenantActive = await Organization.exists({ organizationId: user.organizationId, isBlocked: { $ne: true } })
-        if (!tenantActive) return next(new Error('REALTIME_TENANT_UNAVAILABLE'))
+        const access = await TenantAccessService.evaluate(String(user.organizationId), {
+          reconcileSubscription: true,
+          actorId: 'system:realtime-dashboard-handshake',
+        })
+        if (!access.workspaceAllowed) {
+          return next(new Error(access.platformStatus === 'active' ? 'REALTIME_SUBSCRIPTION_INACTIVE' : 'REALTIME_TENANT_UNAVAILABLE'))
+        }
       }
       socket.data.userId = String(user._id)
       socket.data.organizationId = user.organizationId

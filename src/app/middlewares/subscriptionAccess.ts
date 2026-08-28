@@ -19,7 +19,7 @@ export const isSubscriptionRecoveryRequest = (req: Request): boolean => {
   const path = apiPath(req)
   const method = String(req.method || 'GET').toUpperCase()
 
-  if (path === '/auth/session' || path === '/auth/realtime-ticket' || path === '/auth/change-password') return true
+  if (path === '/auth/session' || path === '/auth/change-password') return true
   if (path.startsWith('/auth/sessions')) return true
   if (path === '/users/me/profile' || path === '/users/me/access') return true
   if (path === '/organization' && method === 'GET') return true
@@ -53,10 +53,15 @@ const platformAccessError = (access: EffectiveTenantAccess): ApiError | null => 
 }
 
 const subscriptionMessage = (reason: TenantAccessReason, status: string): string => {
-  if (reason === 'TRIAL_ENDED') return 'Your free trial has ended. Choose a subscription plan to regain access to your workspace.'
-  if (reason === 'TRIAL_EXPIRED') return 'Your free trial has expired. Choose a subscription plan to regain access to your workspace.'
-  if (reason === 'PAYMENT_PAST_DUE') return 'Your subscription payment is past due. Renew your subscription to regain access to your workspace.'
-  if (reason === 'SUBSCRIPTION_GRACE') return 'Your subscription renewal is overdue. Renew your subscription to regain access to your workspace.'
+  if (reason === 'TRIAL_ENDED' || reason === 'TRIAL_EXPIRED') {
+    return 'Your free trial has ended. Choose a subscription plan to restore your dashboard and public website.'
+  }
+  if (reason === 'PAYMENT_PAST_DUE' || reason === 'SUBSCRIPTION_GRACE') {
+    return 'Your subscription renewal is overdue. Renew your subscription to restore your dashboard and public website.'
+  }
+  if (reason === 'SUBSCRIPTION_EXPIRED') {
+    return 'Your subscription period has ended. Renew your plan to restore your dashboard and public website.'
+  }
   return `Subscription is ${status}. Renew or choose an active plan to continue.`
 }
 

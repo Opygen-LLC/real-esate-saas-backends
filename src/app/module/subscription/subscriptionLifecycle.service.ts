@@ -7,6 +7,7 @@ import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
 import { getTrialPolicy, type TrialPolicy } from '../platformSettings/trialPolicy.service'
 import { SubscriptionScheduleService } from './subscriptionSchedule.service'
+import { RealtimeService } from '../realtime/realtime.service'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -138,6 +139,24 @@ const applyBoundaryTransition = async (organization: any, now: Date, policy: Tri
   } catch (error) {
     Metrics.inc('tenant_access_cache_invalidation_failures_total', { source: 'subscription_boundary' })
     logger.warn('[Subscription lifecycle] tenant cache invalidation failed', {
+      organizationId: updated.organizationId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  const isTrial = String(updated.subscription?.plan || 'trial') === 'trial'
+  const runtimeReason = isTrial
+    ? (transition.nextStatus === 'grace' ? 'TRIAL_ENDED' : 'TRIAL_EXPIRED')
+    : (transition.nextStatus === 'grace' ? 'SUBSCRIPTION_GRACE' : 'SUBSCRIPTION_EXPIRED')
+  try {
+    await RealtimeService.revokeTenantRuntimeAccess({
+      organizationId: String(updated.organizationId),
+      reason: runtimeReason,
+      subscriptionStatus: transition.nextStatus,
+    })
+  } catch (error) {
+    Metrics.inc('tenant_access_realtime_revoke_failures_total', { source: 'subscription_boundary' })
+    logger.warn('[Subscription lifecycle] realtime access revoke failed', {
       organizationId: updated.organizationId,
       error: error instanceof Error ? error.message : String(error),
     })

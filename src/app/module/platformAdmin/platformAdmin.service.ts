@@ -163,6 +163,11 @@ const suspendTenant = async (organizationId: string, actor: { id: string; reason
     AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_suspended' } }),
     CacheInvalidationService.invalidateTenant(organizationId),
   ])
+  await RealtimeService.revokeTenantRuntimeAccess({
+    organizationId,
+    reason: 'PLATFORM_SUSPENDED',
+    subscriptionStatus: 'suspended',
+  })
   await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.suspended', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { previousSubscriptionStatus, previousWebsiteStatus } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_suspended' })
   return org
