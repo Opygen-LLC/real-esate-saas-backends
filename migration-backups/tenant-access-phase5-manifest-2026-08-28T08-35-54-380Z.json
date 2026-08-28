@@ -1,0 +1,23 @@
+{
+  "migrationName": "tenant-access-phase5",
+  "generatedAt": "2026-08-28T08:35:54.380Z",
+  "backup": null,
+  "organizationsScanned": 8,
+  "structuralRowsModified": 0,
+  "fieldsBackfilled": [
+    "platformAccess.status",
+    "websiteStatus"
+  ],
+  "subscriptionFingerprintBefore": {
+    "count": 8,
+    "sha256": "5917a01a1625aff8cf37df267c899eabbb301a0558f86f0e7108ca7386023b05"
+  },
+  "subscriptionFingerprintAfter": {
+    "count": 8,
+    "sha256": "5917a01a1625aff8cf37df267c899eabbb301a0558f86f0e7108ca7386023b05"
+  },
+  "subscriptionAssignmentMutation": false,
+  "subscriptionStatusMutation": false,
+  "subscriptionDateMutation": false,
+  "dataDeletion": false
+}

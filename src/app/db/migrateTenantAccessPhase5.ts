@@ -45,7 +45,8 @@ const run = async () => {
   }).toArray()
 
   const blockers: string[] = []
-  const changes: Array<{ _id: unknown; organizationId: string; set: Record<string, unknown> }> = []
+  type OrganizationRow = (typeof rows)[number]
+  const changes: Array<{ _id: OrganizationRow['_id']; organizationId: string; set: Record<string, unknown> }> = []
 
   for (const row of rows) {
     const organizationId = String(row.organizationId || row._id)
