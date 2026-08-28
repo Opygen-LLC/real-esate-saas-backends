@@ -7,6 +7,7 @@ import { requireTenant } from '../../middlewares/auth'
 import ApiError from '../../../errors/ApiError'
 import { sanitizeRichText } from '../../helpers/sanitize'
 import { tenantResourceFilter } from '../../repositories/tenantRepository'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const createLandingPage = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -22,6 +23,7 @@ const createLandingPage = catchAsync(async (req: Request, res: Response) => {
 
 const getLandingPages = catchAsync(async (req: Request, res: Response) => {
   const organizationId = req.params.organizationId || requireTenant(req)
+  if (req.params.organizationId) await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const result = await LandingPage.find({ organizationId }).sort({ createdAt: -1 })
 
   sendResponse(res, {

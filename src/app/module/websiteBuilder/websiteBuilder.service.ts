@@ -29,6 +29,7 @@ import { ObjectStorageService } from './objectStorage.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { buildDefaultWebsiteDocument } from './defaultWebsiteDocument'
 import { assertTemplateQuality } from './templateQa'
 
@@ -815,10 +816,10 @@ const cleanupOrphanAssets = async (limit = 100) => {
   return { checked: candidates.length, deleted, incompleteUploadsDeleted: incompleteDeleted }
 }
 
-const assertPublicWebsite = (org: any) => {
-  if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') {
-    throw new ApiError(404, 'Agency website not found')
-  }
+const resolvePublicOrganization = async (identifier: string) => {
+  const org = await resolveOrganization(identifier)
+  if (!org) throw new ApiError(404, 'Agency website not found')
+  await TenantAccessService.assertPublicWebsiteAccess(String(org.organizationId))
   return org
 }
 
@@ -832,10 +833,11 @@ const getPublicPage = async (identifier: string, slug = '/') => {
   const normalized = normalizeIdentifier(identifier)
   const resolution = await Cache.tenantResolve.get(normalized)
   if (resolution?.organizationId) {
+    await TenantAccessService.assertPublicWebsiteAccess(String(resolution.organizationId))
     const hot = await WebsiteCache.get<any>('published', resolution.organizationId, targetSlug)
     if (hot) return hot
   }
-  const org = assertPublicWebsite(await resolveOrganization(identifier))
+  const org = await resolvePublicOrganization(identifier)
 
   const cached = await WebsiteCache.get<any>('published', org.organizationId, targetSlug)
   if (cached) return cached
@@ -850,15 +852,15 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 }
 
 const getSitemap = async (identifier: string) => {
-  const org = assertPublicWebsite(await resolveOrganization(identifier))
+  const org = await resolvePublicOrganization(identifier)
   const base = await canonicalBase(org)
   const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }
 
-const getRobots = async (identifier: string) => { const org = assertPublicWebsite(await resolveOrganization(identifier)); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
+const getRobots = async (identifier: string) => { const org = await resolvePublicOrganization(identifier); const base = await canonicalBase(org); return `User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n` }
 const getPropertyShareCard = async (identifier: string, propertyId: string) => {
-  const org = assertPublicWebsite(await resolveOrganization(identifier))
+  const org = await resolvePublicOrganization(identifier)
   const source: any = await Property.findOne({
     _id: propertyId,
     organizationId: org.organizationId,

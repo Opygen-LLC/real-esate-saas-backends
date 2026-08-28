@@ -21,6 +21,7 @@ import { PUBLIC_PROPERTY_STATUSES } from '../property/property.constants'
 import { toPublicProperties } from '../property/publicProperty.serializer'
 import { Viewing } from '../viewing/viewing.model'
 import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionCatalog, permissionsForRole } from './accessControl'
 import { UserResponseDto } from './user.dto'
@@ -201,6 +202,7 @@ const publicBrokerVisibilityStage = {
 }
 
 const getPublicAgents = async (organizationId: string): Promise<any[]> => {
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const agents = await User.aggregate([
     {
       $match: {
@@ -286,6 +288,7 @@ const getPublicAgentDetail = async (agentId: string): Promise<any> => {
     { $limit: 1 },
   ])
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Broker profile not found')
+  await TenantAccessService.assertPublicWebsiteAccess(String(row.organizationId))
   return { agent: toPublicAgentDto(row), activeProperties: toPublicProperties(row.activeProperties || []) }
 }
 

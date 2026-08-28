@@ -26,6 +26,7 @@ import { IViewing, IViewingCalendarFilter, IViewingFilter, ViewingCalendarItem }
 import { Viewing } from './viewing.model'
 import type { PublicViewingRequestInput } from './viewing.validation'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 const normalizePhone=(value:string)=>{try{return normalizeBangladeshPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
 const timeToMinutes=(time:string)=>{const[h,m]=time.split(':').map(Number);return h*60+m}
 const viewingStartMs=(date:string,startTime:string)=>Date.parse(`${date}T${startTime}:00+06:00`)
@@ -53,11 +54,8 @@ const resolvePublicViewingAgent = async (organizationId:string, preferredAgentId
 
 const publicRequestViewing=async(payload:PublicViewingRequestInput,context:{ip?:string;requestId?:string}):Promise<IViewing>=>{
   const{organizationId,propertyId,date,startTime,endTime,clientName,clientPhone,clientEmail,notes,privacyConsent,policyVersion,attribution}=payload
-  const organization:any=await Organization.findOne({organizationId}).select('isBlocked websiteStatus').lean()
-  if(!organization)throw new ApiError(404,'Agency not found')
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
-  if(organization.isBlocked||organization.websiteStatus==='suspended')throw new ApiError(423,'This agency is currently suspended','','TENANT_SUSPENDED')
-  if(organization.websiteStatus!=='published')throw new ApiError(409,'This agency website is not published yet')
   assertViewingWindowIsFuture(date,startTime)
   const prop:any=await assertViewingRequestableProperty(organizationId,propertyId)
   if(!privacyConsent)throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})

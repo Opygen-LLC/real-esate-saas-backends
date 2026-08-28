@@ -11,6 +11,7 @@ import { MetaEvent } from './metaEvent.model'
 import { Resilience } from '../../../shared/resilience'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 export const META_EVENT_NAMES = ['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'] as const
 const ALLOWED_EVENTS = new Set<string>(META_EVENT_NAMES)
@@ -206,6 +207,7 @@ export const resolveCanonicalMetaPublicUrl = async (organizationId: string): Pro
 const publicConfig = async (identifier: string) => {
   const organizationId = await resolveOrganization(identifier)
   if (!organizationId) return { enabled: false, pixelEnabled: false, capiEnabled: false }
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
   if (!integration) return { enabled: false, pixelEnabled: false, capiEnabled: false }
   const state = effectiveState(integration)
@@ -234,6 +236,7 @@ const recordBrowserDiagnostic = async (organizationId: string, payload: any, eve
 const queuePublicEvent = async (identifier: string, payload: any, context: { ip?: string; userAgent?: string }) => {
   const organizationId = await resolveOrganization(identifier)
   if (!organizationId) throw new ApiError(404, 'Agency website not found')
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   const integration: any = await MetaIntegration.findOne({ organizationId }).select('+accessTokenEncrypted').lean()
   if (!integration) return { queued: false, reason: 'integration_disabled' }

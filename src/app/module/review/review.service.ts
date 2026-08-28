@@ -7,6 +7,7 @@ import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { AgencyReview, ReviewInvitation } from './review.model'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const hashToken = (value: string) => crypto.createHash('sha256').update(value).digest('hex')
 
@@ -33,6 +34,7 @@ const list = async (organizationId: string) => {
 const getInvitation = async (token: string) => {
   const invitation: any = await ReviewInvitation.findOne({ tokenHash: hashToken(token) }).populate('propertyId', 'title slug images').lean()
   if (!invitation || invitation.status !== 'pending') throw new ApiError(httpStatus.NOT_FOUND, 'Review link is invalid or has already been used')
+  await TenantAccessService.assertPublicWebsiteAccess(String(invitation.organizationId))
   await TenantPurgeBarrier.assertTenantWritable(String(invitation.organizationId))
   if (new Date(invitation.expiresAt).getTime() <= Date.now()) {
     await ReviewInvitation.updateOne({ _id: invitation._id }, { $set: { status: 'expired' } })
@@ -47,7 +49,10 @@ const submit = async (payload: { token: string; name: string; email?: string; ph
   const tokenHash = hashToken(payload.token)
   const now = new Date()
   const invitationScope: any = await ReviewInvitation.findOne({ tokenHash }).select('organizationId').lean()
-  if (invitationScope?.organizationId) await TenantPurgeBarrier.assertTenantWritable(String(invitationScope.organizationId))
+  if (invitationScope?.organizationId) {
+    await TenantAccessService.assertPublicWebsiteAccess(String(invitationScope.organizationId))
+    await TenantPurgeBarrier.assertTenantWritable(String(invitationScope.organizationId))
+  }
   // Atomically consume the one-time invitation so two simultaneous submissions cannot create duplicate reviews.
   const invitation: any = await ReviewInvitation.findOneAndUpdate(
     { tokenHash, status: 'pending', expiresAt: { $gt: now } },
@@ -102,7 +107,10 @@ const revokeInvitation = async (organizationId: string, id: string) => {
   return invitation
 }
 
-const getPublicReviews = async (organizationId: string) => AgencyReview.find({ organizationId, status: 'published' })
+const getPublicReviews = async (organizationId: string) => {
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  return AgencyReview.find({ organizationId, status: 'published' })
   .populate('propertyId', 'title slug images').select('name rating comment propertyId createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean()
+}
 
 export const ReviewService = { createInvitation, list, getInvitation, submit, moderate, remove, revokeInvitation, getPublicReviews }

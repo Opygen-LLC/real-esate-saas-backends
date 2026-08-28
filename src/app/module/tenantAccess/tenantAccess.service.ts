@@ -1,11 +1,13 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
+import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
 import { reconcileOrganizationSubscriptionBoundaryState } from '../subscription/subscriptionLifecycle.service'
 import {
   ACCESSIBLE_SUBSCRIPTION_STATUSES,
   type EffectiveTenantAccess,
+  type PublicTenantAccess,
   type TenantAccessEvaluationOptions,
   type TenantAccessOrganizationShape,
   type TenantAccessReason,
@@ -131,11 +133,52 @@ const evaluate = async (
   return evaluateOrganization(reconciled.organization as TenantAccessOrganizationShape, now)
 }
 
+
+const toPublicAccess = (access: EffectiveTenantAccess): PublicTenantAccess => ({
+  allowed: access.publicWebsiteAllowed,
+  reason: access.reason,
+})
+
+const assertPublicWebsiteAccess = async (
+  organizationId: string,
+  options: TenantAccessEvaluationOptions = {},
+): Promise<EffectiveTenantAccess> => {
+  const access = await evaluate(organizationId, options)
+  if (access.publicWebsiteAllowed) return access
+
+  if (access.reason === 'WEBSITE_NOT_PUBLISHED') {
+    throw new ApiError(
+      httpStatus.NOT_FOUND,
+      'Agency website is not published',
+      '',
+      API_ERROR_CODES.PUBLIC_WEBSITE_NOT_PUBLISHED,
+    )
+  }
+
+  if (access.reason === 'PLATFORM_SUSPENDED') {
+    throw new ApiError(
+      423,
+      'This agency website is currently unavailable',
+      '',
+      'TENANT_SUSPENDED',
+    )
+  }
+
+  throw new ApiError(
+    httpStatus.SERVICE_UNAVAILABLE,
+    'Website temporarily unavailable',
+    '',
+    API_ERROR_CODES.PUBLIC_WEBSITE_UNAVAILABLE,
+  )
+}
+
 const isSubscriptionAccessible = (status?: string | null): boolean =>
   Boolean(status && ACCESSIBLE_SUBSCRIPTION_STATUS_SET.has(String(status)))
 
 export const TenantAccessService = {
   evaluate,
   evaluateOrganization,
+  toPublicAccess,
+  assertPublicWebsiteAccess,
   isSubscriptionAccessible,
 }

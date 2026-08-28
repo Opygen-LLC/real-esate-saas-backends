@@ -23,6 +23,7 @@ describe('TenantAccessService.evaluateOrganization', () => {
     expect(access.publicWebsiteAllowed).toBe(true)
     expect(access.backgroundBusinessWorkAllowed).toBe(true)
     expect(access.reason).toBe('ACTIVE')
+    expect(TenantAccessService.toPublicAccess(access)).toEqual({ allowed: true, reason: 'ACTIVE' })
   })
 
   it('keeps workspace access while an active website is not published', () => {

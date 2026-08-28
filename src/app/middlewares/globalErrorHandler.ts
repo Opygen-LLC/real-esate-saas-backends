@@ -54,8 +54,9 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     errorMessages = config.env === 'production' ? [] : [{ path: '', message: error.message }]
   }
 
-  const event = httpErrorEvent(statusCode)
-  const level = httpLogLevelForStatus(statusCode, code)
+  const expectedPublicWebsiteLock = code === API_ERROR_CODES.PUBLIC_WEBSITE_UNAVAILABLE
+  const event = expectedPublicWebsiteLock ? 'request_rejected' : httpErrorEvent(statusCode)
+  const level = expectedPublicWebsiteLock ? 'info' : httpLogLevelForStatus(statusCode, code)
   const commonLogMeta = {
     event,
     requestId: req.requestId,
@@ -70,11 +71,11 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
       : undefined,
   }
 
-  // Expected 4xx outcomes are operational responses, not application crashes.
+  // Expected access rejections (including the intentional public-site 503) are operational responses, not application crashes.
   // Keep them concise so expired sessions/subscriptions cannot flood production
   // with stack traces. Unexpected 5xx errors retain the original Error object so
   // source-mapped stacks remain available in Cloud Logging.
-  if (isUnexpectedServerError(statusCode)) {
+  if (isUnexpectedServerError(statusCode) && !expectedPublicWebsiteLock) {
     errorLogger.log(level, event, { ...commonLogMeta, error })
   } else {
     errorLogger.log(level, event, { ...commonLogMeta, errorMessage: message })
@@ -93,6 +94,11 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
 
   res.locals.apiErrorCode = code
   res.locals.apiErrorEvent = event
+
+  if (code === API_ERROR_CODES.PUBLIC_WEBSITE_UNAVAILABLE || code === API_ERROR_CODES.PUBLIC_WEBSITE_NOT_PUBLISHED || code === 'TENANT_SUSPENDED') {
+    res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+  }
 
   res.status(statusCode).json({
     success: false,

@@ -17,6 +17,11 @@ export type TenantAccessReason =
   | 'SUBSCRIPTION_EXPIRED'
   | 'WEBSITE_NOT_PUBLISHED'
 
+export type PublicTenantAccess = {
+  allowed: boolean
+  reason: TenantAccessReason
+}
+
 export type EffectiveTenantAccess = {
   organizationId: string
   workspaceAllowed: boolean

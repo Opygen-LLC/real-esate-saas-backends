@@ -4,9 +4,11 @@ import catchAsync from '../../../shared/catchAsync'
 import { sendResponse } from '../../../shared/customResponse'
 import { AmenityService } from './amenity.service'
 import { requireTenant } from '../../middlewares/auth'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const getAllAmenities = catchAsync(async (req: Request, res: Response) => {
   const organizationId = (req.params.organizationId || req.user?.organizationId || req.user?.storeId) as string
+  if (req.params.organizationId) await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const result = await AmenityService.getAllAmenities(organizationId)
 
   sendResponse(res, {

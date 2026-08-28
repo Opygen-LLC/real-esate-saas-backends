@@ -17,6 +17,7 @@ import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } fr
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './publicProperty.serializer'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { logger } from '../../../shared/logger'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
@@ -331,6 +332,7 @@ const getPublicProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<PublicPropertyDto[]>> => {
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const result = await getAllProperties(
     { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
     paginationOptions,
@@ -345,6 +347,7 @@ const getPropertyById = async (organizationId: string, id: string): Promise<IPro
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<PublicPropertyDto> => {
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return toPublicProperty(result)
@@ -354,6 +357,7 @@ const getPublicPropertyDetail = async (
   idOrSlug: string,
   organizationId: string,
 ): Promise<{ property: PublicPropertyDto; similarProperties: PublicPropertyDto[] }> => {
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const isObjectId = idOrSlug.match(/^[0-9a-fA-F]{24}$/)
   const tenantScope = { organizationId }
   const query = isObjectId

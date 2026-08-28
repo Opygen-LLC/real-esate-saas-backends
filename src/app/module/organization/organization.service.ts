@@ -64,18 +64,27 @@ const getMyOrganization = async (organizationId: string): Promise<(IOrganization
 
 const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {
   const normalized = domainOrSubdomain.toLowerCase().replace(/^www\./, '').split(':')[0]
-  const direct = await Organization.findOne({ sub_domain: normalized })
-  if (direct) return direct
-  const alias = await SubdomainAlias.findOne({ alias: normalized }).lean()
-  if (alias) return Organization.findOne({ organizationId: alias.organizationId })
-  const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean()
-  return domain ? Organization.findOne({ organizationId: domain.organizationId }) : null
+  let organization: IOrganization | null = await Organization.findOne({ sub_domain: normalized })
+  if (!organization) {
+    const alias = await SubdomainAlias.findOne({ alias: normalized }).lean()
+    if (alias) organization = await Organization.findOne({ organizationId: alias.organizationId })
+  }
+  if (!organization) {
+    const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean()
+    if (domain) organization = await Organization.findOne({ organizationId: domain.organizationId })
+  }
+  if (!organization) return null
+  await TenantAccessService.assertPublicWebsiteAccess(organization.organizationId)
+  return organization
 }
 
 const getPublicSiteInfo = async (identifier: string): Promise<any> => {
   const cacheKey = identifier.toLowerCase().trim()
   const cached = await Cache.tenantPublic.get<any>(cacheKey)
-  if (cached) return cached
+  if (cached?.organizationId) {
+    await TenantAccessService.assertPublicWebsiteAccess(String(cached.organizationId))
+    return cached
+  }
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
     .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
@@ -102,7 +111,8 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     }
   }
 
-  if (!org || org.websiteStatus === 'provisioned' || org.websiteStatus === 'suspended') throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
+  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
+  await TenantAccessService.assertPublicWebsiteAccess(String(org.organizationId))
 
   const [totalProperties, totalAgents] = await Promise.all([
     Property.countDocuments({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }),

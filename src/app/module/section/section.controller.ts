@@ -6,6 +6,7 @@ import { Section } from './section.model'
 import { requireTenant } from '../../middlewares/auth'
 import ApiError from '../../../errors/ApiError'
 import { tenantResourceFilter } from '../../repositories/tenantRepository'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const createSection = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -21,6 +22,7 @@ const createSection = catchAsync(async (req: Request, res: Response) => {
 
 const getSections = catchAsync(async (req: Request, res: Response) => {
   const organizationId = req.params.organizationId || requireTenant(req)
+  if (req.params.organizationId) await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   const result = await Section.find({ organizationId }).sort({ order: 1 })
 
   sendResponse(res, {

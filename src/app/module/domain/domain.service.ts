@@ -13,6 +13,7 @@ import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { SubdomainAlias } from './subdomainAlias.model'
 import { DomainProviderService, type DomainDiagnostic } from './providers'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const ACTIVE_RECHECK_MS = 6 * 60 * 60_000
 const TLS_RECHECK_MS = 2 * 60_000
@@ -98,25 +99,31 @@ const changeSubdomain = async (organizationId: string, input: string) => {
 const resolveSubdomain = async (input: string) => {
   const subdomain = normalizeSubdomain(input)
   if (!subdomain) return null
-  const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId agencyName sub_domain websiteStatus isBlocked').lean()
-  if (direct) return {
-    organizationId: direct.organizationId,
-    agencyName: direct.agencyName,
-    canonicalSubdomain: direct.sub_domain,
-    isAlias: false,
-    websiteStatus: direct.isBlocked ? 'suspended' : (direct.websiteStatus || 'published'),
-    websiteUrl: buildTenantWebsiteUrl(direct.sub_domain || direct.organizationId),
+  const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId agencyName sub_domain').lean()
+  if (direct) {
+    const access = await TenantAccessService.evaluate(direct.organizationId)
+    return {
+      organizationId: direct.organizationId,
+      agencyName: direct.agencyName,
+      canonicalSubdomain: direct.sub_domain,
+      isAlias: false,
+      websiteStatus: access.websiteStatus,
+      publicAccess: TenantAccessService.toPublicAccess(access),
+      websiteUrl: buildTenantWebsiteUrl(direct.sub_domain || direct.organizationId),
+    }
   }
   const alias = await SubdomainAlias.findOne({ alias: subdomain }).lean()
   if (!alias) return null
-  const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('agencyName sub_domain websiteStatus isBlocked').lean()
+  const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('organizationId agencyName sub_domain').lean()
   if (!canonical) return null
+  const access = await TenantAccessService.evaluate(alias.organizationId)
   return {
     organizationId: alias.organizationId,
     agencyName: canonical.agencyName,
     canonicalSubdomain: canonical.sub_domain || alias.canonicalSubdomain,
     isAlias: true,
-    websiteStatus: canonical.isBlocked ? 'suspended' : (canonical.websiteStatus || 'published'),
+    websiteStatus: access.websiteStatus,
+    publicAccess: TenantAccessService.toPublicAccess(access),
     websiteUrl: buildTenantWebsiteUrl(canonical.sub_domain || alias.canonicalSubdomain),
   }
 }
@@ -669,8 +676,9 @@ const resolveVerifiedHost = async (host: string) => {
     ],
   }).lean()
   if (!record?.organizationId) return null
-  const org: any = await Organization.findOne({ organizationId: record.organizationId }).select('organizationId agencyName sub_domain websiteStatus isBlocked platformAccess.status').lean()
+  const org: any = await Organization.findOne({ organizationId: record.organizationId }).select('organizationId agencyName sub_domain').lean()
   if (!org) return null
+  const access = await TenantAccessService.evaluate(org.organizationId)
   const canonicalHost = record.domain
   return {
     organizationId: org.organizationId,
@@ -679,8 +687,8 @@ const resolveVerifiedHost = async (host: string) => {
     canonicalHost,
     redirectTo: rawHost === canonicalHost ? null : `https://${canonicalHost}`,
     lifecycleStatus: deriveLifecycle(record),
-    websiteStatus: org.isBlocked ? 'suspended' : (org.websiteStatus || 'published'),
-    isBlocked: Boolean(org.isBlocked),
+    websiteStatus: access.websiteStatus,
+    publicAccess: TenantAccessService.toPublicAccess(access),
   }
 }
 

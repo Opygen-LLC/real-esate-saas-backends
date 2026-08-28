@@ -7,7 +7,7 @@ import type { CrmAccessContext } from '../crm/crmAccess'
 import type { PublicLeadCaptureInput } from '../lead/lead.validation'
 import { Lead } from '../lead/lead.model'
 import { LeadService } from '../lead/lead.service'
-import { Organization } from '../organization/organization.model'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { Property } from '../property/property.model'
 import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
@@ -74,15 +74,8 @@ type PublicLeadSubmissionContext = { ip?: string; requestId?: string }
 
 const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadSubmissionContext) => {
   const { organizationId, privacyConsent, policyVersion } = payload
-  const organization: any = await Organization.findOne({ organizationId }).select('isBlocked websiteStatus').lean()
-  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Agency not found')
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
-  if (organization.isBlocked || organization.websiteStatus === 'suspended') {
-    throw new ApiError(423, 'This agency is currently suspended', '', 'TENANT_SUSPENDED')
-  }
-  if (organization.websiteStatus !== 'published') {
-    throw new ApiError(httpStatus.CONFLICT, 'This agency website is not published yet')
-  }
   if (!privacyConsent) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Privacy consent is required', '', 'VALIDATION_ERROR', undefined, { privacyConsent: ['Privacy consent is required'] })
   }
