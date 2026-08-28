@@ -9,13 +9,19 @@ describe('phase 3 subscription access contract', () => {
   it('enforces one global operational subscription guard with recovery routes', () => {
     const auth = read('src/app/middlewares/auth.ts')
     const guard = read('src/app/middlewares/subscriptionAccess.ts')
+    const tenantAccess = read('src/app/module/tenantAccess/tenantAccess.service.ts')
+    const tenantTypes = read('src/app/module/tenantAccess/tenantAccess.types.ts')
 
-    expect(guard).toContain("new Set(['trialing', 'active', 'cancel_at_period_end'])")
+    expect(tenantTypes).toContain("['trialing', 'active', 'cancel_at_period_end']")
+    expect(guard).toContain('TenantAccessService.evaluate')
+    expect(tenantAccess).toContain('workspaceAllowed')
     for (const route of ['/organization', '/billing', '/subscription', '/website-price', '/support']) {
       expect(guard).toContain(route)
     }
     expect(guard).toContain("'SUBSCRIPTION_INACTIVE'")
     expect(guard).toContain('upgradeRequired: true')
+    expect(guard).toContain('effectiveAccess: access')
+    expect(auth).toContain('TenantAccessService.evaluateOrganization')
     expect(auth.match(/await enforceSubscriptionAccess\(req\)/g)?.length || 0).toBeGreaterThanOrEqual(3)
   })
 

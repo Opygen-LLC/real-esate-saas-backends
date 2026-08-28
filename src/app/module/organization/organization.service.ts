@@ -12,6 +12,8 @@ import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
@@ -44,18 +46,20 @@ const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrg
   return Organization.create(payload)
 }
 
-const getMyOrganization = async (organizationId: string): Promise<IOrganization | null> => {
+const getMyOrganization = async (organizationId: string): Promise<(IOrganization & { effectiveAccess: EffectiveTenantAccess }) | null> => {
   const [result, verifiedDomain] = await Promise.all([
     Organization.findOne({ organizationId }).lean(),
     DomainRecord.findOne({ organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
   ])
   if (!result) return null
+  const effectiveAccess = TenantAccessService.evaluateOrganization(result)
   return {
     ...result,
     websiteStatus: result.websiteStatus || 'published',
     onboarding: normalizeOnboardingState(result.onboarding, result.createdAt || new Date()),
     websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
-  } as IOrganization
+    effectiveAccess,
+  } as IOrganization & { effectiveAccess: EffectiveTenantAccess }
 }
 
 const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {

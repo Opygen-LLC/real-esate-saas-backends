@@ -1,5 +1,8 @@
 import { sendSms } from '../../helpers/sendOtp'
+import { logger } from '../../../shared/logger'
+import { Metrics } from '../../../shared/metrics'
 import { writeAudit } from '../audit/audit.service'
+import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { Organization } from '../organization/organization.model'
 import type { SubscriptionStatus } from '../organization/organization.interface'
 import { getTrialPolicy, type TrialPolicy } from '../platformSettings/trialPolicy.service'
@@ -17,20 +20,29 @@ export type SubscriptionBoundarySnapshot = {
   cancelAtPeriodEnd: boolean
 }
 
+export type SubscriptionBoundaryState = {
+  snapshot: SubscriptionBoundarySnapshot
+  organization: any
+}
+
 type BoundaryTransition = {
   nextStatus: SubscriptionStatus
   gracePeriodEnd: Date | null
 }
 
-const snapshot = (organization: any): SubscriptionBoundarySnapshot => ({
-  organizationId: String(organization.organizationId),
-  plan: String(organization.subscription?.plan || 'trial'),
-  planVersion: Math.max(1, Number(organization.subscription?.planVersion || 1)),
-  status: String(organization.subscription?.status || 'expired') as SubscriptionStatus,
-  currentPeriodEnd: organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null,
-  gracePeriodEnd: organization.subscription?.gracePeriodEnd ? new Date(organization.subscription.gracePeriodEnd) : null,
-  cancelAtPeriodEnd: Boolean(organization.subscription?.cancelAtPeriodEnd),
-})
+const snapshot = (organization: any): SubscriptionBoundarySnapshot => {
+  const parsedPlanVersion = Number(organization.subscription?.planVersion || 1)
+  const planVersion = Number.isFinite(parsedPlanVersion) ? Math.max(1, Math.floor(parsedPlanVersion)) : 1
+  return {
+    organizationId: String(organization.organizationId),
+    plan: String(organization.subscription?.plan || 'trial'),
+    planVersion,
+    status: String(organization.subscription?.status || 'expired') as SubscriptionStatus,
+    currentPeriodEnd: organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null,
+    gracePeriodEnd: organization.subscription?.gracePeriodEnd ? new Date(organization.subscription.gracePeriodEnd) : null,
+    cancelAtPeriodEnd: Boolean(organization.subscription?.cancelAtPeriodEnd),
+  }
+}
 
 const graceDaysFor = (organization: any, policy: TrialPolicy): number =>
   String(organization.subscription?.plan || 'trial') === 'trial'
@@ -112,19 +124,39 @@ const applyBoundaryTransition = async (organization: any, now: Date, policy: Tri
     },
   })
 
+  Metrics.inc('subscription_expiry_transition_total', {
+    previous: previousStatus,
+    next: transition.nextStatus,
+    plan: String(updated.subscription?.plan || 'trial'),
+  })
+
+  // Access decisions change at the same instant as the lifecycle boundary.
+  // Invalidate tenant/public caches immediately, but never roll back a valid
+  // billing transition merely because the cache layer is temporarily degraded.
+  try {
+    await CacheInvalidationService.invalidateTenant(String(updated.organizationId))
+  } catch (error) {
+    Metrics.inc('tenant_access_cache_invalidation_failures_total', { source: 'subscription_boundary' })
+    logger.warn('[Subscription lifecycle] tenant cache invalidation failed', {
+      organizationId: updated.organizationId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
   return { changed: true as const, organization: updated }
 }
 
 /**
- * Request-time lifecycle reconciliation. The cron worker remains the normal
- * batch path, but this method makes the billing boundary authoritative even if
- * the worker is late or an API request arrives exactly at period end.
+ * Reconciles one organization and returns both the normalized subscription
+ * snapshot and the authoritative organization row used by TenantAccessService.
+ * Billing lifecycle remains independent from platform suspension; access precedence
+ * is applied by TenantAccessService rather than by rewriting either state machine.
  */
-export const reconcileOrganizationSubscriptionBoundary = async (
+export const reconcileOrganizationSubscriptionBoundaryState = async (
   organizationId: string,
   now = new Date(),
   actorId = 'system:subscription-access',
-): Promise<SubscriptionBoundarySnapshot> => {
+): Promise<SubscriptionBoundaryState> => {
   let organization: any = await Organization.findOne({ organizationId })
   if (!organization) throw new Error(`Organization ${organizationId} not found`)
 
@@ -138,7 +170,21 @@ export const reconcileOrganizationSubscriptionBoundary = async (
 
   const policy = await getTrialPolicy()
   const result = await applyBoundaryTransition(organization, now, policy, actorId)
-  return snapshot(result.organization)
+  return { snapshot: snapshot(result.organization), organization: result.organization }
+}
+
+/**
+ * Request-time lifecycle reconciliation. The continuously running worker remains
+ * the normal batch path, but this method makes the billing boundary authoritative
+ * even if a worker is late or a request arrives exactly at period end.
+ */
+export const reconcileOrganizationSubscriptionBoundary = async (
+  organizationId: string,
+  now = new Date(),
+  actorId = 'system:subscription-access',
+): Promise<SubscriptionBoundarySnapshot> => {
+  const result = await reconcileOrganizationSubscriptionBoundaryState(organizationId, now, actorId)
+  return result.snapshot
 }
 
 export const reconcileSubscriptions = async (): Promise<{ transitioned: number; reminders: number; scheduledChanges: Awaited<ReturnType<typeof SubscriptionScheduleService.processDueChanges>> }> => {

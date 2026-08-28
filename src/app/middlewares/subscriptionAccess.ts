@@ -1,9 +1,9 @@
 import { Request } from 'express'
 import ApiError from '../../errors/ApiError'
-import { reconcileOrganizationSubscriptionBoundary, type SubscriptionBoundarySnapshot } from '../module/subscription/subscriptionLifecycle.service'
+import { TenantAccessService } from '../module/tenantAccess/tenantAccess.service'
+import type { EffectiveTenantAccess, TenantAccessReason } from '../module/tenantAccess/tenantAccess.types'
 
-const ACCESSIBLE_STATUSES = new Set(['trialing', 'active', 'cancel_at_period_end'])
-const requestSnapshots = new WeakMap<Request, Promise<SubscriptionBoundarySnapshot>>()
+const requestAccess = new WeakMap<Request, Promise<EffectiveTenantAccess>>()
 
 const apiPath = (req: Request): string => {
   const raw = String(req.originalUrl || req.url || req.path || '').split('?')[0]
@@ -11,10 +11,9 @@ const apiPath = (req: Request): string => {
 }
 
 /**
- * Recovery routes stay reachable after expiry so the agency can authenticate,
- * inspect its subscription, pay/renew, manage its own profile, or contact
- * support. The lifecycle boundary is still reconciled before these requests;
- * only the blocking decision is bypassed.
+ * Recovery routes stay reachable after subscription expiry so the agency can
+ * authenticate, inspect billing, renew, manage its own profile, or contact
+ * support. Platform suspension/archive/deletion still wins before this bypass.
  */
 export const isSubscriptionRecoveryRequest = (req: Request): boolean => {
   const path = apiPath(req)
@@ -32,38 +31,63 @@ export const isSubscriptionRecoveryRequest = (req: Request): boolean => {
   return false
 }
 
-const subscriptionSnapshotForRequest = (req: Request): Promise<SubscriptionBoundarySnapshot> => {
-  const existing = requestSnapshots.get(req)
+const accessForRequest = (req: Request): Promise<EffectiveTenantAccess> => {
+  const existing = requestAccess.get(req)
   if (existing) return existing
   const organizationId = req.tenant?.organizationId
-  if (!organizationId) {
-    return Promise.reject(new ApiError(403, 'Tenant context required'))
-  }
-  const pending = reconcileOrganizationSubscriptionBoundary(organizationId)
-  requestSnapshots.set(req, pending)
+  if (!organizationId) return Promise.reject(new ApiError(403, 'Tenant context required'))
+
+  const pending = TenantAccessService.evaluate(organizationId, {
+    reconcileSubscription: true,
+    actorId: 'system:subscription-access',
+  })
+  requestAccess.set(req, pending)
   return pending
 }
 
-export const enforceSubscriptionAccess = async (req: Request): Promise<SubscriptionBoundarySnapshot | null> => {
+const platformAccessError = (access: EffectiveTenantAccess): ApiError | null => {
+  if (access.reason === 'TENANT_PENDING_DELETION') return new ApiError(403, 'Your agency is pending permanent deletion', '', 'TENANT_PENDING_DELETION')
+  if (access.reason === 'PLATFORM_ARCHIVED') return new ApiError(403, 'Your agency has been archived', '', 'TENANT_ARCHIVED')
+  if (access.reason === 'PLATFORM_SUSPENDED') return new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
+  return null
+}
+
+const subscriptionMessage = (reason: TenantAccessReason, status: string): string => {
+  if (reason === 'TRIAL_ENDED') return 'Your free trial has ended. Choose a subscription plan to regain access to your workspace.'
+  if (reason === 'TRIAL_EXPIRED') return 'Your free trial has expired. Choose a subscription plan to regain access to your workspace.'
+  if (reason === 'PAYMENT_PAST_DUE') return 'Your subscription payment is past due. Renew your subscription to regain access to your workspace.'
+  if (reason === 'SUBSCRIPTION_GRACE') return 'Your subscription renewal is overdue. Renew your subscription to regain access to your workspace.'
+  return `Subscription is ${status}. Renew or choose an active plan to continue.`
+}
+
+export const enforceSubscriptionAccess = async (req: Request): Promise<EffectiveTenantAccess | null> => {
   if (!req.user || req.user.userRole === 'super-admin' || !req.tenant?.organizationId) return null
 
-  const subscription = await subscriptionSnapshotForRequest(req)
-  if (isSubscriptionRecoveryRequest(req)) return subscription
-  if (ACCESSIBLE_STATUSES.has(subscription.status)) return subscription
+  const access = await accessForRequest(req)
+  const platformError = platformAccessError(access)
+  if (platformError) throw platformError
+
+  if (isSubscriptionRecoveryRequest(req)) return access
+  if (access.workspaceAllowed) return access
 
   throw new ApiError(
     402,
-    subscription.status === 'grace'
-      ? 'Your subscription renewal is overdue. Renew your subscription to regain access to your workspace.'
-      : `Subscription is ${subscription.status}. Renew or choose an active plan to continue.`,
+    subscriptionMessage(access.reason, access.subscriptionStatus),
     '',
     'SUBSCRIPTION_INACTIVE',
     {
-      currentPlan: subscription.plan,
-      currentPlanVersion: subscription.planVersion,
-      subscriptionStatus: subscription.status,
-      currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() || null,
-      gracePeriodEnd: subscription.gracePeriodEnd?.toISOString() || null,
+      reason: access.reason,
+      currentPlan: access.plan,
+      currentPlanVersion: access.planVersion,
+      subscriptionStatus: access.subscriptionStatus,
+      currentPeriodEnd: access.currentPeriodEnd?.toISOString() || null,
+      gracePeriodEnd: access.gracePeriodEnd?.toISOString() || null,
+      workspaceAllowed: access.workspaceAllowed,
+      publicWebsiteAllowed: access.publicWebsiteAllowed,
+      publicWritesAllowed: access.publicWritesAllowed,
+      backgroundBusinessWorkAllowed: access.backgroundBusinessWorkAllowed,
+      recoveryAllowed: access.recoveryAllowed,
+      effectiveAccess: access,
       upgradeRequired: true,
     },
   )

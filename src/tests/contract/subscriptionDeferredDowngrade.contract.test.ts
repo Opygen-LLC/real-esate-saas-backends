@@ -66,7 +66,7 @@ describe('deferred subscription downgrade contract', () => {
   it('has both worker and request-time protection for the exact effective boundary', () => {
     const worker = read('src/app/module/cron/phase3.worker.ts')
     const lifecycle = read('src/app/module/subscription/subscriptionLifecycle.service.ts')
-    expect(worker).toContain('SubscriptionScheduleService.processDueChanges')
+    expect(worker).toContain('reconcileSubscriptions()')
     expect(lifecycle).toContain('SubscriptionScheduleService.processDueChanges')
     expect(lifecycle).toContain('SubscriptionScheduleService.applyDueChange')
   })

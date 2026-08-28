@@ -11,6 +11,7 @@ import { effectivePermissionsForUser, Permission, permissionMatrix, permissionsF
 import { toAuthUserDto } from '../module/user/userProfile.service'
 import { enforceSubscriptionAccess } from './subscriptionAccess'
 import { TenantPurgeBarrier } from '../module/compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../module/tenantAccess/tenantAccess.service'
 
 const authenticate = async (req: Request): Promise<void> => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
@@ -24,14 +25,14 @@ const authenticate = async (req: Request): Promise<void> => {
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
   if (payload.organizationId !== user.organizationId) throw new ApiError(401, 'Token tenant mismatch')
   if (user.userRole !== 'super-admin') {
-    const organization: any = await Organization.findOne({ organizationId: user.organizationId }).select('isBlocked platformAccess.status').lean()
+    const organization: any = await Organization.findOne({ organizationId: user.organizationId })
+      .select('organizationId isBlocked platformAccess.status websiteStatus subscription')
+      .lean()
     if (!organization) throw new ApiError(401, 'Account is unavailable')
-    if (organization.isBlocked) {
-      const accessStatus = String(organization.platformAccess?.status || 'suspended')
-      if (accessStatus === 'archived') throw new ApiError(403, 'Your agency has been archived', '', 'TENANT_ARCHIVED')
-      if (accessStatus === 'pending_deletion') throw new ApiError(403, 'Your agency is pending permanent deletion', '', 'TENANT_PENDING_DELETION')
-      throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
-    }
+    const tenantAccess = TenantAccessService.evaluateOrganization(organization)
+    if (tenantAccess.platformStatus === 'archived') throw new ApiError(403, 'Your agency has been archived', '', 'TENANT_ARCHIVED')
+    if (tenantAccess.platformStatus === 'pending_deletion') throw new ApiError(403, 'Your agency is pending permanent deletion', '', 'TENANT_PENDING_DELETION')
+    if (tenantAccess.platformStatus === 'suspended') throw new ApiError(403, 'Your agency has been suspended', '', 'TENANT_SUSPENDED')
   }
   const authUser: any = toAuthUserDto(user)
   const accessControl = user.profile?.accessControl || { useRoleDefaults: true, permissions: [] }
