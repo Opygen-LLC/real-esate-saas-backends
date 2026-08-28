@@ -9,6 +9,7 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { reconcileSubscriptions } from '../subscription/subscriptionLifecycle.service'
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { TenantEntitlementOverrideService } from '../tenantEntitlementOverride/tenantEntitlementOverride.service'
+import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonitoring.service'
 
 let running = false
 let cleanupTick = 0
@@ -21,6 +22,7 @@ let lastPropertyDraftCleanupSuccessAt = 0
 let lastPropertyDraftCleanupDurationMs = 0
 let lastPropertyDraftCleanupError = ''
 let lastPropertyDraftCleanupResult: Record<string, number> | null = null
+let lastAccessMetricsRefreshAt = 0
 let interval: NodeJS.Timeout | null = null
 let initial: NodeJS.Timeout | null = null
 
@@ -36,13 +38,17 @@ export const runPhase3Maintenance = async () => {
       OperationsQueueService.schedulePendingDomainChecks(100),
       OperationsQueueService.schedulePendingCalendarSync(50),
     ])
+    const subscriptionLifecyclePromise = reconcileSubscriptions().catch((error) => {
+      Metrics.inc('subscription_lifecycle_failures_total')
+      throw error
+    })
     const [operations, planVersions, subscriptionLifecycle, recurringLeadAddons, tenantEntitlementOverrides, sla, leadAllowanceReservations] = await Promise.all([
       OperationsQueueService.processDue(config.runtime.worker_batch_size),
       SubscriptionPlanService.applyDuePlanVersions(),
       // One canonical batch path now owns scheduled subscription changes,
       // expiry/grace transitions and renewal reminders. Request-time access
       // reconciliation remains the exact-boundary safety net.
-      reconcileSubscriptions(),
+      subscriptionLifecyclePromise,
       LeadAddonSubscriptionService.applyDueLifecycle(Math.max(25, config.runtime.worker_batch_size)),
       TenantEntitlementOverrideService.applyDueExpirations(Math.max(25, config.runtime.worker_batch_size)),
       Lead.updateMany({ firstResponseAt: { $exists: false }, responseDueAt: { $lt: new Date() }, slaBreachedAt: { $exists: false } }, { $set: { slaBreachedAt: new Date() } }),
@@ -59,8 +65,21 @@ export const runPhase3Maintenance = async () => {
     Metrics.setGauge('domain_queue_failed', domainBacklog.failed)
     Metrics.setGauge('domain_queue_oldest_age_seconds', domainBacklog.oldestPendingAt ? Math.max(0, (Date.now() - new Date(domainBacklog.oldestPendingAt).getTime()) / 1000) : 0)
     Metrics.setGauge('subscription_lifecycle_last_success_timestamp_seconds', Date.now() / 1000)
+    Metrics.setGauge('subscription_lifecycle_last_success_timestamp', Date.now() / 1000)
     Metrics.inc('subscription_lifecycle_transitions_total', {}, subscriptionLifecycle.transitioned)
     Metrics.inc('subscription_lifecycle_reminders_total', {}, subscriptionLifecycle.reminders)
+
+    // Aggregate lock gauges are refreshed periodically and never carry tenant IDs,
+    // keeping Prometheus cardinality bounded even with a large customer base.
+    if (!lastAccessMetricsRefreshAt || Date.now() - lastAccessMetricsRefreshAt >= 5 * 60 * 1000) {
+      try {
+        await TenantAccessMonitoringService.refreshLockReasonGauges()
+        lastAccessMetricsRefreshAt = Date.now()
+      } catch (error) {
+        Metrics.inc('tenant_access_metrics_failures_total')
+        logger.warn('tenant_access_metrics_refresh_failed', { error })
+      }
+    }
     cleanupTick += 1
     const cleanupEvery = Math.max(1, Math.round(24 * 60 * 60 * 1000 / config.runtime.worker_poll_ms))
     const propertyDraftCleanupEvery = Math.max(1, Math.round(config.assets.property_draft_cleanup_interval_minutes * 60_000 / config.runtime.worker_poll_ms))

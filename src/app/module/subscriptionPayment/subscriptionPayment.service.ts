@@ -311,7 +311,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     const payment: any = await paymentQuery
     if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Manual payment not found')
     if (payment.status === decision.status) {
-      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: payment.periodStart || null, changeType: (payment.quoteSnapshot as SubscriptionQuoteSnapshot | null)?.changeType || null, idempotent: true }
+      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: payment.periodStart || null, changeType: (payment.quoteSnapshot as SubscriptionQuoteSnapshot | null)?.changeType || null, previousSubscriptionStatus: null, idempotent: true }
     }
     if (payment.status !== 'pending') throw new ApiError(httpStatus.CONFLICT, `Payment is already ${payment.status}`)
 
@@ -319,7 +319,9 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
     if (session) orgQuery.session(session)
     const org: any = await orgQuery
     if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-    if (org.isBlocked && decision.status === 'confirmed') throw new ApiError(httpStatus.CONFLICT, 'Reactivate this tenant before confirming a subscription payment')
+    // Billing lifecycle and platform suspension are deliberately independent. A
+    // suspended tenant may renew successfully, but TenantAccessService keeps the
+    // workspace/public website locked until a Super Admin explicitly reactivates it.
 
     let request: any = null
     if (payment.changeRequestId) {
@@ -336,7 +338,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
         await request.save(session ? { session } : undefined)
       }
       await writeAudit({ organizationId: payment.organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.payment_rejected', entityType: 'subscriptionPayment', entityId: String(payment._id), reason: decision.reason || 'Payment rejected', requestId: actor.requestId, ip: actor.ip, metadata: { paymentNumber } }, session)
-      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: null, changeType: request?.changeType || null, idempotent: false }
+      return { organizationId: payment.organizationId, entitlementReconciliation: null, deferredDowngrade: false, scheduledEffectiveAt: null, changeType: request?.changeType || null, previousSubscriptionStatus: null, idempotent: false }
     }
 
     const plan = await resolvePlan(payment.planId, payment.planVersion, session)
@@ -515,10 +517,18 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       },
     }, session)
 
-    return { organizationId: payment.organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt: deferredDowngrade ? start : null, changeType: quoteType, idempotent: false }
+    return {
+      organizationId: payment.organizationId,
+      entitlementReconciliation,
+      deferredDowngrade,
+      scheduledEffectiveAt: deferredDowngrade ? start : null,
+      changeType: quoteType,
+      previousSubscriptionStatus: String(previous.status || ''),
+      idempotent: false,
+    }
   })
 
-  const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType, idempotent } = transactionResult
+  const { organizationId, entitlementReconciliation, deferredDowngrade, scheduledEffectiveAt, changeType, previousSubscriptionStatus, idempotent } = transactionResult
   if (!idempotent) await publishSubscriptionEntitlementReconciliation(entitlementReconciliation)
   const result: any = await SubscriptionPayment.findOne({ paymentNumber }).lean()
   if (!idempotent && decision.status === 'confirmed' && result) {
@@ -544,6 +554,7 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       organizationId,
       source: idempotent ? 'manual_payment_confirmation_retry' : 'manual_payment_confirmation',
       eventType: 'subscription.payment_confirmed',
+      previousSubscriptionStatus,
     })
   }
   return result

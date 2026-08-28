@@ -4,6 +4,7 @@ import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import { Organization } from '../organization/organization.model'
 import { reconcileOrganizationSubscriptionBoundaryState } from '../subscription/subscriptionLifecycle.service'
 import { evaluateTenantAccessOrganization, isTenantSubscriptionAccessible } from './tenantAccess.policy'
+import { TenantAccessMonitoringService } from './tenantAccessMonitoring.service'
 import {
   type EffectiveTenantAccess,
   type PublicTenantAccess,
@@ -27,7 +28,9 @@ const evaluate = async (
       .select('organizationId isBlocked platformAccess.status websiteStatus subscription')
       .lean()
     if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found', '', 'TENANT_NOT_FOUND')
-    return evaluateOrganization(organization, now)
+    const access = evaluateOrganization(organization, now)
+    TenantAccessMonitoringService.recordEvaluation(access)
+    return access
   }
 
   const reconciled = await reconcileOrganizationSubscriptionBoundaryState(
@@ -35,7 +38,9 @@ const evaluate = async (
     now,
     options.actorId || 'system:tenant-access',
   )
-  return evaluateOrganization(reconciled.organization as TenantAccessOrganizationShape, now)
+  const access = evaluateOrganization(reconciled.organization as TenantAccessOrganizationShape, now)
+  TenantAccessMonitoringService.recordEvaluation(access)
+  return access
 }
 
 const toPublicAccess = (access: EffectiveTenantAccess): PublicTenantAccess => ({
@@ -49,6 +54,7 @@ const assertPublicWebsiteAccess = async (
 ): Promise<EffectiveTenantAccess> => {
   const access = await evaluate(organizationId, options)
   if (access.publicWebsiteAllowed) return access
+  TenantAccessMonitoringService.recordPublicDenied(access)
 
   if (access.reason === 'WEBSITE_NOT_PUBLISHED') {
     throw new ApiError(

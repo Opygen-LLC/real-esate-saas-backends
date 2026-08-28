@@ -31,7 +31,7 @@ const lifecycleStatus = (org: any): AccessLifecycle => {
 }
 
 const restoreSubscriptionStatus = (org: any, candidate?: SubscriptionStatus | null): SubscriptionStatus => {
-  const fallback: SubscriptionStatus = org.subscription?.plan === 'trial' ? 'trialing' : 'active'
+  const fallback: SubscriptionStatus = 'expired'
   let restored: SubscriptionStatus = candidate && candidate !== 'suspended' ? candidate : fallback
   const now = new Date()
   const periodEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
@@ -206,16 +206,16 @@ const archiveTenant = async (organizationId: string, actor: PlatformAdminActor) 
   if (currentAccess === 'pending_deletion') throw new ApiError(httpStatus.CONFLICT, 'Organization is already pending permanent deletion')
 
   const previousSubscriptionStatus = org.subscription?.status === 'suspended'
-    ? (org.platformAccess?.previousSubscriptionStatus || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
-    : (org.subscription?.status || (org.subscription?.plan === 'trial' ? 'trialing' : 'active'))
+    ? (org.platformAccess?.previousSubscriptionStatus || 'expired')
+    : (org.subscription?.status || 'expired')
   const previousWebsiteStatus = org.websiteStatus === 'suspended'
-    ? (org.platformAccess?.previousWebsiteStatus || 'published')
-    : (org.websiteStatus || 'published')
+    ? (org.platformAccess?.previousWebsiteStatus || 'provisioned')
+    : (org.websiteStatus || 'provisioned')
   const now = new Date()
 
+  // Archiving is a platform-access decision. Preserve billing and publishing
+  // state so restoring the archive cannot accidentally renew or publish a tenant.
   org.isBlocked = true
-  org.websiteStatus = 'suspended'
-  if (org.subscription) org.subscription.status = 'suspended'
   org.platformAccess = {
     ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
     status: 'archived',
@@ -258,11 +258,14 @@ const restoreArchivedTenant = async (organizationId: string, actor: PlatformAdmi
   const restoredSubscription = restoreSubscriptionStatus(org, org.platformAccess?.previousSubscriptionStatus)
   const restoredWebsite = org.platformAccess?.previousWebsiteStatus && org.platformAccess.previousWebsiteStatus !== 'suspended'
     ? org.platformAccess.previousWebsiteStatus
-    : 'published'
+    : 'provisioned'
 
   org.isBlocked = previousAccess === 'suspended'
-  org.websiteStatus = previousAccess === 'suspended' ? 'suspended' : restoredWebsite
-  if (org.subscription) org.subscription.status = previousAccess === 'suspended' ? 'suspended' : restoredSubscription
+  // Compatibility repair for organizations archived by the legacy implementation,
+  // which copied platform state into subscription/website state. New archives never
+  // mutate either field. Fail closed for an unknown legacy website state.
+  if (org.subscription?.status === 'suspended') org.subscription.status = restoredSubscription
+  if (org.websiteStatus === 'suspended') org.websiteStatus = restoredWebsite === 'published' || restoredWebsite === 'provisioned' ? restoredWebsite : 'provisioned'
   org.platformAccess = {
     ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
     status: previousAccess,

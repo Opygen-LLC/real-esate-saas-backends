@@ -193,6 +193,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
   let scheduledEffectiveAt: Date | null = null
   let activatedChangeType: SubscriptionQuoteSnapshot['changeType'] | null = null
   let renewalDatePreserved = false
+  let previousSubscriptionStatus: string | null = null
 
   await EntitlementService.withTeamMemberQuotaGuard(attempt.organizationId, async (session) => {
     const organizationQuery = Organization.findOne({ organizationId: attempt.organizationId })
@@ -202,6 +203,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
 
     const now = new Date()
     const previousSubscription = organization.subscription?.toObject?.() || { ...(organization.subscription || {}) }
+    previousSubscriptionStatus = String(previousSubscription.status || '') || null
 
     const planQuery = SubscriptionPlan.findOne({ planId: attempt.planId, version: attempt.planVersion || 1 })
     if (session) planQuery.session(session)
@@ -422,6 +424,7 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     organizationId: attempt.organizationId,
     source: 'bkash_payment_confirmation',
     eventType: 'subscription.payment_confirmed',
+    previousSubscriptionStatus,
   })
   RealtimeService.emitOrganization(attempt.organizationId, {
     type: 'subscription.changed',

@@ -14,6 +14,7 @@ import { SubdomainAlias } from './subdomainAlias.model'
 import { DomainProviderService, type DomainDiagnostic } from './providers'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonitoring.service'
 
 const ACTIVE_RECHECK_MS = 6 * 60 * 60_000
 const TLS_RECHECK_MS = 2 * 60_000
@@ -102,6 +103,7 @@ const resolveSubdomain = async (input: string) => {
   const direct = await Organization.findOne({ sub_domain: subdomain }).select('organizationId agencyName sub_domain').lean()
   if (direct) {
     const access = await TenantAccessService.evaluate(direct.organizationId)
+    if (!access.publicWebsiteAllowed) TenantAccessMonitoringService.recordPublicDenied(access)
     return {
       organizationId: direct.organizationId,
       agencyName: direct.agencyName,
@@ -117,6 +119,7 @@ const resolveSubdomain = async (input: string) => {
   const canonical = await Organization.findOne({ organizationId: alias.organizationId }).select('organizationId agencyName sub_domain').lean()
   if (!canonical) return null
   const access = await TenantAccessService.evaluate(alias.organizationId)
+  if (!access.publicWebsiteAllowed) TenantAccessMonitoringService.recordPublicDenied(access)
   return {
     organizationId: alias.organizationId,
     agencyName: canonical.agencyName,
@@ -679,6 +682,7 @@ const resolveVerifiedHost = async (host: string) => {
   const org: any = await Organization.findOne({ organizationId: record.organizationId }).select('organizationId agencyName sub_domain').lean()
   if (!org) return null
   const access = await TenantAccessService.evaluate(org.organizationId)
+  if (!access.publicWebsiteAllowed) TenantAccessMonitoringService.recordPublicDenied(access)
   const canonicalHost = record.domain
   return {
     organizationId: org.organizationId,

@@ -28,6 +28,7 @@ import { ImpersonationSession } from './impersonationSession.model'
 import { resolveEntitlementSource } from '../entitlement/featureCatalog'
 import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
 import { TenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.model'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const TEAM_ROLES = ['agency_owner', 'agency_admin', 'agent', 'staff', 'viewer']
 
@@ -108,6 +109,12 @@ export const getTenant360 = async (organizationId: string) => {
   const normalizedOrganizationId = String(organizationId || '').trim()
   if (!normalizedOrganizationId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization is required')
 
+  // Reconcile the exact subscription boundary before rendering Agency 360 so
+  // Super Admin always sees the same authoritative access decision as the API,
+  // public website and realtime layers.
+  const effectiveAccess = await TenantAccessService.evaluate(normalizedOrganizationId, {
+    actorId: 'system:platform-admin-tenant360',
+  })
   const organization: any = await Organization.findOne({ organizationId: normalizedOrganizationId }).lean()
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
 
@@ -298,6 +305,11 @@ export const getTenant360 = async (organizationId: string) => {
       subscriptionStatus: organization.subscription?.status || 'trialing',
       websiteStatus: organization.websiteStatus || 'provisioned',
       operationalErrorCount: errorCount,
+      effectiveAccess,
+      renewalRequired: !TenantAccessService.isSubscriptionAccessible(effectiveAccess.subscriptionStatus),
+      websiteConfigurationPreserved: Boolean(
+        effectiveAccess.websiteStatus === 'published' && !effectiveAccess.publicWebsiteAllowed
+      ),
     },
     ownerAndTeam: {
       owner,

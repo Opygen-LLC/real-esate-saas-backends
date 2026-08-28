@@ -149,16 +149,16 @@ const suspendTenant = async (organizationId: string, actor: { id: string; reason
   if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const accessStatus = tenantAccessStatus(org)
   if (accessStatus !== 'active') throw new ApiError(httpStatus.CONFLICT, `Only active organizations can be suspended (current status: ${accessStatus})`)
-  const previousSubscriptionStatus = org.subscription?.status || 'active'
-  const previousWebsiteStatus = org.websiteStatus || 'published'
+  const previousSubscriptionStatus = org.subscription?.status || 'expired'
+  const previousWebsiteStatus = org.websiteStatus || 'provisioned'
   org.isBlocked = true
-  org.websiteStatus = 'suspended'
   org.platformAccess = {
     ...(org.platformAccess?.toObject?.() || org.platformAccess || {}),
     status: 'suspended', suspendedAt: new Date(), suspendedBy: actor.id, suspensionReason: actor.reason,
+    // Retained only as audit/legacy-recovery context. Platform suspension no longer
+    // rewrites the independent billing or website-publication state machines.
     previousSubscriptionStatus, previousWebsiteStatus, suspensionSource: 'tenant', suspensionUserId: null,
   }
-  if (org.subscription) org.subscription.status = 'suspended'
   await org.save()
   await AuthSession.updateMany({ organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_suspended' } })
   await TenantAccessTransitionService.sync({
@@ -179,19 +179,32 @@ const reactivateTenant = async (organizationId: string, actor: { id: string; rea
   if (accessStatus !== 'suspended') throw new ApiError(httpStatus.CONFLICT, `Only suspended organizations can be reactivated (current status: ${accessStatus})`)
   const previous = org.platformAccess?.previousSubscriptionStatus
   const previousWebsiteStatus = org.platformAccess?.previousWebsiteStatus
-  const fallback = org.subscription?.plan === 'trial' ? 'trialing' : 'active'
-  let restored = previous && previous !== 'suspended' ? previous : fallback
   const now = new Date()
-  const periodEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
-  const graceEnd = org.subscription?.gracePeriodEnd ? new Date(org.subscription.gracePeriodEnd) : null
-  if (periodEnd && periodEnd.getTime() <= now.getTime()) restored = graceEnd && graceEnd.getTime() > now.getTime() ? 'grace' : 'expired'
+
+  // Compatibility repair for rows suspended by the pre-tenant-access engine,
+  // which used to overwrite independent state with the word "suspended". New
+  // suspensions never enter this branch because those fields are left untouched.
+  let legacyRestoredSubscriptionStatus: string | null = null
+  if (org.subscription?.status === 'suspended') {
+    const fallback = 'expired'
+    let restored = previous && previous !== 'suspended' ? previous : fallback
+    const periodEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
+    const graceEnd = org.subscription?.gracePeriodEnd ? new Date(org.subscription.gracePeriodEnd) : null
+    if (periodEnd && periodEnd.getTime() <= now.getTime()) restored = graceEnd && graceEnd.getTime() > now.getTime() ? 'grace' : 'expired'
+    org.subscription.status = restored
+    legacyRestoredSubscriptionStatus = restored
+  }
+  let legacyRestoredWebsiteStatus: string | null = null
+  if (org.websiteStatus === 'suspended') {
+    org.websiteStatus = previousWebsiteStatus && previousWebsiteStatus !== 'suspended' ? previousWebsiteStatus : 'provisioned'
+    legacyRestoredWebsiteStatus = org.websiteStatus
+  }
+
   org.isBlocked = false
-  org.websiteStatus = previousWebsiteStatus && previousWebsiteStatus !== 'suspended' ? previousWebsiteStatus : 'published'
   org.platformAccess = { ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'active', reactivatedAt: new Date(), reactivatedBy: actor.id, reactivationReason: actor.reason, suspensionSource: null, suspensionUserId: null }
-  if (org.subscription) org.subscription.status = restored
   await org.save()
   await TenantAccessTransitionService.sync({ organizationId, organization: org, source: 'platform_reactivate', eventType: 'organization.reactivated' })
-  await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.reactivated', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { restoredSubscriptionStatus: restored, restoredWebsiteStatus: org.websiteStatus } })
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'organization.reactivated', entityType: 'organization', entityId: org._id.toString(), reason: actor.reason, requestId: actor.requestId, ip: actor.ip, metadata: { legacyRestoredSubscriptionStatus, legacyRestoredWebsiteStatus, currentSubscriptionStatus: org.subscription?.status || null, currentWebsiteStatus: org.websiteStatus || null } })
   RealtimeService.emitRole('super-admin', { type: 'platform.notification.changed', action: 'updated', entityId: 'tenant_reactivated' })
   return org
 }
@@ -404,6 +417,7 @@ const changeTenantSubscription = async (
 
   let response: any
   let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
+  let previousSubscriptionStatus: string | null = null
   await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
     const orgQuery = Organization.findOne({ organizationId })
     if (session) orgQuery.session(session)
@@ -413,6 +427,7 @@ const changeTenantSubscription = async (
     if (org.subscription?.scheduledPlan) throw new ApiError(httpStatus.CONFLICT, 'A paid subscription downgrade is already scheduled. Resolve its billing adjustment/refund before overriding the tenant subscription.')
 
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
+    previousSubscriptionStatus = String(previous.status || '') || null
     const now = new Date()
     const end = new Date(now.getTime() + Math.max(1, Number(input.periodDays || policy.defaultTrialDays)) * 24 * 60 * 60 * 1000)
     const assigned = {
@@ -445,7 +460,7 @@ const changeTenantSubscription = async (
   })
 
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_assignment', eventType: 'subscription.plan_changed' })
+  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_assignment', eventType: 'subscription.plan_changed', previousSubscriptionStatus })
   return response
 }
 
@@ -457,6 +472,7 @@ const manageTenantTrial = async (
   const policy = await getTrialPolicy()
   let response: any
   let reconciliation: SubscriptionEntitlementReconciliationResult | null = null
+  let previousSubscriptionStatus: string | null = null
 
   await EntitlementService.withTeamMemberQuotaGuard(organizationId, async (session) => {
     const orgQuery = Organization.findOne({ organizationId })
@@ -468,6 +484,7 @@ const manageTenantTrial = async (
     if (org.subscription?.plan !== 'trial') throw new ApiError(httpStatus.CONFLICT, 'This agency is on a paid plan. Use Manage plan to switch it to Trial first.')
 
     const previous = org.subscription?.toObject?.() || { ...(org.subscription || {}) }
+    previousSubscriptionStatus = String(previous.status || '') || null
     const now = new Date()
     let end: Date = now
     if (input.action === 'extend') {
@@ -520,7 +537,7 @@ const manageTenantTrial = async (
   })
 
   await publishSubscriptionEntitlementReconciliation(reconciliation)
-  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_update', eventType: 'subscription.trial_updated' })
+  await TenantAccessTransitionService.sync({ organizationId, source: 'admin_trial_update', eventType: 'subscription.trial_updated', previousSubscriptionStatus })
   return response
 }
 

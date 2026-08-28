@@ -22,6 +22,7 @@ import { toPublicProperties } from '../property/publicProperty.serializer'
 import { Viewing } from '../viewing/viewing.model'
 import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { TenantAccessTransitionService } from '../tenantAccess/tenantAccessTransition.service'
 import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { effectivePermissionsForUser, normalizeCustomPermissions, permissionCatalog, permissionsForRole } from './accessControl'
 import { UserResponseDto } from './user.dto'
@@ -543,20 +544,18 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
     if (previousRole === 'agency_owner') {
       const org: any = await Organization.findOne({ organizationId: user.organizationId })
       if (org && !org.isBlocked) {
-        const previousSubscriptionStatus = org.subscription?.status || 'active'
-        const previousWebsiteStatus = org.websiteStatus || 'published'
+        const previousSubscriptionStatus = org.subscription?.status || 'expired'
+        const previousWebsiteStatus = org.websiteStatus || 'provisioned'
+        // Blocking the canonical agency owner is a platform suspension only.
+        // Subscription and website publishing state are independent facts.
         org.isBlocked = true
-        org.websiteStatus = 'suspended'
-        if (org.subscription) org.subscription.status = 'suspended'
         org.platformAccess = {
           ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'suspended', suspendedAt: new Date(), suspendedBy: actorId || '',
           suspensionReason: reason, previousSubscriptionStatus, previousWebsiteStatus, suspensionSource: 'owner_user', suspensionUserId: String(user._id),
         }
         await org.save()
-        await Promise.all([
-          AuthSession.updateMany({ organizationId: user.organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_owner_suspended' } }),
-          CacheInvalidationService.invalidateTenant(user.organizationId),
-        ])
+        await AuthSession.updateMany({ organizationId: user.organizationId, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'tenant_owner_suspended' } })
+        await TenantAccessTransitionService.sync({ organizationId: user.organizationId, organization: org, source: 'owner_user_suspend', eventType: 'organization.suspended' })
         RealtimeService.emitOrganization(user.organizationId, { type: 'auth.changed', action: 'authorization_changed', forceLogout: true, entityId: 'tenant_suspended' })
       }
     }
@@ -564,14 +563,16 @@ const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string
   if (changes.status === 'active' && previousRole === 'agency_owner') {
     const org: any = await Organization.findOne({ organizationId: user.organizationId })
     if (org?.isBlocked && org.platformAccess?.suspensionSource === 'owner_user' && String(org.platformAccess?.suspensionUserId || '') === String(user._id)) {
-      const restoredSubscription = org.platformAccess?.previousSubscriptionStatus && org.platformAccess.previousSubscriptionStatus !== 'suspended' ? org.platformAccess.previousSubscriptionStatus : (org.subscription?.plan === 'trial' ? 'trialing' : 'active')
-      const restoredWebsite = org.platformAccess?.previousWebsiteStatus && org.platformAccess.previousWebsiteStatus !== 'suspended' ? org.platformAccess.previousWebsiteStatus : 'published'
+      const restoredSubscription = org.platformAccess?.previousSubscriptionStatus && org.platformAccess.previousSubscriptionStatus !== 'suspended' ? org.platformAccess.previousSubscriptionStatus : 'expired'
+      const restoredWebsite = org.platformAccess?.previousWebsiteStatus && org.platformAccess.previousWebsiteStatus !== 'suspended' ? org.platformAccess.previousWebsiteStatus : 'provisioned'
+      const previousSubscriptionStatus = org.subscription?.status || null
       org.isBlocked = false
-      org.websiteStatus = restoredWebsite
-      if (org.subscription) org.subscription.status = restoredSubscription
+      // Compatibility repair only for rows written by the legacy coupled suspension.
+      if (org.subscription?.status === 'suspended') org.subscription.status = restoredSubscription
+      if (org.websiteStatus === 'suspended') org.websiteStatus = restoredWebsite
       org.platformAccess = { ...(org.platformAccess?.toObject?.() || org.platformAccess || {}), status: 'active', reactivatedAt: new Date(), reactivatedBy: actorId || '', reactivationReason: reason, suspensionSource: null, suspensionUserId: null }
       await org.save()
-      await CacheInvalidationService.invalidateTenant(user.organizationId)
+      await TenantAccessTransitionService.sync({ organizationId: user.organizationId, organization: org, source: 'owner_user_reactivate', eventType: 'organization.reactivated', previousSubscriptionStatus })
     }
   }
   const readModel = await findUserWithProfiles({ _id: user._id })

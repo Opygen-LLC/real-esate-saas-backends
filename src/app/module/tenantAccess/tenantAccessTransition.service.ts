@@ -9,6 +9,7 @@ import { RealtimeService } from '../realtime/realtime.service'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
 import { evaluateTenantAccessOrganization } from './tenantAccess.policy'
 import type { EffectiveTenantAccess, TenantAccessOrganizationShape } from './tenantAccess.types'
+import { TenantAccessMonitoringService } from './tenantAccessMonitoring.service'
 
 export const ACCESS_CONTROLLED_OPERATION_TYPES = [
   'task_reminder',
@@ -90,6 +91,7 @@ type SyncInput = {
   source: string
   organization?: TenantAccessOrganizationShape | null
   eventType?: string
+  previousSubscriptionStatus?: string | null
 }
 
 const sync = async (input: SyncInput): Promise<EffectiveTenantAccess | null> => {
@@ -102,6 +104,11 @@ const sync = async (input: SyncInput): Promise<EffectiveTenantAccess | null> => 
   if (!organization) return null
 
   const access = evaluateTenantAccessOrganization(organization as TenantAccessOrganizationShape)
+  TenantAccessMonitoringService.recordSubscriptionReactivation({
+    previousStatus: input.previousSubscriptionStatus,
+    nextStatus: access.subscriptionStatus,
+    source: input.source,
+  })
   const now = new Date()
   let identifiers: string[] = []
 

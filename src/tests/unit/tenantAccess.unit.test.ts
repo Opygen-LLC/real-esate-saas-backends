@@ -60,6 +60,60 @@ describe('TenantAccessService.evaluateOrganization', () => {
     expect(access.recoveryAllowed).toBe(false)
   })
 
+
+  it('locks an expired paid plan and keeps billing recovery available', () => {
+    const access = TenantAccessService.evaluateOrganization(organization({
+      subscription: {
+        plan: 'professional',
+        planVersion: 4,
+        status: 'expired',
+        currentPeriodEnd: new Date('2026-08-25T00:00:00.000Z'),
+        gracePeriodEnd: null,
+      },
+    }))
+    expect(access.workspaceAllowed).toBe(false)
+    expect(access.publicWebsiteAllowed).toBe(false)
+    expect(access.backgroundBusinessWorkAllowed).toBe(false)
+    expect(access.reason).toBe('SUBSCRIPTION_EXPIRED')
+    expect(access.recoveryAllowed).toBe(true)
+  })
+
+  it('keeps platform suspension authoritative after a paid subscription becomes active again', () => {
+    const access = TenantAccessService.evaluateOrganization(organization({
+      isBlocked: true,
+      platformAccess: { status: 'suspended' },
+      subscription: {
+        plan: 'professional',
+        planVersion: 4,
+        status: 'active',
+        currentPeriodEnd: new Date('2026-09-25T00:00:00.000Z'),
+        gracePeriodEnd: null,
+      },
+    }))
+    expect(access.subscriptionStatus).toBe('active')
+    expect(access.workspaceAllowed).toBe(false)
+    expect(access.publicWebsiteAllowed).toBe(false)
+    expect(access.reason).toBe('PLATFORM_SUSPENDED')
+    expect(access.recoveryAllowed).toBe(false)
+  })
+
+  it('never republishes a provisioned website when subscription access is restored', () => {
+    const access = TenantAccessService.evaluateOrganization(organization({
+      websiteStatus: 'provisioned',
+      subscription: {
+        plan: 'professional',
+        planVersion: 4,
+        status: 'active',
+        currentPeriodEnd: new Date('2026-09-25T00:00:00.000Z'),
+        gracePeriodEnd: null,
+      },
+    }))
+    expect(access.workspaceAllowed).toBe(true)
+    expect(access.publicWebsiteAllowed).toBe(false)
+    expect(access.websiteStatus).toBe('provisioned')
+    expect(access.reason).toBe('WEBSITE_NOT_PUBLISHED')
+  })
+
   it('fails closed for an inconsistent legacy isBlocked row', () => {
     const access = TenantAccessService.evaluateOrganization(organization({
       isBlocked: true,
