@@ -12,6 +12,7 @@ router.get('/public-agent/:id', UserController.getPublicAgentDetail)
 
 // Authenticated endpoints
 router.get('/me/access', authMiddlewares.auth(), UserController.getMyAccess)
+router.get('/me/export', authMiddlewares.auth(), UserController.exportMyData)
 router.get('/me/profile', authMiddlewares.auth(), UserController.getMyProfile)
 router.patch('/me/profile', authMiddlewares.auth(), validateRequest(UserValidation.selfProfile), UserController.updateMyProfile)
 

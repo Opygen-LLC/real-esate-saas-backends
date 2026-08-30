@@ -7,6 +7,7 @@ import { UserService } from './user.service'
 import { requireTenant } from '../../middlewares/auth'
 import { writeAudit } from '../audit/audit.service'
 import { TeamInvitationService } from '../teamInvitation/teamInvitation.service'
+import { UserDataExportService } from './userDataExport.service'
 
 const createUser = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.createUser(requireTenant(req), req.body, req.user!._id!)
@@ -160,6 +161,40 @@ const deleteUserById = catchAsync(async (req: Request, res: Response) => {
 })
 
 
+const exportMyData = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const sectionQuery = Array.isArray(req.query.sections)
+    ? req.query.sections.map(String)
+    : typeof req.query.sections === 'string'
+      ? req.query.sections
+      : undefined
+  const result = await UserDataExportService.buildUserDataExport(
+    organizationId,
+    req.user!._id!,
+    sectionQuery,
+  )
+
+  await writeAudit({
+    organizationId,
+    actorId: req.user!._id!,
+    actorRole: req.user!.userRole,
+    action: 'user.data_exported',
+    entityType: 'user',
+    entityId: req.user!._id!,
+    reason: 'User downloaded profile data export',
+    requestId: req.requestId,
+    ip: req.ip,
+    metadata: { sections: result.sections, scope: result.scope, counts: result.counts, totalRecords: result.totalRecords },
+  })
+
+  res.setHeader('Content-Type', 'application/zip')
+  res.setHeader('Content-Disposition', `attachment; filename="${result.fileName}"`)
+  res.setHeader('Content-Length', String(result.buffer.length))
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0')
+  res.setHeader('Pragma', 'no-cache')
+  res.status(httpStatus.OK).send(result.buffer)
+})
+
 const getMyProfile = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.getUserById(requireTenant(req), req.user!._id!)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Profile fetched successfully', data: result })
@@ -297,6 +332,7 @@ export const UserController = {
   updateUserRoleSuperAdmin,
   verifyUserSuperAdmin,
   getMyAccess,
+  exportMyData,
   getMyProfile,
   updateMyProfile,
   updateMemberAccess,
