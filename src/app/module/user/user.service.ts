@@ -10,6 +10,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { AccountCredential } from '../accountCredential/accountCredential.model'
 import { AuthSession } from '../auth/authSession.model'
 import { OtpChallenge } from '../auth/otpChallenge.model'
+import { writeAudit } from '../audit/audit.service'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { EntitlementService, TEAM_MEMBER_SEAT_ROLES } from '../entitlement/entitlement.service'
@@ -495,6 +496,127 @@ const getSuperAdminUserSummary = async () => {
 const getAllUsersSuperAdminExportCursor = (filters: IUserFilter) =>
   User.find(superAdminExportWhere(filters)).select('name email phoneNumber userRole organizationId status createdAt').sort({ createdAt: -1, _id: -1 }).lean().cursor()
 
+type ManualVerificationContext = {
+  actorId: string
+  reason: string
+  requestId?: string
+  ip?: string
+}
+
+type ManualVerificationWriteResult = {
+  changed: boolean
+  organizationId: string
+}
+
+const verifyUserSuperAdmin = async (id: string, context: ManualVerificationContext) => {
+  const objectId = asUserObjectId(id)
+  if (!objectId) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+
+  const current = await User.findById(objectId).select('_id organizationId status isVerified').lean()
+  if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  if (current.isVerified && current.status === 'active') {
+    const existingReadModel = await findUserWithProfiles({ _id: objectId })
+    if (!existingReadModel) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+    return {
+      user: toUserDto(existingReadModel, { includeAccessControl: true, includePrivateProfile: true }),
+      alreadyVerified: true,
+      verificationMethod: 'existing' as const,
+    }
+  }
+  if (current.status !== 'pending' || current.isVerified) {
+    throw new ApiError(httpStatus.CONFLICT, 'Only pending, unverified accounts can be manually verified')
+  }
+  if (!await AccountCredential.exists({ userId: objectId })) {
+    throw new ApiError(httpStatus.CONFLICT, 'Account credential is missing; manual verification cannot be completed safely')
+  }
+
+  const verifiedAt = new Date()
+  const applyVerification = async (session?: mongoose.ClientSession): Promise<ManualVerificationWriteResult> => {
+    const updated = await User.findOneAndUpdate(
+      { _id: objectId, status: 'pending', isVerified: false },
+      { $set: { status: 'active', isVerified: true } },
+      { new: true, ...(session ? { session } : {}) },
+    ).select('_id organizationId status isVerified')
+
+    if (!updated) {
+      const raceQuery = User.findById(objectId).select('_id organizationId status isVerified')
+      if (session) raceQuery.session(session)
+      const raceWinner = await raceQuery.lean()
+      if (!raceWinner) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+      if (raceWinner.isVerified && raceWinner.status === 'active') {
+        return { changed: false, organizationId: raceWinner.organizationId }
+      }
+      throw new ApiError(httpStatus.CONFLICT, 'Only pending, unverified accounts can be manually verified')
+    }
+
+    const credentialUpdate = await AccountCredential.updateOne(
+      { userId: objectId },
+      { $set: { emailVerifiedAt: verifiedAt } },
+      session ? { session } : undefined,
+    )
+    if (credentialUpdate.matchedCount !== 1) {
+      throw new ApiError(httpStatus.CONFLICT, 'Account credential is missing; manual verification cannot be completed safely')
+    }
+
+    await OtpChallenge.updateMany(
+      { userId: objectId, purpose: 'account_verification', consumedAt: null },
+      { $set: { consumedAt: verifiedAt } },
+      session ? { session } : undefined,
+    )
+
+    await writeAudit({
+      organizationId: updated.organizationId,
+      actorId: context.actorId,
+      actorRole: 'super-admin',
+      action: 'identity.user_manually_verified',
+      entityType: 'user',
+      entityId: id,
+      reason: context.reason,
+      requestId: context.requestId,
+      ip: context.ip,
+      metadata: {
+        source: 'super_admin',
+        verificationMethod: 'manual_admin_approval',
+        userId: id,
+        verifiedBy: context.actorId,
+        previousStatus: 'pending',
+        newStatus: 'active',
+        verifiedAt: verifiedAt.toISOString(),
+      },
+    }, session)
+
+    return { changed: true, organizationId: updated.organizationId }
+  }
+
+  let writeResult: ManualVerificationWriteResult
+  if (await mongoSupportsTransactions()) {
+    const session = await mongoose.startSession()
+    try {
+      let transactionResult: ManualVerificationWriteResult | undefined
+      await session.withTransaction(async () => { transactionResult = await applyVerification(session) })
+      if (!transactionResult) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Manual verification transaction did not complete')
+      writeResult = transactionResult
+    } finally {
+      await session.endSession()
+    }
+  } else {
+    writeResult = await applyVerification()
+  }
+
+  const readModel = await findUserWithProfiles({ _id: objectId })
+  if (!readModel) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
+  if (writeResult.changed) {
+    await CacheInvalidationService.invalidateTenant(writeResult.organizationId)
+    RealtimeService.emitOrganization(writeResult.organizationId, { type: 'team.changed', action: 'verified', entityId: id })
+  }
+  return {
+    user: toUserDto(readModel, { includeAccessControl: true, includePrivateProfile: true }),
+    alreadyVerified: !writeResult.changed,
+    verificationMethod: writeResult.changed ? 'manual_admin_approval' as const : 'existing' as const,
+    ...(writeResult.changed ? { verifiedAt: verifiedAt.toISOString() } : {}),
+  }
+}
+
 const updateUserRoleSuperAdmin = async (id: string, payload: { userRole?: string; status?: string; reason: string }, actorId?: string) => {
   const user = await User.findById(id)
   if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'User not found')
@@ -799,6 +921,7 @@ export const UserService = {
   getSuperAdminUserSummary,
   getAllUsersSuperAdminExportCursor,
   updateUserRoleSuperAdmin,
+  verifyUserSuperAdmin,
   getMyAccess,
   updateMemberAccess,
   updateMemberSeatAccess,

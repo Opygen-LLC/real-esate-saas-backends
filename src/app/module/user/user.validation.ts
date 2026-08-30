@@ -19,4 +19,5 @@ export const UserValidation = {
   publicBroker: z.object({ body: z.object({ showAsLicensedBroker: z.boolean(), licenseNumber: z.string().trim().max(100).optional() }).strict() }),
   platformRole: z.object({ body: z.object({ userRole: z.enum(['super-admin', 'agency_owner', 'agency_admin', 'agent', 'staff', 'viewer', 'user']).optional(),
     status: z.enum(['pending', 'active', 'blocked']).optional(), reason: z.string().trim().min(10).max(500) }).refine(value => value.userRole || value.status, 'Role or status is required') }),
+  manualVerification: z.object({ body: z.object({ reason: z.string().trim().min(10).max(500) }).strict() }),
 }

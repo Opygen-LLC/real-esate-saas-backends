@@ -71,6 +71,8 @@ router.get('/super-admin/export.csv', authMiddlewares.authSuperAdmin, UserContro
 router.get('/super-admin/all', authMiddlewares.authSuperAdmin, UserController.getAllUsersSuperAdmin)
 router.patch('/super-admin/:id/role', authMiddlewares.authSuperAdmin,
   validateRequest(UserValidation.platformRole), UserController.updateUserRoleSuperAdmin)
+router.patch('/super-admin/:id/verify', authMiddlewares.authSuperAdmin,
+  validateRequest(UserValidation.manualVerification), UserController.verifyUserSuperAdmin)
 
 router.get(
   '/:id',

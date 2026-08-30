@@ -247,6 +247,22 @@ const exportUsersSuperAdminCsv = catchAsync(async (req: Request, res: Response) 
   res.end()
 })
 
+const verifyUserSuperAdmin = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.verifyUserSuperAdmin(req.params.id, {
+    actorId: req.user!._id!,
+    reason: req.body.reason,
+    requestId: req.requestId,
+    ip: req.ip,
+  })
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.alreadyVerified ? 'User is already verified' : 'User verified successfully by super-admin',
+    data: result,
+  })
+})
+
 const updateUserRoleSuperAdmin = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
   const result = await UserService.updateUserRoleSuperAdmin(id, req.body, req.user!._id!)
@@ -279,6 +295,7 @@ export const UserController = {
   getSuperAdminUserSummary,
   exportUsersSuperAdminCsv,
   updateUserRoleSuperAdmin,
+  verifyUserSuperAdmin,
   getMyAccess,
   getMyProfile,
   updateMyProfile,
