@@ -15,6 +15,7 @@ export const PRODUCTION_EVENT_NAMES = [
   'meta_capi_failed',
   'website_template_changed',
   'website_template_render_failed',
+  'website_submission_deleted',
 ] as const
 
 export type ProductionEventName = typeof PRODUCTION_EVENT_NAMES[number]

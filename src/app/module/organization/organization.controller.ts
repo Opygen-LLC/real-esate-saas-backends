@@ -89,7 +89,7 @@ const updateInvoiceBrandingSettings = catchAsync(async (req: Request, res: Respo
     actorRole: req.user!.userRole || 'agency_owner',
     action: 'finance.invoice_branding_updated',
     entityType: 'organization',
-    entityId: String(result._id),
+    entityId: String((result as any)._id || result.organizationId),
     requestId: req.requestId,
     ip: req.ip,
     metadata: { invoiceLogoConfigured: Boolean(result.invoiceLogo) },
