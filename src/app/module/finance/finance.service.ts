@@ -194,8 +194,8 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
 const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
   const transaction: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
   if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked invoice and commission transactions cannot be deleted directly')
-  if (transaction.status !== 'voided') throw new ApiError(httpStatus.CONFLICT, 'Void this manual transaction before deleting it')
+  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked invoice and commission transactions cannot be deleted directly', '', 'FINANCE_TRANSACTION_LINKED_PROTECTED')
+  if (transaction.status !== 'voided') throw new ApiError(httpStatus.CONFLICT, 'Void this manual transaction before deleting it', '', 'FINANCE_TRANSACTION_VOID_REQUIRED')
   transaction.deletedAt = new Date()
   transaction.deletedBy = actorObjectId(actor.id)
   transaction.deleteReason = reason.trim()
@@ -423,7 +423,8 @@ const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorCo
   const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
   if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
   const removableStatus = invoice.status === 'draft' || invoice.status === 'cancelled'
-  if (!removableStatus || Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft or voided invoices can be archived')
+  if (Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be archived', '', 'FINANCE_INVOICE_PAYMENT_PROTECTED')
+  if (!removableStatus) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft or voided invoices can be archived', '', 'FINANCE_INVOICE_REMOVE_NOT_ALLOWED')
   invoice.archivedAt = new Date()
   invoice.archivedBy = actorObjectId(actor.id)
   invoice.archiveReason = reason
@@ -555,8 +556,8 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
 const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Cancelled commission removed by agency owner') => {
   const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
   if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (commission.status === 'paid' || commission.paidAt || commission.payoutTransactionId) throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be deleted')
-  if (commission.status !== 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancel this commission before deleting it')
+  if (commission.status === 'paid' || commission.paidAt || commission.payoutTransactionId) throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be deleted', '', 'FINANCE_COMMISSION_PAYMENT_PROTECTED')
+  if (commission.status !== 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancel this commission before deleting it', '', 'FINANCE_COMMISSION_CANCEL_REQUIRED')
   commission.archivedAt = new Date()
   commission.archivedBy = actorObjectId(actor.id)
   commission.archiveReason = reason.trim()

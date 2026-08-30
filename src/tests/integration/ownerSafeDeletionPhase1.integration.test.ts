@@ -189,6 +189,15 @@ suite('agency-owner safe deletion phase 1', () => {
 
     const linkedDelete = await request(`/api/v1/finance/transactions/${linked._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Unsafe linked delete' }) })
     expect(linkedDelete.response.status).toBe(409)
+    expect(linkedDelete.body?.code).toBe('FINANCE_TRANSACTION_LINKED_PROTECTED')
+
+    const activeManual = await FinanceTransaction.create({
+      organizationId: tenantA, type: 'expense', category: 'Office', amount: 100, currency: 'BDT', transactionDate: new Date(), paymentMethod: 'cash',
+      status: 'paid', description: 'Active manual expense', sourceType: 'manual', createdBy: ownerA._id,
+    })
+    const activeDelete = await request(`/api/v1/finance/transactions/${activeManual._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must void first' }) })
+    expect(activeDelete.response.status).toBe(409)
+    expect(activeDelete.body?.code).toBe('FINANCE_TRANSACTION_VOID_REQUIRED')
 
     const removed = await request(`/api/v1/finance/transactions/${manual._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Duplicate manual entry' }) })
     expect(removed.response.status).toBe(200)
@@ -207,7 +216,14 @@ suite('agency-owner safe deletion phase 1', () => {
 
     expect((await request(`/api/v1/finance/invoices/${draft._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Duplicate draft' }) })).response.status).toBe(200)
     expect((await request(`/api/v1/finance/invoices/${voided._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Old voided invoice' }) })).response.status).toBe(200)
-    expect((await request(`/api/v1/finance/invoices/${paid._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must remain' }) })).response.status).toBe(409)
+    const paidDelete = await request(`/api/v1/finance/invoices/${paid._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must remain' }) })
+    expect(paidDelete.response.status).toBe(409)
+    expect(paidDelete.body?.code).toBe('FINANCE_INVOICE_PAYMENT_PROTECTED')
+
+    const sent = await FinanceInvoice.create(financeInvoice(tenantA, ownerA._id, 'INV-DELETE-SENT', 'sent'))
+    const sentDelete = await request(`/api/v1/finance/invoices/${sent._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must void first' }) })
+    expect(sentDelete.response.status).toBe(409)
+    expect(sentDelete.body?.code).toBe('FINANCE_INVOICE_REMOVE_NOT_ALLOWED')
 
     expect((await FinanceInvoice.findById(draft._id).lean())?.archivedAt).toBeTruthy()
     expect((await FinanceInvoice.findById(voided._id).lean())?.archivedAt).toBeTruthy()
@@ -229,7 +245,17 @@ suite('agency-owner safe deletion phase 1', () => {
     })
 
     expect((await request(`/api/v1/finance/commissions/${cancelled._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Cancelled record cleanup' }) })).response.status).toBe(200)
-    expect((await request(`/api/v1/finance/commissions/${paid._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must remain' }) })).response.status).toBe(409)
+    const paidDelete = await request(`/api/v1/finance/commissions/${paid._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must remain' }) })
+    expect(paidDelete.response.status).toBe(409)
+    expect(paidDelete.body?.code).toBe('FINANCE_COMMISSION_PAYMENT_PROTECTED')
+
+    const approved = await FinanceCommission.create({
+      organizationId: tenantA, commissionNumber: 'COM-DELETE-APPROVED', agentId: ownerA._id, grossDealValue: 100000, commissionAmount: 5000,
+      agentShare: 3000, companyShare: 2000, currency: 'BDT', status: 'approved', createdBy: ownerA._id,
+    })
+    const approvedDelete = await request(`/api/v1/finance/commissions/${approved._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Must cancel first' }) })
+    expect(approvedDelete.response.status).toBe(409)
+    expect(approvedDelete.body?.code).toBe('FINANCE_COMMISSION_CANCEL_REQUIRED')
 
     expect((await FinanceCommission.findById(cancelled._id).lean())?.archivedAt).toBeTruthy()
     expect((await FinanceCommission.findById(paid._id).lean())?.archivedAt).toBeFalsy()
