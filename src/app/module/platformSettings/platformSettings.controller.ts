@@ -12,7 +12,15 @@ import { toTeamMemberLimitContract } from '../../../contracts/workspaceContracts
 
 const toPlatformSettingsContract = (settings: any) => {
   const plain = typeof settings?.toObject === 'function' ? settings.toObject() : settings
-  return plain?.trial ? { ...plain, trial: toTeamMemberLimitContract(plain.trial) } : plain
+  if (!plain) return plain
+
+  return {
+    ...plain,
+    ...(plain.trial ? { trial: toTeamMemberLimitContract(plain.trial) } : {}),
+    authentication: {
+      requireEmailOtpVerification: plain.authentication?.requireEmailOtpVerification ?? true,
+    },
+  }
 }
 
 const publicSettings = catchAsync(async (_req: Request, res: Response) => {

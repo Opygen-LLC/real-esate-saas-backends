@@ -18,6 +18,9 @@ const platformSettingsSchema = new Schema({
     legalReviewStatus: { type: String, enum: ['required', 'approved'], default: 'required' },
     legalReviewedAt: { type: Date, default: null },
   },
+  authentication: {
+    requireEmailOtpVerification: { type: Boolean, default: true },
+  },
   support: {
     whatsapp: { type: String, default: '+8801891793354', maxlength: 20 },
     phone: { type: String, default: '+8801891793354', maxlength: 20 },

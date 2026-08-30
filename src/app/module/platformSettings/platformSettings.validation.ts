@@ -83,6 +83,9 @@ export const PlatformSettingsValidation = {
       if (!privacy.policyUrl) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['policyUrl'], message: 'Policy URL is required before privacy can be approved' })
       if (!privacy.policyVersion) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['policyVersion'], message: 'Policy version is required before privacy can be approved' })
     }).optional(),
+    authentication: z.object({
+      requireEmailOtpVerification: z.boolean(),
+    }).strict().optional(),
     support: z.object({
       whatsapp: bdPhone,
       phone: bdPhone,
