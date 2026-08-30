@@ -155,6 +155,19 @@ const revokeOtherSessions = catchAsync(async (req: Request, res: Response) => {
 
 const registerAgency = catchAsync(async (req: Request, res: Response) => {
   const result = await AuthServices.registerAgency(req.body, meta(req))
+
+  if (!result.verificationRequired) {
+    setAuthCookies(res, result)
+    const { refreshToken: _refresh, accessToken: _access, ...safe } = result
+    sendResponse(res, {
+      statusCode: 201,
+      success: true,
+      message: 'Agency created. Your account is verified and ready.',
+      data: safe,
+    })
+    return
+  }
+
   sendResponse(res, {
     statusCode: 201,
     success: true,

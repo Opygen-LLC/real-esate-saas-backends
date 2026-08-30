@@ -26,7 +26,7 @@ import { ensureUserProfile, syncRoleProfile, toAuthUserDto } from '../user/userP
 import { findUserWithProfiles } from '../user/userReadModel.service'
 import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDocument'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
-import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RequestMeta } from './auth.interface'
+import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RegisterAgencyResult, RequestMeta } from './auth.interface'
 import { AuthSession } from './authSession.model'
 import { toAuthSessionSummary, type AuthSessionSummary } from '../../../contracts/workspaceContracts'
 import { OtpChallenge, OtpPurpose } from './otpChallenge.model'
@@ -34,6 +34,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { captureOtpForTest } from '../../../testSupport/otpCapture'
 import { sendAccountVerificationEmail, sendPasswordResetEmail } from './authEmail.service'
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
+import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { RealtimeService } from '../realtime/realtime.service'
 
 const OTP_TTL_MS = 5 * 60 * 1000
@@ -178,9 +179,20 @@ const createOtpChallenge = async (
   }
 }
 
-const cleanupProvisionedAgency = async (input: { organizationObjectId: Types.ObjectId; organizationId: string; userId: Types.ObjectId; challengeId: Types.ObjectId }) => {
+const requireEmailOtpVerificationForRegistration = async (): Promise<boolean> => {
+  const settings = await PlatformSettings.findOne({ key: 'platform' })
+    .select('authentication.requireEmailOtpVerification')
+    .lean() as { authentication?: { requireEmailOtpVerification?: boolean } } | null
+
+  // Fail closed for legacy or missing settings documents: registration keeps
+  // requiring OTP until a Super Admin explicitly disables it.
+  return settings?.authentication?.requireEmailOtpVerification ?? true
+}
+
+const cleanupProvisionedAgency = async (input: { organizationObjectId: Types.ObjectId; organizationId: string; userId: Types.ObjectId }) => {
   await Promise.allSettled([
-    OtpChallenge.deleteOne({ _id: input.challengeId, userId: input.userId }),
+    OtpChallenge.deleteMany({ userId: input.userId, purpose: 'account_verification' }),
+    AuthSession.deleteMany({ userId: input.userId }),
     WebsitePage.deleteOne({ organizationId: input.organizationId, slug: '/' }),
     AccountCredential.deleteOne({ userId: input.userId }),
     UserProfile.deleteOne({ userId: input.userId }),
@@ -189,18 +201,14 @@ const cleanupProvisionedAgency = async (input: { organizationObjectId: Types.Obj
     SuperAdminProfile.deleteOne({ userId: input.userId }),
     User.deleteOne({ _id: input.userId, organizationId: input.organizationId }),
     Organization.deleteOne({ _id: input.organizationObjectId, organizationId: input.organizationId }),
-    AuditEvent.collection.deleteMany({ organizationId: input.organizationId, action: 'tenant.provisioned', entityId: input.organizationObjectId.toString() }),
+    AuditEvent.collection.deleteMany({
+      organizationId: input.organizationId,
+      action: { $in: ['tenant.provisioned', 'identity.verification_required', 'identity.auto_verified'] },
+    }),
   ])
 }
 
-const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Promise<{
-  email: string
-  phoneNumber: string
-  subdomain: string
-  websiteUrl: string
-  verificationRequired: true
-  verificationChannel: 'email'
-}> => {
+const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Promise<RegisterAgencyResult> => {
   const email = normalizeEmail(payload.email)
   let phoneNumber: string
   try {
@@ -211,13 +219,15 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
 
   if (await User.exists({ $or: [{ email }, { phoneNumber }] })) throw new ApiError(409, 'Email or phone is already registered')
 
+  const verificationRequired = await requireEmailOtpVerificationForRegistration()
   const subdomain = await reserveSubdomain(payload.agencyName)
   const organizationId = `org_${randomUUID()}`
   const userId = new Types.ObjectId()
   const organizationObjectId = new Types.ObjectId()
-  const challengeId = new Types.ObjectId()
-  const otp = generateOtp()
-  await enforceOtpThrottle(email, 'account_verification')
+  const challengeId = verificationRequired ? new Types.ObjectId() : null
+  const otp = verificationRequired ? generateOtp() : null
+
+  if (verificationRequired) await enforceOtpThrottle(email, 'account_verification')
 
   const trialPolicy = await getTrialPolicy()
   const trialEnd = trialEndFromPolicy(trialPolicy)
@@ -225,6 +235,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
   const websiteUrl = buildTenantWebsiteUrl(subdomain)
   const websiteDocument = buildDefaultWebsiteDocument(payload.agencyName, payload.agencyType || 'residential')
   const agencyTypeText = (payload.agencyType || 'residential').replace(/[_-]+/g, ' ')
+  const provisionedAt = new Date()
 
   const provisionAgency = async (session?: mongoose.ClientSession): Promise<void> => {
     const sessionOptions = session ? { session } : undefined
@@ -275,13 +286,14 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       phoneNumber,
       organizationId,
       userRole: 'agency_owner',
-      status: 'pending',
-      isVerified: false,
+      status: verificationRequired ? 'pending' : 'active',
+      isVerified: !verificationRequired,
     }], sessionOptions)
     await AccountCredential.create([{
       userId,
       passwordHash,
-      passwordChangedAt: new Date(),
+      passwordChangedAt: provisionedAt,
+      emailVerifiedAt: verificationRequired ? null : provisionedAt,
     }], sessionOptions)
     await ensureUserProfile(userId, {
       isAddProfile: false,
@@ -299,18 +311,22 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       seo: websiteDocument.seo,
       updatedBy: userId,
     }], sessionOptions)
-    await OtpChallenge.create([{
-      _id: challengeId,
-      email,
-      channel: 'email',
-      userId,
-      organizationId,
-      purpose: 'account_verification',
-      codeHash: hashOtp(challengeId.toString(), otp),
-      expiresAt: new Date(Date.now() + OTP_TTL_MS),
-      requestIp: meta.ip || '',
-      requestUserAgent: meta.userAgent || '',
-    }], sessionOptions)
+
+    if (verificationRequired && challengeId && otp) {
+      await OtpChallenge.create([{
+        _id: challengeId,
+        email,
+        channel: 'email',
+        userId,
+        organizationId,
+        purpose: 'account_verification',
+        codeHash: hashOtp(challengeId.toString(), otp),
+        expiresAt: new Date(Date.now() + OTP_TTL_MS),
+        requestIp: meta.ip || '',
+        requestUserAgent: meta.userAgent || '',
+      }], sessionOptions)
+    }
+
     await writeAudit({
       organizationId,
       actorId: userId.toString(),
@@ -320,7 +336,27 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       entityId: organizationObjectId.toString(),
       requestId: meta.requestId,
       ip: meta.ip,
-      metadata: { subdomain, plan: 'trial', websiteUrl, verificationChannel: 'email' },
+      metadata: {
+        subdomain,
+        plan: 'trial',
+        websiteUrl,
+        verificationRequired,
+        ...(verificationRequired ? { verificationChannel: 'email' } : {}),
+      },
+    }, session)
+
+    await writeAudit({
+      organizationId,
+      actorId: 'system',
+      actorRole: 'system',
+      action: verificationRequired ? 'identity.verification_required' : 'identity.auto_verified',
+      entityType: 'user',
+      entityId: userId.toString(),
+      requestId: meta.requestId,
+      ip: meta.ip,
+      metadata: verificationRequired
+        ? { source: 'platform_setting', verificationMethod: 'email_otp', channel: 'email' }
+        : { source: 'platform_setting', verificationMethod: 'automatic' },
     }, session)
   }
 
@@ -336,17 +372,33 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       await provisionAgency()
     }
 
-    await sendAccountVerificationEmail({ email, code: otp, name: payload.name, agencyName: payload.agencyName })
-    captureOtpForTest(email, 'account_verification', otp)
+    if (verificationRequired && otp) {
+      await sendAccountVerificationEmail({ email, code: otp, name: payload.name, agencyName: payload.agencyName })
+      captureOtpForTest(email, 'account_verification', otp)
+      return { email, phoneNumber, subdomain, websiteUrl, verificationRequired: true, verificationChannel: 'email' }
+    }
+
+    const activeUser = await User.findById(userId)
+    if (!activeUser || !activeUser.isVerified || activeUser.status !== 'active') {
+      throw new ApiError(500, 'The account could not be activated after registration', '', 'REGISTRATION_ACTIVATION_FAILED')
+    }
+
+    const authenticated = await createSession(activeUser, meta)
+    return {
+      ...authenticated,
+      email,
+      phoneNumber,
+      subdomain,
+      websiteUrl,
+      verificationRequired: false,
+    }
   } catch (error) {
-    await cleanupProvisionedAgency({ organizationObjectId, organizationId, userId, challengeId })
+    await cleanupProvisionedAgency({ organizationObjectId, organizationId, userId })
     if ((error as { code?: number })?.code === 11000) {
       throw new ApiError(409, 'An account or agency website with these details already exists', '', 'ACCOUNT_ALREADY_EXISTS')
     }
     throw error
   }
-
-  return { email, phoneNumber, subdomain, websiteUrl, verificationRequired: true, verificationChannel: 'email' }
 }
 
 const loginUser = async (payload: ILoginUser, meta: RequestMeta): Promise<AuthResult> => {

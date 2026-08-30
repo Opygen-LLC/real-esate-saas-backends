@@ -9,3 +9,22 @@ export interface RequestMeta { ip?: string; userAgent?: string; requestId?: stri
 export interface AuthResult { accessToken: string; refreshToken: string; userRole: IUserRole;
   organizationId: string; user: AuthUserResponseDto; isVerified: boolean; websiteUrl?: string; websiteStatus?: string;
   onboarding?: { status: 'not_started' | 'in_progress' | 'completed' | 'skipped'; currentStep: number; version?: number } }
+
+export interface RegisterAgencyPendingVerificationResult {
+  email: string
+  phoneNumber: string
+  subdomain: string
+  websiteUrl: string
+  verificationRequired: true
+  verificationChannel: 'email'
+}
+
+export type RegisterAgencyAuthenticatedResult = AuthResult & {
+  email: string
+  phoneNumber: string
+  subdomain: string
+  websiteUrl: string
+  verificationRequired: false
+}
+
+export type RegisterAgencyResult = RegisterAgencyPendingVerificationResult | RegisterAgencyAuthenticatedResult
