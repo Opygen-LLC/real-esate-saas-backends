@@ -24,7 +24,27 @@ const request = async (path: string, body: Record<string, unknown>) => {
   return { response, body: await response.json() as any }
 }
 
-suite('phase 2 conditional registration verification', () => {
+const authCookieHeader = (response: Response): string => {
+  const setCookie = response.headers.get('set-cookie') || ''
+  return ['accessToken', 'refreshToken']
+    .map((name) => {
+      const match = setCookie.match(new RegExp(`${name}=([^;, ]+)`))
+      return match ? `${name}=${match[1]}` : ''
+    })
+    .filter(Boolean)
+    .join('; ')
+}
+
+const getWithSession = async (path: string, responseWithCookies: Response) => {
+  const cookie = authCookieHeader(responseWithCookies)
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'GET',
+    headers: { origin: 'http://localhost:3000', cookie },
+  })
+  return { response, body: await response.json() as any }
+}
+
+suite('conditional registration verification and phase 3 routing protection', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test'
     process.env.DATABASE_URL = requiredDb!
@@ -84,8 +104,23 @@ suite('phase 2 conditional registration verification', () => {
     expect(user).toMatchObject({ status: 'pending', isVerified: false })
     expect(await OtpChallenge.countDocuments({ userId: user._id, purpose: 'account_verification' })).toBe(1)
     expect(await AuthSession.countDocuments({ userId: user._id })).toBe(0)
-    expect(readCapturedOtpForTest(email, 'account_verification')).toMatch(/^\d{6}$/)
+    expect(authCookieHeader(result.response)).toBe('')
+    const verificationCode = readCapturedOtpForTest(email, 'account_verification')
+    expect(verificationCode).toMatch(/^\d{6}$/)
     expect(await AuditEvent.exists({ organizationId: user.organizationId, action: 'identity.verification_required', entityId: user._id.toString() })).toBeTruthy()
+
+    const verified = await request('/api/v1/auth/verify', { email, verificationCode })
+    expect(verified.response.status).toBe(200)
+    expect(verified.body?.data?.user).toMatchObject({ isVerified: true, status: 'active' })
+    expect(authCookieHeader(verified.response)).toContain('accessToken=')
+    expect(authCookieHeader(verified.response)).toContain('refreshToken=')
+    expect(await User.findOne({ email }).lean()).toMatchObject({ status: 'active', isVerified: true })
+    expect(await AuthSession.countDocuments({ userId: user._id, revokedAt: null })).toBe(1)
+    expect(await OtpChallenge.countDocuments({ userId: user._id, purpose: 'account_verification', consumedAt: { $ne: null } })).toBe(1)
+
+    const onboardingBootstrap = await getWithSession('/api/v1/organization', verified.response)
+    expect(onboardingBootstrap.response.status).toBe(200)
+    expect(onboardingBootstrap.body?.data?.onboarding).toMatchObject({ status: 'not_started', currentStep: 1 })
   })
 
   it('auto-verifies and authenticates registration without generating OTP when verification is disabled', async () => {
@@ -128,6 +163,10 @@ suite('phase 2 conditional registration verification', () => {
     const setCookie = result.response.headers.get('set-cookie') || ''
     expect(setCookie).toMatch(/accessToken=/)
     expect(setCookie).toMatch(/refreshToken=/)
+
+    const onboardingBootstrap = await getWithSession('/api/v1/organization', result.response)
+    expect(onboardingBootstrap.response.status).toBe(200)
+    expect(onboardingBootstrap.body?.data?.onboarding).toMatchObject({ status: 'not_started', currentStep: 1 })
   })
 
   it('does not disable password-reset OTP when registration verification is disabled', async () => {
