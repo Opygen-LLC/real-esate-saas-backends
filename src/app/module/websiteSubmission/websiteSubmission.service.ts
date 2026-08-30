@@ -22,6 +22,7 @@ import {
 } from './websiteSubmission.interface'
 import { WebsiteSubmission } from './websiteSubmission.model'
 import { emitProductionEvent } from '../../../shared/productionEvents'
+import { writeAudit } from '../audit/audit.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -283,7 +284,7 @@ const list = async (
     limit: paginationOptions.limit || 50,
   })
 
-  const conditions: Record<string, unknown>[] = [{ organizationId }]
+  const conditions: Record<string, unknown>[] = [{ organizationId }, { deletedAt: null }]
   if (filters.submissionType) conditions.push({ submissionType: filters.submissionType })
   if (filters.status) conditions.push({ status: filters.status })
   if (filters.propertyId) conditions.push({ propertyId: filters.propertyId })
@@ -317,7 +318,7 @@ const list = async (
 }
 
 const getById = async (organizationId: string, id: string, options: WebsiteSubmissionReadOptions = {}) => {
-  const submission = await WebsiteSubmission.findOne({ _id: id, organizationId })
+  const submission = await WebsiteSubmission.findOne({ _id: id, organizationId, deletedAt: null })
     .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
     .populate({ path: 'movedToCrmBy', select: 'name email', match: { organizationId } })
     .lean()
@@ -349,7 +350,7 @@ const updateStatus = async (
   }
 
   const submission = await WebsiteSubmission.findOneAndUpdate(
-    { _id: id, organizationId },
+    { _id: id, organizationId, deletedAt: null },
     { $set: set },
     { new: true, runValidators: true },
   )
@@ -364,6 +365,65 @@ const updateStatus = async (
   })
   const [enriched] = await enrichLinkedRecords(organizationId, [submission.toObject()], options)
   return enriched
+}
+
+export type WebsiteSubmissionActorContext = {
+  id: string
+  role?: string
+  requestId?: string
+  ip?: string
+}
+
+const deleteSubmission = async (
+  organizationId: string,
+  actor: WebsiteSubmissionActorContext,
+  id: string,
+  reason = 'Removed by agency owner',
+) => {
+  if (!actor.id) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid authenticated user')
+  const current: any = await WebsiteSubmission.findOne({ _id: id, organizationId, deletedAt: null }).lean()
+  if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
+  if (current.crmTransferStatus === 'PROCESSING') {
+    throw new ApiError(httpStatus.CONFLICT, 'This submission is currently being moved to CRM. Try again after the transfer finishes.')
+  }
+
+  const deletedAt = new Date()
+  const updated: any = await WebsiteSubmission.findOneAndUpdate(
+    { _id: id, organizationId, deletedAt: null, crmTransferStatus: { $ne: 'PROCESSING' } },
+    { $set: { deletedAt, deletedBy: actor.id, deleteReason: reason.trim() } },
+    { new: true, runValidators: true },
+  ).lean()
+  if (!updated) throw new ApiError(httpStatus.CONFLICT, 'Website submission state changed. Refresh and try again.')
+
+  await writeAudit({
+    organizationId,
+    actorId: actor.id,
+    actorRole: actor.role || 'tenant',
+    action: 'website_submission.deleted',
+    entityType: 'websiteSubmission',
+    entityId: id,
+    reason: updated.deleteReason || reason,
+    requestId: actor.requestId,
+    ip: actor.ip,
+    metadata: {
+      submissionType: updated.submissionType,
+      status: updated.status,
+      linkedEntityType: updated.linkedEntityType || null,
+      linkedEntityId: updated.linkedEntityId ? String(updated.linkedEntityId) : null,
+      crmTransferStatus: updated.crmTransferStatus,
+    },
+  })
+  RealtimeService.emitOrganization(organizationId, {
+    type: 'website_submission.changed',
+    action: 'deleted',
+    entityId: id,
+  })
+  emitProductionEvent('website_submission_deleted', {
+    organizationId,
+    submissionId: id,
+    linkedEntityPreserved: Boolean(updated.linkedEntityId),
+  })
+  return { _id: updated._id, deletedAt: updated.deletedAt, linkedEntityPreserved: Boolean(updated.linkedEntityId) }
 }
 
 const LEAD_SUBMISSION_TYPES: WebsiteSubmissionType[] = ['CONTACT', 'PROPERTY_ENQUIRY', 'GENERAL_LEAD']
@@ -384,7 +444,7 @@ const moveToCrm = async (
   access: CrmAccessContext,
   options: WebsiteSubmissionReadOptions = {},
 ) => {
-  const current: any = await WebsiteSubmission.findOne({ _id: id, organizationId }).lean()
+  const current: any = await WebsiteSubmission.findOne({ _id: id, organizationId, deletedAt: null }).lean()
   if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Website submission not found')
   if (!LEAD_SUBMISSION_TYPES.includes(current.submissionType)) {
     throw new ApiError(httpStatus.CONFLICT, 'Only lead-like website submissions can be moved to CRM', '', 'CRM_TRANSFER_NOT_APPLICABLE')
@@ -409,6 +469,7 @@ const moveToCrm = async (
     {
       _id: id,
       organizationId,
+      deletedAt: null,
       submissionType: { $in: LEAD_SUBMISSION_TYPES },
       $or: [
         { crmTransferStatus: { $in: ['PENDING', 'FAILED'] } },
@@ -430,7 +491,7 @@ const moveToCrm = async (
   ).lean()
 
   if (!claim) {
-    const latest: any = await WebsiteSubmission.findOne({ _id: id, organizationId }).lean()
+    const latest: any = await WebsiteSubmission.findOne({ _id: id, organizationId, deletedAt: null }).lean()
     if (latest && transferStatusOf(latest) === 'COMPLETED' && latest.linkedEntityId) {
       return {
         submission: await getById(organizationId, id, options),
@@ -466,7 +527,7 @@ const moveToCrm = async (
     const outcome = result.outcome === 'merged' ? 'MERGED' : 'CREATED'
     const completedAt = new Date()
     const updated = await WebsiteSubmission.findOneAndUpdate(
-      { _id: id, organizationId, crmTransferStatus: 'PROCESSING' },
+      { _id: id, organizationId, deletedAt: null, crmTransferStatus: 'PROCESSING' },
       {
         $set: {
           linkedEntityType: 'Lead',
@@ -512,7 +573,7 @@ const moveToCrm = async (
     const nextStatus = capacityBlocked || accessInactive ? 'PENDING' : 'FAILED'
     const safeError = String(error?.message || 'Unable to move submission to CRM').slice(0, 1000)
     await WebsiteSubmission.updateOne(
-      { _id: id, organizationId, crmTransferStatus: 'PROCESSING' },
+      { _id: id, organizationId, deletedAt: null, crmTransferStatus: 'PROCESSING' },
       { $set: { crmTransferStatus: nextStatus, crmTransferStartedAt: null, crmTransferError: safeError } },
     )
     RealtimeService.emitOrganization(organizationId, {
@@ -569,6 +630,7 @@ export const WebsiteSubmissionService = {
   list,
   getById,
   updateStatus,
+  deleteSubmission,
   moveToCrm,
   toPublicReceipt,
   withPublicReceipt,

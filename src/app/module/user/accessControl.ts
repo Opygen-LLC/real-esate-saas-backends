@@ -6,11 +6,11 @@ export const permissionValues = [
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
   'users.read', 'users.write', 'organization.manage',
-  'billing.manage', 'website.write', 'domains.manage', 'website.submissions.read', 'website.submissions.manage',
+  'billing.manage', 'website.write', 'domains.manage', 'website.submissions.read', 'website.submissions.manage', 'website.submissions.delete',
   'analytics.read', 'analytics.advanced',
   'crm.configure', 'crm.export',
   'messaging.manage', 'whatsapp.manage',
-  'finance.read', 'finance.write',
+  'finance.read', 'finance.write', 'finance.delete',
 ] as const
 
 
@@ -62,8 +62,10 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'tasks.write': ['tasks.read'],
   'viewings.write': ['viewings.read'],
   'website.submissions.manage': ['website.submissions.read'],
+  'website.submissions.delete': ['website.submissions.read'],
   'users.write': ['users.read'],
   'finance.write': ['finance.read'],
+  'finance.delete': ['finance.read'],
   'analytics.advanced': ['analytics.read'],
   'crm.configure': ['leads.read', 'users.read'],
   'crm.export': ['leads.read', 'contacts.read'],
@@ -71,12 +73,14 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'whatsapp.manage': ['leads.read'],
 }
 
+const ownerOnlyPermissions = new Set<Permission>(['billing.manage', 'finance.delete', 'website.submissions.delete'])
+
 export const normalizeCustomPermissions = (input: string[] = [], options: { allowBilling?: boolean } = {}): Permission[] => {
   const allowed = new Set<string>(permissionValues)
   const selected = new Set<Permission>()
   for (const value of input) {
     if (!allowed.has(value)) continue
-    if (!options.allowBilling && value === 'billing.manage') continue
+    if (ownerOnlyPermissions.has(value as Permission) && !(options.allowBilling && value === 'billing.manage')) continue
     selected.add(value as Permission)
   }
   let changed = true

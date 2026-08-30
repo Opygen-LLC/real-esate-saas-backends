@@ -58,6 +58,9 @@ export interface IWebsiteSubmission {
   submittedAt: Date
   readAt?: Date | null
   processedAt?: Date | null
+  deletedAt?: Date | null
+  deletedBy?: mongoose.Types.ObjectId | string | null
+  deleteReason?: string
   createdAt?: Date
   updatedAt?: Date
 }

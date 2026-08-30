@@ -98,7 +98,8 @@ const recordInvoicePayment = z.object({ body: z.object({
 }).strict() })
 
 const voidInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() })
-const archiveInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict() })
+const deleteRecord = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict().optional() })
+const archiveInvoice = deleteRecord
 
 const commissionMoneyFields = {
   grossDealValue: z.coerce.number().nonnegative().max(1_000_000_000_000),
@@ -229,6 +230,7 @@ export const FinanceValidation = {
   updateInvoice,
   voidInvoice,
   archiveInvoice,
+  deleteRecord,
   recordInvoicePayment,
   createCommission,
   updateCommission,

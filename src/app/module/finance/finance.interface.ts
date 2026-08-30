@@ -27,6 +27,9 @@ export interface IFinanceTransaction {
   voidedAt?: Date
   voidedBy?: mongoose.Types.ObjectId | string
   voidReason?: string
+  deletedAt?: Date | null
+  deletedBy?: mongoose.Types.ObjectId | string | null
+  deleteReason?: string
   createdAt?: Date
   updatedAt?: Date
 }
@@ -101,6 +104,9 @@ export interface IFinanceCommission {
   cancelledAt?: Date
   cancelledBy?: mongoose.Types.ObjectId | string
   cancelReason?: string
+  archivedAt?: Date | null
+  archivedBy?: mongoose.Types.ObjectId | string | null
+  archiveReason?: string
   paymentMethod?: FinancePaymentMethod
   paymentReference?: string
   payoutTransactionId?: mongoose.Types.ObjectId | string

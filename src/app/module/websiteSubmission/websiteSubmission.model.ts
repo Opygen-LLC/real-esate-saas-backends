@@ -65,6 +65,9 @@ const websiteSubmissionSchema = new Schema<IWebsiteSubmission>(
     submittedAt: { type: Date, required: true, default: Date.now, index: true },
     readAt: { type: Date, default: null },
     processedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    deleteReason: { type: String, trim: true, maxlength: 500, default: '' },
   },
   { timestamps: true },
 )
@@ -75,5 +78,6 @@ websiteSubmissionSchema.index({ organizationId: 1, submissionType: 1, submittedA
 websiteSubmissionSchema.index({ organizationId: 1, propertyId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, linkedEntityType: 1, linkedEntityId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, crmTransferStatus: 1, submittedAt: -1 })
+websiteSubmissionSchema.index({ organizationId: 1, deletedAt: 1, submittedAt: -1 })
 
 export const WebsiteSubmission = model<IWebsiteSubmission>('WebsiteSubmission', websiteSubmissionSchema)

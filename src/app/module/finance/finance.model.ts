@@ -31,12 +31,16 @@ const transactionSchema = new Schema<IFinanceTransaction>(
     voidedAt: Date,
     voidedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     voidReason: { type: String, trim: true, maxlength: 500, default: '' },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    deleteReason: { type: String, trim: true, maxlength: 500, default: '' },
   },
   { timestamps: true },
 )
 transactionSchema.index({ organizationId: 1, transactionDate: -1, type: 1, status: 1 })
 transactionSchema.index({ organizationId: 1, category: 1, transactionDate: -1 })
 transactionSchema.index({ organizationId: 1, sourceType: 1, sourceId: 1 })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, createdAt: -1 })
 
 const invoiceLineItemSchema = new Schema(
   {
@@ -120,6 +124,9 @@ const commissionSchema = new Schema<IFinanceCommission>(
     cancelledAt: Date,
     cancelledBy: { type: Schema.Types.ObjectId, ref: 'User' },
     cancelReason: { type: String, trim: true, maxlength: 500, default: '' },
+    archivedAt: { type: Date, default: null, index: true },
+    archivedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    archiveReason: { type: String, trim: true, maxlength: 500, default: '' },
     paymentMethod: { type: String, enum: ['cash', 'bank', 'bkash', 'nagad', 'card', 'cheque', 'other'] },
     paymentReference: { type: String, trim: true, maxlength: 200, default: '' },
     payoutTransactionId: { type: Schema.Types.ObjectId, ref: 'FinanceTransaction' },
@@ -132,6 +139,7 @@ const commissionSchema = new Schema<IFinanceCommission>(
 commissionSchema.index({ organizationId: 1, commissionNumber: 1 }, { unique: true })
 commissionSchema.index({ organizationId: 1, status: 1, dueDate: 1 })
 commissionSchema.index({ organizationId: 1, agentId: 1, createdAt: -1 })
+commissionSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })
 
 const vendorSchema = new Schema<IFinanceVendor>(
   {

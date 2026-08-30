@@ -89,6 +89,10 @@ const invoiceAudit = async (organizationId: string, actor: FinanceActorContext, 
   await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType: 'financeInvoice', entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata }, session)
 }
 
+const financeDestructiveAudit = async (organizationId: string, actor: FinanceActorContext, action: string, entityType: string, entityId: string, reason: string, metadata: Record<string, unknown> = {}) => {
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType, entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata })
+}
+
 const financeCommercialTransaction = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
   if (await mongoSupportsTransactions()) {
     const session = await mongoose.startSession()
@@ -127,7 +131,7 @@ const createTransaction = async (organizationId: string, actorId: string, payloa
 const listTransactions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(pagination)
   const { startDate, endDate } = resolveDateRange(query)
-  const conditions: any[] = [{ organizationId }]
+  const conditions: any[] = [{ organizationId }, { deletedAt: null }]
   const type = asString(query.type); if (type) conditions.push({ type })
   const category = asString(query.category); if (category) conditions.push({ category })
   const status = asString(query.status); if (status) conditions.push({ status })
@@ -161,7 +165,7 @@ const listTransactions = async (organizationId: string, query: Record<string, un
 }
 
 const updateTransaction = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceTransaction>) => {
-  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId })
+  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
   if (existing.status === 'voided') throw new ApiError(httpStatus.CONFLICT, 'Voided transactions cannot be changed')
   if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be managed from their source record')
@@ -170,14 +174,14 @@ const updateTransaction = async (organizationId: string, actorId: string, id: st
   if ('vendorId' in payload) normalized.vendorId = cleanOptionalId(payload.vendorId) || null
   if ('propertyId' in payload) normalized.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) normalized.leadId = cleanOptionalId(payload.leadId) || null
-  const result = await FinanceTransaction.findOneAndUpdate({ _id: id, organizationId }, normalized, { new: true, runValidators: true })
+  const result = await FinanceTransaction.findOneAndUpdate({ _id: id, organizationId, deletedAt: null }, normalized, { new: true, runValidators: true })
     .populate('vendorId', 'name category').populate('propertyId', 'title')
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.updated', `Transaction updated: ${result?.description || id}`)
   return result
 }
 
 const voidTransaction = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId })
+  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
   if (existing.status === 'voided') return existing
   if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be reversed from their source record')
@@ -185,6 +189,23 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
   await existing.save()
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.voided', `Transaction voided: ${reason}`)
   return existing
+}
+
+const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
+  const transaction: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
+  if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
+  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked invoice and commission transactions cannot be deleted directly')
+  if (transaction.status !== 'voided') throw new ApiError(httpStatus.CONFLICT, 'Void this manual transaction before deleting it')
+  transaction.deletedAt = new Date()
+  transaction.deletedBy = actorObjectId(actor.id)
+  transaction.deleteReason = reason.trim()
+  transaction.updatedBy = actorObjectId(actor.id)
+  await transaction.save()
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_transaction', id, 'finance.transaction.deleted', `Transaction removed from Money: ${transaction.description}`),
+    financeDestructiveAudit(organizationId, actor, 'finance.transaction.deleted', 'financeTransaction', id, transaction.deleteReason || reason, { sourceType: transaction.sourceType, status: transaction.status, amount: transaction.amount, type: transaction.type }),
+  ])
+  return { _id: transaction._id, deletedAt: transaction.deletedAt }
 }
 
 const calculateInvoiceAmounts = (organizationId: string, lineItems: IFinanceInvoiceLineItem[], discount = 0) => {
@@ -401,14 +422,15 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
 const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Draft removed by agency') => {
   const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
   if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  if (invoice.status !== 'draft' || Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft invoices can be archived')
+  const removableStatus = invoice.status === 'draft' || invoice.status === 'cancelled'
+  if (!removableStatus || Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft or voided invoices can be archived')
   invoice.archivedAt = new Date()
   invoice.archivedBy = actorObjectId(actor.id)
   invoice.archiveReason = reason
   invoice.updatedBy = actorObjectId(actor.id)
   await invoice.save()
   await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Draft invoice ${invoice.invoiceNumber} archived`),
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Invoice ${invoice.invoiceNumber} archived`),
     invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
   ])
   return { _id: invoice._id, invoiceNumber: invoice.invoiceNumber, archivedAt: invoice.archivedAt }
@@ -484,7 +506,7 @@ const createCommission = async (organizationId: string, actorId: string, payload
 const listCommissions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(pagination)
   const { startDate, endDate } = resolveDateRange(query)
-  const conditions: any[] = [{ organizationId }]
+  const conditions: any[] = [{ organizationId }, { archivedAt: null }]
   const status = asString(query.status); if (status) conditions.push({ status })
   const agentId = asString(query.agentId); if (agentId && mongoose.isValidObjectId(agentId)) conditions.push({ agentId })
   if (startDate || endDate) conditions.push({ createdAt: dateCondition(startDate, endDate) })
@@ -500,7 +522,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
 }
 
 const updateCommission = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceCommission>) => {
-  const existing: any = await FinanceCommission.findOne({ _id: id, organizationId })
+  const existing: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
   if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
   if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
@@ -509,13 +531,13 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
   if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
-  const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId }, update, { new: true, runValidators: true }).populate('agentId', 'name email').populate('propertyId', 'title')
+  const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }).populate('agentId', 'name email').populate('propertyId', 'title')
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.updated', `Commission ${result?.commissionNumber || id} updated`)
   return result
 }
 
 const cancelCommission = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId })
+  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
   if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (commission.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
   if (commission.status === 'cancelled') return commission.populate('agentId', 'name email')
@@ -530,8 +552,25 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
   return commission.populate('agentId', 'name email')
 }
 
+const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Cancelled commission removed by agency owner') => {
+  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
+  if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+  if (commission.status === 'paid' || commission.paidAt || commission.payoutTransactionId) throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be deleted')
+  if (commission.status !== 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancel this commission before deleting it')
+  commission.archivedAt = new Date()
+  commission.archivedBy = actorObjectId(actor.id)
+  commission.archiveReason = reason.trim()
+  commission.updatedBy = actorObjectId(actor.id)
+  await commission.save()
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_commission', id, 'finance.commission.archived', `Commission ${commission.commissionNumber} archived`),
+    financeDestructiveAudit(organizationId, actor, 'finance.commission.archived', 'financeCommission', id, commission.archiveReason || reason, { commissionNumber: commission.commissionNumber, status: commission.status, agentShare: commission.agentShare }),
+  ])
+  return { _id: commission._id, commissionNumber: commission.commissionNumber, archivedAt: commission.archivedAt }
+}
+
 const payCommission = async (organizationId: string, actorId: string, id: string, payload: any) => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId }).populate('agentId', 'name email')
+  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).populate('agentId', 'name email')
   if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (commission.status !== 'approved') throw new ApiError(httpStatus.CONFLICT, 'Only approved commissions can be paid')
   const paidAt = asDate(payload.paidAt)
@@ -562,7 +601,7 @@ const listVendors = async (organizationId: string, query: Record<string, unknown
   const where = { $and: conditions }
   const [data, total] = await Promise.all([FinanceVendor.find(where).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(), FinanceVendor.countDocuments(where)])
   const ids = data.map((item) => item._id)
-  const spend = ids.length ? await FinanceTransaction.aggregate([{ $match: { organizationId, vendorId: { $in: ids }, type: 'expense', status: 'paid' } }, { $group: { _id: '$vendorId', totalSpend: { $sum: '$amount' } } }]) : []
+  const spend = ids.length ? await FinanceTransaction.aggregate([{ $match: { organizationId, deletedAt: null, vendorId: { $in: ids }, type: 'expense', status: 'paid' } }, { $group: { _id: '$vendorId', totalSpend: { $sum: '$amount' } } }]) : []
   const spendMap = new Map(spend.map((row) => [String(row._id), row.totalSpend]))
   return { meta: { page, limit, total }, data: data.map((item) => ({ ...item, totalSpend: spendMap.get(String(item._id)) || 0 })) }
 }
@@ -573,7 +612,18 @@ const updateVendor = async (organizationId: string, actorId: string, id: string,
   await emitFinanceEvent(organizationId, actorId, 'finance_vendor', id, 'finance.vendor.updated', `Vendor ${result.name} updated`)
   return result
 }
-const archiveVendor = (organizationId: string, actorId: string, id: string) => updateVendor(organizationId, actorId, id, { status: 'inactive' })
+const archiveVendor = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Vendor archived by agency owner') => {
+  const vendor: any = await FinanceVendor.findOne({ _id: id, organizationId })
+  if (!vendor) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor not found')
+  vendor.status = 'inactive'
+  vendor.updatedBy = actorObjectId(actor.id)
+  await vendor.save()
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_vendor', id, 'finance.vendor.archived', `Vendor ${vendor.name} archived`),
+    financeDestructiveAudit(organizationId, actor, 'finance.vendor.archived', 'financeVendor', id, reason, { name: vendor.name }),
+  ])
+  return vendor
+}
 
 const createBudget = async (organizationId: string, actorId: string, payload: Partial<IFinanceBudget>) => {
   const startDate = asDate(payload.startDate), endDate = asDate(payload.endDate)
@@ -584,7 +634,7 @@ const createBudget = async (organizationId: string, actorId: string, payload: Pa
 }
 
 const enrichBudgets = async (organizationId: string, budgets: any[]) => Promise.all(budgets.map(async (budget: any) => {
-  const result = await FinanceTransaction.aggregate([{ $match: { organizationId, type: 'expense', status: 'paid', category: budget.category, transactionDate: { $gte: budget.startDate, $lte: budget.endDate } } }, { $group: { _id: null, spent: { $sum: '$amount' } } }])
+  const result = await FinanceTransaction.aggregate([{ $match: { organizationId, deletedAt: null, type: 'expense', status: 'paid', category: budget.category, transactionDate: { $gte: budget.startDate, $lte: budget.endDate } } }, { $group: { _id: null, spent: { $sum: '$amount' } } }])
   const spent = Number(result[0]?.spent || 0); const remaining = Number(Math.max(0, budget.amount - spent).toFixed(2)); const percentage = budget.amount > 0 ? Number(((spent / budget.amount) * 100).toFixed(1)) : 0
   return { ...budget, spent, remaining, percentage, alert: percentage >= budget.alertThresholdPercent }
 }))
@@ -611,17 +661,28 @@ const updateBudget = async (organizationId: string, actorId: string, id: string,
   await emitFinanceEvent(organizationId, actorId, 'finance_budget', id, 'finance.budget.updated', `Budget ${result?.name || id} updated`)
   return (await enrichBudgets(organizationId, result ? [result] : []))[0]
 }
-const archiveBudget = (organizationId: string, actorId: string, id: string) => updateBudget(organizationId, actorId, id, { status: 'archived' })
+const archiveBudget = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Budget archived by agency owner') => {
+  const budget: any = await FinanceBudget.findOne({ _id: id, organizationId })
+  if (!budget) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
+  budget.status = 'archived'
+  budget.updatedBy = actorObjectId(actor.id)
+  await budget.save()
+  await Promise.all([
+    emitFinanceEvent(organizationId, actor.id, 'finance_budget', id, 'finance.budget.archived', `Budget ${budget.name} archived`),
+    financeDestructiveAudit(organizationId, actor, 'finance.budget.archived', 'financeBudget', id, reason, { name: budget.name, amount: budget.amount, category: budget.category }),
+  ])
+  return budget
+}
 
 const aggregateCategory = async (organizationId: string, type: 'income' | 'expense', startDate?: Date, endDate?: Date) => FinanceTransaction.aggregate([
-  { $match: { organizationId, type, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
+  { $match: { organizationId, deletedAt: null, type, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
   { $group: { _id: '$category', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
   { $sort: { amount: -1 } },
   { $limit: 20 },
 ]).then((rows) => rows.map((row) => ({ category: row._id || 'Uncategorized', amount: row.amount, count: row.count })))
 
 const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?: Date) => FinanceTransaction.aggregate([
-  { $match: { organizationId, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
+  { $match: { organizationId, deletedAt: null, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
   { $group: { _id: { year: { $year: { date: '$transactionDate', timezone: 'Asia/Dhaka' } }, month: { $month: { date: '$transactionDate', timezone: 'Asia/Dhaka' } }, type: '$type' }, amount: { $sum: '$amount' } } },
   { $sort: { '_id.year': 1, '_id.month': 1 } },
 ]).then((rows) => {
@@ -636,11 +697,11 @@ const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?
 
 const getSummary = async (organizationId: string, startDate?: Date, endDate?: Date) => {
   await refreshOverdueInvoices(organizationId)
-  const transactionMatch: any = { organizationId, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
+  const transactionMatch: any = { organizationId, deletedAt: null, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
   const [totals, invoiceTotals, commissionTotals, activeBudgetCount] = await Promise.all([
     FinanceTransaction.aggregate([{ $match: transactionMatch }, { $group: { _id: '$type', amount: { $sum: '$amount' } } }]),
-    FinanceInvoice.aggregate([{ $match: { organizationId, status: { $nin: ['cancelled', 'draft'] } } }, { $group: { _id: null, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, overdue: { $sum: { $cond: [{ $eq: ['$status', 'overdue'] }, { $subtract: ['$total', '$paidAmount'] }, 0] } } } }]),
-    FinanceCommission.aggregate([{ $match: { organizationId, status: { $in: ['pending', 'approved'] } } }, { $group: { _id: null, payable: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' } } }]),
+    FinanceInvoice.aggregate([{ $match: { organizationId, archivedAt: null, status: { $nin: ['cancelled', 'draft'] } } }, { $group: { _id: null, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, overdue: { $sum: { $cond: [{ $eq: ['$status', 'overdue'] }, { $subtract: ['$total', '$paidAmount'] }, 0] } } } }]),
+    FinanceCommission.aggregate([{ $match: { organizationId, archivedAt: null, status: { $in: ['pending', 'approved'] } } }, { $group: { _id: null, payable: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' } } }]),
     FinanceBudget.countDocuments({ organizationId, status: 'active', startDate: { $lte: new Date() }, endDate: { $gte: new Date() } }),
   ])
   const income = Number(totals.find((row) => row._id === 'income')?.amount || 0), expense = Number(totals.find((row) => row._id === 'expense')?.amount || 0)
@@ -655,8 +716,8 @@ const getOverview = async (organizationId: string, query: Record<string, unknown
     aggregateTrend(organizationId, startDate, endDate),
     aggregateCategory(organizationId, 'expense', startDate, endDate),
     aggregateCategory(organizationId, 'income', startDate, endDate),
-    FinanceTransaction.find({ organizationId }).populate('vendorId', 'name').sort({ transactionDate: -1, createdAt: -1 }).limit(8).lean(),
-    FinanceInvoice.find({ organizationId, status: 'overdue' }).sort({ dueDate: 1 }).limit(6).lean(),
+    FinanceTransaction.find({ organizationId, deletedAt: null }).populate('vendorId', 'name').sort({ transactionDate: -1, createdAt: -1 }).limit(8).lean(),
+    FinanceInvoice.find({ organizationId, archivedAt: null, status: 'overdue' }).sort({ dueDate: 1 }).limit(6).lean(),
     FinanceBudget.find({ organizationId, status: 'active', startDate: { $lte: new Date() }, endDate: { $gte: new Date() } }).sort({ endDate: 1 }).limit(8).lean(),
   ])
   return { range: { startDate, endDate }, summary, monthlyTrend, expenseByCategory, incomeByCategory, recentTransactions, overdueInvoices, budgets: await enrichBudgets(organizationId, activeBudgets) }
@@ -669,9 +730,9 @@ const getReports = async (organizationId: string, query: Record<string, unknown>
     aggregateTrend(organizationId, startDate, endDate),
     aggregateCategory(organizationId, 'expense', startDate, endDate),
     aggregateCategory(organizationId, 'income', startDate, endDate),
-    FinanceTransaction.aggregate([{ $match: { organizationId, type: 'expense', status: 'paid', vendorId: { $ne: null }, transactionDate: dateCondition(startDate, endDate) } }, { $group: { _id: '$vendorId', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }, { $limit: 20 }]),
-    FinanceCommission.aggregate([{ $match: { organizationId, ...(startDate || endDate ? { createdAt: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$status', commissionAmount: { $sum: '$commissionAmount' }, agentShare: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' }, count: { $sum: 1 } } }]),
-    FinanceTransaction.aggregate([{ $match: { organizationId, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$paymentMethod', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }]),
+    FinanceTransaction.aggregate([{ $match: { organizationId, deletedAt: null, type: 'expense', status: 'paid', vendorId: { $ne: null }, transactionDate: dateCondition(startDate, endDate) } }, { $group: { _id: '$vendorId', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }, { $limit: 20 }]),
+    FinanceCommission.aggregate([{ $match: { organizationId, archivedAt: null, ...(startDate || endDate ? { createdAt: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$status', commissionAmount: { $sum: '$commissionAmount' }, agentShare: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' }, count: { $sum: 1 } } }]),
+    FinanceTransaction.aggregate([{ $match: { organizationId, deletedAt: null, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$paymentMethod', amount: { $sum: '$amount' }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }]),
     FinanceInvoice.aggregate([{ $match: { organizationId, archivedAt: null, propertyId: { $ne: null }, status: { $nin: ['cancelled', 'draft'] }, ...(startDate || endDate ? { issueDate: dateCondition(startDate, endDate) } : {}) } }, { $group: { _id: '$propertyId', invoiced: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, count: { $sum: 1 } } }, { $addFields: { outstanding: { $subtract: ['$invoiced', '$paid'] } } }, { $sort: { invoiced: -1 } }, { $limit: 12 }]),
     FinanceBudget.find({ organizationId, status: 'active', ...(startDate || endDate ? { $and: [{ endDate: { $gte: startDate || new Date(0) } }, { startDate: { $lte: endDate || new Date(8640000000000000) } }] } : {}) }).sort({ startDate: 1 }).limit(100).lean(),
   ])
@@ -695,7 +756,7 @@ const getReports = async (organizationId: string, query: Record<string, unknown>
 
 const exportTransactionsCsv = async (organizationId: string, query: Record<string, unknown>) => {
   const { startDate, endDate } = resolveDateRange(query)
-  const match: any = { organizationId }
+  const match: any = { organizationId, deletedAt: null }
   const type = asString(query.type); if (type) match.type = type
   const status = asString(query.status); if (status) match.status = status
   if (startDate || endDate) match.transactionDate = dateCondition(startDate, endDate)
@@ -707,9 +768,9 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 }
 
 export const FinanceService = {
-  createTransaction, listTransactions, updateTransaction, voidTransaction,
+  createTransaction, listTransactions, updateTransaction, voidTransaction, deleteTransaction,
   createInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
-  createCommission, listCommissions, updateCommission, cancelCommission, payCommission,
+  createCommission, listCommissions, updateCommission, cancelCommission, archiveCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,
   getOverview, getReports, exportTransactionsCsv,

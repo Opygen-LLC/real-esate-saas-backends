@@ -137,7 +137,8 @@
     "verify:phase7-property-media": "node scripts/verify-phase7-property-media-resilience.mjs",
     "migrate:tenant-access-phase5": "ts-node --transpile-only src/app/db/migrateTenantAccessPhase5.ts",
     "test:tenant-access-phase5": "vitest run src/tests/unit/tenantAccess.unit.test.ts src/tests/contract/phase5TenantAccessProduction.contract.test.ts src/tests/integration/tenantAccessLifecycle.integration.test.ts",
-    "verify:tenant-access-phase5": "node scripts/verify-tenant-access-phase5.mjs"
+    "verify:tenant-access-phase5": "node scripts/verify-tenant-access-phase5.mjs",
+    "migrate:owner-safe-deletion-phase1": "ts-node --transpile-only src/app/db/migrateOwnerSafeDeletionPhase1.ts"
   },
   "keywords": [
     "real-estate",

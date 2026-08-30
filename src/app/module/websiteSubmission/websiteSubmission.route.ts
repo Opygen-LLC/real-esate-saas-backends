@@ -20,6 +20,13 @@ router.get(
   WebsiteSubmissionController.getById,
 )
 
+router.delete(
+  '/:id',
+  authMiddlewares.requirePermission('website.submissions.delete'),
+  validateRequest(WebsiteSubmissionValidation.deleteSubmission),
+  WebsiteSubmissionController.deleteSubmission,
+)
+
 router.post(
   '/:id/move-to-crm',
   authMiddlewares.requirePermission('website.submissions.manage'),

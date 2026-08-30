@@ -41,6 +41,10 @@ const voidTransaction = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.voidTransaction(requireTenant(req), actorId(req), req.params.id, req.body.reason)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Transaction voided successfully', data })
 })
+const deleteTransaction = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.deleteTransaction(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Transaction removed successfully', data })
+})
 
 const listInvoices = catchAsync(async (req: Request, res: Response) => {
   const result = await FinanceService.listInvoices(requireTenant(req), req.query, pagination(req))
@@ -68,7 +72,7 @@ const voidInvoice = catchAsync(async (req: Request, res: Response) => {
 })
 const archiveInvoice = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.archiveDraftInvoice(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Draft invoice archived successfully', data })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice archived successfully', data })
 })
 const downloadInvoicePdf = catchAsync(async (req: Request, res: Response) => {
   const result = await FinanceService.renderInvoiceDocument(requireTenant(req), financeActor(req), req.params.id)
@@ -95,6 +99,11 @@ const cancelCommission = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission cancelled successfully', data })
 })
 
+const archiveCommission = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.archiveCommission(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission archived successfully', data })
+})
+
 const payCommission = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.payCommission(requireTenant(req), actorId(req), req.params.id, req.body)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Commission marked as paid', data })
@@ -113,7 +122,7 @@ const updateVendor = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Vendor updated successfully', data })
 })
 const archiveVendor = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.archiveVendor(requireTenant(req), actorId(req), req.params.id)
+  const data = await FinanceService.archiveVendor(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Vendor archived successfully', data })
 })
 
@@ -130,15 +139,15 @@ const updateBudget = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Budget updated successfully', data })
 })
 const archiveBudget = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.archiveBudget(requireTenant(req), actorId(req), req.params.id)
+  const data = await FinanceService.archiveBudget(requireTenant(req), financeActor(req), req.params.id, req.body?.reason)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Budget archived successfully', data })
 })
 
 export const FinanceController = {
   getOverview, getReports, exportTransactions,
-  listTransactions, createTransaction, updateTransaction, voidTransaction,
+  listTransactions, createTransaction, updateTransaction, voidTransaction, deleteTransaction,
   listInvoices, createInvoice, getInvoice, updateInvoice, voidInvoice, archiveInvoice, recordInvoicePayment, downloadInvoicePdf,
-  listCommissions, createCommission, updateCommission, cancelCommission, payCommission,
+  listCommissions, createCommission, updateCommission, cancelCommission, archiveCommission, payCommission,
   listVendors, createVendor, updateVendor, archiveVendor,
   listBudgets, createBudget, updateBudget, archiveBudget,
 }

@@ -21,9 +21,14 @@ const listQuery = z.object({
 
 const idParams = z.object({ params: z.object({ id: objectId }).strict() })
 
+const deleteSubmission = z.object({
+  params: z.object({ id: objectId }).strict(),
+  body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict().optional(),
+})
+
 const updateStatus = z.object({
   params: z.object({ id: objectId }).strict(),
   body: z.object({ status: z.enum(WEBSITE_SUBMISSION_STATUSES) }).strict(),
 })
 
-export const WebsiteSubmissionValidation = { listQuery, idParams, updateStatus }
+export const WebsiteSubmissionValidation = { listQuery, idParams, deleteSubmission, updateStatus }

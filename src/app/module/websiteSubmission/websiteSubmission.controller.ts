@@ -63,6 +63,23 @@ const moveToCrm = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+
+const deleteSubmission = catchAsync(async (req: Request, res: Response) => {
+  const actorId = req.user?._id || req.user?.id || ''
+  const data = await WebsiteSubmissionService.deleteSubmission(
+    requireTenant(req),
+    { id: String(actorId), role: req.user?.userRole || 'tenant', requestId: req.requestId, ip: req.ip },
+    req.params.id,
+    req.body?.reason,
+  )
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Website submission deleted successfully',
+    data,
+  })
+})
+
 const updateStatus = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
   statusCode: httpStatus.OK,
   success: true,
@@ -70,4 +87,4 @@ const updateStatus = catchAsync(async (req: Request, res: Response) => sendRespo
   data: await WebsiteSubmissionService.updateStatus(requireTenant(req), req.params.id, req.body.status, readOptions(req)),
 }))
 
-export const WebsiteSubmissionController = { list, getById, updateStatus, moveToCrm }
+export const WebsiteSubmissionController = { list, getById, updateStatus, deleteSubmission, moveToCrm }
