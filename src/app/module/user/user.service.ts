@@ -558,6 +558,14 @@ const verifyUserSuperAdmin = async (id: string, context: ManualVerificationConte
       throw new ApiError(httpStatus.CONFLICT, 'Account credential is missing; manual verification cannot be completed safely')
     }
 
+    // Preserve the continuation token even when an older OTP challenge was
+    // already consumed by a resend. Mark every registration challenge as
+    // admin-approved, while consuming only still-active registration OTPs.
+    await OtpChallenge.updateMany(
+      { userId: objectId, purpose: 'account_verification' },
+      { $set: { manualApprovedAt: verifiedAt } },
+      session ? { session } : undefined,
+    )
     await OtpChallenge.updateMany(
       { userId: objectId, purpose: 'account_verification', consumedAt: null },
       { $set: { consumedAt: verifiedAt } },

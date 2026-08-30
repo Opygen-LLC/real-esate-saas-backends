@@ -36,6 +36,9 @@ export const AuthValidation = {
     }),
   }),
   verifyOtpZodSchema: z.object({ body: z.object({ email: emailIdentity, verificationCode: z.string().regex(/^\d{6}$/) }) }),
+  registrationContinuationZodSchema: z.object({
+    body: z.object({ registrationContinuationToken: z.string().trim().min(32).max(256) }).strict(),
+  }),
   emailZodSchema: z.object({ body: z.object({ email: emailIdentity }) }),
   resetVerifyZodSchema: z.object({ body: z.object({ email: emailIdentity, verificationCode: z.string().regex(/^\d{6}$/) }) }),
   resetCompleteZodSchema: z.object({ body: z.object({ resetToken: z.string().min(32), newPassword: strongPasswordSchema }) }),

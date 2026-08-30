@@ -21,6 +21,10 @@ export interface IOtpChallenge {
   resetTokenIssuedAt?: Date | null
   resetTokenExpiresAt?: Date | null
   resetTokenUsedAt?: Date | null
+  continuationTokenHash?: string
+  continuationExpiresAt?: Date | null
+  continuationConsumedAt?: Date | null
+  manualApprovedAt?: Date | null
   requestIp?: string
   requestUserAgent?: string
   createdAt?: Date
@@ -47,6 +51,10 @@ const otpChallengeSchema = new Schema<IOtpChallenge>({
   resetTokenIssuedAt: { type: Date, default: null },
   resetTokenExpiresAt: { type: Date, default: null },
   resetTokenUsedAt: { type: Date, default: null },
+  continuationTokenHash: { type: String, select: false },
+  continuationExpiresAt: { type: Date, default: null },
+  continuationConsumedAt: { type: Date, default: null },
+  manualApprovedAt: { type: Date, default: null },
   requestIp: { type: String, default: '', maxlength: 128 },
   requestUserAgent: { type: String, default: '', maxlength: 1000 },
 }, {
@@ -56,6 +64,7 @@ const otpChallengeSchema = new Schema<IOtpChallenge>({
     transform: (_doc, ret: Record<string, unknown>) => {
       delete ret.codeHash
       delete ret.resetTokenHash
+      delete ret.continuationTokenHash
       return ret
     },
   },
@@ -63,6 +72,7 @@ const otpChallengeSchema = new Schema<IOtpChallenge>({
     transform: (_doc, ret: Record<string, unknown>) => {
       delete ret.codeHash
       delete ret.resetTokenHash
+      delete ret.continuationTokenHash
       return ret
     },
   },
@@ -74,5 +84,6 @@ otpChallengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400, name: 'o
 otpChallengeSchema.index({ email: 1, purpose: 1, channel: 1, createdAt: -1 }, { name: 'otp_challenge_email_lookup' })
 otpChallengeSchema.index({ phoneNumber: 1, purpose: 1, channel: 1, createdAt: -1 }, { name: 'otp_challenge_phone_lookup' })
 otpChallengeSchema.index({ userId: 1, purpose: 1, consumedAt: 1, createdAt: -1 }, { name: 'otp_challenge_user_lookup' })
+otpChallengeSchema.index({ continuationTokenHash: 1 }, { unique: true, sparse: true, name: 'otp_challenge_continuation_token_unique' })
 
 export const OtpChallenge = model<IOtpChallenge>('OtpChallenge', otpChallengeSchema)

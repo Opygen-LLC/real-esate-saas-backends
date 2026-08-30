@@ -41,6 +41,7 @@ const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
 const OTP_COOLDOWN_MS = 60 * 1000
 const RESET_TOKEN_TTL_MS = 10 * 60 * 1000
+const REGISTRATION_CONTINUATION_TTL_MS = 30 * 60 * 1000
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 export type OtpState = { expiresAt: Date; consumedAt?: Date | null; attempts: number; maxAttempts: number }
@@ -81,22 +82,27 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     lastUsedIp: meta.ip || '',
     userAgent: meta.userAgent || '',
   })
-  const [projectedUser, organization, verifiedDomain] = await Promise.all([
-    findUserWithProfiles({ _id: user._id }),
-    Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
-    DomainRecord.findOne({ organizationId: user.organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
-  ])
-  const onboarding = normalizeOnboardingState(organization?.onboarding)
-  return {
-    accessToken: accessTokenFor(user),
-    refreshToken,
-    userRole: user.userRole,
-    organizationId: user.organizationId,
-    user: publicUser(projectedUser || user),
-    isVerified: user.isVerified,
-    websiteStatus: organization?.websiteStatus || 'published',
-    onboarding,
-    websiteUrl: organization ? buildTenantWebsiteUrl(organization.sub_domain || user.organizationId, verifiedDomain?.domain) : undefined,
+  try {
+    const [projectedUser, organization, verifiedDomain] = await Promise.all([
+      findUserWithProfiles({ _id: user._id }),
+      Organization.findOne({ organizationId: user.organizationId }).select('sub_domain websiteStatus onboarding').lean(),
+      DomainRecord.findOne({ organizationId: user.organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
+    ])
+    const onboarding = normalizeOnboardingState(organization?.onboarding)
+    return {
+      accessToken: accessTokenFor(user),
+      refreshToken,
+      userRole: user.userRole,
+      organizationId: user.organizationId,
+      user: publicUser(projectedUser || user),
+      isVerified: user.isVerified,
+      websiteStatus: organization?.websiteStatus || 'published',
+      onboarding,
+      websiteUrl: organization ? buildTenantWebsiteUrl(organization.sub_domain || user.organizationId, verifiedDomain?.domain) : undefined,
+    }
+  } catch (error) {
+    await AuthSession.deleteOne({ _id: sessionId }).catch(() => undefined)
+    throw error
   }
 }
 
@@ -226,6 +232,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
   const organizationObjectId = new Types.ObjectId()
   const challengeId = verificationRequired ? new Types.ObjectId() : null
   const otp = verificationRequired ? generateOtp() : null
+  const registrationContinuationToken = verificationRequired ? randomToken(32) : null
 
   if (verificationRequired) await enforceOtpThrottle(email, 'account_verification')
 
@@ -312,7 +319,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       updatedBy: userId,
     }], sessionOptions)
 
-    if (verificationRequired && challengeId && otp) {
+    if (verificationRequired && challengeId && otp && registrationContinuationToken) {
       await OtpChallenge.create([{
         _id: challengeId,
         email,
@@ -322,6 +329,8 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
         purpose: 'account_verification',
         codeHash: hashOtp(challengeId.toString(), otp),
         expiresAt: new Date(Date.now() + OTP_TTL_MS),
+        continuationTokenHash: sha256(registrationContinuationToken),
+        continuationExpiresAt: new Date(Date.now() + REGISTRATION_CONTINUATION_TTL_MS),
         requestIp: meta.ip || '',
         requestUserAgent: meta.userAgent || '',
       }], sessionOptions)
@@ -372,10 +381,18 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
       await provisionAgency()
     }
 
-    if (verificationRequired && otp) {
+    if (verificationRequired && otp && registrationContinuationToken) {
       await sendAccountVerificationEmail({ email, code: otp, name: payload.name, agencyName: payload.agencyName })
       captureOtpForTest(email, 'account_verification', otp)
-      return { email, phoneNumber, subdomain, websiteUrl, verificationRequired: true, verificationChannel: 'email' }
+      return {
+        email,
+        phoneNumber,
+        subdomain,
+        websiteUrl,
+        verificationRequired: true,
+        verificationChannel: 'email',
+        registrationContinuationToken,
+      }
     }
 
     const activeUser = await User.findById(userId)
@@ -456,16 +473,28 @@ const consumeOtp = async (email: string, code: string, purpose: OtpPurpose) => {
 const verifyOtp = async (rawEmail: string, code: string, meta: RequestMeta): Promise<AuthResult> => {
   const email = normalizeEmail(rawEmail)
   const challenge = await consumeOtp(email, code, 'account_verification')
+  const verifiedAt = new Date()
   const user = await User.findOneAndUpdate(
     { _id: challenge.userId, email, isVerified: false },
     { isVerified: true, status: 'active' },
     { new: true },
   )
   if (!user) throw new ApiError(409, 'Account is already verified or unavailable')
-  await AccountCredential.updateOne(
-    { userId: user._id },
-    { $set: { emailVerifiedAt: new Date() } },
-  )
+  await Promise.all([
+    AccountCredential.updateOne(
+      { userId: user._id },
+      { $set: { emailVerifiedAt: verifiedAt } },
+    ),
+    OtpChallenge.updateMany(
+      {
+        userId: user._id,
+        purpose: 'account_verification',
+        continuationTokenHash: { $exists: true, $ne: '' },
+        continuationConsumedAt: null,
+      },
+      { $set: { continuationConsumedAt: verifiedAt } },
+    ),
+  ])
   await writeAudit({
     organizationId: user.organizationId,
     actorId: user._id.toString(),
@@ -477,6 +506,84 @@ const verifyOtp = async (rawEmail: string, code: string, meta: RequestMeta): Pro
     ip: meta.ip,
   })
   return createSession(user, meta)
+}
+
+type RegistrationStatus = {
+  verified: boolean
+  status: 'pending' | 'active' | 'blocked'
+  verificationMethod?: 'admin' | 'otp'
+}
+
+const findRegistrationContinuationChallenge = async (rawToken: string) => {
+  const token = rawToken.trim()
+  const challenge = await OtpChallenge.findOne({
+    purpose: 'account_verification',
+    channel: 'email',
+    continuationTokenHash: sha256(token),
+  })
+    .select('+continuationTokenHash userId organizationId continuationExpiresAt continuationConsumedAt manualApprovedAt')
+    .lean()
+
+  if (!challenge?.userId || !challenge.continuationExpiresAt) {
+    throw new ApiError(400, 'Invalid registration continuation token', '', 'REGISTRATION_CONTINUATION_INVALID')
+  }
+  if (challenge.continuationExpiresAt.getTime() <= Date.now()) {
+    throw new ApiError(410, 'Registration continuation token has expired', '', 'REGISTRATION_CONTINUATION_EXPIRED')
+  }
+  if (challenge.continuationConsumedAt) {
+    throw new ApiError(409, 'Registration continuation token has already been used', '', 'REGISTRATION_CONTINUATION_CONSUMED')
+  }
+  return challenge
+}
+
+const getRegistrationStatus = async (registrationContinuationToken: string): Promise<RegistrationStatus> => {
+  const challenge = await findRegistrationContinuationChallenge(registrationContinuationToken)
+  const user = await User.findById(challenge.userId).select('status isVerified').lean()
+  if (!user) throw new ApiError(400, 'Invalid registration continuation token', '', 'REGISTRATION_CONTINUATION_INVALID')
+
+  const verified = Boolean(user.isVerified && user.status === 'active')
+  return {
+    verified,
+    status: user.status,
+    ...(verified
+      ? { verificationMethod: challenge.manualApprovedAt ? 'admin' as const : 'otp' as const }
+      : {}),
+  }
+}
+
+const completeRegistration = async (registrationContinuationToken: string, meta: RequestMeta): Promise<AuthResult> => {
+  const challenge = await findRegistrationContinuationChallenge(registrationContinuationToken)
+  const user = await User.findOne({ _id: challenge.userId, isVerified: true, status: 'active' })
+  if (!user) {
+    throw new ApiError(409, 'Registration is still awaiting verification', '', 'REGISTRATION_VERIFICATION_PENDING')
+  }
+
+  const consumedAt = new Date()
+  const claimed = await OtpChallenge.findOneAndUpdate(
+    {
+      _id: challenge._id,
+      purpose: 'account_verification',
+      continuationTokenHash: sha256(registrationContinuationToken.trim()),
+      continuationConsumedAt: null,
+      continuationExpiresAt: { $gt: consumedAt },
+    },
+    { $set: { continuationConsumedAt: consumedAt } },
+    { new: true },
+  ).select('+continuationTokenHash')
+  if (!claimed) {
+    throw new ApiError(409, 'Registration continuation token has already been used or expired', '', 'REGISTRATION_CONTINUATION_CONSUMED')
+  }
+
+  try {
+    return await createSession(user, meta)
+  } catch (error) {
+    // Release only our claim so a transient session-creation failure can be retried.
+    await OtpChallenge.updateOne(
+      { _id: challenge._id, continuationConsumedAt: consumedAt },
+      { $set: { continuationConsumedAt: null } },
+    ).catch(() => undefined)
+    throw error
+  }
 }
 
 const resendOtp = async (rawEmail: string, meta: RequestMeta): Promise<void> => {
@@ -868,6 +975,8 @@ export const AuthServices = {
   registerAgency,
   loginUser,
   verifyOtp,
+  getRegistrationStatus,
+  completeRegistration,
   resendOtp,
   requestPasswordReset,
   verifyPasswordReset,

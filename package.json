@@ -30,6 +30,7 @@
     "verify:ci": "pnpm verify:release",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "migrate:email-otp": "ts-node --transpile-only src/app/db/migrateEmailOtpAuth.ts",
+    "migrate:registration-continuation": "ts-node --transpile-only src/app/db/migrateRegistrationContinuationToken.ts",
     "test:smtp": "node scripts/verify-smtp.mjs",
     "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
     "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",

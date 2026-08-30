@@ -27,6 +27,19 @@ export const authRateLimiter = rateLimit({
 export const otpRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true,
   legacyHeaders: false, message: { success: false, message: 'Too many verification requests. Try again later.' } })
 
+
+export const registrationStatusRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'RATE_LIMITED',
+    message: 'Too many registration status checks. Please wait a moment and try again.',
+  },
+})
+
 export const refreshRateLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 30, standardHeaders: true,
   legacyHeaders: false, message: { success: false, message: 'Too many session refresh attempts.' } })
 

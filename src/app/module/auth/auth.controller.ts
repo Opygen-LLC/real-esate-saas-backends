@@ -154,6 +154,8 @@ const revokeOtherSessions = catchAsync(async (req: Request, res: Response) => {
 })
 
 const registerAgency = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0')
+  res.setHeader('Pragma', 'no-cache')
   const result = await AuthServices.registerAgency(req.body, meta(req))
 
   if (!result.verificationRequired) {
@@ -191,6 +193,27 @@ const verifyOtp = catchAsync(async (req: Request, res: Response) =>
     'Email verified successfully',
   ),
 )
+
+const getRegistrationStatus = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0')
+  res.setHeader('Pragma', 'no-cache')
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Registration verification status retrieved',
+    data: await AuthServices.getRegistrationStatus(req.body.registrationContinuationToken),
+  })
+})
+
+const completeRegistration = catchAsync(async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0')
+  res.setHeader('Pragma', 'no-cache')
+  authResponse(
+    res,
+    await AuthServices.completeRegistration(req.body.registrationContinuationToken, meta(req)),
+    'Registration completed successfully',
+  )
+})
 
 const resendOtp = catchAsync(async (req: Request, res: Response) => {
   await AuthServices.resendOtp(req.body.email, meta(req))
@@ -274,6 +297,8 @@ export const AuthController = {
   registerAgency,
   loginUser,
   verifyOtp,
+  getRegistrationStatus,
+  completeRegistration,
   resendOtp,
   requestPasswordReset,
   verifyPasswordReset,

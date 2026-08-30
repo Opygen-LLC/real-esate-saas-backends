@@ -17,6 +17,7 @@ export interface RegisterAgencyPendingVerificationResult {
   websiteUrl: string
   verificationRequired: true
   verificationChannel: 'email'
+  registrationContinuationToken: string
 }
 
 export type RegisterAgencyAuthenticatedResult = AuthResult & {
