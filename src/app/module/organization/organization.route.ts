@@ -19,6 +19,13 @@ router.patch(
 )
 
 router.patch(
+  '/invoice-branding',
+  authMiddlewares.auth('agency_owner'),
+  validateRequest(OrganizationValidation.invoiceBranding),
+  OrganizationController.updateInvoiceBrandingSettings,
+)
+
+router.patch(
   '/website-settings',
   authMiddlewares.requirePermission('website.write'),
   validateRequest(OrganizationValidation.website),

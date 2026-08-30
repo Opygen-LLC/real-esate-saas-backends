@@ -80,6 +80,29 @@ const updateBrandingSettings = catchAsync(async (req: Request, res: Response) =>
 })
 
 
+const updateInvoiceBrandingSettings = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const result = await OrganizationService.updateInvoiceBrandingSettings(organizationId, req.body)
+  await writeAudit({
+    organizationId,
+    actorId: req.user!._id!,
+    actorRole: req.user!.userRole || 'agency_owner',
+    action: 'finance.invoice_branding_updated',
+    entityType: 'organization',
+    entityId: String(result._id),
+    requestId: req.requestId,
+    ip: req.ip,
+    metadata: { invoiceLogoConfigured: Boolean(result.invoiceLogo) },
+  })
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.invoiceLogo ? 'Invoice PDF logo saved successfully' : 'Invoice PDF logo removed successfully',
+    data: result,
+  })
+})
+
 const saveOnboarding = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   await OrganizationService.saveOnboarding(organizationId, req.body)
@@ -155,6 +178,7 @@ export const OrganizationController = {
   getPublicSiteInfo,
   updateWebsiteSettings,
   updateBrandingSettings,
+  updateInvoiceBrandingSettings,
   saveOnboarding,
   completeOnboarding,
   skipOnboarding,

@@ -12,6 +12,7 @@ import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
+import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
 import { Property } from '../property/property.model'
@@ -213,6 +214,44 @@ const updateBrandingSettings = async (organizationId: string, payload: Partial<I
   return result
 }
 
+const updateInvoiceBrandingSettings = async (organizationId: string, payload: Pick<IOrganization, 'invoiceLogo'>): Promise<IOrganization> => {
+  const invoiceLogo = String(payload.invoiceLogo || '').trim()
+  let safeInvoiceLogo = ''
+
+  if (invoiceLogo) {
+    safeInvoiceLogo = assertSafeUrl(invoiceLogo)
+    const key = ObjectStorageService.keyFromReference(safeInvoiceLogo)
+    if (!key || !key.startsWith(`tenants/${organizationId}/`)) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Invoice logo must be uploaded to this agency storage first')
+    }
+    const metadata = await ObjectStorageService.head(key)
+    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
+    if (!allowedTypes.has(metadata.contentType.toLowerCase())) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Invoice logo must be a JPG, PNG, WebP, or AVIF image')
+    }
+    if (metadata.size > 5 * 1024 * 1024) {
+      throw new ApiError(413, 'Invoice logo must be 5 MB or smaller')
+    }
+  }
+
+  const result = await Organization.findOneAndUpdate(
+    { organizationId },
+    { $set: { invoiceLogo: safeInvoiceLogo } },
+    { new: true },
+  )
+  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+
+  await CacheInvalidationService.invalidateTenant(organizationId)
+  await DomainEventService.emit({
+    organizationId,
+    aggregateType: 'organization',
+    aggregateId: result._id.toString(),
+    eventType: 'finance.invoice_branding_updated',
+    payload: { invoiceLogoConfigured: Boolean(safeInvoiceLogo) },
+  })
+  return result
+}
+
 const updateMyOrganization = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   const allowed = ['agencyName', 'agencyType', 'email', 'phone', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
   const safePayload = Object.fromEntries(allowed.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]]))
@@ -304,6 +343,7 @@ export const OrganizationService = {
   getPublicSiteInfo,
   updateWebsiteSettings,
   updateBrandingSettings,
+  updateInvoiceBrandingSettings,
   updateMyOrganization,
   saveOnboarding,
   completeOnboarding: (organizationId: string) => finalizeOnboarding(organizationId, 'completed'),

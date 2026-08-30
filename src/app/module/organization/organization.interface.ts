@@ -91,6 +91,7 @@ export interface IOrganization {
   areaConversion?: { kathaSqft?: number; bighaKatha?: number }
   serviceAreas?: string[] | IServiceArea[]
   logo?: string
+  invoiceLogo?: string
   favicon?: string
   primaryColor?: string
   secondaryColor?: string

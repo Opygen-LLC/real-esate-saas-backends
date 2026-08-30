@@ -77,6 +77,10 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       type: String,
       default: '',
     },
+    invoiceLogo: {
+      type: String,
+      default: '',
+    },
     favicon: {
       type: String,
       default: '',

@@ -3,7 +3,9 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { pathToFileURL } from 'url'
+import sharp from 'sharp'
 import ApiError from '../../../errors/ApiError'
+import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 
 const escapeHtml = (value: unknown) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -57,7 +59,28 @@ const runChromium = async (executable: string, inputHtml: string, outputPdf: str
   })
 }
 
-const renderInvoiceHtml = (invoice: any, organization: any) => {
+const resolveInvoiceLogoDataUri = async (organization: any): Promise<string> => {
+  const reference = String(organization?.invoiceLogo || organization?.logo || '').trim()
+  if (!reference) return ''
+  const key = ObjectStorageService.keyFromReference(reference)
+  if (!key || !String(organization?.organizationId || '').trim() || !key.startsWith(`tenants/${organization.organizationId}/`)) return ''
+
+  try {
+    const source = await ObjectStorageService.readBuffer(key, 5 * 1024 * 1024)
+    const normalized = await sharp(source, { failOn: 'error' })
+      .rotate()
+      .resize({ width: 320, height: 100, fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toBuffer()
+    return `data:image/png;base64,${normalized.toString('base64')}`
+  } catch {
+    // A missing/invalid logo should never prevent an otherwise valid invoice
+    // from being generated. The agency name remains the deterministic fallback.
+    return ''
+  }
+}
+
+const renderInvoiceHtml = (invoice: any, organization: any, logoDataUri = '') => {
   const outstanding = Math.max(0, Number(invoice.total || 0) - Number(invoice.paidAmount || 0))
   const primary = safeHex(organization?.primaryColor)
   const address = [organization?.address, organization?.city, organization?.state, organization?.country].filter(Boolean).join(', ')
@@ -94,6 +117,7 @@ const renderInvoiceHtml = (invoice: any, organization: any) => {
   .sheet { position: relative; min-height: 265mm; }
   .watermark { position: fixed; top: 42%; left: 10%; width: 80%; transform: rotate(-24deg); text-align: center; font-size: 68px; font-weight: 800; letter-spacing: 8px; color: rgba(190, 24, 93, .10); z-index: -1; }
   .header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid ${primary}; padding-bottom: 18px; }
+  .brand-logo { display: block; max-width: 170px; max-height: 54px; object-fit: contain; margin-bottom: 8px; }
   .brand { font-size: 20px; font-weight: 800; color: ${primary}; margin-bottom: 5px; }
   .title { font-size: 26px; font-weight: 800; letter-spacing: -.5px; text-align: right; }
   .status { display: inline-block; margin-top: 5px; border: 1px solid #d4d4d8; border-radius: 999px; padding: 3px 9px; font-size: 9px; text-transform: uppercase; font-weight: 700; }
@@ -119,6 +143,7 @@ const renderInvoiceHtml = (invoice: any, organization: any) => {
 ${cancelled ? '<div class="watermark">VOID</div>' : ''}
 <header class="header">
   <div>
+    ${logoDataUri ? `<img class="brand-logo" src="${logoDataUri}" alt="Agency logo" />` : ''}
     <div class="brand">${escapeHtml(organization?.agencyName || 'Real Estate Agency')}</div>
     ${address ? `<div class="muted">${escapeHtml(address)}</div>` : ''}
     ${organization?.phone ? `<div class="muted">${escapeHtml(organization.phone)}</div>` : ''}
@@ -170,7 +195,8 @@ export const renderInvoicePdf = async (invoice: any, organization: any): Promise
   const input = path.join(tempDir, 'invoice.html')
   const output = path.join(tempDir, 'invoice.pdf')
   try {
-    await writeFile(input, renderInvoiceHtml(invoice, organization), { encoding: 'utf8', mode: 0o600 })
+    const logoDataUri = await resolveInvoiceLogoDataUri(organization)
+    await writeFile(input, renderInvoiceHtml(invoice, organization, logoDataUri), { encoding: 'utf8', mode: 0o600 })
     await runChromium(executable, input, output)
     const pdf = await readFile(output)
     if (pdf.length < 500 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Invoice renderer returned an invalid PDF')

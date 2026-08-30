@@ -472,7 +472,7 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
 const renderInvoiceDocument = async (organizationId: string, actor: FinanceActorContext, id: string) => {
   const [invoice, organization]: any[] = await Promise.all([
     getInvoiceById(organizationId, id),
-    Organization.findOne({ organizationId }).select('agencyName email phone address city state country primaryColor').lean(),
+    Organization.findOne({ organizationId }).select('organizationId agencyName email phone address city state country primaryColor logo invoiceLogo').lean(),
   ])
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const pdf = await renderInvoicePdf(invoice, organization)

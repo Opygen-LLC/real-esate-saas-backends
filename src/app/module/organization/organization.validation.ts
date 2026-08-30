@@ -80,6 +80,10 @@ export const OrganizationValidation = {
     metaDescription: z.string().trim().max(300).optional(), logo: optionalUrl.optional(), favicon: optionalUrl.optional(),
   }).strict() }),
 
+  invoiceBranding: z.object({ body: z.object({
+    invoiceLogo: optionalUrl,
+  }).strict() }),
+
   website: z.object({ body: z.object({
     templateId: z.enum(WEBSITE_TEMPLATE_IDS).optional(),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
