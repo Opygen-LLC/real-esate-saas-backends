@@ -56,14 +56,28 @@ const appendSocialLinkUpdates = (
     if (entry === undefined) continue
     target[`socialLinks.${key}`] = key === 'whatsapp' || entry === '' ? entry : assertSafeUrl(String(entry))
   }
-  // Once X/Twitter is explicitly written, remove the legacy field so clearing X
-  // cannot accidentally fall back to an old Twitter URL on subsequent reads.
+  // The migration preserves legacy Twitter during the compatibility window, but
+  // an explicit X/Twitter write becomes authoritative and retires the old field.
   if (unset && (value.x !== undefined || value.twitter !== undefined)) unset['socialLinks.twitter'] = ''
 }
 
 const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) => ({
   $set: set,
   ...(Object.keys(unset).length ? { $unset: unset } : {}),
+})
+
+const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null): OrganizationWebsiteSettings => ({
+  ...(settings || {}),
+  renderMode: settings?.renderMode || 'template',
+  footer: {
+    showSocialLinks: settings?.footer?.showSocialLinks ?? true,
+    socialVisibility: {
+      facebook: settings?.footer?.socialVisibility?.facebook ?? true,
+      instagram: settings?.footer?.socialVisibility?.instagram ?? true,
+      youtube: settings?.footer?.socialVisibility?.youtube ?? true,
+      x: settings?.footer?.socialVisibility?.x ?? true,
+    },
+  },
 })
 
 const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?: OrganizationWebsiteSettings | null) => {
@@ -118,6 +132,7 @@ const getMyOrganization = async (organizationId: string): Promise<(IOrganization
   return {
     ...result,
     socialLinks: canonicalSocialLinks(result.socialLinks),
+    websiteSettings: canonicalWebsiteSettings(result.websiteSettings),
     websiteStatus: result.websiteStatus || 'published',
     onboarding: normalizeOnboardingState(result.onboarding, result.createdAt || new Date()),
     websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
@@ -133,7 +148,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
   const cached = await Cache.tenantPublic.get<PublicOrganizationWebsite & { socialLinks?: OrganizationSocialLinks }>(cacheKey)
   if (cached?.organizationId) {
     await TenantAccessService.assertPublicWebsiteAccess(String(cached.organizationId))
-    return { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks) }
+    return { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks), websiteSettings: canonicalWebsiteSettings(cached.websiteSettings) }
   }
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
@@ -182,7 +197,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
     font: org.font || 'Inter',
     primaryColor: org.primaryColor || '#1877F2',
     secondaryColor: org.secondaryColor || '#0f172a',
-    websiteSettings: { renderMode: 'template', ...(org.websiteSettings || {}) },
+    websiteSettings: canonicalWebsiteSettings(org.websiteSettings),
     brandingVersion: updatedAt ? new Date(updatedAt).toISOString() : '',
     stats: { totalProperties, totalAgents },
   }

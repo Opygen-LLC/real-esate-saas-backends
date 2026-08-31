@@ -4,6 +4,37 @@ import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constant
 import { ONBOARDING_TOTAL_STEPS } from './onboarding.constants'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
+const secureUrl = z.union([z.literal(''), z.string().trim().max(2048).superRefine((value, ctx) => {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:') ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'URL must start with https://' })
+    if (url.username || url.password) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'URL cannot contain login credentials' })
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a valid URL' })
+  }
+})])
+const platformUrl = (label: string, domains: readonly string[]) => z.union([
+  z.literal(''),
+  z.string().trim().max(2048).superRefine((value, ctx) => {
+    try {
+      const url = new URL(value)
+      if (url.protocol !== 'https:') {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} URL must start with https://` })
+        return
+      }
+      if (url.username || url.password) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} URL cannot contain login credentials` })
+        return
+      }
+      const host = url.hostname.toLowerCase().replace(/\.$/, '')
+      if (!domains.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} URL must use ${domains.join(' or ')}` })
+      }
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Enter a valid ${label} URL` })
+    }
+  }),
+])
 const agencyType = z.enum(['residential', 'commercial', 'mixed', 'brokerage', 'developer', 'general'])
 const addressDetails = z.object({
   divisionId: z.string().max(12).optional(), division: z.string().max(80).optional(), districtId: z.string().max(12).optional(),
@@ -12,8 +43,13 @@ const addressDetails = z.object({
   mouza: z.string().max(100).optional(), postalCode: z.union([z.literal(''), z.string().regex(/^\d{4}$/)]).optional(), landmark: z.string().max(200).optional(),
 }).strict()
 const socialLinks = z.object({
-  facebook: optionalUrl.optional(), instagram: optionalUrl.optional(), twitter: optionalUrl.optional(), x: optionalUrl.optional(), linkedin: optionalUrl.optional(),
-  youtube: optionalUrl.optional(), whatsapp: z.union([z.literal(''), z.string().max(40)]).optional(),
+  facebook: platformUrl('Facebook', ['facebook.com']).optional(),
+  instagram: platformUrl('Instagram', ['instagram.com']).optional(),
+  twitter: platformUrl('X', ['x.com', 'twitter.com']).optional(),
+  x: platformUrl('X', ['x.com', 'twitter.com']).optional(),
+  linkedin: secureUrl.optional(),
+  youtube: platformUrl('YouTube', ['youtube.com', 'youtu.be']).optional(),
+  whatsapp: z.union([z.literal(''), z.string().max(40)]).optional(),
 }).strict()
 const shortText = (max = 200) => z.string().trim().max(max)
 const websiteFeature = z.object({ title: shortText(120), description: shortText(500) }).strict()

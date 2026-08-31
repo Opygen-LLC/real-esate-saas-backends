@@ -142,7 +142,9 @@
     "migrate:website-social-contract-phase1": "ts-node --transpile-only src/app/db/migrateWebsiteSocialContractPhase1.ts",
     "audit:tenant-relations-phase1": "ts-node --transpile-only src/app/db/auditTenantRelationIntegrity.ts",
     "verify:phase1-data-integrity": "node scripts/verify-phase1-data-integrity.mjs",
-    "migrate:phase1-query-indexes": "ts-node --transpile-only src/app/db/migratePhase1QueryIndexes.ts"
+    "migrate:phase1-query-indexes": "ts-node --transpile-only src/app/db/migratePhase1QueryIndexes.ts",
+    "migrate:website-footer-phase2": "ts-node --transpile-only src/app/db/migrateWebsiteFooterPhase2.ts",
+    "verify:phase2-website-footer": "node scripts/verify-phase2-website-footer.mjs"
   },
   "keywords": [
     "real-estate",
