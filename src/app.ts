@@ -99,7 +99,7 @@ app.get("/", (_req: Request, res: Response) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Welcome to the Real Estate SaaS 31 Aug 3:10PM",
+    message: "Welcome to the Real Estate SaaS 1 Sep 1:10AM",
     data: {
       status: "operational",
       version: "1.0.0",
