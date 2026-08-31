@@ -32,7 +32,7 @@ const createFromJob = async (input: NotificationJobInput) => {
   // updateOne + upsertedId lets worker retries remain idempotent without
   // broadcasting duplicate "created" events for the same reminder job.
   const result = await Notification.updateOne(
-    { jobId: input.jobId, userId: input.userId },
+    { organizationId: input.organizationId, jobId: input.jobId, userId: input.userId },
     { $setOnInsert: { ...input } },
     { upsert: true, setDefaultsOnInsert: true },
   ).catch((error: unknown) => {
@@ -41,11 +41,11 @@ const createFromJob = async (input: NotificationJobInput) => {
     if (isDuplicateKeyError(error)) return null
     throw error
   })
-  if (!result) return Notification.findOne({ jobId: input.jobId, userId: input.userId })
+  if (!result) return Notification.findOne({ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId })
 
   const row = result.upsertedId
-    ? await Notification.findById(result.upsertedId)
-    : await Notification.findOne({ jobId: input.jobId, userId: input.userId })
+    ? await Notification.findOne({ _id: result.upsertedId, organizationId: input.organizationId })
+    : await Notification.findOne({ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId })
 
   if (row && result.upsertedId) {
     RealtimeService.emitNotification(input.organizationId, input.userId, row._id.toString(), 'created')

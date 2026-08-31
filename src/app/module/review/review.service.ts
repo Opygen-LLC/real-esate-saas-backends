@@ -25,65 +25,79 @@ const createInvitation = async (organizationId: string, createdBy: string, prope
 
 const list = async (organizationId: string) => {
   const [reviews, invitations] = await Promise.all([
-    AgencyReview.find({ organizationId }).populate('propertyId', 'title slug images').sort({ createdAt: -1, _id: -1 }).lean(),
-    ReviewInvitation.find({ organizationId }).populate('propertyId', 'title slug').select('-tokenHash').sort({ createdAt: -1, _id: -1 }).limit(100).lean(),
+    AgencyReview.find({ organizationId }).populate({ path: 'propertyId', select: 'title slug images', match: { organizationId } }).sort({ createdAt: -1, _id: -1 }).lean(),
+    ReviewInvitation.find({ organizationId }).populate({ path: 'propertyId', select: 'title slug', match: { organizationId } }).select('-tokenHash').sort({ createdAt: -1, _id: -1 }).limit(100).lean(),
   ])
   return { reviews, invitations }
 }
 
 const getInvitation = async (token: string) => {
-  const invitation: any = await ReviewInvitation.findOne({ tokenHash: hashToken(token) }).populate('propertyId', 'title slug images').lean()
+  const tokenHash = hashToken(token)
+  const scope: any = await ReviewInvitation.findOne({ tokenHash }).select('organizationId').lean()
+  if (!scope?.organizationId) throw new ApiError(httpStatus.NOT_FOUND, 'Review link is invalid or has already been used')
+  const organizationId = String(scope.organizationId)
+  const invitation: any = await ReviewInvitation.findOne({ tokenHash, organizationId }).lean()
   if (!invitation || invitation.status !== 'pending') throw new ApiError(httpStatus.NOT_FOUND, 'Review link is invalid or has already been used')
-  await TenantAccessService.assertPublicWebsiteAccess(String(invitation.organizationId))
-  await TenantPurgeBarrier.assertTenantWritable(String(invitation.organizationId))
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (new Date(invitation.expiresAt).getTime() <= Date.now()) {
-    await ReviewInvitation.updateOne({ _id: invitation._id }, { $set: { status: 'expired' } })
+    await ReviewInvitation.updateOne({ _id: invitation._id, organizationId }, { $set: { status: 'expired' } })
     throw new ApiError(httpStatus.GONE, 'This review link has expired')
   }
-  const organization = await Organization.findOne({ organizationId: invitation.organizationId }).select('agencyName logo').lean()
+  const [organization, property] = await Promise.all([
+    Organization.findOne({ organizationId }).select('agencyName logo').lean(),
+    Property.findOne({ _id: invitation.propertyId, organizationId }).select('title slug images').lean(),
+  ])
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Agency not found')
-  return { agencyName: organization.agencyName, logo: (organization as any).logo || '', property: invitation.propertyId, expiresAt: invitation.expiresAt }
+  if (!property) throw new ApiError(httpStatus.NOT_FOUND, 'Property is no longer available for this review link')
+  return { agencyName: organization.agencyName, logo: (organization as any).logo || '', property, expiresAt: invitation.expiresAt }
 }
 
 const submit = async (payload: { token: string; name: string; email?: string; phone: string; rating: number; comment: string }) => {
   const tokenHash = hashToken(payload.token)
   const now = new Date()
   const invitationScope: any = await ReviewInvitation.findOne({ tokenHash }).select('organizationId').lean()
-  if (invitationScope?.organizationId) {
-    await TenantAccessService.assertPublicWebsiteAccess(String(invitationScope.organizationId))
-    await TenantPurgeBarrier.assertTenantWritable(String(invitationScope.organizationId))
-  }
-  // Atomically consume the one-time invitation so two simultaneous submissions cannot create duplicate reviews.
+  if (!invitationScope?.organizationId) throw new ApiError(httpStatus.NOT_FOUND, 'Review link is invalid or has already been used')
+  const organizationId = String(invitationScope.organizationId)
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  await TenantPurgeBarrier.assertTenantWritable(organizationId)
+
+  // Atomically consume the one-time invitation inside the derived tenant scope.
   const invitation: any = await ReviewInvitation.findOneAndUpdate(
-    { tokenHash, status: 'pending', expiresAt: { $gt: now } },
+    { tokenHash, organizationId, status: 'pending', expiresAt: { $gt: now } },
     { $set: { status: 'submitted', submittedAt: now } },
     { new: true },
   )
   if (!invitation) {
-    const existing: any = await ReviewInvitation.findOne({ tokenHash }).select('status expiresAt')
+    const existing: any = await ReviewInvitation.findOne({ tokenHash, organizationId }).select('status expiresAt')
     if (existing?.status === 'pending' && new Date(existing.expiresAt).getTime() <= now.getTime()) {
-      await ReviewInvitation.updateOne({ _id: existing._id, status: 'pending' }, { $set: { status: 'expired' } })
+      await ReviewInvitation.updateOne({ _id: existing._id, organizationId, status: 'pending' }, { $set: { status: 'expired' } })
       throw new ApiError(httpStatus.GONE, 'This review link has expired')
     }
     throw new ApiError(httpStatus.NOT_FOUND, 'Review link is invalid or has already been used')
   }
 
+  const property = await Property.exists({ _id: invitation.propertyId, organizationId })
+  if (!property) {
+    await ReviewInvitation.updateOne({ _id: invitation._id, organizationId, status: 'submitted' }, { $set: { status: 'pending' }, $unset: { submittedAt: 1 } })
+    throw new ApiError(httpStatus.CONFLICT, 'Review link has an invalid property relationship')
+  }
+
   let phone: string
   try { phone = normalizeBangladeshPhone(payload.phone) } catch (error) {
-    await ReviewInvitation.updateOne({ _id: invitation._id, status: 'submitted' }, { $set: { status: 'pending' }, $unset: { submittedAt: 1 } })
+    await ReviewInvitation.updateOne({ _id: invitation._id, organizationId, status: 'submitted' }, { $set: { status: 'pending' }, $unset: { submittedAt: 1 } })
     throw new ApiError(httpStatus.BAD_REQUEST, (error as Error).message)
   }
   const email = payload.email?.trim() ? normalizeEmail(payload.email) : ''
   try {
     return await AgencyReview.create({
-      organizationId: invitation.organizationId, propertyId: invitation.propertyId, invitationId: invitation._id,
+      organizationId, propertyId: invitation.propertyId, invitationId: invitation._id,
       name: payload.name.trim(), email, phone, rating: payload.rating, comment: payload.comment.trim(), status: 'pending',
     })
   } catch (error) {
-    // Release only our still-unfulfilled claim; this keeps transient database failures retryable.
-    const reviewExists = await AgencyReview.exists({ invitationId: invitation._id })
+    const reviewExists = await AgencyReview.exists({ invitationId: invitation._id, organizationId })
     if (!reviewExists) {
-      await ReviewInvitation.updateOne({ _id: invitation._id, status: 'submitted' }, { $set: { status: 'pending' }, $unset: { submittedAt: 1 } })
+      await ReviewInvitation.updateOne({ _id: invitation._id, organizationId, status: 'submitted' }, { $set: { status: 'pending' }, $unset: { submittedAt: 1 } })
     }
     throw error
   }
@@ -110,7 +124,7 @@ const revokeInvitation = async (organizationId: string, id: string) => {
 const getPublicReviews = async (organizationId: string) => {
   await TenantAccessService.assertPublicWebsiteAccess(organizationId)
   return AgencyReview.find({ organizationId, status: 'published' })
-  .populate('propertyId', 'title slug images').select('name rating comment propertyId createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean()
+  .populate({ path: 'propertyId', select: 'title slug images', match: { organizationId } }).select('name rating comment propertyId createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean()
 }
 
 export const ReviewService = { createInvitation, list, getInvitation, submit, moderate, remove, revokeInvitation, getPublicReviews }

@@ -179,7 +179,7 @@ const acceptInvitation = async (token: string, password: string) => {
         await Promise.allSettled([
           AccountCredential.deleteOne({ userId: user._id }),
           deleteUserCompanionRecords(user._id),
-          User.deleteOne({ _id: user._id }),
+          User.deleteOne({ _id: user._id, organizationId: invitation.organizationId }),
         ])
       }
       throw error

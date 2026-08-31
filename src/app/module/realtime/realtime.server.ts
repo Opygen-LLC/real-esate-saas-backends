@@ -161,7 +161,7 @@ const initializeRealtimeServer = async (httpServer: HttpServer) => {
       if (!ticket) return next(new Error('REALTIME_AUTH_REQUIRED'))
       const payload: any = jwtHelpers.verifyToken(ticket, config.jwt.secret as Secret)
       if (payload.typ !== 'realtime_ticket' || payload.aud !== 'dashboard_socket' || !payload._id) return next(new Error('REALTIME_TICKET_INVALID'))
-      const user = await User.findById(payload._id).select('_id organizationId userRole status isVerified').lean()
+      const user = await User.findOne({ _id: payload._id, organizationId: payload.organizationId }).select('_id organizationId userRole status isVerified').lean()
       if (!user || user.status !== 'active' || !user.isVerified) return next(new Error('REALTIME_ACCOUNT_UNAVAILABLE'))
       if (payload.organizationId !== user.organizationId || payload.userRole !== user.userRole) return next(new Error('REALTIME_AUTH_CHANGED'))
       if (user.userRole !== 'super-admin') {

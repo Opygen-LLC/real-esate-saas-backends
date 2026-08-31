@@ -14,6 +14,7 @@ import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { Lead } from '../lead/lead.model'
 import { userRefPopulate } from '../user/userProfile.service'
+import { TenantReferenceService } from '../../shared/tenantReference.service'
 import {
   CrmHistoryEntry,
   CrmHistoryKind,
@@ -38,7 +39,7 @@ const normalizedNoteContent = (content: unknown): string => {
 
 const getProjectedActivity = async (organizationId: string, domainEventId: unknown): Promise<IActivity> => {
   const activity: any = await Activity.findOne({ organizationId, 'metadata.domainEventId': domainEventId })
-    .populate(userRefPopulate('agentId', 'name email userRole'))
+    .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
   if (!activity) throw new ApiError(500, 'CRM history projection was not created')
   return activity
 }
@@ -66,6 +67,9 @@ const createActivity = async (
   await LeadEntitlementService.assertLeadAccessible(organizationId, String(payload.leadId))
 
   const actorId = payload.agentId ? String(payload.agentId) : undefined
+  if (actorId) await TenantReferenceService.assertUserBelongsToOrganization(organizationId, actorId)
+  if (payload.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, payload.propertyId)
+  if (payload.contactId) await TenantReferenceService.assertContactBelongsToOrganization(organizationId, payload.contactId)
   const eventType = `activity.${type}`
   const event: any = await DomainEventService.emit({
     organizationId,
@@ -193,7 +197,7 @@ const getActivitiesByLead = async (
   const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
   const [result, total] = await Promise.all([
     Activity.find({ organizationId, leadId })
-      .populate(userRefPopulate('agentId', 'name email userRole'))
+      .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit),
@@ -295,7 +299,7 @@ const getHistoryPage = async (
   const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
   const [activities, total] = await Promise.all([
     Activity.find({ organizationId, ...where })
-      .populate(userRefPopulate('agentId', 'name email userRole'))
+      .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit),

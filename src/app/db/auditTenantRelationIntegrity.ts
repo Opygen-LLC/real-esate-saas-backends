@@ -3,7 +3,7 @@ import config from '../../config'
 import { backupDocuments, migrationCli, requireConfirmation, writeMigrationManifest } from './migrations/migrationSafety'
 import { collectTenantRelationFindings, summarizeTenantRelationFindings } from './tenantRelationIntegrity'
 
-const MIGRATION = 'tenant-relation-integrity-phase1-v2'
+const MIGRATION = 'tenant-relation-integrity-phase1-v3'
 const CONFIRMATION = 'tenant-relations-phase1'
 
 const toObjectId = (value: string): Types.ObjectId => {

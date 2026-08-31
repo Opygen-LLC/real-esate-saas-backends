@@ -46,7 +46,7 @@ const getAssignees = async (organizationId: string, capability: CrmAssignmentCap
 }
 
 const getConfig = async (organizationId: string) => {
-  let config = await CrmConfig.findOne({ organizationId }).populate('assignment.eligibleAgentIds', 'name email userRole status').populate('assignment.territoryRules.agentIds', 'name email userRole status')
+  let config = await CrmConfig.findOne({ organizationId }).populate({ path: 'assignment.eligibleAgentIds', select: 'name email userRole status', match: { organizationId } }).populate({ path: 'assignment.territoryRules.agentIds', select: 'name email userRole status', match: { organizationId } })
   if (!config) return CrmConfig.create({ organizationId, pipelineStages: DEFAULT_LEAD_PIPELINE_STAGES })
 
   const canonicalStages = canonicalizePipelineStages(config.pipelineStages || [])
@@ -130,7 +130,9 @@ const getAssignmentHistory = async (organizationId: string, leadId: string, acce
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
   await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
   return LeadAssignmentAudit.find({ organizationId, leadId })
-    .populate('previousAgentId assignedAgentId actorId', 'name email').sort({ createdAt: -1 }).lean()
+    .populate({ path: 'previousAgentId', select: 'name email', match: { organizationId } })
+    .populate({ path: 'assignedAgentId', select: 'name email', match: { organizationId } })
+    .populate({ path: 'actorId', select: 'name email', match: { organizationId } }).sort({ createdAt: -1 }).lean()
 }
 
 export const CrmService = { getConfig, updateConfig, chooseAgent, recordAssignment, getAssignmentHistory, getAssignees }

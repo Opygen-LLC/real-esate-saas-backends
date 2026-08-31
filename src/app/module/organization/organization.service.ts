@@ -6,6 +6,7 @@ import { Cache } from '../../../shared/cache'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import paginationHelper from '../../helpers/paginationHelper'
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
+import { normalizeSubdomain, RESERVED_SUBDOMAINS } from '../../helpers/identity'
 import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
 import { safeRegexPattern } from '../../helpers/searchQuery'
 import { DomainRecord } from '../domain/domain.model'
@@ -112,6 +113,47 @@ const getPublicTenantIdentifiers = async (organizationId: string, subdomain?: st
   )
 }
 
+const generatedSubdomainForOrganization = (organizationId: string, agencyName?: string): string => {
+  const normalizedAgency = normalizeSubdomain(String(agencyName || 'agency'))
+  const seed = (normalizedAgency || 'agency').slice(0, 40)
+  const safeSeed = RESERVED_SUBDOMAINS.has(seed) ? `agency-${seed}` : seed
+  const suffix = organizationId.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(-10)
+  return `${safeSeed}-${suffix || randomUUID().replace(/-/g, '').slice(0, 10)}`.slice(0, 63).replace(/-+$/g, '')
+}
+
+const resolveInitialSubdomain = async (organizationId: string, payload: Partial<IOrganization>): Promise<string> => {
+  const requested = String(payload.sub_domain || '').trim()
+  if (requested) {
+    const normalized = normalizeSubdomain(requested)
+    if (normalized.length < 2 || RESERVED_SUBDOMAINS.has(normalized)) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid or reserved website address')
+    }
+    const [existing, alias] = await Promise.all([
+      Organization.exists({ sub_domain: normalized }),
+      SubdomainAlias.exists({ alias: normalized }),
+    ])
+    if (existing || alias) throw new ApiError(httpStatus.CONFLICT, 'This website address is already taken')
+    return normalized
+  }
+
+  const isSubdomainAvailable = async (candidate: string) => {
+    const [organization, alias] = await Promise.all([
+      Organization.exists({ sub_domain: candidate }),
+      SubdomainAlias.exists({ alias: candidate }),
+    ])
+    return !organization && !alias
+  }
+
+  const base = generatedSubdomainForOrganization(organizationId, payload.agencyName)
+  if (await isSubdomainAvailable(base)) return base
+  for (let attempt = 2; attempt <= 99; attempt += 1) {
+    const suffix = `-${attempt}`
+    const candidate = `${base.slice(0, 63 - suffix.length)}${suffix}`
+    if (await isSubdomainAvailable(candidate)) return candidate
+  }
+  throw new ApiError(httpStatus.CONFLICT, 'Unable to allocate a unique website address')
+}
+
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
   const organizationId = payload.organizationId || `org_${randomUUID()}`
   if (await Organization.exists({ organizationId })) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
@@ -119,7 +161,15 @@ const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrg
   // New records persist the canonical X field only. Legacy `twitter` remains read-compatible
   // through canonicalSocialLinks while the production migration window is open.
   const socialLinks = payload.socialLinks ? canonicalSocialLinks(payload.socialLinks) : undefined
-  return Organization.create({ ...payload, organizationId, ...(socialLinks ? { socialLinks } : {}) })
+  const sub_domain = await resolveInitialSubdomain(organizationId, payload)
+  try {
+    return await Organization.create({ ...payload, organizationId, sub_domain, ...(socialLinks ? { socialLinks } : {}) })
+  } catch (error: any) {
+    if (error?.code === 11000 && (error?.keyPattern?.sub_domain || error?.keyValue?.sub_domain)) {
+      throw new ApiError(httpStatus.CONFLICT, 'This website address is already taken')
+    }
+    throw error
+  }
 }
 
 const getMyOrganization = async (organizationId: string): Promise<(IOrganization & { effectiveAccess: EffectiveTenantAccess }) | null> => {

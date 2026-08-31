@@ -111,7 +111,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
     sub_domain: {
       type: String,
-      default: '',
+      trim: true,
       lowercase: true,
     },
     domain_Verify: {
@@ -285,7 +285,14 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
   }
 )
 
-organizationSchema.index({ sub_domain: 1 }, { unique: true })
+organizationSchema.index(
+  { sub_domain: 1 },
+  {
+    unique: true,
+    name: 'organization_subdomain_unique_nonempty',
+    partialFilterExpression: { sub_domain: { $type: 'string', $gt: '' } },
+  },
+)
 organizationSchema.index(
   { 'subscription.scheduledEffectiveAt': 1, organizationId: 1 },
   {

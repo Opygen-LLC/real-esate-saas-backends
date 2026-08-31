@@ -19,6 +19,7 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import type { LeadAllowanceSource } from '../entitlement/leadAllowanceReservation.interface'
 import { logger } from '../../../shared/logger'
 import { Property } from '../property/property.model'
+import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
 import { ILead, ILeadFilter } from './lead.interface'
@@ -145,6 +146,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
     updatedBy:creatorAgentId||undefined,
     isConverted:false,
   }
+  await TenantReferenceService.assertPropertiesBelongToOrganization(organizationId, prepared.propertyInterest as unknown[] | undefined)
   if(access&&prepared.assignedAgent&&!canAssignLeadTo(access,String(prepared.assignedAgent)))throw new ApiError(403,'Assigning a lead to another team member requires leads.assign')
   if(access&&!access.isManager&&!access.permissions.includes('leads.assign')&&!prepared.assignedAgent)prepared.assignedAgent=access.userId
 
@@ -423,11 +425,11 @@ const getLeadById=async(organizationId:string,id:string,access?:CrmAccessContext
   if(!visible)throw new ApiError(404,'Lead not found')
   await LeadEntitlementService.assertLeadAccessible(organizationId,id)
   const result=await Lead.findOne({_id:id,organizationId,isLocked:{$ne:true},...ownerScope})
-    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
-    .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
-    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
-    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms status')
-    .populate('contactId','name email phone address company tags')
+    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL',{ organizationId }))
+    .populate(userRefPopulate('createdBy','name email userRole profileImgURL',{ organizationId }))
+    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL',{ organizationId }))
+    .populate({ path: 'propertyInterest', select: 'title price images city propertyType bedrooms bathrooms status', match: { organizationId } })
+    .populate({ path: 'contactId', select: 'name email phone address company tags', match: { organizationId } })
   if(!result)throw new ApiError(404,'Lead not found')
   return result
 }
@@ -441,12 +443,13 @@ const updateLead=async(organizationId:string,id:string,payload:Partial<ILead>,ac
   const prepared:any=prepareLeadMutationPayload(payload,actorId)
   if(prepared.phone){prepared.phone=normalizePhone(prepared.phone);prepared.normalizedPhone=prepared.phone}
   if(prepared.email!==undefined)prepared.normalizedEmail=normalizeOptionalEmail(prepared.email)
+  await TenantReferenceService.assertPropertiesBelongToOrganization(organizationId, prepared.propertyInterest as unknown[] | undefined)
   const scored=scoreLead({...current.toObject(),...prepared})
   prepared.leadScore=scored.score
   prepared.scoreReasons=scored.reasons
   const result=await Lead.findOneAndUpdate({_id:id,organizationId,...ownerFilter,isLocked:{$ne:true}},prepared,{new:true,runValidators:true})
-    .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole'))
-    .populate('propertyInterest','title price images city status')
+    .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole', { organizationId }))
+    .populate({ path: 'propertyInterest', select: 'title price images city status', match: { organizationId } })
   if(!result) {
     await LeadEntitlementService.assertLeadAccessible(organizationId,id)
     throw new ApiError(404,'Lead not found')
@@ -481,6 +484,7 @@ const applyLeadProfilePatchInTransaction=async(
   const prepared:any=prepareLeadMutationPayload(payload,actorId)
   if(prepared.phone){prepared.phone=normalizePhone(prepared.phone);prepared.normalizedPhone=prepared.phone}
   if(prepared.email!==undefined)prepared.normalizedEmail=normalizeOptionalEmail(prepared.email)
+  await TenantReferenceService.assertPropertiesBelongToOrganization(organizationId, prepared.propertyInterest as unknown[] | undefined, session)
   const scored=scoreLead({...current.toObject(),...prepared})
   prepared.leadScore=scored.score
   prepared.scoreReasons=scored.reasons
@@ -596,11 +600,11 @@ const manageLead=async(
   // ownership/assignment permissions; this one response remains usable even when an
   // authorized reassignment moves the Lead out of the caller's subsequent "mine" scope.
   const result=await Lead.findOne({_id:id,organizationId,isLocked:{$ne:true}})
-    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL'))
-    .populate(userRefPopulate('createdBy','name email userRole profileImgURL'))
-    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL'))
-    .populate('propertyInterest','title price images city propertyType bedrooms bathrooms status')
-    .populate('contactId','name email phone address company tags')
+    .populate(userRefPopulate('assignedAgent','name email phoneNumber userRole profileImgURL',{ organizationId }))
+    .populate(userRefPopulate('createdBy','name email userRole profileImgURL',{ organizationId }))
+    .populate(userRefPopulate('updatedBy','name email userRole profileImgURL',{ organizationId }))
+    .populate({ path: 'propertyInterest', select: 'title price images city propertyType bedrooms bathrooms status', match: { organizationId } })
+    .populate({ path: 'contactId', select: 'name email phone address company tags', match: { organizationId } })
   if(!result)throw new ApiError(404,'Lead not found')
   return result
 }
@@ -692,9 +696,9 @@ const getLeadExportRows = async (
   if (total > MAX_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
 
   const leads: any[] = await Lead.find(accessibleWhere)
-    .populate(userRefPopulate('assignedAgent', 'name email userRole'))
-    .populate(userRefPopulate('createdBy', 'name email userRole'))
-    .populate('propertyInterest', 'title')
+    .populate(userRefPopulate('assignedAgent', 'name email userRole', { organizationId }))
+    .populate(userRefPopulate('createdBy', 'name email userRole', { organizationId }))
+    .populate({ path: 'propertyInterest', select: 'title', match: { organizationId } })
     .sort({ createdAt: -1, _id: -1 })
     .limit(MAX_EXPORT_ROWS)
     .select('name phone email source leadStatus assignedAgent followUpDate propertyInterest budgetMin budgetMax currency locationPreference createdBy createdAt')

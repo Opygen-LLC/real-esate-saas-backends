@@ -612,8 +612,8 @@ const markLifecycleFailure = async (record: any, error: unknown) => {
   await CacheInvalidationService.invalidateTenant(record.organizationId)
 }
 
-const verifyById = async (recordId: string) => {
-  const record: any = await DomainRecord.findById(recordId)
+const verifyById = async (organizationId: string, recordId: string) => {
+  const record: any = await DomainRecord.findOne({ _id: recordId, organizationId })
   if (!record) return null
   if (record.entitlementStatus === 'suspended') return publicDomainStatus(record)
   try { return await verifyRecord(record) }

@@ -30,6 +30,7 @@ import {
 } from './finance.model'
 import { renderInvoicePdf } from './invoicePdf.service'
 import { emitProductionEvent } from '../../../shared/productionEvents'
+import { TenantReferenceService } from '../../shared/tenantReference.service'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -115,8 +116,17 @@ const normalizeTransactionPayload = (payload: Partial<IFinanceTransaction>) => (
   transactionDate: asDate(payload.transactionDate),
 })
 
+const assertTransactionRelations = async (organizationId: string, payload: Partial<IFinanceTransaction>) => {
+  const checks: Promise<unknown>[] = []
+  if (payload.vendorId) checks.push(TenantReferenceService.assertFinanceVendorBelongsToOrganization(organizationId, payload.vendorId))
+  if (payload.propertyId) checks.push(TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, payload.propertyId))
+  if (payload.leadId) checks.push(TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId))
+  await Promise.all(checks)
+}
+
 const createTransaction = async (organizationId: string, actorId: string, payload: Partial<IFinanceTransaction>) => {
   const normalized = normalizeTransactionPayload(payload)
+  await assertTransactionRelations(organizationId, normalized)
   const result = await FinanceTransaction.create({
     ...normalized,
     organizationId,
@@ -154,9 +164,9 @@ const listTransactions = async (organizationId: string, query: Record<string, un
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const [data, total] = await Promise.all([
     FinanceTransaction.find(where)
-      .populate('vendorId', 'name category')
-      .populate('propertyId', 'title')
-      .populate('createdBy', 'name email')
+      .populate({ path: 'vendorId', select: 'name category', match: { organizationId } })
+      .populate({ path: 'propertyId', select: 'title', match: { organizationId } })
+      .populate(userRefPopulate('createdBy', 'name email', { organizationId }))
       .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
       .skip(skip).limit(limit).lean(),
     FinanceTransaction.countDocuments(where),
@@ -174,8 +184,9 @@ const updateTransaction = async (organizationId: string, actorId: string, id: st
   if ('vendorId' in payload) normalized.vendorId = cleanOptionalId(payload.vendorId) || null
   if ('propertyId' in payload) normalized.propertyId = cleanOptionalId(payload.propertyId) || null
   if ('leadId' in payload) normalized.leadId = cleanOptionalId(payload.leadId) || null
+  await assertTransactionRelations(organizationId, normalized)
   const result = await FinanceTransaction.findOneAndUpdate({ _id: id, organizationId, deletedAt: null }, normalized, { new: true, runValidators: true })
-    .populate('vendorId', 'name category').populate('propertyId', 'title')
+    .populate({ path: 'vendorId', select: 'name category', match: { organizationId } }).populate({ path: 'propertyId', select: 'title', match: { organizationId } })
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.updated', `Transaction updated: ${result?.description || id}`)
   return result
 }
@@ -276,13 +287,13 @@ const refreshOverdueInvoices = async (organizationId: string) => {
 
 const INVOICE_PROPERTY_SELECT = 'title slug address city state status listingType price currency bangladeshAddress'
 
-const invoicePopulate = (query: any) => query
-  .populate('propertyId', INVOICE_PROPERTY_SELECT)
-  .populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } })
-  .populate('createdBy', 'name email')
-  .populate('updatedBy', 'name email')
-  .populate('cancelledBy', 'name email')
-  .populate('payments.recordedBy', 'name email')
+const invoicePopulate = (query: any, organizationId: string) => query
+  .populate({ path: 'propertyId', select: INVOICE_PROPERTY_SELECT, match: { organizationId } })
+  .populate({ path: 'leadId', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } })
+  .populate(userRefPopulate('createdBy', 'name email', { organizationId }))
+  .populate(userRefPopulate('updatedBy', 'name email', { organizationId }))
+  .populate(userRefPopulate('cancelledBy', 'name email', { organizationId }))
+  .populate(userRefPopulate('payments.recordedBy', 'name email', { organizationId }))
 
 const validateInvoiceDates = (issueDate: Date, dueDate?: Date | null) => {
   if (dueDate && dueDate.getTime() < issueDate.getTime()) throw financeFieldError('dueDate', 'Due date cannot be before the issue date')
@@ -314,6 +325,7 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
   const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
+  if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
   const result = await FinanceInvoice.create({
     ...payload,
     ...amounts,
@@ -330,7 +342,7 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   ])
   emitProductionEvent('invoice_created', { organizationId, invoiceId: result._id.toString(), status: result.status, propertyLinked: Boolean(property) })
   if (property) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: result._id.toString(), propertyId: String(property._id), action: 'created' })
-  return invoicePopulate(FinanceInvoice.findById(result._id)).lean()
+  return invoicePopulate(FinanceInvoice.findOne({ _id: result._id, organizationId }), organizationId).lean()
 }
 
 const listInvoices = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
@@ -346,14 +358,14 @@ const listInvoices = async (organizationId: string, query: Record<string, unknow
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceInvoice.find(where).select('-payments').populate('propertyId', INVOICE_PROPERTY_SELECT).populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
+    FinanceInvoice.find(where).select('-payments').populate({ path: 'propertyId', select: INVOICE_PROPERTY_SELECT, match: { organizationId } }).populate({ path: 'leadId', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(),
     FinanceInvoice.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
 }
 
 const getInvoiceById = async (organizationId: string, id: string) => {
-  const invoice = await invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })).lean()
+  const invoice = await invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), organizationId).lean()
   if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
   return invoice
 }
@@ -383,10 +395,13 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
     property = await resolveInvoiceProperty(organizationId, payload.propertyId)
     update.propertyId = property?._id || null
   }
-  if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
+  if ('leadId' in payload) {
+    update.leadId = cleanOptionalId(payload.leadId) || null
+    if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
+  }
   validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
 
-  const result: any = await invoicePopulate(FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }))
+  const result: any = await invoicePopulate(FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }), organizationId)
   const auditProperty = 'propertyId' in payload ? property : result?.propertyId
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
@@ -416,7 +431,7 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`),
     invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
   ])
-  return invoicePopulate(FinanceInvoice.findById(id)).lean()
+  return invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId }), organizationId).lean()
 }
 
 const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Draft removed by agency') => {
@@ -488,6 +503,8 @@ const ensureAgent = async (organizationId: string, agentId: string) => {
 
 const createCommission = async (organizationId: string, actorId: string, payload: Partial<IFinanceCommission>) => {
   await ensureAgent(organizationId, String(payload.agentId))
+  if (payload.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, payload.propertyId)
+  if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
   const calculated = calculateCommissionAmounts(payload)
   const result = await FinanceCommission.create({
     ...payload,
@@ -501,7 +518,7 @@ const createCommission = async (organizationId: string, actorId: string, payload
     createdBy: actorObjectId(actorId),
   })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', result._id.toString(), 'finance.commission.created', `Commission ${result.commissionNumber} created`)
-  return result.populate('agentId', 'name email')
+  return result.populate(userRefPopulate('agentId', 'name email', { organizationId }))
 }
 
 const listCommissions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
@@ -516,7 +533,7 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
   const [data, total] = await Promise.all([
-    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole')).populate('propertyId', 'title').populate({ path: 'leadId', select: 'name phone email', match: { isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit),
+    FinanceCommission.find(where).populate(userRefPopulate('agentId', 'name email userRole', { organizationId })).populate({ path: 'propertyId', select: 'title', match: { organizationId } }).populate({ path: 'leadId', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } }).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit),
     FinanceCommission.countDocuments(where),
   ])
   return { meta: { page, limit, total }, data }
@@ -529,10 +546,16 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
   if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
   const calculated = calculateCommissionAmounts(payload, existing)
   const update: any = { ...payload, ...calculated, updatedBy: actorObjectId(actorId) }
-  if ('propertyId' in payload) update.propertyId = cleanOptionalId(payload.propertyId) || null
-  if ('leadId' in payload) update.leadId = cleanOptionalId(payload.leadId) || null
+  if ('propertyId' in payload) {
+    update.propertyId = cleanOptionalId(payload.propertyId) || null
+    if (update.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, update.propertyId)
+  }
+  if ('leadId' in payload) {
+    update.leadId = cleanOptionalId(payload.leadId) || null
+    if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
+  }
   if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
-  const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }).populate('agentId', 'name email').populate('propertyId', 'title')
+  const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }).populate(userRefPopulate('agentId', 'name email', { organizationId })).populate({ path: 'propertyId', select: 'title', match: { organizationId } })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.updated', `Commission ${result?.commissionNumber || id} updated`)
   return result
 }
@@ -541,7 +564,7 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
   const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
   if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (commission.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
-  if (commission.status === 'cancelled') return commission.populate('agentId', 'name email')
+  if (commission.status === 'cancelled') return commission.populate(userRefPopulate('agentId', 'name email', { organizationId }))
   if (!['pending', 'approved'].includes(commission.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot cancel a ${commission.status} commission`)
   commission.status = 'cancelled'
   commission.cancelledAt = new Date()
@@ -550,7 +573,7 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
   commission.updatedBy = actorObjectId(actorId)
   await commission.save()
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.cancelled', `Commission ${commission.commissionNumber} cancelled`)
-  return commission.populate('agentId', 'name email')
+  return commission.populate(userRefPopulate('agentId', 'name email', { organizationId }))
 }
 
 const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Cancelled commission removed by agency owner') => {
@@ -571,7 +594,7 @@ const archiveCommission = async (organizationId: string, actor: FinanceActorCont
 }
 
 const payCommission = async (organizationId: string, actorId: string, id: string, payload: any) => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).populate('agentId', 'name email')
+  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
   if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
   if (commission.status !== 'approved') throw new ApiError(httpStatus.CONFLICT, 'Only approved commissions can be paid')
   const paidAt = asDate(payload.paidAt)
@@ -717,7 +740,7 @@ const getOverview = async (organizationId: string, query: Record<string, unknown
     aggregateTrend(organizationId, startDate, endDate),
     aggregateCategory(organizationId, 'expense', startDate, endDate),
     aggregateCategory(organizationId, 'income', startDate, endDate),
-    FinanceTransaction.find({ organizationId, deletedAt: null }).populate('vendorId', 'name').sort({ transactionDate: -1, createdAt: -1 }).limit(8).lean(),
+    FinanceTransaction.find({ organizationId, deletedAt: null }).populate({ path: 'vendorId', select: 'name', match: { organizationId } }).sort({ transactionDate: -1, createdAt: -1 }).limit(8).lean(),
     FinanceInvoice.find({ organizationId, archivedAt: null, status: 'overdue' }).sort({ dueDate: 1 }).limit(6).lean(),
     FinanceBudget.find({ organizationId, status: 'active', startDate: { $lte: new Date() }, endDate: { $gte: new Date() } }).sort({ endDate: 1 }).limit(8).lean(),
   ])
@@ -761,7 +784,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
   const type = asString(query.type); if (type) match.type = type
   const status = asString(query.status); if (status) match.status = status
   if (startDate || endDate) match.transactionDate = dateCondition(startDate, endDate)
-  const rows: any[] = await FinanceTransaction.find(match).populate('vendorId', 'name').sort({ transactionDate: -1 }).limit(10_000).lean()
+  const rows: any[] = await FinanceTransaction.find(match).populate({ path: 'vendorId', select: 'name', match: { organizationId } }).sort({ transactionDate: -1 }).limit(10_000).lean()
   const quote = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
   const header = ['Date', 'Type', 'Category', 'Description', 'Amount (BDT)', 'Status', 'Payment Method', 'Vendor', 'Reference']
   const lines = rows.map((row) => [new Date(row.transactionDate).toISOString().slice(0, 10), row.type, row.category, row.description, row.amount, row.status, row.paymentMethod, row.vendorId?.name || '', row.reference || ''].map(quote).join(','))

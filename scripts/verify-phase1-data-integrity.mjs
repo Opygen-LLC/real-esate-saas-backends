@@ -43,4 +43,46 @@ assert(userModel.includes("user_tenant_created_desc"), 'user tenant chronologica
 assert(financeModel.includes("transactionSchema.index({ organizationId: 1, transactionDate: -1, type: 1, status: 1 })"), 'finance transaction query index is missing')
 assert(domainModel.includes("domainRecordSchema.index({ lifecycleStatus: 1, nextCheckAt: 1 })"), 'domain worker lifecycle index is missing')
 
+
+
+// Phase 1 tenant integrity hardening.
+const tenantReferenceService = read('src/app/shared/tenantReference.service.ts')
+const calendarSyncService = read('src/app/module/crm/calendarSync.service.ts')
+const operationsQueueService = read('src/app/module/operationsQueue/operationsQueue.service.ts')
+const leadService = read('src/app/module/lead/lead.service.ts')
+const contactService = read('src/app/module/contact/contact.service.ts')
+const financeService = read('src/app/module/finance/finance.service.ts')
+const reviewService = read('src/app/module/review/review.service.ts')
+const notificationService = read('src/app/module/notification/notification.service.ts')
+const tenantRelationIntegrity = read('src/app/db/tenantRelationIntegrity.ts')
+const subdomainMigration = read('src/app/db/migrateOrganizationSubdomainIntegrity.ts')
+
+assert(tenantReferenceService.includes('assertPropertiesBelongToOrganization'), 'reusable property tenant-reference validation is missing')
+assert(tenantReferenceService.includes('assertFinanceInvoiceBelongsToOrganization'), 'reusable finance tenant-reference validation is missing')
+assert(operationsQueueService.includes('CalendarSyncService.syncViewing(job.organizationId, job.entityId)'), 'calendar queue must pass organizationId')
+assert(calendarSyncService.includes('const scope = { _id: viewingId, organizationId }'), 'calendar sync must build a tenant scope')
+assert(calendarSyncService.includes('Viewing.findOne(scope)'), 'calendar sync root read must be tenant scoped')
+assert(!calendarSyncService.includes('Viewing.findById('), 'calendar sync must not use unscoped findById')
+assert(leadService.includes('TenantReferenceService.assertPropertiesBelongToOrganization'), 'Lead property relationships must be write-validated')
+assert(leadService.includes("path: 'contactId'") && leadService.includes('match: { organizationId }'), 'Lead populated relationships must be tenant scoped')
+assert(contactService.includes('TenantReferenceService.assertPropertiesBelongToOrganization'), 'Contact property relationships must be write-validated')
+assert(financeService.includes('assertTransactionRelations') && financeService.includes('TenantReferenceService.assertFinanceVendorBelongsToOrganization'), 'Finance relations must be tenant validated')
+assert(reviewService.includes("Property.findOne({ _id: invitation.propertyId, organizationId })"), 'Review property relation must be tenant scoped')
+assert(notificationService.includes('{ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId }'), 'notification worker idempotency query must be tenant scoped')
+assert(organizationModel.includes("name: 'organization_subdomain_unique_nonempty'"), 'organization subdomain partial unique index is missing')
+assert(organizationModel.includes("partialFilterExpression: { sub_domain: { $type: 'string', $gt: '' } }"), 'subdomain index must ignore blank legacy values')
+assert(organizationService.includes('resolveInitialSubdomain') && organizationService.includes('SubdomainAlias.exists({ alias: candidate })'), 'organization creation must allocate a tenant-safe unique subdomain')
+assert(subdomainMigration.includes("const CONFIRMATION = 'organization-subdomain-integrity-phase1'"), 'subdomain migration apply guard is missing')
+assert(subdomainMigration.includes('backupDocuments') && subdomainMigration.includes('duplicateGroups'), 'subdomain migration backup/verification is missing')
+for (const relationship of [
+  "collection: 'leads', field: 'propertyInterest'",
+  "collection: 'leads', field: 'contactId'",
+  "collection: 'viewings', field: 'propertyId'",
+  "collection: 'tasks', field: 'linkedProperty'",
+  "collection: 'agencyreviews', field: 'propertyId'",
+  "collection: 'financetransactions', field: 'sourceId'",
+  "collection: 'websiterevisions', field: 'pageId'",
+]) assert(tenantRelationIntegrity.includes(relationship), `tenant reconciliation is missing ${relationship}`)
+assert(tenantRelationIntegrity.includes('tenant-owned document is missing organizationId'), 'tenant reconciliation must detect records missing organizationId')
+
 console.log('[phase1-data-integrity] source invariants verified')

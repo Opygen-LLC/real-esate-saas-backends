@@ -187,7 +187,7 @@ const processScheduledPublishes = async (limit = 25) => {
     })
     if (!access.backgroundBusinessWorkAllowed) {
       await WebsitePage.updateOne(
-        { _id: candidate._id, status: 'scheduled', accessDeferredAt: null },
+        { _id: candidate._id, organizationId: candidate.organizationId, status: 'scheduled', accessDeferredAt: null },
         { $set: { accessDeferredAt: now } },
       )
       deferred += 1
@@ -198,6 +198,7 @@ const processScheduledPublishes = async (limit = 25) => {
     const claimed: any = await WebsitePage.findOneAndUpdate(
       {
         _id: candidate._id,
+        organizationId: candidate.organizationId,
         status: 'scheduled',
         accessDeferredAt: null,
         scheduledPublishAt: originalScheduledPublishAt,

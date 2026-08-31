@@ -12,6 +12,7 @@ import { userRefPopulate } from '../user/userProfile.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone, getWeekBoundsInTimeZone } from '../lead/leadFollowUpTime'
 import { LEAD_STATUS_LABELS, leadStatusFilterValues, normalizeLeadStatus } from '../lead/leadStatus.contract'
+import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { IContact, IContactFilter } from './contact.interface'
 import { Contact } from './contact.model'
 import {
@@ -138,6 +139,7 @@ const createContact = async (
     prepared.assignedTo = access.userId
   }
   await assertAssignedMember(organizationId, prepared.assignedTo)
+  await TenantReferenceService.assertPropertiesBelongToOrganization(organizationId, prepared.propertyInterest as unknown[] | undefined)
   const result: any = await Contact.create({
     ...prepared,
     organizationId,
@@ -183,12 +185,12 @@ const getAllContacts = async (
 
 const getContactById = async (organizationId: string, id: string, access?: CrmAccessContext): Promise<IContact | null> => {
   const result = await Contact.findOne({ _id: id, organizationId, ...crmReadOwnerFilter('assignedTo', access), ...visibleContactRelationshipFilter })
-    .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL'))
-    .populate(userRefPopulate('convertedBy', 'name email userRole profileImgURL'))
-    .populate(userRefPopulate('createdBy', 'name email userRole profileImgURL'))
-    .populate(userRefPopulate('updatedBy', 'name email userRole profileImgURL'))
-    .populate({ path: 'sourceLeadId', select: 'name phone email source leadStatus budgetMin budgetMax currency locationPreference propertyType bedrooms propertyInterest firstContactedAt followUpDate convertedAt createdAt updatedAt isConverted', populate: { path: 'propertyInterest', select: 'title price city propertyType status' } })
-    .populate('propertyInterest', 'title price images city propertyType bedrooms bathrooms status')
+    .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL', { organizationId }))
+    .populate(userRefPopulate('convertedBy', 'name email userRole profileImgURL', { organizationId }))
+    .populate(userRefPopulate('createdBy', 'name email userRole profileImgURL', { organizationId }))
+    .populate(userRefPopulate('updatedBy', 'name email userRole profileImgURL', { organizationId }))
+    .populate({ path: 'sourceLeadId', select: 'name phone email source leadStatus budgetMin budgetMax currency locationPreference propertyType bedrooms propertyInterest firstContactedAt followUpDate convertedAt createdAt updatedAt isConverted', match: { organizationId }, populate: { path: 'propertyInterest', select: 'title price city propertyType status', match: { organizationId } } })
+    .populate({ path: 'propertyInterest', select: 'title price images city propertyType bedrooms bathrooms status', match: { organizationId } })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Contact not found')
   return result
 }
@@ -205,13 +207,14 @@ const updateContact = async (
     throw new ApiError(403, 'Team members cannot reassign contacts to another member')
   }
   await assertAssignedMember(organizationId, prepared.assignedTo)
+  await TenantReferenceService.assertPropertiesBelongToOrganization(organizationId, prepared.propertyInterest as unknown[] | undefined)
   const result = await Contact.findOneAndUpdate({ _id: id, organizationId, ...crmMutationOwnerFilter('assignedTo', access), ...visibleContactRelationshipFilter }, prepared, {
     new: true,
     runValidators: true,
   })
-    .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL'))
-    .populate('sourceLeadId', 'name phone email leadStatus source createdAt')
-    .populate('propertyInterest', 'title price images city propertyType status')
+    .populate(userRefPopulate('assignedTo', 'name email phoneNumber userRole profileImgURL', { organizationId }))
+    .populate({ path: 'sourceLeadId', select: 'name phone email leadStatus source createdAt', match: { organizationId } })
+    .populate({ path: 'propertyInterest', select: 'title price images city propertyType status', match: { organizationId } })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Contact not found')
   await DomainEventService.emit({
     organizationId,
@@ -285,14 +288,15 @@ const getContactExportRows = async (
   if (total > MAX_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
 
   const contacts: any[] = await Contact.find(where)
-    .populate(userRefPopulate('assignedTo', 'name email userRole'))
-    .populate(userRefPopulate('createdBy', 'name email userRole'))
+    .populate(userRefPopulate('assignedTo', 'name email userRole', { organizationId }))
+    .populate(userRefPopulate('createdBy', 'name email userRole', { organizationId }))
     .populate({
       path: 'sourceLeadId',
       select: 'name source leadStatus budgetMin budgetMax currency locationPreference propertyInterest',
-      populate: { path: 'propertyInterest', select: 'title' },
+      match: { organizationId },
+      populate: { path: 'propertyInterest', select: 'title', match: { organizationId } },
     })
-    .populate('propertyInterest', 'title')
+    .populate({ path: 'propertyInterest', select: 'title', match: { organizationId } })
     .sort({ updatedAt: -1, _id: -1 })
     .limit(MAX_EXPORT_ROWS)
     .select('name phone email type source statusAtConversion assignedTo followUpDate propertyInterest city address createdBy createdAt convertedAt sourceLeadId')

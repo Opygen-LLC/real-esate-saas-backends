@@ -649,11 +649,11 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
       .sort(sort)
       .skip(options.skip)
       .limit(options.limit)
-      .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole'))
-      .populate(userRefPopulate('createdBy', 'name email userRole'))
-      .populate(userRefPopulate('updatedBy', 'name email userRole'))
-      .populate('propertyInterest', 'title price images city propertyType bedrooms bathrooms')
-      .populate('contactId', 'name email phone company')
+      .populate(userRefPopulate('assignedAgent', 'name email phoneNumber userRole', { organizationId: options.organizationId }))
+      .populate(userRefPopulate('createdBy', 'name email userRole', { organizationId: options.organizationId }))
+      .populate(userRefPopulate('updatedBy', 'name email userRole', { organizationId: options.organizationId }))
+      .populate({ path: 'propertyInterest', select: 'title price images city propertyType bedrooms bathrooms', match: { organizationId: options.organizationId } })
+      .populate({ path: 'contactId', select: 'name email phone company', match: { organizationId: options.organizationId } })
       .lean(),
     Lead.countDocuments(query),
   ])

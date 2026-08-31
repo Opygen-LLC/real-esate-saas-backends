@@ -25,7 +25,7 @@ const safeFilename = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, '-').re
 
 const queueCustomerEmail = async (ticket: any, subject: string, body: string) => {
   const [requester, organization] = await Promise.all([
-    ticket.userId ? User.findById(ticket.userId).select('email').lean() : null,
+    ticket.userId ? User.findOne({ _id: ticket.userId, organizationId: ticket.organizationId }).select('email').lean() : null,
     Organization.findOne({ organizationId: ticket.organizationId }).select('email agencyName').lean(),
   ])
   const to = requester?.email || organization?.email
@@ -37,7 +37,7 @@ const queueCustomerEmail = async (ticket: any, subject: string, body: string) =>
     runAt: new Date(Date.now() + 1000),
     payload: { to, subject, html: `<p>${sanitizeRichText(body)}</p><p>Ticket: ${ticket.ticketId}</p>` },
   })
-  await SupportTicket.updateOne({ _id: ticket._id }, { $set: { lastCustomerNotifiedAt: new Date() } })
+  await SupportTicket.updateOne({ _id: ticket._id, organizationId: ticket.organizationId }, { $set: { lastCustomerNotifiedAt: new Date() } })
 }
 
 const create = async (organizationId: string, userId: string | undefined, payload: any) => {

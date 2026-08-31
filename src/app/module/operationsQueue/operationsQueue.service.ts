@@ -141,14 +141,14 @@ const deliver = async (job: any) => {
     return
   }
   if (job.type === 'domain_verify') {
-    await DomainService.verifyById(job.entityId)
+    await DomainService.verifyById(job.organizationId, job.entityId)
     return
   }
   if (job.type === 'asset_finalize') {
     await WebsiteAssetProcessor.finalize(job.organizationId, job.entityId, job.payload || {})
     return
   }
-  if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.entityId); return }
+  if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.organizationId, job.entityId); return }
   if (job.type === 'task_reminder') {
     const task: any = await Task.findOne({ _id: job.entityId, organizationId: job.organizationId }).lean()
     if (!task || ['Completed', 'Cancelled'].includes(task.status)) return
