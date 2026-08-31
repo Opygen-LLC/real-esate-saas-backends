@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { safeRegexPattern } from '../../helpers/searchQuery'
 import { CrmService } from '../crm/crm.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
@@ -167,7 +168,8 @@ const getAllTasks = async (
   if (Object.keys(ownerScope).length) conditions.push(ownerScope)
   if (searchTerm) {
     const search = safeRegexPattern(searchTerm)
-    conditions.push({ $or: ['title', 'description'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) })
+    const prefix = { $regex: `^${search}`, $options: 'i' }
+    conditions.push({ $or: [{ title: prefix }, { description: prefix }] })
   }
   if (status) conditions.push({ status })
   if (priority) conditions.push({ priority })
@@ -189,7 +191,8 @@ const getAllTasks = async (
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'dueAt'
 
   const dayBounds = getDayBoundsInTimeZone(new Date(), CRM_FOLLOW_UP_TIME_ZONE)
-  const [result, summaryRows] = await Promise.all([
+  const profile = createQueryProfile('/api/v1/task', String(organizationId || ''))
+  const [result, summaryRows] = await profile.db(() => Promise.all([
     Task.find(where)
       .populate(userRefPopulate('assignedAgent', 'name email userRole', { organizationId }))
       .populate({ path: 'linkedLead', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } })
@@ -232,7 +235,8 @@ const getAllTasks = async (
         },
       },
     ]),
-  ])
+  ]), 2)
+  profile.finish(result.length, { paginationMode: 'page' })
   const summary = summaryRows[0] || { total: 0, completed: 0, dueToday: 0, overdue: 0 }
   const total = Number(summary.total || 0)
   return {
@@ -241,6 +245,7 @@ const getAllTasks = async (
       limit,
       total,
       totalPages: Math.ceil(total / Math.max(limit, 1)),
+      paginationMode: 'page',
       summary: {
         completed: Number(summary.completed || 0),
         dueToday: Number(summary.dueToday || 0),

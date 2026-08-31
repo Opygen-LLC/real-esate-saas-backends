@@ -2,6 +2,8 @@ import { isValidObjectId } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Notification } from './notification.model'
 import { RealtimeService } from '../realtime/realtime.service'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 
 type NotificationJobInput = {
   organizationId: string
@@ -53,14 +55,22 @@ const createFromJob = async (input: NotificationJobInput) => {
   return row
 }
 
-const list = async (organizationId: string, userId: string, limit = 20) => Notification.find({
-  organizationId,
-  userId,
-  dismissedAt: null,
-})
-  .sort({ createdAt: -1, _id: -1 })
-  .limit(normalizeLimit(limit))
-  .lean()
+const list = async (organizationId: string, userId: string, options: { limit?: number; cursor?: string } = {}) => {
+  const profile = createQueryProfile('/api/v1/notifications', organizationId)
+  const cursor = prepareCursorPagination({ limit: normalizeLimit(Number(options.limit || 20)), cursor: options.cursor }, { sortField: 'createdAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
+  const baseWhere = { organizationId, userId, dismissedAt: null }
+  const where = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
+  const [rows, total] = await profile.db(() => Promise.all([
+    Notification.find(where).sort({ createdAt: -1, _id: -1 }).limit(cursor.queryLimit).lean(),
+    Notification.countDocuments(baseWhere),
+  ]), 2)
+  const page = finalizeCursorPage(rows as any[], cursor.limit, 'createdAt', cursor.cursorMode)
+  profile.finish(page.rows.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
+  return {
+    meta: { page: 1, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' as const : 'page' as const },
+    data: page.rows,
+  }
+}
 
 const markRead = async (organizationId: string, userId: string, id: string) => {
   assertNotificationId(id)

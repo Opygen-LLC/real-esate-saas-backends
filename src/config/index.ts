@@ -436,6 +436,7 @@ export default {
     worker_batch_size: Math.max(1, Math.min(200, Number(process.env.WORKER_BATCH_SIZE || 50))),
     shutdown_timeout_ms: Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS || 15000)),
     max_page_size: Math.max(10, Math.min(500, Number(process.env.MAX_PAGE_SIZE || 100))),
+    max_deep_pagination_skip: Math.max(1000, Math.min(100_000, Number(process.env.MAX_DEEP_PAGINATION_SKIP || 10_000))),
   },
   observability: {
     metrics_token: process.env.METRICS_TOKEN || 'real_estate_saas_metrics_token_production_default_32bytes',

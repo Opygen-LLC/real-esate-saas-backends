@@ -252,6 +252,7 @@ propertySchema.index({ organizationId: 1, propertyType: 1, listingType: 1 })
 propertySchema.index({ organizationId: 1, _id: 1 })
 propertySchema.index({ organizationId: 1, createdAt: -1 })
 propertySchema.index({ organizationId: 1, createdAt: -1, _id: -1 }, { name: 'property_tenant_created_cursor' })
+propertySchema.index({ organizationId: 1, status: 1, createdAt: -1, _id: -1 }, { name: 'property_tenant_status_created_cursor' })
 propertySchema.index({ organizationId: 1, agentId: 1, status: 1 })
 propertySchema.index({ organizationId: 1, views: -1, updatedAt: -1 })
 

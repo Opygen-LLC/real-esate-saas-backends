@@ -18,6 +18,7 @@ export type IPaginationOptions = {
   limit?: number
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
+  cursor?: string
 }
 
 export type IGenericResponse<T> = {
@@ -27,6 +28,9 @@ export type IGenericResponse<T> = {
     total: number
     totalPages?: number
     summary?: Record<string, number>
+    nextCursor?: string
+    hasMore?: boolean
+    paginationMode?: 'page' | 'cursor'
   }
   data: T
 }

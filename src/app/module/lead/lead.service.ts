@@ -4,6 +4,8 @@ import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { safeRegexPattern } from '../../helpers/searchQuery'
@@ -314,15 +316,22 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext,includeLocked
   const ownerScope=crmReadOwnerFilter('assignedAgent',access)
   if(Object.keys(ownerScope).length)conditions.push(ownerScope)
   if(searchTerm){
-    const search=safeRegexPattern(searchTerm)
-    const regex={$regex:search,$options:'i'}
-    conditions.push({$or:[
-      {name:regex},
-      {locationPreference:regex},
-      {'attribution.utmCampaign':regex},
-      {$and:[{isLocked:{$ne:true}},{email:regex}]},
-      {$and:[{isLocked:{$ne:true}},{phone:regex}]},
-    ]})
+    const raw=String(searchTerm).trim()
+    const search=safeRegexPattern(raw)
+    if(raw.includes('@')){
+      const normalized=normalizeOptionalEmail(raw)
+      conditions.push({normalizedEmail:normalized})
+    }else if(/^[+()\d\s-]{6,30}$/.test(raw)){
+      const normalized=normalizePhone(raw)
+      conditions.push({normalizedPhone:normalized})
+    }else{
+      const prefixRegex={$regex:`^${search}`,$options:'i'}
+      conditions.push({$or:[
+        {name:prefixRegex},
+        {locationPreference:prefixRegex},
+        {'attribution.utmCampaign':prefixRegex},
+      ]})
+    }
   }
   if(leadStatus){
     const statusValues=leadStatusFilterValues(leadStatus)
@@ -370,10 +379,17 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext,includeLocked
 const getAllLeads=async(filters:ILeadFilter,paginationOptions:IPaginationOptions,access?:CrmAccessContext):Promise<IGenericResponse<ILead[]>>=>{
   const organizationId=String(filters.organizationId||'')
   if(organizationId)await LeadEntitlementService.ensureCurrentLeadCapacity(organizationId)
-  const where=buildLeadWhere(filters,access)
-  const{page,limit,skip,sortBy,sortOrder}=paginationHelper.calculatePagination(paginationOptions)
-  const pageResult=await readLeadListPage<ILead>({match:where,skip,limit,sortBy,sortOrder})
-  return{meta:{page,limit,total:pageResult.total,totalPages:Math.ceil(pageResult.total/Math.max(limit,1))},data:pageResult.rows}
+  const profile=createQueryProfile('/api/v1/lead',organizationId)
+  const requestedSortBy=String(paginationOptions.sortBy||'createdAt')
+  const requestedSortOrder=paginationOptions.sortOrder==='asc'?'asc':'desc'
+  if(paginationOptions.cursor&&(requestedSortBy!=='createdAt'||requestedSortOrder!=='desc'))throw new ApiError(400,'Lead cursor pagination requires sortBy=createdAt&sortOrder=desc')
+  const cursor=prepareCursorPagination(paginationOptions,{sortField:'createdAt',sortOrder:'desc',parseValue:parseDateCursorValue})
+  const baseWhere=buildLeadWhere(filters,access)
+  const where=cursor.range?{$and:[baseWhere,cursor.range]}:baseWhere
+  const pageResult=await profile.db(()=>readLeadListPage<ILead>({match:where,countMatch:baseWhere,skip:cursor.querySkip,limit:cursor.queryLimit,sortBy:cursor.cursorMode?'createdAt':cursor.sortBy,sortOrder:cursor.cursorMode?-1:cursor.sortOrder,organizationId} as any),2)
+  const page=finalizeCursorPage(pageResult.rows as any[],cursor.limit,'createdAt',cursor.cursorMode)
+  profile.finish(page.rows.length,{paginationMode:cursor.cursorMode?'cursor':'page'})
+  return{meta:{page:cursor.page,limit:cursor.limit,total:pageResult.total,totalPages:Math.ceil(pageResult.total/Math.max(cursor.limit,1)),nextCursor:page.nextCursor,hasMore:page.hasMore,paginationMode:cursor.cursorMode?'cursor':'page'},data:page.rows as ILead[]}
 }
 
 

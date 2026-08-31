@@ -7,6 +7,7 @@ import { logger } from '../../../shared/logger'
 import { Metrics } from '../../../shared/metrics'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import paginationHelper from '../../helpers/paginationHelper'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { safeRegexPattern } from '../../helpers/searchQuery'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { PrivacyConsentService } from '../privacy/privacyConsent.service'
@@ -89,7 +90,14 @@ const getAllViewings = async (
   if (status) conditions.push({ status })
   if (date) conditions.push({ date })
   if (startDate || endDate) conditions.push({ date: { ...(startDate ? { $gte: startDate } : {}), ...(endDate ? { $lte: endDate } : {}) } })
-  if (searchTerm) { const search = safeRegexPattern(searchTerm); conditions.push({ $or: ['clientName', 'clientPhone', 'clientEmail', 'notes'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) }) }
+  if (searchTerm) {
+    const raw = String(searchTerm).trim()
+    const search = safeRegexPattern(raw)
+    const prefix = { $regex: `^${search}`, $options: 'i' }
+    if (raw.includes('@')) conditions.push({ clientEmail: { $regex: `^${search}$`, $options: 'i' } })
+    else if (/^[+()\d\s-]{6,30}$/.test(raw)) conditions.push({ clientPhone: raw })
+    else conditions.push({ $or: [{ clientName: prefix }, { notes: prefix }] })
+  }
 
   const where = conditions.length ? { $and: conditions } : {}
   const calendarMode = viewMode === 'calendar'
@@ -101,17 +109,20 @@ const getAllViewings = async (
     ? paginationHelper.buildCalendarSort()
     : paginationHelper.buildAllowedStableSort(sortBy, sortOrder, VIEWING_LIST_SORT_FIELDS, 'createdAt')
 
-  const [result, total] = await Promise.all([
+  const profile = createQueryProfile('/api/v1/viewing', String(organizationId || ''))
+  const [result, total] = await profile.db(() => Promise.all([
     Viewing.find(where)
       .populate({ path: 'propertyId', select: 'title price images address city', match: { organizationId } })
       .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
       .populate({ path: 'leadId', select: 'name phone email leadStatus', match: { organizationId, isLocked: { $ne: true } } })
       .sort(sort)
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Viewing.countDocuments(where),
-  ])
-  return { meta: { page, limit, total }, data: result }
+  ]), 2)
+  profile.finish(result.length, { paginationMode: 'page', calendarMode })
+  return { meta: { page, limit, total, paginationMode: 'page' }, data: result as IViewing[] }
 }
 const getCalendarViewings = async (filters: IViewingCalendarFilter, access?: CrmAccessContext): Promise<ViewingCalendarItem[]> => {
   const { organizationId, startDate, endDate, status, propertyId, agentId } = filters

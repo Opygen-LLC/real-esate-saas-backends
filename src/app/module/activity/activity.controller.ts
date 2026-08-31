@@ -26,7 +26,7 @@ const createActivity = catchAsync(async (req: Request, res: Response) => {
 const getActivitiesByLead = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { leadId } = req.params
-  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'])
   const result = await ActivityService.getActivitiesByLead(organizationId, leadId, paginationOptions, crmRecordReadAccessFromRequest(req))
 
   sendResponse(res, {

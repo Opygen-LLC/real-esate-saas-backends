@@ -22,7 +22,7 @@ const list = catchAsync(async (req: Request, res: Response) => {
   const result = await WebsiteSubmissionService.list(
     requireTenant(req),
     pick(req.query, ['searchTerm', 'submissionType', 'status', 'propertyId', 'sourcePage', 'submittedFrom', 'submittedTo']),
-    pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder']),
+    pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor']),
     readOptions(req),
   )
   sendResponse(res, {

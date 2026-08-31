@@ -2,6 +2,8 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import type { PublicLeadCaptureInput } from '../lead/lead.validation'
@@ -277,12 +279,18 @@ const list = async (
   paginationOptions: IPaginationOptions,
   options: WebsiteSubmissionReadOptions = {},
 ) => {
-  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination({
+  const profile = createQueryProfile('/api/v1/website-submissions', organizationId)
+  const requestedSortBy = String(paginationOptions.sortBy || 'submittedAt')
+  const requestedSortOrder = paginationOptions.sortOrder === 'asc' ? 'asc' : 'desc'
+  if (paginationOptions.cursor && (requestedSortBy !== 'submittedAt' || requestedSortOrder !== 'desc')) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Website submission cursor pagination requires sortBy=submittedAt&sortOrder=desc')
+  }
+  const cursor = prepareCursorPagination({
     ...paginationOptions,
-    sortBy: paginationOptions.sortBy || 'createdAt',
-    sortOrder: paginationOptions.sortOrder || 'desc',
+    sortBy: paginationOptions.cursor ? 'submittedAt' : (paginationOptions.sortBy || 'submittedAt'),
+    sortOrder: paginationOptions.cursor ? 'desc' : (paginationOptions.sortOrder || 'desc'),
     limit: paginationOptions.limit || 50,
-  })
+  }, { sortField: 'submittedAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
 
   const conditions: Record<string, unknown>[] = [{ organizationId }, { deletedAt: null }]
   if (filters.submissionType) conditions.push({ submissionType: filters.submissionType })
@@ -291,8 +299,17 @@ const list = async (
   if (filters.sourcePage) conditions.push({ sourcePage: filters.sourcePage })
 
   if (filters.searchTerm) {
-    const search = { $regex: escapeRegex(filters.searchTerm), $options: 'i' }
-    conditions.push({ $or: [{ name: search }, { email: search }, { phone: search }, { message: search }, { sourcePage: search }] })
+    const raw = String(filters.searchTerm).trim()
+    const escaped = escapeRegex(raw)
+    if (raw.includes('@')) conditions.push({ email: raw.toLowerCase() })
+    else if (/^[+()\d\s-]{6,30}$/.test(raw)) {
+      let normalizedPhone = raw
+      try { normalizedPhone = normalizeBangladeshPhone(raw) } catch { /* keep exact raw fallback */ }
+      conditions.push({ $or: [{ phone: normalizedPhone }, { phone: raw }] })
+    } else {
+      const prefix = { $regex: `^${escaped}`, $options: 'i' }
+      conditions.push({ $or: [{ name: prefix }, { sourcePage: prefix }, { message: prefix }] })
+    }
   }
 
   const submittedFrom = parseBoundary(filters.submittedFrom, 'submittedFrom')
@@ -302,19 +319,25 @@ const list = async (
   }
   if (submittedFrom || submittedTo) conditions.push({ submittedAt: { ...(submittedFrom ? { $gte: submittedFrom } : {}), ...(submittedTo ? { $lte: submittedTo } : {}) } })
 
-  const where = { $and: conditions }
-  const [rows, total] = await Promise.all([
+  const baseWhere = { $and: conditions }
+  const where = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
+  const sortBy = cursor.cursorMode ? 'submittedAt' : cursor.sortBy
+  const sortOrder = cursor.cursorMode ? -1 : cursor.sortOrder
+  const [rows, total] = await profile.db(() => Promise.all([
     WebsiteSubmission.find(where)
       .populate({ path: 'propertyId', select: 'title slug address city images status', match: { organizationId } })
       .populate({ path: 'movedToCrmBy', select: 'name email', match: { organizationId } })
       .sort(paginationHelper.buildStableSort(sortBy, sortOrder))
-      .skip(skip)
-      .limit(limit)
+      .skip(cursor.querySkip)
+      .limit(cursor.queryLimit)
       .lean(),
-    WebsiteSubmission.countDocuments(where),
-  ])
+    WebsiteSubmission.countDocuments(baseWhere),
+  ]), 2)
+  const page = finalizeCursorPage(rows as any[], cursor.limit, 'submittedAt', cursor.cursorMode)
+  const data = await profile.db(() => enrichLinkedRecords(organizationId, page.rows, options), page.rows.length ? 2 : 0)
+  profile.finish(data.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
 
-  return { meta: { page, limit, total }, data: await enrichLinkedRecords(organizationId, rows, options) }
+  return { meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' }, data }
 }
 
 const getById = async (organizationId: string, id: string, options: WebsiteSubmissionReadOptions = {}) => {

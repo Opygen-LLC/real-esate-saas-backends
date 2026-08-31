@@ -41,6 +41,14 @@ transactionSchema.index({ organizationId: 1, transactionDate: -1, type: 1, statu
 transactionSchema.index({ organizationId: 1, category: 1, transactionDate: -1 })
 transactionSchema.index({ organizationId: 1, sourceType: 1, sourceId: 1 })
 transactionSchema.index({ organizationId: 1, deletedAt: 1, createdAt: -1 })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, createdAt: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_created_cursor' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, transactionDate: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_date_cursor' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, status: 1, createdAt: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_status_created' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, amount: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_amount_sort' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, updatedAt: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_updated_sort' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, category: 1, _id: 1 }, { name: 'finance_transaction_tenant_deleted_category_sort' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, status: 1, _id: 1 }, { name: 'finance_transaction_tenant_deleted_status_sort' })
+transactionSchema.index({ organizationId: 1, deletedAt: 1, paymentMethod: 1, _id: 1 }, { name: 'finance_transaction_tenant_deleted_payment_sort' })
 
 const invoiceLineItemSchema = new Schema(
   {
@@ -100,6 +108,7 @@ invoiceSchema.index({ organizationId: 1, invoiceNumber: 1 }, { unique: true })
 invoiceSchema.index({ organizationId: 1, status: 1, dueDate: 1 })
 invoiceSchema.index({ organizationId: 1, issueDate: -1 })
 invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })
+invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1, _id: -1 }, { name: 'finance_invoice_tenant_archived_created_cursor' })
 invoiceSchema.index({ organizationId: 1, propertyId: 1, createdAt: -1 })
 
 const commissionSchema = new Schema<IFinanceCommission>(

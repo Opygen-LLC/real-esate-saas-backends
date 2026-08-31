@@ -2,6 +2,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { User } from '../user/user.model'
@@ -75,12 +76,14 @@ const buildContactWhere = (filters: IContactFilter, access?: CrmAccessContext) =
   conditions.push(visibleContactRelationshipFilter)
 
   if (searchTerm) {
-    const escaped = String(searchTerm).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    conditions.push({
-      $or: ['name', 'email', 'phone', 'company', 'city'].map((field) => ({
-        [field]: { $regex: escaped, $options: 'i' },
-      })),
-    })
+    const raw = String(searchTerm).trim()
+    if (raw.includes('@')) conditions.push({ normalizedEmail: normalizeOptionalEmail(raw) })
+    else if (/^[+()\d\s-]{6,30}$/.test(raw)) conditions.push({ normalizedPhone: normalizePhone(raw) })
+    else {
+      const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const prefix = { $regex: `^${escaped}`, $options: 'i' }
+      conditions.push({ $or: [{ name: prefix }, { company: prefix }, { city: prefix }] })
+    }
   }
   if (type) conditions.push({ type })
   if (city) conditions.push({ city: { $regex: String(city).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } })
@@ -170,7 +173,8 @@ const getAllContacts = async (
 
   const whereCondition = buildContactWhere(filters, access)
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions, { sortBy: 'updatedAt', sortOrder: 'desc' })
-  const pageResult = await readContactListPage<IContact>({
+  const profile = createQueryProfile('/api/v1/contact', organizationId)
+  const pageResult = await profile.db(() => readContactListPage<IContact>({
     organizationId,
     scope: access?.scope || 'team',
     requestId: diagnostics?.requestId,
@@ -179,8 +183,9 @@ const getAllContacts = async (
     limit,
     sortBy,
     sortOrder,
-  })
-  return { meta: { page, limit, total: pageResult.total }, data: pageResult.rows }
+  }), 2)
+  profile.finish(pageResult.rows.length, { paginationMode: 'page' })
+  return { meta: { page, limit, total: pageResult.total, paginationMode: 'page' }, data: pageResult.rows }
 }
 
 const getContactById = async (organizationId: string, id: string, access?: CrmAccessContext): Promise<IContact | null> => {

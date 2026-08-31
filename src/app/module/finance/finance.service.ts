@@ -5,6 +5,8 @@ import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
@@ -139,7 +141,12 @@ const createTransaction = async (organizationId: string, actorId: string, payloa
 }
 
 const listTransactions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
-  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(pagination)
+  const profile = createQueryProfile('/api/v1/finance/transactions', organizationId)
+  const requestedSortBy = String(pagination.sortBy || 'createdAt')
+  const requestedSortOrder = pagination.sortOrder === 'asc' ? 'asc' : 'desc'
+  if (pagination.cursor && (requestedSortBy !== 'createdAt' || requestedSortOrder !== 'desc')) throw new ApiError(httpStatus.BAD_REQUEST, 'Finance transaction cursor pagination requires sortBy=createdAt&sortOrder=desc')
+  const cursor = prepareCursorPagination(pagination, { sortField: 'createdAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
+  const { sortBy, sortOrder } = cursor
   const { startDate, endDate } = resolveDateRange(query)
   const conditions: any[] = [{ organizationId }, { deletedAt: null }]
   const type = asString(query.type); if (type) conditions.push({ type })
@@ -156,22 +163,27 @@ const listTransactions = async (organizationId: string, query: Record<string, un
   if (startDate || endDate) conditions.push({ transactionDate: dateCondition(startDate, endDate) })
   const searchTerm = asString(query.searchTerm)
   if (searchTerm) {
-    const regex = escapeRegex(searchTerm)
-    conditions.push({ $or: ['description', 'reference', 'category'].map((field) => ({ [field]: { $regex: regex, $options: 'i' } })) })
+    const raw = searchTerm.trim()
+    const escaped = escapeRegex(raw)
+    const prefix = { $regex: `^${escaped}`, $options: 'i' }
+    conditions.push({ $or: [{ reference: { $regex: `^${escaped}$`, $options: 'i' } }, { category: prefix }, { description: prefix }] })
   }
-  const where = { $and: conditions }
+  const baseWhere = { $and: conditions }
+  const where = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
   const allowedSort = new Set(['transactionDate', 'amount', 'createdAt', 'updatedAt', 'category', 'status', 'paymentMethod'])
   const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
-  const [data, total] = await Promise.all([
+  const [rows, total] = await profile.db(() => Promise.all([
     FinanceTransaction.find(where)
       .populate({ path: 'vendorId', select: 'name category', match: { organizationId } })
       .populate({ path: 'propertyId', select: 'title', match: { organizationId } })
       .populate(userRefPopulate('createdBy', 'name email', { organizationId }))
-      .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
-      .skip(skip).limit(limit).lean(),
-    FinanceTransaction.countDocuments(where),
-  ])
-  return { meta: { page, limit, total }, data }
+      .sort(paginationHelper.buildStableSort(pagination.cursor ? 'createdAt' : safeSortBy, pagination.cursor ? -1 : sortOrder))
+      .skip(cursor.querySkip).limit(cursor.queryLimit).lean(),
+    FinanceTransaction.countDocuments(baseWhere),
+  ]), 2)
+  const pageResult = finalizeCursorPage(rows as any[], cursor.limit, 'createdAt', cursor.cursorMode)
+  profile.finish(pageResult.rows.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
+  return { meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: pageResult.nextCursor, hasMore: pageResult.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' }, data: pageResult.rows }
 }
 
 const updateTransaction = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceTransaction>) => {
@@ -657,11 +669,28 @@ const createBudget = async (organizationId: string, actorId: string, payload: Pa
   return result
 }
 
-const enrichBudgets = async (organizationId: string, budgets: any[]) => Promise.all(budgets.map(async (budget: any) => {
-  const result = await FinanceTransaction.aggregate([{ $match: { organizationId, deletedAt: null, type: 'expense', status: 'paid', category: budget.category, transactionDate: { $gte: budget.startDate, $lte: budget.endDate } } }, { $group: { _id: null, spent: { $sum: '$amount' } } }])
-  const spent = Number(result[0]?.spent || 0); const remaining = Number(Math.max(0, budget.amount - spent).toFixed(2)); const percentage = budget.amount > 0 ? Number(((spent / budget.amount) * 100).toFixed(1)) : 0
-  return { ...budget, spent, remaining, percentage, alert: percentage >= budget.alertThresholdPercent }
-}))
+const enrichBudgets = async (organizationId: string, budgets: any[]) => {
+  if (!budgets.length) return []
+  const categories = [...new Set(budgets.map((budget) => String(budget.category || '')).filter(Boolean))]
+  const starts = budgets.map((budget) => new Date(budget.startDate).getTime()).filter(Number.isFinite)
+  const ends = budgets.map((budget) => new Date(budget.endDate).getTime()).filter(Number.isFinite)
+  const minStart = new Date(Math.min(...starts))
+  const maxEnd = new Date(Math.max(...ends))
+  const facets = Object.fromEntries(budgets.map((budget, index) => [`b${index}`, [
+    { $match: { category: budget.category, transactionDate: { $gte: new Date(budget.startDate), $lte: new Date(budget.endDate) } } },
+    { $group: { _id: null, spent: { $sum: '$amount' } } },
+  ]]))
+  const [batched] = await FinanceTransaction.aggregate([
+    { $match: { organizationId, deletedAt: null, type: 'expense', status: 'paid', category: { $in: categories }, transactionDate: { $gte: minStart, $lte: maxEnd } } },
+    { $facet: facets },
+  ])
+  return budgets.map((budget, index) => {
+    const spent = Number(batched?.[`b${index}`]?.[0]?.spent || 0)
+    const remaining = Number(Math.max(0, budget.amount - spent).toFixed(2))
+    const percentage = budget.amount > 0 ? Number(((spent / budget.amount) * 100).toFixed(1)) : 0
+    return { ...budget, spent, remaining, percentage, alert: percentage >= budget.alertThresholdPercent }
+  })
+}
 
 const listBudgets = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(pagination)
@@ -669,11 +698,23 @@ const listBudgets = async (organizationId: string, query: Record<string, unknown
   const status = asString(query.status); if (status) conditions.push({ status })
   const categoryValue = asString(query.category); if (categoryValue) conditions.push({ category: categoryValue })
   const period = asString(query.period); if (period) conditions.push({ period })
-  const searchTerm = asString(query.searchTerm); if (searchTerm) conditions.push({ name: { $regex: escapeRegex(searchTerm), $options: 'i' } })
+  const searchTerm = asString(query.searchTerm); if (searchTerm) conditions.push({ name: { $regex: `^${escapeRegex(searchTerm)}`, $options: 'i' } })
   const allowedSort = new Set(['startDate', 'endDate', 'amount', 'name', 'createdAt']); const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt'
   const where = { $and: conditions }
-  const [rows, total] = await Promise.all([FinanceBudget.find(where).sort(paginationHelper.buildStableSort(safeSortBy, sortOrder)).skip(skip).limit(limit).lean(), FinanceBudget.countDocuments(where)])
-  return { meta: { page, limit, total }, data: await enrichBudgets(organizationId, rows) }
+  const profile = createQueryProfile('/api/v1/finance/budgets', organizationId)
+  const budgetPage = await profile.db<any[]>(() => FinanceBudget.aggregate([
+    { $match: where },
+    { $facet: {
+      rows: [{ $sort: paginationHelper.buildStableSort(safeSortBy, sortOrder) }, { $skip: skip }, { $limit: limit }],
+      total: [{ $count: 'value' }],
+    } },
+  ]) as any, 1)
+  const [pageRows] = budgetPage
+  const rows = pageRows?.rows || []
+  const total = Number(pageRows?.total?.[0]?.value || 0)
+  const data = await profile.db(() => enrichBudgets(organizationId, rows), rows.length ? 1 : 0)
+  profile.finish(data.length, { budgetQueries: rows.length ? 2 : 1 })
+  return { meta: { page, limit, total }, data }
 }
 
 const updateBudget = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceBudget>) => {

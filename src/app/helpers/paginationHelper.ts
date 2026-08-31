@@ -1,6 +1,7 @@
 import { SortOrder } from 'mongoose'
 import { IPaginationOptions } from '../../interfaces/common'
 import config from '../../config'
+import ApiError from '../../errors/ApiError'
 
 export type PaginationDefaults = {
   sortBy?: string
@@ -25,6 +26,9 @@ const calculatePagination = (options: IPaginationOptions, defaults: PaginationDe
   const requestedLimit = positiveInt(options.limit, 20)
   const limit = Math.min(requestedLimit, config.runtime.max_page_size)
   const skip = (page - 1) * limit
+  if (!options.cursor && skip > config.runtime.max_deep_pagination_skip) {
+    throw new ApiError(400, `Requested page is too deep. Use cursor pagination after ${config.runtime.max_deep_pagination_skip} skipped records.`)
+  }
 
   const requestedSortBy = options.sortBy ?? defaults.sortBy
   const sortBy = typeof requestedSortBy === 'string' && /^[a-zA-Z0-9_.]{1,80}$/.test(requestedSortBy) ? requestedSortBy : 'createdAt'

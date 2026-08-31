@@ -6,12 +6,19 @@ import { NotificationService } from './notification.service'
 
 const userId = (req: Request) => String(req.user?._id || req.user?.id || '')
 
-const list = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
-  statusCode: 200,
-  success: true,
-  message: 'Notifications fetched',
-  data: await NotificationService.list(requireTenant(req), userId(req), Number(req.query.limit || 20)),
-}))
+const list = catchAsync(async (req: Request, res: Response) => {
+  const result = await NotificationService.list(requireTenant(req), userId(req), {
+    limit: Number(req.query.limit || 20),
+    cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+  })
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Notifications fetched',
+    meta: result.meta,
+    data: result.data,
+  })
+})
 
 const markRead = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
   statusCode: 200,

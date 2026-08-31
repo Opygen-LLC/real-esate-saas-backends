@@ -18,6 +18,9 @@ export type CrmListReadModelOptions = {
   limit: number
   sortBy: string
   sortOrder: SortOrder
+  countMatch?: Record<string, unknown>
+  /** Tenant id is required by production callers for tenant-safe population; optional for legacy low-level tests. */
+  organizationId?: string
 }
 
 export type ContactListReadModelOptions = CrmListReadModelOptions & {
@@ -643,6 +646,7 @@ const accessibleLeadMatch = (match: Record<string, unknown>) => ({ $and: [match,
 
 const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
   const query = accessibleLeadMatch(options.match) as any
+  const countQuery = accessibleLeadMatch(options.countMatch || options.match) as any
   const sort = sortSpec(options.sortBy, options.sortOrder, LEAD_SORT_FIELDS, 'createdAt') as any
   const [documents, total] = await Promise.all([
     Lead.find(query)
@@ -655,7 +659,7 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
       .populate({ path: 'propertyInterest', select: 'title price images city propertyType bedrooms bathrooms', match: { organizationId: options.organizationId } })
       .populate({ path: 'contactId', select: 'name email phone company', match: { organizationId: options.organizationId } })
       .lean(),
-    Lead.countDocuments(query),
+    Lead.countDocuments(countQuery),
   ])
 
   const rows = (documents as any[]).map((row) => {
@@ -677,6 +681,7 @@ const readLeadListPageFallback = async <T = any>(options: CrmListReadModelOption
 
 export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions): Promise<ReadModelPage<T>> => {
   const documentMatch = accessibleLeadMatch(options.match) as Record<string, unknown>
+  const countMatch = accessibleLeadMatch(options.countMatch || options.match) as Record<string, unknown>
   const aggregateMatch = castAggregationMatch(documentMatch) as Record<string, unknown>
   const rowPipeline: PipelineStage[] = [
     { $match: aggregateMatch },
@@ -699,7 +704,7 @@ export const readLeadListPage = async <T = any>(options: CrmListReadModelOptions
     // cheap, and expensive lookups only run for the bounded page of rows.
     const [rows, total] = await Promise.all([
       Lead.aggregate(rowPipeline).allowDiskUse(true),
-      Lead.countDocuments(documentMatch as any),
+      Lead.countDocuments(countMatch as any),
     ])
     return { rows: rows as T[], total }
   } catch (error) {

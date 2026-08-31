@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { performance } from 'perf_hooks'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
@@ -194,45 +195,88 @@ const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<Publi
   getPublicSiteInfo(domainOrSubdomain)
 
 const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganizationWebsite> => {
+  const startedAt = performance.now()
+  let mongoMs = 0
+  let redisMs = 0
+  let queryCount = 0
+  const measureMongo = async <T>(work: () => PromiseLike<T>, count = 1): Promise<T> => {
+    const started = performance.now()
+    try { return await work() }
+    finally {
+      mongoMs += performance.now() - started
+      queryCount += Math.max(0, Math.trunc(count))
+    }
+  }
+  const measureRedis = async <T>(work: () => PromiseLike<T>): Promise<T> => {
+    const started = performance.now()
+    try { return await work() }
+    finally { redisMs += performance.now() - started }
+  }
+  const finishProfile = (organizationId: string, cacheHit: boolean, resultCount = 1) => {
+    const durationMs = performance.now() - startedAt
+    const sampleRate = Math.max(0, Math.min(1, Number(process.env.PUBLIC_SITE_PROFILE_SAMPLE_RATE || 0.05)))
+    // Cache misses are always useful to profile; fast cache hits are sampled to
+    // keep high-traffic public sites from turning performance telemetry into log noise.
+    if (cacheHit && durationMs < 150 && Math.random() >= sampleRate) return
+    const renderMs = Math.max(0, durationMs - mongoMs - redisMs)
+    emitProductionEvent('public_site_query_performance', {
+      route: '/public/site/:identifier',
+      organizationId,
+      cacheHit,
+      cacheMiss: !cacheHit,
+      durationMs: Number(durationMs.toFixed(1)),
+      mongoMs: Number(mongoMs.toFixed(1)),
+      redisMs: Number(redisMs.toFixed(1)),
+      renderMs: Number(renderMs.toFixed(1)),
+      queryCount,
+      resultCount,
+    }, durationMs >= 150 ? 'warn' : 'info')
+  }
+
   const cacheKey = identifier.toLowerCase().trim()
-  const cached = await Cache.tenantPublic.get<PublicOrganizationWebsite & { socialLinks?: OrganizationSocialLinks }>(cacheKey)
+  const cached = await measureRedis(() => Cache.tenantPublic.get<PublicOrganizationWebsite & { socialLinks?: OrganizationSocialLinks }>(cacheKey))
   if (cached?.organizationId) {
     await TenantAccessService.assertPublicWebsiteAccess(String(cached.organizationId))
+    finishProfile(String(cached.organizationId), true)
     return { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks), websiteSettings: canonicalWebsiteSettings(cached.websiteSettings) }
   }
 
-  let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
-    .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
-    .lean()
+  const publicSelect = 'organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt'
+  let org: any = await measureMongo(() => Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
+    .select(publicSelect)
+    .lean())
 
   if (!org) {
-    const alias = await SubdomainAlias.findOne({ alias: cacheKey }).lean()
+    const alias: any = await measureMongo(() => SubdomainAlias.findOne({ alias: cacheKey }).lean())
     if (alias) {
-      org = await Organization.findOne({ organizationId: alias.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
-        .lean()
+      org = await measureMongo(() => Organization.findOne({ organizationId: alias.organizationId })
+        .select(publicSelect)
+        .lean())
     }
   }
 
   if (!org) {
     const normalized = cacheKey.replace(/^www\./, '').split(':')[0]
-    const resolved = await Cache.tenantResolve.get(normalized)
-    const verifiedDomain: any = resolved || await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean()
+    const resolved = await measureRedis(() => Cache.tenantResolve.get(normalized))
+    const verifiedDomain: any = resolved || await measureMongo(() => DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('organizationId').lean())
     if (verifiedDomain?.organizationId) {
-      await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
-      org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
-        .lean()
+      if (!resolved) await measureRedis(() => Cache.tenantResolve.set(normalized, verifiedDomain.organizationId))
+      org = await measureMongo(() => Organization.findOne({ organizationId: verifiedDomain.organizationId })
+        .select(publicSelect)
+        .lean())
     }
   }
 
-  if (!org) throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
+  if (!org) {
+    finishProfile('', false, 0)
+    throw new ApiError(httpStatus.NOT_FOUND, 'Agency website is not published')
+  }
   await TenantAccessService.assertPublicWebsiteAccess(String(org.organizationId))
 
-  const [totalProperties, totalAgents] = await Promise.all([
+  const [totalProperties, totalAgents] = await measureMongo(() => Promise.all([
     Property.countDocuments({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }),
     User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
-  ])
+  ]), 2)
   // Keep entitlement/runtime bookkeeping available for response shaping without
   // exposing those internal fields through either public organization endpoint.
   const { entitlementRestrictions, updatedAt, ...publicOrg } = org
@@ -257,8 +301,9 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
     org.sub_domain,
     ...(entitlementRestrictions?.customDomain ? [] : [org.domain]),
   ].filter(Boolean).map(String)
-  await Promise.all(identifiers.map((key) => Cache.tenantPublic.set(key, result, 300)))
-  await Promise.all(identifiers.map((key) => Cache.tenantResolve.set(key, org.organizationId, 300)))
+  await measureRedis(() => Promise.all(identifiers.map((key) => Cache.tenantPublic.set(key, result, 300))).then(() => undefined))
+  await measureRedis(() => Promise.all(identifiers.map((key) => Cache.tenantResolve.set(key, org.organizationId, 300))).then(() => undefined))
+  finishProfile(String(org.organizationId), false)
   return result
 }
 

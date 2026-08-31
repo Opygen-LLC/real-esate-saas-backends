@@ -79,5 +79,8 @@ websiteSubmissionSchema.index({ organizationId: 1, propertyId: 1, submittedAt: -
 websiteSubmissionSchema.index({ organizationId: 1, linkedEntityType: 1, linkedEntityId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, crmTransferStatus: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, deletedAt: 1, submittedAt: -1 })
+websiteSubmissionSchema.index({ organizationId: 1, deletedAt: 1, submittedAt: -1, _id: -1 }, { name: 'website_submission_tenant_deleted_submitted_cursor' })
+websiteSubmissionSchema.index({ organizationId: 1, email: 1 }, { name: 'website_submission_tenant_email_exact' })
+websiteSubmissionSchema.index({ organizationId: 1, phone: 1 }, { name: 'website_submission_tenant_phone_exact' })
 
 export const WebsiteSubmission = model<IWebsiteSubmission>('WebsiteSubmission', websiteSubmissionSchema)

@@ -234,7 +234,7 @@ const getAllProperties = catchAsync(async (req: Request, res: Response) => {
   // Org scoping
   filters.organizationId = requireTenant(req)
 
-  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'])
   const result = await PropertyService.getAllProperties(filters, paginationOptions)
 
   sendResponse(res, {
@@ -266,7 +266,7 @@ const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
   ])
   filters.organizationId = organizationId
 
-  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'])
   const result = await PropertyService.getPublicProperties(organizationId, filters, paginationOptions)
 
   sendResponse(res, {

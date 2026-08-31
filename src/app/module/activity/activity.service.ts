@@ -1,6 +1,8 @@
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { Contact } from '../contact/contact.model'
 import { visibleContactRelationshipFilter } from '../contact/contactRelationship.contract'
 import {
@@ -194,16 +196,25 @@ const getActivitiesByLead = async (
   })
   if (!visibleLead) throw new ApiError(404, 'Lead not found')
   await LeadEntitlementService.assertLeadAccessible(organizationId, leadId)
-  const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
-  const [result, total] = await Promise.all([
-    Activity.find({ organizationId, leadId })
+  if (paginationOptions.cursor && ((paginationOptions.sortBy && paginationOptions.sortBy !== 'createdAt') || paginationOptions.sortOrder === 'asc')) {
+    throw new ApiError(400, 'Activity cursor pagination requires sortBy=createdAt&sortOrder=desc')
+  }
+  const profile = createQueryProfile('/api/v1/activity/lead/:id', organizationId)
+  const cursor = prepareCursorPagination(paginationOptions, { sortField: 'createdAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
+  const baseWhere = { organizationId, leadId }
+  const where = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
+  const [result, total] = await profile.db(() => Promise.all([
+    Activity.find(where)
       .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
       .sort({ createdAt: -1, _id: -1 })
-      .skip(skip)
-      .limit(limit),
-    Activity.countDocuments({ organizationId, leadId }),
-  ])
-  return { meta: { page, limit, total }, data: result }
+      .skip(cursor.querySkip)
+      .limit(cursor.queryLimit)
+      .lean(),
+    Activity.countDocuments(baseWhere),
+  ]), 2)
+  const page = finalizeCursorPage(result as any[], cursor.limit, 'createdAt', cursor.cursorMode)
+  profile.finish(page.rows.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
+  return { meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' }, data: page.rows as IActivity[] }
 }
 
 const historyKind = (eventType: string, activityType: string): CrmHistoryKind => {
@@ -297,14 +308,15 @@ const getHistoryPage = async (
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<CrmHistoryEntry[]>> => {
   const { page, limit, skip } = paginationHelper.calculatePagination(paginationOptions)
-  const [activities, total] = await Promise.all([
+  const profile = createQueryProfile('/api/v1/crm/history', organizationId)
+  const [activities, total] = await profile.db(() => Promise.all([
     Activity.find({ organizationId, ...where })
       .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit),
     Activity.countDocuments({ organizationId, ...where }),
-  ])
+  ]), 2)
 
   const eventIds = activities
     .map((activity: any) => activity.metadata?.domainEventId)
@@ -320,7 +332,8 @@ const getHistoryPage = async (
     activity.metadata?.domainEventId ? eventsById.get(String(activity.metadata.domainEventId)) : undefined,
   ))
 
-  return { meta: { page, limit, total }, data }
+  profile.finish(data.length, { paginationMode: 'page' })
+  return { meta: { page, limit, total, paginationMode: 'page' }, data }
 }
 
 const getLeadHistory = async (

@@ -33,7 +33,7 @@ const getAllLeads = catchAsync(async (req, res) => {
   const filters = pick(req.query, ['searchTerm', 'leadStatus', 'source', 'assignedAgent', 'propertyType', 'minBudget', 'maxBudget', 'sla', 'minScore', 'scope', 'isConverted', 'followUpPreset', 'followUpFrom', 'followUpTo'])
   filters.organizationId = requireTenant(req)
   const access = crmAccessFromRequest(req, req.query.scope)
-  const result = await LeadService.getAllLeads(filters, pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder']), access)
+  const result = await LeadService.getAllLeads(filters, pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor']), access)
   sendResponse(res, { statusCode: 200, success: true, message: 'Leads fetched successfully', meta: result.meta, data: result.data })
 })
 

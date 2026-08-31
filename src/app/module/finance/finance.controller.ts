@@ -8,7 +8,7 @@ import { FinanceService } from './finance.service'
 
 const actorId = (req: Request) => req.user?._id || req.user?.id || ''
 const financeActor = (req: Request) => ({ id: actorId(req), role: req.user?.userRole || 'tenant', requestId: req.requestId, ip: req.ip })
-const pagination = (req: Request) => pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder'])
+const pagination = (req: Request, cursor = false) => pick(req.query, cursor ? ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'] : ['page', 'limit', 'sortBy', 'sortOrder'])
 
 const getOverview = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.getOverview(requireTenant(req), req.query)
@@ -26,7 +26,7 @@ const exportTransactions = catchAsync(async (req: Request, res: Response) => {
 })
 
 const listTransactions = catchAsync(async (req: Request, res: Response) => {
-  const result = await FinanceService.listTransactions(requireTenant(req), req.query, pagination(req))
+  const result = await FinanceService.listTransactions(requireTenant(req), req.query, pagination(req, true))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Transactions fetched successfully', meta: result.meta, data: result.data })
 })
 const createTransaction = catchAsync(async (req: Request, res: Response) => {

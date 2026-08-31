@@ -3,6 +3,8 @@ import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
+import { createQueryProfile } from '../../helpers/queryPerformance'
 import { exactCaseInsensitiveRegex, safeRegexPattern } from '../../helpers/searchQuery'
 import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface'
 import { Property } from './property.model'
@@ -198,11 +200,18 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   }
 
   if (searchTerm) {
-    const search = safeRegexPattern(searchTerm)
+    const raw = String(searchTerm).trim()
+    const search = safeRegexPattern(raw)
+    const prefix = { $regex: `^${search}`, $options: 'i' }
     andConditions.push({
-      $or: ['title', 'slug', 'description', 'address', 'city', 'state', 'bangladeshAddress.postalCode'].map((field) => ({
-        [field]: { $regex: search, $options: 'i' },
-      })),
+      $or: [
+        { title: prefix },
+        { slug: raw.toLowerCase() },
+        { address: prefix },
+        { city: prefix },
+        { state: prefix },
+        { 'bangladeshAddress.postalCode': prefix },
+      ],
     })
   }
 
@@ -246,20 +255,33 @@ const getAllProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<IProperty[]>> => {
-  const whereCondition = await buildPropertyWhereCondition(filters)
-  const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
-  const safeSort = safePropertySort(sortBy, sortOrder)
+  const organizationId = String(filters.organizationId || '')
+  const profile = createQueryProfile('/api/v1/property', organizationId)
+  const requestedSort = safePropertySort(paginationOptions.sortBy, paginationOptions.sortOrder)
+  if (paginationOptions.cursor && (requestedSort.sortBy !== 'createdAt' || requestedSort.sortOrder !== 'desc')) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Property cursor pagination requires sortBy=createdAt&sortOrder=desc')
+  }
+  const cursor = prepareCursorPagination(paginationOptions, { sortField: 'createdAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
+  const baseWhere = await buildPropertyWhereCondition(filters)
+  const whereCondition = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
+  const safeSort = cursor.cursorMode ? { sortBy: 'createdAt', sortOrder: 'desc' as const } : safePropertySort(cursor.sortBy, cursor.sortOrder)
 
-  const [result, total] = await Promise.all([
+  const [result, total] = await profile.db(() => Promise.all([
     Property.find(whereCondition)
-      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', filters.organizationId ? { organizationId: filters.organizationId } : undefined))
+      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', organizationId ? { organizationId } : undefined))
       .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
-      .skip(skip)
-      .limit(limit),
-    Property.countDocuments(whereCondition),
-  ])
+      .skip(cursor.querySkip)
+      .limit(cursor.queryLimit)
+      .lean(),
+    Property.countDocuments(baseWhere),
+  ]), 2)
+  const page = finalizeCursorPage(result as any[], cursor.limit, 'createdAt', cursor.cursorMode)
+  profile.finish(page.rows.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
 
-  return { meta: { page, limit, total }, data: result }
+  return {
+    meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' },
+    data: page.rows as IProperty[],
+  }
 }
 
 const PROPERTY_EXPORT_COLUMNS: CrmExportColumn[] = [

@@ -82,5 +82,6 @@ viewingSchema.index({ organizationId: 1, date: 1, status: 1, propertyId: 1, star
 viewingSchema.index({ organizationId: 1, status: 1 })
 viewingSchema.index({ organizationId: 1, status: 1, date: 1 })
 viewingSchema.index({ organizationId: 1, agentId: 1, createdAt: -1 })
+viewingSchema.index({ organizationId: 1, createdAt: -1, _id: -1 }, { name: 'viewing_tenant_created_cursor' })
 
 export const Viewing = model<IViewing, ViewingModel>('Viewing', viewingSchema)
