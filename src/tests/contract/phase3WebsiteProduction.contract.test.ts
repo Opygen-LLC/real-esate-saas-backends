@@ -21,6 +21,27 @@ describe('Phase 3 production contract', () => {
     expect(builder).toMatch(/WebsitePage\.findOne\(\{ _id: preview\.pageId, organizationId: preview\.organizationId \}\)/)
   })
 
+  it('keeps section appearance on one strict contract and invalidates every public website cache namespace', () => {
+    const contract = read('src/app/module/organization/organizationWebsite.contract.ts')
+    const validation = read('src/app/module/organization/organization.validation.ts')
+    const service = read('src/app/module/organization/organization.service.ts')
+    const cache = read('src/app/module/domainEvent/cacheInvalidation.service.ts')
+    expect(contract).toContain("'shared.header'")
+    expect(contract).toContain("'home.hero'")
+    expect(contract).toContain("'contact.form'")
+    expect(contract).toMatch(/sectionStyles\?: WebsiteSectionStyles/)
+    expect(validation).toMatch(/\^#\[0-9a-fA-F\]\{6\}\$/)
+    expect(validation).toMatch(/z\.record\(z\.enum\(WEBSITE_SECTION_KEYS\), websiteSectionStyle\)/)
+    expect(service).toMatch(/serializeSectionStylesForStorage/)
+    expect(service).toMatch(/sectionStyles: canonicalSectionStyles/)
+    expect(service).toMatch(/updateWebsiteSettings[\s\S]*CacheInvalidationService\.invalidateTenant\(organizationId\)/)
+    expect(cache).toMatch(/Cache\.tenantPublic\.del/)
+    expect(cache).toMatch(/Cache\.tenantResolve\.del/)
+    expect(cache).toMatch(/Cache\.website\.delAll\(organizationId\)/)
+    expect(cache).toMatch(/WebsiteCache\.del\('draft'/)
+    expect(cache).toMatch(/WebsiteCache\.del\('published'/)
+  })
+
   it('uses escaped search terms across high traffic CRM/property services', () => {
     for (const file of ['property/property.service.ts', 'task/task.service.ts', 'viewing/viewing.service.ts', 'lead/lead.service.ts', 'organization/organization.service.ts', 'user/user.service.ts']) {
       const source = read(`src/app/module/${file}`)

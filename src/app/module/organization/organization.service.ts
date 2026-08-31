@@ -21,7 +21,8 @@ import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
-import type { OrganizationSocialLinks, OrganizationWebsiteSettings, PublicOrganizationWebsite } from './organizationWebsite.contract'
+import { WEBSITE_SECTION_KEYS } from './organizationWebsite.contract'
+import type { OrganizationSocialLinks, OrganizationWebsiteSettings, PublicOrganizationWebsite, WebsiteSectionKey, WebsiteSectionStyle, WebsiteSectionStyles } from './organizationWebsite.contract'
 import { Organization } from './organization.model'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
@@ -68,9 +69,61 @@ const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) =>
   ...(Object.keys(unset).length ? { $unset: unset } : {}),
 })
 
+const websiteSectionKeySet = new Set<string>(WEBSITE_SECTION_KEYS)
+const websiteSectionHexColor = /^#[0-9a-fA-F]{6}$/
+const isWebsiteSectionKey = (value: string): value is WebsiteSectionKey => websiteSectionKeySet.has(value)
+
+const canonicalSectionStyle = (value: unknown): WebsiteSectionStyle | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const style = definedEntries({
+    backgroundColor: typeof input.backgroundColor === 'string' && websiteSectionHexColor.test(input.backgroundColor) ? input.backgroundColor : undefined,
+    textColor: typeof input.textColor === 'string' && websiteSectionHexColor.test(input.textColor) ? input.textColor : undefined,
+  }) as WebsiteSectionStyle
+  return Object.keys(style).length ? style : undefined
+}
+
+// API section identifiers deliberately use dotted stable keys (for example home.hero),
+// while MongoDB stores the values as nested objects so field-name dots never become
+// persistence/update hazards.
+const canonicalSectionStyles = (value: unknown): WebsiteSectionStyles => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const input = value as Record<string, unknown>
+  const result: WebsiteSectionStyles = {}
+
+  for (const [rawKey, rawValue] of Object.entries(input)) {
+    if (isWebsiteSectionKey(rawKey)) {
+      const style = canonicalSectionStyle(rawValue)
+      if (style) result[rawKey] = style
+      continue
+    }
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) continue
+    for (const [sectionName, sectionValue] of Object.entries(rawValue as Record<string, unknown>)) {
+      const key = `${rawKey}.${sectionName}`
+      if (!isWebsiteSectionKey(key)) continue
+      const style = canonicalSectionStyle(sectionValue)
+      if (style) result[key] = style
+    }
+  }
+  return result
+}
+
+const serializeSectionStylesForStorage = (styles?: WebsiteSectionStyles): Record<string, Record<string, WebsiteSectionStyle>> => {
+  const stored: Record<string, Record<string, WebsiteSectionStyle>> = {}
+  for (const key of WEBSITE_SECTION_KEYS) {
+    const style = canonicalSectionStyle(styles?.[key])
+    if (!style) continue
+    const [group, section] = key.split('.', 2)
+    stored[group] ||= {}
+    stored[group][section] = style
+  }
+  return stored
+}
+
 const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null): OrganizationWebsiteSettings => ({
   ...(settings || {}),
   renderMode: settings?.renderMode || 'template',
+  sectionStyles: canonicalSectionStyles((settings as any)?.sectionStyles),
   footer: {
     showSocialLinks: settings?.footer?.showSocialLinks ?? true,
     socialVisibility: {
@@ -88,6 +141,7 @@ const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?:
     const value = settings[key]
     if (value !== undefined) target[`websiteSettings.${key}`] = key === 'heroImage' && value ? assertSafeUrl(String(value)) : value
   }
+  if (settings.sectionStyles !== undefined) target['websiteSettings.sectionStyles'] = serializeSectionStylesForStorage(settings.sectionStyles)
   if (settings.footer?.showSocialLinks !== undefined) target['websiteSettings.footer.showSocialLinks'] = settings.footer.showSocialLinks
   const visibility = settings.footer?.socialVisibility
   if (visibility) {

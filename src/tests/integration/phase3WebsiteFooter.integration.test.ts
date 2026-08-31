@@ -90,6 +90,38 @@ suite('Phase 3 website footer/data integrity integration', () => {
     expect(site).not.toHaveProperty('effectiveAccess')
   })
 
+  it('stores Mongo-safe section styles, exposes dotted public keys, and removes reset overrides', async () => {
+    await OrganizationService.updateWebsiteSettings(tenantA, {
+      websiteSettings: {
+        sectionStyles: {
+          'home.hero': { backgroundColor: '#111827', textColor: '#FFFFFF' },
+          'contact.form': { backgroundColor: '#22C55E', textColor: '#111827' },
+        },
+      },
+    })
+
+    const stored = await Organization.findOne({ organizationId: tenantA }).lean()
+    expect(stored.websiteSettings.sectionStyles.home.hero).toEqual({ backgroundColor: '#111827', textColor: '#FFFFFF' })
+    expect(stored.websiteSettings.sectionStyles.contact.form).toEqual({ backgroundColor: '#22C55E', textColor: '#111827' })
+    expect(stored.websiteSettings.sectionStyles['home.hero']).toBeUndefined()
+
+    const mine = await OrganizationService.getMyOrganization(tenantA)
+    expect(mine.websiteSettings.sectionStyles['home.hero']).toEqual({ backgroundColor: '#111827', textColor: '#FFFFFF' })
+    const publicSite = await OrganizationService.getPublicSiteInfo('phase3-footer-a')
+    expect(publicSite.websiteSettings.sectionStyles['contact.form']).toEqual({ backgroundColor: '#22C55E', textColor: '#111827' })
+
+    await OrganizationService.updateWebsiteSettings(tenantA, {
+      websiteSettings: {
+        sectionStyles: {
+          'contact.form': { backgroundColor: '#22C55E', textColor: '#111827' },
+        },
+      },
+    })
+    const resetSite = await OrganizationService.getPublicSiteInfo('phase3-footer-a')
+    expect(resetSite.websiteSettings.sectionStyles['home.hero']).toBeUndefined()
+    expect(resetSite.websiteSettings.sectionStyles['contact.form']).toEqual({ backgroundColor: '#22C55E', textColor: '#111827' })
+  })
+
   it('rejects a task linked to another tenant property', async () => {
     await expect(TaskService.createTask(tenantA, { title: 'Bad relation', dueAt: new Date(Date.now() + 86_400_000), linkedProperty: propertyB._id })).rejects.toThrow(/Linked property must belong to this agency/)
   })

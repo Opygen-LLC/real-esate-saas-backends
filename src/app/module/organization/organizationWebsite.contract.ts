@@ -1,5 +1,38 @@
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
 
+export const WEBSITE_SECTION_KEYS = [
+  'shared.header',
+  'shared.footer',
+  'home.hero',
+  'home.trustPoints',
+  'home.featuredProperties',
+  'home.whyChooseUs',
+  'home.reviews',
+  'home.agents',
+  'home.consultation',
+  'about.hero',
+  'about.story',
+  'about.values',
+  'about.stats',
+  'about.cta',
+  'properties.hero',
+  'properties.listing',
+  'agents.hero',
+  'agents.listing',
+  'contact.hero',
+  'contact.office',
+  'contact.form',
+] as const
+
+export type WebsiteSectionKey = (typeof WEBSITE_SECTION_KEYS)[number]
+
+export type WebsiteSectionStyle = {
+  backgroundColor?: string
+  textColor?: string
+}
+
+export type WebsiteSectionStyles = Partial<Record<WebsiteSectionKey, WebsiteSectionStyle>>
+
 export type OrganizationSocialLinks = {
   facebook?: string
   instagram?: string
@@ -33,6 +66,7 @@ export type OrganizationWebsiteSettings = {
   enableWhatsAppChat?: boolean
   renderMode?: 'template' | 'builder'
   content?: Record<string, unknown>
+  sectionStyles?: WebsiteSectionStyles
   footer?: WebsiteFooterSettings
 }
 

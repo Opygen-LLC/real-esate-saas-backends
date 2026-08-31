@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
 import { ONBOARDING_TOTAL_STEPS } from './onboarding.constants'
+import { WEBSITE_SECTION_KEYS } from './organizationWebsite.contract'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
 const secureUrl = z.union([z.literal(''), z.string().trim().max(2048).superRefine((value, ctx) => {
@@ -54,6 +55,12 @@ const socialLinks = z.object({
 const shortText = (max = 200) => z.string().trim().max(max)
 const websiteFeature = z.object({ title: shortText(120), description: shortText(500) }).strict()
 const websiteStat = z.object({ label: shortText(80), value: shortText(40), caption: shortText(160) }).strict()
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Enter a valid 6-digit hex color')
+const websiteSectionStyle = z.object({
+  backgroundColor: hexColor.optional(),
+  textColor: hexColor.optional(),
+}).strict()
+const websiteSectionStyles = z.record(z.enum(WEBSITE_SECTION_KEYS), websiteSectionStyle)
 const websiteContent = z.object({
   navigation: z.object({
     tagline: shortText(120), homeLabel: shortText(40), propertiesLabel: shortText(40), agentsLabel: shortText(40),
@@ -91,6 +98,7 @@ const websiteSettings = z.object({
   enableWhatsAppChat: z.boolean().optional(),
   renderMode: z.enum(['template', 'builder']).optional(),
   content: websiteContent.optional(),
+  sectionStyles: websiteSectionStyles.optional(),
   footer: z.object({
     showSocialLinks: z.boolean().optional(),
     socialVisibility: z.object({

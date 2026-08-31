@@ -207,6 +207,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableWhatsAppChat: { type: Boolean, default: true },
       renderMode: { type: String, enum: ['template', 'builder'], default: 'template' },
       content: { type: Schema.Types.Mixed, default: {} },
+      // Stored as a nested Mongo-safe object and flattened to dotted stable section IDs at the API boundary.
+      sectionStyles: { type: Schema.Types.Mixed, default: {} },
       footer: {
         showSocialLinks: { type: Boolean, default: true },
         socialVisibility: {

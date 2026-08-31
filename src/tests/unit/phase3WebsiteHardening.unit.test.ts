@@ -28,6 +28,29 @@ describe('Phase 3 website/data hardening helpers', () => {
     expect(result.success).toBe(false)
   })
 
+  it('accepts only stable per-section website appearance keys with strict hex colors', () => {
+    const valid = OrganizationValidation.website.safeParse({
+      body: {
+        websiteSettings: {
+          sectionStyles: {
+            'home.hero': { backgroundColor: '#111827', textColor: '#FFFFFF' },
+            'contact.form': { backgroundColor: '#22C55E' },
+          },
+        },
+      },
+    })
+    expect(valid.success).toBe(true)
+
+    for (const invalidBody of [
+      { websiteSettings: { sectionStyles: { 'home.hero': { backgroundColor: 'red' } } } },
+      { websiteSettings: { sectionStyles: { 'home.hero': { textColor: 'var(--brand)' } } } },
+      { websiteSettings: { sectionStyles: { 'home.hero': { backgroundColor: 'url(https://example.com)' } } } },
+      { websiteSettings: { sectionStyles: { 'home.unknown': { backgroundColor: '#FFFFFF' } } } },
+    ]) {
+      expect(OrganizationValidation.website.safeParse({ body: invalidBody }).success).toBe(false)
+    }
+  })
+
   it('escapes regex metacharacters and caps hostile search input', () => {
     expect(escapeRegex('a.*(b)+?')).toBe('a\\.\\*\\(b\\)\\+\\?')
     expect(safeRegexPattern('  a.*(b)+?  ')).toBe('a\\.\\*\\(b\\)\\+\\?')
