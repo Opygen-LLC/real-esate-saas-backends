@@ -4,6 +4,7 @@ export interface IWebsiteRevision {
   organizationId: string
   pageId: Types.ObjectId | string
   document: Record<string, any>
+  schemaVersion: number
   version: number
   createdBy?: Types.ObjectId | string
   message?: string

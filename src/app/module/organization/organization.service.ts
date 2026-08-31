@@ -16,13 +16,15 @@ import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.servi
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
+import { WebsitePublicationService } from '../websiteBuilder/websitePublication.service'
+import { WebsiteArchitectureService } from '../websiteBuilder/websiteArchitecture.service'
+import type { WebsiteRenderMode } from '../websiteBuilder/websiteArchitecture.contract'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
-import { WEBSITE_SECTION_KEYS } from './organizationWebsite.contract'
-import type { OrganizationSocialLinks, OrganizationWebsiteSettings, PublicOrganizationWebsite, WebsiteSectionKey, WebsiteSectionStyle, WebsiteSectionStyles } from './organizationWebsite.contract'
+import type { OrganizationSocialLinks, OrganizationWebsiteSettings, PublicOrganizationWebsite } from './organizationWebsite.contract'
 import { Organization } from './organization.model'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
@@ -69,61 +71,10 @@ const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) =>
   ...(Object.keys(unset).length ? { $unset: unset } : {}),
 })
 
-const websiteSectionKeySet = new Set<string>(WEBSITE_SECTION_KEYS)
-const websiteSectionHexColor = /^#[0-9a-fA-F]{6}$/
-const isWebsiteSectionKey = (value: string): value is WebsiteSectionKey => websiteSectionKeySet.has(value)
-
-const canonicalSectionStyle = (value: unknown): WebsiteSectionStyle | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const input = value as Record<string, unknown>
-  const style = definedEntries({
-    backgroundColor: typeof input.backgroundColor === 'string' && websiteSectionHexColor.test(input.backgroundColor) ? input.backgroundColor : undefined,
-    textColor: typeof input.textColor === 'string' && websiteSectionHexColor.test(input.textColor) ? input.textColor : undefined,
-  }) as WebsiteSectionStyle
-  return Object.keys(style).length ? style : undefined
-}
-
-// API section identifiers deliberately use dotted stable keys (for example home.hero),
-// while MongoDB stores the values as nested objects so field-name dots never become
-// persistence/update hazards.
-const canonicalSectionStyles = (value: unknown): WebsiteSectionStyles => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const input = value as Record<string, unknown>
-  const result: WebsiteSectionStyles = {}
-
-  for (const [rawKey, rawValue] of Object.entries(input)) {
-    if (isWebsiteSectionKey(rawKey)) {
-      const style = canonicalSectionStyle(rawValue)
-      if (style) result[rawKey] = style
-      continue
-    }
-    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) continue
-    for (const [sectionName, sectionValue] of Object.entries(rawValue as Record<string, unknown>)) {
-      const key = `${rawKey}.${sectionName}`
-      if (!isWebsiteSectionKey(key)) continue
-      const style = canonicalSectionStyle(sectionValue)
-      if (style) result[key] = style
-    }
-  }
-  return result
-}
-
-const serializeSectionStylesForStorage = (styles?: WebsiteSectionStyles): Record<string, Record<string, WebsiteSectionStyle>> => {
-  const stored: Record<string, Record<string, WebsiteSectionStyle>> = {}
-  for (const key of WEBSITE_SECTION_KEYS) {
-    const style = canonicalSectionStyle(styles?.[key])
-    if (!style) continue
-    const [group, section] = key.split('.', 2)
-    stored[group] ||= {}
-    stored[group][section] = style
-  }
-  return stored
-}
-
 const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null): OrganizationWebsiteSettings => ({
   ...(settings || {}),
   renderMode: settings?.renderMode || 'template',
-  sectionStyles: canonicalSectionStyles((settings as any)?.sectionStyles),
+  sectionStyles: WebsiteArchitectureService.canonicalizeSectionStyles((settings as any)?.sectionStyles),
   footer: {
     showSocialLinks: settings?.footer?.showSocialLinks ?? true,
     socialVisibility: {
@@ -141,7 +92,7 @@ const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?:
     const value = settings[key]
     if (value !== undefined) target[`websiteSettings.${key}`] = key === 'heroImage' && value ? assertSafeUrl(String(value)) : value
   }
-  if (settings.sectionStyles !== undefined) target['websiteSettings.sectionStyles'] = serializeSectionStylesForStorage(settings.sectionStyles)
+  if (settings.sectionStyles !== undefined) target['websiteSettings.sectionStyles'] = WebsiteArchitectureService.serializeSectionStylesForStorage(settings.sectionStyles)
   if (settings.footer?.showSocialLinks !== undefined) target['websiteSettings.footer.showSocialLinks'] = settings.footer.showSocialLinks
   const visibility = settings.footer?.socialVisibility
   if (visibility) {
@@ -152,21 +103,6 @@ const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?:
 }
 
 
-const getPublicTenantIdentifiers = async (organizationId: string, subdomain?: string): Promise<string[]> => {
-  const [domains, aliases] = await Promise.all([
-    DomainRecord.find({ organizationId, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).select('domain').lean(),
-    SubdomainAlias.find({ organizationId }).select('alias').lean(),
-  ])
-
-  return Array.from(
-    new Set(
-      [organizationId, subdomain, ...domains.map((record: any) => record.domain), ...aliases.map((record: any) => record.alias)]
-        .filter(Boolean)
-        .map((value) => String(value).trim().toLowerCase())
-        .filter(Boolean)
-    )
-  )
-}
 
 const generatedSubdomainForOrganization = (organizationId: string, agencyName?: string): string => {
   const normalizedAgency = normalizeSubdomain(String(agencyName || 'agency'))
@@ -292,10 +228,21 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
   if (cached?.organizationId) {
     await TenantAccessService.assertPublicWebsiteAccess(String(cached.organizationId))
     finishProfile(String(cached.organizationId), true)
-    return { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks), websiteSettings: canonicalWebsiteSettings(cached.websiteSettings) }
+    const websiteSettings = canonicalWebsiteSettings(cached.websiteSettings)
+    const normalizedCached = { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks), websiteSettings }
+    return {
+      ...normalizedCached,
+      website: cached.website || WebsiteArchitectureService.toCanonicalWebsiteContract(normalizedCached, {
+        renderMode: websiteSettings.renderMode === 'builder' ? 'builder' : 'template',
+        templateId: normalizedCached.templateId || 'template-1',
+        customDomain: normalizedCached.domain || '',
+        customDomainVerified: false,
+        public: true,
+      }),
+    }
   }
 
-  const publicSelect = 'organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt'
+  const publicSelect = 'organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain domain_Verify templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt'
   let org: any = await measureMongo(() => Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
     .select(publicSelect)
     .lean())
@@ -333,19 +280,28 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
   ]), 2)
   // Keep entitlement/runtime bookkeeping available for response shaping without
   // exposing those internal fields through either public organization endpoint.
-  const { entitlementRestrictions, updatedAt, ...publicOrg } = org
+  const { entitlementRestrictions, updatedAt, domain_Verify, ...publicOrg } = org
+  const effectiveTemplateId = entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1')
+  const websiteSettings = canonicalWebsiteSettings(org.websiteSettings)
   const result: PublicOrganizationWebsite = {
     ...publicOrg,
     socialLinks: canonicalSocialLinks(org.socialLinks),
     defaultLanguage: org.defaultLanguage || 'en',
     metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
     metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
-    templateId: entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
+    templateId: effectiveTemplateId,
     configuredTemplateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
     primaryColor: org.primaryColor || '#1877F2',
     secondaryColor: org.secondaryColor || '#0f172a',
-    websiteSettings: canonicalWebsiteSettings(org.websiteSettings),
+    websiteSettings,
+    website: WebsiteArchitectureService.toCanonicalWebsiteContract({ ...org, websiteSettings }, {
+      renderMode: websiteSettings.renderMode === 'builder' ? 'builder' : 'template',
+      templateId: effectiveTemplateId,
+      customDomain: entitlementRestrictions?.customDomain ? '' : String(org.domain || ''),
+      customDomainVerified: Boolean(domain_Verify) && !entitlementRestrictions?.customDomain,
+      public: true,
+    }),
     brandingVersion: updatedAt ? new Date(updatedAt).toISOString() : '',
     stats: { totalProperties, totalAgents },
   }
@@ -363,9 +319,16 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
 
 const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
-  const previousTemplate = payload.templateId
-    ? await Organization.findOne({ organizationId }).select('templateId').lean()
-    : null
+  const currentWebsite = await Organization.findOne({ organizationId }).select('templateId websiteSettings.renderMode').lean()
+  if (!currentWebsite) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  const requestedRenderMode = payload.websiteSettings?.renderMode
+  const renderMode: WebsiteRenderMode = requestedRenderMode === 'builder' || requestedRenderMode === 'template'
+    ? requestedRenderMode
+    : payload.templateId
+      ? 'template'
+      : currentWebsite.websiteSettings?.renderMode === 'builder'
+        ? 'builder'
+        : 'template'
 
   const updateData: Record<string, unknown> = definedEntries({
     primaryColor: payload.primaryColor,
@@ -383,14 +346,25 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
   appendWebsiteSettingUpdates(updateData, payload.websiteSettings)
   if (payload.templateId) updateData['websiteSettings.renderMode'] = 'template'
 
-  const result = await Organization.findOneAndUpdate({ organizationId }, mongoUpdate(updateData, unsetData), { new: true })
-  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  await CacheInvalidationService.invalidateTenant(organizationId)
-  await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData) } })
-  if (payload.templateId && String(previousTemplate?.templateId || 'template-1') !== String(payload.templateId)) {
+  const publication = await WebsitePublicationService.commitPublicationState({
+    organizationId,
+    renderMode,
+    set: updateData,
+    unset: unsetData,
+  })
+  const result = publication.organization
+  await WebsitePublicationService.afterPublication({
+    organizationId,
+    renderMode,
+    aggregateId: result._id.toString(),
+    publicationRevision: publication.publicationRevision,
+    eventType: renderMode === 'builder' ? 'website.settings_published' : 'website.template_published',
+  })
+  await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData), publicationRevision: publication.publicationRevision } })
+  if (payload.templateId && String(currentWebsite?.templateId || 'template-1') !== String(payload.templateId)) {
     emitProductionEvent('website_template_changed', {
       organizationId,
-      fromTemplateId: String(previousTemplate?.templateId || 'template-1'),
+      fromTemplateId: String(currentWebsite?.templateId || 'template-1'),
       toTemplateId: String(payload.templateId),
       cacheInvalidated: true,
     })
@@ -409,11 +383,18 @@ const updateBrandingSettings = async (organizationId: string, payload: Partial<I
     logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
     favicon: payload.favicon ? assertSafeUrl(payload.favicon) : payload.favicon,
   })
-  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: updateData }, { new: true })
-  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-
-  const tenantIdentifiers = await getPublicTenantIdentifiers(organizationId, result.sub_domain)
-  await CacheInvalidationService.invalidateTenant(organizationId, tenantIdentifiers)
+  const current = await Organization.findOne({ organizationId }).select('websiteSettings.renderMode').lean()
+  if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  const renderMode: WebsiteRenderMode = current.websiteSettings?.renderMode === 'builder' ? 'builder' : 'template'
+  const publication = await WebsitePublicationService.commitPublicationState({ organizationId, renderMode, set: updateData })
+  const result = publication.organization
+  const tenantIdentifiers = await WebsitePublicationService.afterPublication({
+    organizationId,
+    renderMode,
+    aggregateId: result._id.toString(),
+    publicationRevision: publication.publicationRevision,
+    eventType: 'website.branding_published',
+  })
   await DomainEventService.emit({
     organizationId,
     aggregateType: 'organization',
@@ -424,6 +405,7 @@ const updateBrandingSettings = async (organizationId: string, payload: Partial<I
       publicVisible: true,
       tenantIdentifiers,
       faviconChanged: Object.prototype.hasOwnProperty.call(updateData, 'favicon'),
+      publicationRevision: publication.publicationRevision,
     },
   })
   return result

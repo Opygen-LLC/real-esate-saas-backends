@@ -18,6 +18,12 @@ const websiteRevisionSchema = new Schema<IWebsiteRevision, WebsiteRevisionModel>
       type: Schema.Types.Mixed,
       required: true,
     },
+    schemaVersion: {
+      type: Number,
+      required: true,
+      default: 2,
+      min: 1,
+    },
     version: {
       type: Number,
       required: true,

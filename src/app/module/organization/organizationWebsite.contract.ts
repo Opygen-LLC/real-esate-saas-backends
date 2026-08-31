@@ -1,37 +1,7 @@
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
-
-export const WEBSITE_SECTION_KEYS = [
-  'shared.header',
-  'shared.footer',
-  'home.hero',
-  'home.trustPoints',
-  'home.featuredProperties',
-  'home.whyChooseUs',
-  'home.reviews',
-  'home.agents',
-  'home.consultation',
-  'about.hero',
-  'about.story',
-  'about.values',
-  'about.stats',
-  'about.cta',
-  'properties.hero',
-  'properties.listing',
-  'agents.hero',
-  'agents.listing',
-  'contact.hero',
-  'contact.office',
-  'contact.form',
-] as const
-
-export type WebsiteSectionKey = (typeof WEBSITE_SECTION_KEYS)[number]
-
-export type WebsiteSectionStyle = {
-  backgroundColor?: string
-  textColor?: string
-}
-
-export type WebsiteSectionStyles = Partial<Record<WebsiteSectionKey, WebsiteSectionStyle>>
+import type { CanonicalWebsiteContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
+export { WEBSITE_SECTION_KEYS } from '../websiteBuilder/websiteArchitecture.contract'
+export type { WebsiteSectionKey, WebsiteSectionStyle, WebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
 
 export type OrganizationSocialLinks = {
   facebook?: string
@@ -64,10 +34,12 @@ export type OrganizationWebsiteSettings = {
   enableTestimonials?: boolean
   enableLeadForm?: boolean
   enableWhatsAppChat?: boolean
-  renderMode?: 'template' | 'builder'
+  renderMode?: WebsiteRenderMode
   content?: Record<string, unknown>
-  sectionStyles?: WebsiteSectionStyles
+  sectionStyles?: CanonicalWebsiteSectionStyles
   footer?: WebsiteFooterSettings
+  publicationRevision?: number
+  lastPublishedAt?: Date | string | null
 }
 
 export type PublicSiteStats = {
@@ -106,4 +78,5 @@ export type PublicOrganizationWebsite = {
   websiteSettings?: OrganizationWebsiteSettings
   brandingVersion?: string
   stats: PublicSiteStats
+  website?: CanonicalWebsiteContract
 }

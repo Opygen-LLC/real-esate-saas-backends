@@ -15,7 +15,6 @@ import { Property } from '../property/property.model'
 import { PUBLIC_PROPERTY_STATUSES } from '../property/property.constants'
 import { toPublicProperty } from '../property/publicProperty.serializer'
 import { DomainRecord } from '../domain/domain.model'
-import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { WebsitePage } from './websitePage.model'
 import { WebsiteRevision } from './websiteRevision.model'
 import { WebsiteAsset } from './websiteAsset.model'
@@ -25,6 +24,7 @@ import { WebsiteUploadIntent } from './websiteUploadIntent.model'
 import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.validation'
 import { TemplateRegistry } from './templateRegistry'
 import { WebsiteCache } from './websiteCache'
+import { WebsitePublicationService } from './websitePublication.service'
 import { ObjectStorageService } from './objectStorage.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
@@ -43,6 +43,24 @@ const sanitizeDocument = (value: any, key = ''): any => {
   if (Array.isArray(value)) return value.map((item) => sanitizeDocument(item, key))
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, sanitizeDocument(child, childKey)]))
   return value
+}
+
+const prepareBuilderDocument = (input: any) => {
+  let document: any
+  try {
+    // Migrate first so legacy revisions are normalized before current guardrails,
+    // schema validation and sanitization are applied.
+    document = sanitizeDocument(TemplateRegistry.migrate(input))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Website document contains unsafe content'
+    throw new ApiError(httpStatus.BAD_REQUEST, message)
+  }
+  const guardrail = checkGuardrails(document)
+  if (!guardrail.valid) throw new ApiError(httpStatus.BAD_REQUEST, `Document Guardrail Error: ${guardrail.message}`)
+  WebsiteBuilderValidation.builderDocumentSchema.parse(document)
+  TemplateRegistry.assertCapabilities(document)
+  assertTemplateQuality(document)
+  return document
 }
 
 const defaultDocument = () => buildDefaultWebsiteDocument()
@@ -94,11 +112,7 @@ const getPageById = async (organizationId: string, pageId: string) => {
 }
 
 const saveDraft = async (organizationId: string, pageId: string, input: any, userId?: string) => {
-  const guardrail = checkGuardrails(input)
-  if (!guardrail.valid) throw new ApiError(httpStatus.BAD_REQUEST, `Document Guardrail Error: ${guardrail.message}`)
-  const document = sanitizeDocument(TemplateRegistry.migrate(input))
-  WebsiteBuilderValidation.builderDocumentSchema.parse(document)
-  assertTemplateQuality(document)
+  const document = prepareBuilderDocument(input)
   await TemplateRegistry.assertEntitlement(organizationId, document)
   const page = await WebsitePage.findOneAndUpdate({ _id: pageId, organizationId }, { $set: { draftDocument: document, seo: document.seo || {}, status: 'draft', scheduledPublishAt: null, ...(userId ? { updatedBy: userId } : {}) } }, { new: true })
   if (!page) throw new ApiError(404, 'Website page not found')
@@ -114,13 +128,11 @@ const performPublish = async (organizationId: string, pageId: string, userId?: s
   const execute = async () => {
     const page = await WebsitePage.findOne({ _id: pageId, organizationId }).session(session || null)
     if (!page) throw new ApiError(404, 'Website page not found')
-    const document = sanitizeDocument(TemplateRegistry.migrate(page.draftDocument))
-    WebsiteBuilderValidation.builderDocumentSchema.parse(document)
-    assertTemplateQuality(document)
+    const document = prepareBuilderDocument(page.draftDocument)
     await TemplateRegistry.assertEntitlement(organizationId, document)
     const latest = await WebsiteRevision.findOne({ organizationId, pageId: page._id }).sort({ version: -1 }).session(session || null).select('version').lean()
     const version = Number(latest?.version || 0) + 1
-    await WebsiteRevision.create([{ organizationId, pageId: page._id, document, version, createdBy: userId, message: `Published Version v${version}` }], session ? { session } : undefined)
+    await WebsiteRevision.create([{ organizationId, pageId: page._id, document, schemaVersion: Number(document.schemaVersion || 2), version, createdBy: userId, message: `Published Version v${version}` }], session ? { session } : undefined)
     page.publishedDocument = document
     page.draftDocument = document
     page.seo = document.seo || {}
@@ -130,20 +142,21 @@ const performPublish = async (organizationId: string, pageId: string, userId?: s
     page.publishedVersion = version
     if (userId) page.updatedBy = userId as any
     result = await page.save(session ? { session } : undefined)
-    await Organization.updateOne({ organizationId }, { $set: { websiteStatus: 'published', 'websiteSettings.renderMode': 'builder' } }, session ? { session } : undefined)
+    const publication = await WebsitePublicationService.commitPublicationState({ organizationId, renderMode: 'builder', session })
+    result.$locals.publicationRevision = publication.publicationRevision
   }
   try {
     if (session) await session.withTransaction(execute)
     else await execute()
   } finally { if (session) await session.endSession() }
-  await Promise.all([WebsiteCache.del('draft', organizationId, pageId), WebsiteCache.del('published', organizationId, result.slug)])
-  await DomainEventService.emit({
+  await WebsitePublicationService.afterPublication({
     organizationId,
-    aggregateType: 'website',
+    renderMode: 'builder',
     aggregateId: pageId,
-    eventType: 'website.published',
     actorId: userId,
-    payload: { summary: `Website page published: ${result.title || result.slug}`, slug: result.slug, version: result.publishedVersion },
+    slug: result.slug,
+    builderVersion: result.publishedVersion,
+    publicationRevision: Number(result.$locals?.publicationRevision || 0),
   })
   return result
 }
@@ -223,10 +236,24 @@ const processScheduledPublishes = async (limit = 25) => {
 
 const listRevisions = async (organizationId: string, pageId: string) => WebsiteRevision.find({ organizationId, pageId }).select('-document').sort({ version: -1 }).limit(100)
 const restoreRevision = async (organizationId: string, pageId: string, version: number, userId?: string) => {
-  const revision = await WebsiteRevision.findOne({ organizationId, pageId, version })
+  const revision = await WebsiteRevision.findOne({ organizationId, pageId, version }).lean()
   if (!revision) throw new ApiError(404, 'Website revision not found')
-  const document = TemplateRegistry.migrate(revision.document)
-  const page = await WebsitePage.findOneAndUpdate({ _id: pageId, organizationId }, { $set: { draftDocument: document, seo: document.seo || {}, status: 'draft', scheduledPublishAt: null, ...(userId ? { updatedBy: userId } : {}) } }, { new: true })
+  const document = prepareBuilderDocument(revision.document)
+  await TemplateRegistry.assertEntitlement(organizationId, document)
+  const page = await WebsitePage.findOneAndUpdate(
+    { _id: pageId, organizationId },
+    {
+      $set: {
+        draftDocument: document,
+        seo: document.seo || {},
+        status: 'draft',
+        scheduledPublishAt: null,
+        ...(userId ? { updatedBy: userId } : {}),
+      },
+    },
+    { new: true },
+  )
+  if (!page) throw new ApiError(404, 'Website page not found')
   await WebsiteCache.del('draft', organizationId, pageId)
   return page
 }
