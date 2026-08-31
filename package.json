@@ -138,7 +138,11 @@
     "migrate:tenant-access-phase5": "ts-node --transpile-only src/app/db/migrateTenantAccessPhase5.ts",
     "test:tenant-access-phase5": "vitest run src/tests/unit/tenantAccess.unit.test.ts src/tests/contract/phase5TenantAccessProduction.contract.test.ts src/tests/integration/tenantAccessLifecycle.integration.test.ts",
     "verify:tenant-access-phase5": "node scripts/verify-tenant-access-phase5.mjs",
-    "migrate:owner-safe-deletion-phase1": "ts-node --transpile-only src/app/db/migrateOwnerSafeDeletionPhase1.ts"
+    "migrate:owner-safe-deletion-phase1": "ts-node --transpile-only src/app/db/migrateOwnerSafeDeletionPhase1.ts",
+    "migrate:website-social-contract-phase1": "ts-node --transpile-only src/app/db/migrateWebsiteSocialContractPhase1.ts",
+    "audit:tenant-relations-phase1": "ts-node --transpile-only src/app/db/auditTenantRelationIntegrity.ts",
+    "verify:phase1-data-integrity": "node scripts/verify-phase1-data-integrity.mjs",
+    "migrate:phase1-query-indexes": "ts-node --transpile-only src/app/db/migratePhase1QueryIndexes.ts"
   },
   "keywords": [
     "real-estate",

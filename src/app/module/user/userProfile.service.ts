@@ -6,6 +6,7 @@ import { UserProfile } from '../userProfile/userProfile.model'
 import { effectivePermissionsForUser } from './accessControl'
 import { AuthUserResponseDto, PublicAgentResponseDto, UserResponseDto } from './user.dto'
 import { IUserProfileInput, IUserRole } from './user.interface'
+import { safeSearchRegex } from '../../helpers/searchQuery'
 
 export const USER_PROFILE_POPULATES = [
   { path: 'profile', select: 'profileImgURL bio address gender isAddProfile sidebarPermission accessControl' },
@@ -14,9 +15,14 @@ export const USER_PROFILE_POPULATES = [
   { path: 'superAdminProfile', select: 'title' },
 ]
 
-export const userRefPopulate = (path: string, select = '_id name email phoneNumber organizationId userRole status isVerified') => ({
+export const userRefPopulate = (
+  path: string,
+  select = '_id name email phoneNumber organizationId userRole status isVerified',
+  match?: Record<string, unknown>,
+) => ({
   path,
   select,
+  ...(match ? { match } : {}),
   populate: USER_PROFILE_POPULATES,
 })
 
@@ -258,7 +264,7 @@ export const deleteUserCompanionRecords = async (userId: string | Types.ObjectId
 }
 
 export const profileUserIdsMatching = async (organizationId: string | undefined, search: string): Promise<Types.ObjectId[]> => {
-  const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  const regex = safeSearchRegex(search)
   const [owners, agents] = await Promise.all([
     AgencyOwnerProfile.find({ ...(organizationId ? { organizationId } : {}), licenseNumber: regex }).select('userId').lean(),
     AgentProfile.find({ ...(organizationId ? { organizationId } : {}), licenseNumber: regex }).select('userId').lean(),

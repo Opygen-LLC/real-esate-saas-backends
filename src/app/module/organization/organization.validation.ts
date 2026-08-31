@@ -12,7 +12,7 @@ const addressDetails = z.object({
   mouza: z.string().max(100).optional(), postalCode: z.union([z.literal(''), z.string().regex(/^\d{4}$/)]).optional(), landmark: z.string().max(200).optional(),
 }).strict()
 const socialLinks = z.object({
-  facebook: optionalUrl.optional(), instagram: optionalUrl.optional(), twitter: optionalUrl.optional(), linkedin: optionalUrl.optional(),
+  facebook: optionalUrl.optional(), instagram: optionalUrl.optional(), twitter: optionalUrl.optional(), x: optionalUrl.optional(), linkedin: optionalUrl.optional(),
   youtube: optionalUrl.optional(), whatsapp: z.union([z.literal(''), z.string().max(40)]).optional(),
 }).strict()
 const shortText = (max = 200) => z.string().trim().max(max)
@@ -55,6 +55,12 @@ const websiteSettings = z.object({
   enableWhatsAppChat: z.boolean().optional(),
   renderMode: z.enum(['template', 'builder']).optional(),
   content: websiteContent.optional(),
+  footer: z.object({
+    showSocialLinks: z.boolean().optional(),
+    socialVisibility: z.object({
+      facebook: z.boolean().optional(), instagram: z.boolean().optional(), youtube: z.boolean().optional(), x: z.boolean().optional(),
+    }).strict().optional(),
+  }).strict().optional(),
 }).strict()
 const onboardingWebsiteSettings = z.object({
   heroSubtitle: z.string().max(400).optional(),

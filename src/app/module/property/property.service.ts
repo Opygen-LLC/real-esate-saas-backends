@@ -3,6 +3,7 @@ import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { exactCaseInsensitiveRegex, safeRegexPattern } from '../../helpers/searchQuery'
 import { IProperty, IPropertyFilter, IPropertyImage } from './property.interface'
 import { Property } from './property.model'
 import { Organization } from '../organization/organization.model'
@@ -178,9 +179,9 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
     const org = await Organization.findOne({
       $or: [
         { organizationId },
-        { sub_domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-        { domain: { $regex: `^${organizationId}$`, $options: 'i' } },
-        { customDomain: { $regex: `^${organizationId}$`, $options: 'i' } },
+        { sub_domain: exactCaseInsensitiveRegex(organizationId, { maxLength: 255, label: 'Organization identifier' }) },
+        { domain: exactCaseInsensitiveRegex(organizationId, { maxLength: 255, label: 'Organization identifier' }) },
+        { customDomain: exactCaseInsensitiveRegex(organizationId, { maxLength: 255, label: 'Organization identifier' }) },
       ],
     })
 
@@ -197,9 +198,10 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   }
 
   if (searchTerm) {
+    const search = safeRegexPattern(searchTerm)
     andConditions.push({
       $or: ['title', 'slug', 'description', 'address', 'city', 'state', 'bangladeshAddress.postalCode'].map((field) => ({
-        [field]: { $regex: searchTerm, $options: 'i' },
+        [field]: { $regex: search, $options: 'i' },
       })),
     })
   }
@@ -213,8 +215,8 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
     if (statusValues.length === 1) andConditions.push({ status: statusValues[0] })
     else if (statusValues.length > 1) andConditions.push({ status: { $in: statusValues } })
   }
-  if (city) andConditions.push({ city: { $regex: city, $options: 'i' } })
-  if (state) andConditions.push({ state: { $regex: state, $options: 'i' } })
+  if (city) andConditions.push({ city: { $regex: safeRegexPattern(city, { label: 'City filter' }), $options: 'i' } })
+  if (state) andConditions.push({ state: { $regex: safeRegexPattern(state, { label: 'State filter' }), $options: 'i' } })
   if (divisionId) andConditions.push({ 'bangladeshAddress.divisionId': divisionId })
   if (districtId) andConditions.push({ 'bangladeshAddress.districtId': districtId })
   if (upazilaId) andConditions.push({ 'bangladeshAddress.upazilaId': upazilaId })
@@ -250,7 +252,7 @@ const getAllProperties = async (
 
   const [result, total] = await Promise.all([
     Property.find(whereCondition)
-      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', filters.organizationId ? { organizationId: filters.organizationId } : undefined))
       .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
       .skip(skip)
       .limit(limit),
@@ -292,7 +294,7 @@ const getPropertyExportRows = async (
   if (total > MAX_PROPERTY_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_PROPERTY_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
   const safeSort = safePropertySort(sortOptions.sortBy, sortOptions.sortOrder)
   const properties: any[] = await Property.find(where)
-    .populate(userRefPopulate('agentId', 'name email userRole'))
+    .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
     .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
     .limit(MAX_PROPERTY_EXPORT_ROWS)
     .select('title propertyType listingType status price currency bangladeshAddress city state address bedrooms bathrooms area areaUnit agentId furnished isFeatured createdAt updatedAt')
@@ -341,14 +343,14 @@ const getPublicProperties = async (
 }
 
 const getPropertyById = async (organizationId: string, id: string): Promise<IProperty | null> => {
-  const result = await Property.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  const result = await Property.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return result
 }
 
 const getPropertyBySlug = async (organizationId: string, slug: string): Promise<PublicPropertyDto> => {
   await TenantAccessService.assertPublicWebsiteAccess(organizationId)
-  const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  const result = await Property.findOne({ slug, organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
   return toPublicProperty(result)
 }
@@ -365,7 +367,7 @@ const getPublicPropertyDetail = async (
     : { slug: idOrSlug, ...tenantScope, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }
 
   const property = await Property.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true, runValidators: true, context: 'query' })
-    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
 
   if (!property) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
 
@@ -375,7 +377,7 @@ const getPublicPropertyDetail = async (
     status: { $in: [...PUBLIC_PROPERTY_STATUSES] },
     quotaLocked: { $ne: true },
     $or: [{ city: property.city }, { propertyType: property.propertyType }],
-  }).limit(3).populate(userRefPopulate('agentId', 'name email userRole'))
+  }).limit(3).populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
 
   return { property: toPublicProperty(property), similarProperties: toPublicProperties(similarProperties as any[]) }
 }
@@ -445,7 +447,7 @@ const updateProperty = async (
     { _id: id, organizationId },
     { $set: setDocument, ...(Object.keys(unsetDocument).length ? { $unset: unsetDocument } : {}) },
     { new: true, runValidators: true, context: 'query', ...(options.session ? { session: options.session } : {}) },
-  ).populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
+  ).populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
 
   const result = await query
   if (result && options.emitEvent !== false) {

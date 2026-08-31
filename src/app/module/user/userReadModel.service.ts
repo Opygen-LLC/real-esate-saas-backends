@@ -1,4 +1,5 @@
 import { Types } from 'mongoose'
+import { safeSearchRegex } from '../../helpers/searchQuery'
 import { AgencyOwnerProfile } from '../agencyOwnerProfile/agencyOwnerProfile.model'
 import { AgentProfile } from '../agentProfile/agentProfile.model'
 import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
@@ -35,10 +36,8 @@ export const userProfileProjectionStages = (): any[] => [
 ]
 
 const profileSearchStages = (searchTerm?: string): any[] => {
-  const value = String(searchTerm || '').trim()
-  if (!value) return []
-  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(escaped, 'i')
+  if (!String(searchTerm || '').trim()) return []
+  const regex = safeSearchRegex(searchTerm)
   return [{
     $match: {
       $or: [

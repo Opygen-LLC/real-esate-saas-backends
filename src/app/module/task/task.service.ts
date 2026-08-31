@@ -3,6 +3,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
+import { safeRegexPattern } from '../../helpers/searchQuery'
 import { CrmService } from '../crm/crm.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
@@ -11,6 +12,7 @@ import { Lead } from '../lead/lead.model'
 import { LeadEntitlementService } from '../lead/leadEntitlement.service'
 import { CRM_FOLLOW_UP_TIME_ZONE, getDayBoundsInTimeZone } from '../lead/leadFollowUpTime'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
+import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { userRefPopulate } from '../user/userProfile.service'
 import { ITask, ITaskFilter, type ITaskMemberSummary, type ITaskSummaryResponse } from './task.interface'
@@ -73,6 +75,12 @@ const assertTaskRelations = async (organizationId: string, task: Partial<ITask>,
       const lead = await Lead.exists({ _id: task.linkedLead, organizationId, ...crmMutationOwnerFilter('assignedAgent', access) })
       if (!lead) throw new ApiError(400, 'Linked lead must belong to this agency')
       await LeadEntitlementService.assertLeadAccessible(organizationId, String(task.linkedLead))
+    })())
+  }
+  if (task.linkedProperty) {
+    checks.push((async () => {
+      const property = await Property.exists({ _id: task.linkedProperty, organizationId })
+      if (!property) throw new ApiError(400, 'Linked property must belong to this agency')
     })())
   }
   if (task.assignedAgent) {
@@ -157,7 +165,10 @@ const getAllTasks = async (
   if (organizationId) conditions.push({ organizationId })
   const ownerScope = crmReadOwnerFilter('assignedAgent', access)
   if (Object.keys(ownerScope).length) conditions.push(ownerScope)
-  if (searchTerm) conditions.push({ $or: ['title', 'description'].map((field) => ({ [field]: { $regex: searchTerm, $options: 'i' } })) })
+  if (searchTerm) {
+    const search = safeRegexPattern(searchTerm)
+    conditions.push({ $or: ['title', 'description'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) })
+  }
   if (status) conditions.push({ status })
   if (priority) conditions.push({ priority })
   if (taskType) conditions.push({ taskType })
@@ -180,9 +191,9 @@ const getAllTasks = async (
   const dayBounds = getDayBoundsInTimeZone(new Date(), CRM_FOLLOW_UP_TIME_ZONE)
   const [result, summaryRows] = await Promise.all([
     Task.find(where)
-      .populate(userRefPopulate('assignedAgent', 'name email userRole'))
-      .populate({ path: 'linkedLead', select: 'name phone email', match: { isLocked: { $ne: true } } })
-      .populate('linkedProperty', 'title price')
+      .populate(userRefPopulate('assignedAgent', 'name email userRole', { organizationId }))
+      .populate({ path: 'linkedLead', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } })
+      .populate({ path: 'linkedProperty', select: 'title price', match: { organizationId } })
       .sort(paginationHelper.buildStableSort(safeSortBy, sortOrder))
       .skip(skip)
       .limit(limit),
@@ -389,6 +400,7 @@ const updateTask = async (
     taskType: prepared.taskType ?? task.taskType,
     linkedLead: prepared.linkedLead ?? task.linkedLead,
     assignedAgent: prepared.assignedAgent ?? task.assignedAgent,
+    linkedProperty: prepared.linkedProperty ?? task.linkedProperty,
   }
   await assertTaskRelations(organizationId, relationCandidate, access)
 
@@ -420,9 +432,9 @@ const updateTask = async (
     payload: { summary: `Task ${task.status}: ${task.title}`, status: task.status, taskType: task.taskType, dueAt: task.dueAt?.toISOString() },
   })
 
-  await task.populate(userRefPopulate('assignedAgent', 'name email userRole'))
-  await task.populate({ path: 'linkedLead', select: 'name phone email', match: { isLocked: { $ne: true } } })
-  await task.populate('linkedProperty', 'title price')
+  await task.populate(userRefPopulate('assignedAgent', 'name email userRole', { organizationId }))
+  await task.populate({ path: 'linkedLead', select: 'name phone email', match: { organizationId, isLocked: { $ne: true } } })
+  await task.populate({ path: 'linkedProperty', select: 'title price', match: { organizationId } })
   return task
 }
 
@@ -550,8 +562,8 @@ const approveTask = async (organizationId: string, id: string, userId: string, a
     { approvalStatus, approvedBy: userId, approvedAt: new Date() },
     { new: true },
   )
-    .populate(userRefPopulate('assignedAgent', 'name email userRole'))
-    .populate(userRefPopulate('approvedBy', 'name email userRole'))
+    .populate(userRefPopulate('assignedAgent', 'name email userRole', { organizationId }))
+    .populate(userRefPopulate('approvedBy', 'name email userRole', { organizationId }))
   if (!result) throw new ApiError(404, 'Task not found')
   return result
 }

@@ -4,6 +4,7 @@ import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import hashPassword from '../../helpers/hashPassword'
 import paginationHelper from '../../helpers/paginationHelper'
+import { safeRegexPattern } from '../../helpers/searchQuery'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
 import { randomToken } from '../../helpers/crypto'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
@@ -449,8 +450,6 @@ const deleteUserById = async (organizationId: string, id: string) => {
   return dto
 }
 
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
 const superAdminUserWhere = (filters: IUserFilter) => {
   const { searchTerm: _searchTerm, userRole, status, ...filtersData } = filters
   const andConditions: any[] = []
@@ -464,7 +463,7 @@ const superAdminUserWhere = (filters: IUserFilter) => {
 const superAdminExportWhere = (filters: IUserFilter) => {
   const base = superAdminUserWhere(filters) as Record<string, unknown>
   if (!filters.searchTerm) return base
-  const search = escapeRegex(String(filters.searchTerm).trim())
+  const search = safeRegexPattern(filters.searchTerm)
   const searchCondition = { $or: ['name', 'email', 'phoneNumber', 'organizationId'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) }
   return Object.keys(base).length ? { $and: [base, searchCondition] } : searchCondition
 }

@@ -77,6 +77,8 @@ const viewingSchema = new Schema<IViewing, ViewingModel>(
 
 viewingSchema.index({ organizationId: 1, date: 1, startTime: 1 })
 viewingSchema.index({ organizationId: 1, agentId: 1, date: 1 })
+viewingSchema.index({ organizationId: 1, date: 1, status: 1, agentId: 1, startTime: 1, endTime: 1 }, { name: 'viewing_tenant_date_status_agent_window' })
+viewingSchema.index({ organizationId: 1, date: 1, status: 1, propertyId: 1, startTime: 1, endTime: 1 }, { name: 'viewing_tenant_date_status_property_window' })
 viewingSchema.index({ organizationId: 1, status: 1 })
 viewingSchema.index({ organizationId: 1, status: 1, date: 1 })
 viewingSchema.index({ organizationId: 1, agentId: 1, createdAt: -1 })

@@ -7,6 +7,7 @@ import { logger } from '../../../shared/logger'
 import { Metrics } from '../../../shared/metrics'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import paginationHelper from '../../helpers/paginationHelper'
+import { safeRegexPattern } from '../../helpers/searchQuery'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { PrivacyConsentService } from '../privacy/privacyConsent.service'
 import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
@@ -15,6 +16,7 @@ import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmA
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { DomainEventService, type DomainEventInput } from '../domainEvent/domainEvent.service'
 import { LeadService } from '../lead/lead.service'
+import { Lead } from '../lead/lead.model'
 import { LeadLifecycleService, type LifecycleEffects } from '../lead/leadLifecycle.service'
 import { LEAD_STATUS } from '../lead/leadStatus.contract'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
@@ -34,9 +36,10 @@ const assertViewingWindowIsFuture=(date:string,startTime:string)=>{const start=v
 const referenceId=(value:unknown):string|undefined=>{if(value===undefined||value===null||value==='')return undefined;if(typeof value==='object'&&value!==null&&'_id' in value)return String((value as {_id:unknown})._id);return String(value)}
 const withSession=<T extends {session:(session:ClientSession)=>T}>(query:T,session?:ClientSession):T=>session?query.session(session):query
 const assertViewingRequestableProperty=async(organizationId:string,propertyId:string,session?:ClientSession)=>{const query=Property.findOne({_id:propertyId,organizationId,quotaLocked:{$ne:true}}).select('agentId status title').lean();const property:any=await withSession(query as any,session);if(!property)throw new ApiError(404,'Property not found');if(!VIEWING_REQUESTABLE_PROPERTY_STATUSES.includes(property.status))throw new ApiError(409,'This property is no longer accepting viewing requests.','','PROPERTY_VIEWING_UNAVAILABLE');return property}
-const checkConflict=async(organizationId:string,agentId:string,propertyId:string,date:string,startTime:string,endTime:string,excludeViewingId?:string,session?:ClientSession)=>{const start=timeToMinutes(startTime),end=timeToMinutes(endTime);if(end<=start)return{hasConflict:true,reason:'End time must be after start time',code:'VIEWING_INVALID_WINDOW'};const query:any={organizationId,date,status:{$in:['Scheduled','Confirmed']}};if(excludeViewingId)query._id={$ne:excludeViewingId};let cursor:any=Viewing.find(query).select('agentId propertyId startTime endTime');if(session)cursor=cursor.session(session);const rows:any[]=await cursor.lean();for(const v of rows){if(start<timeToMinutes(v.endTime)&&end>timeToMinutes(v.startTime)){if(String(v.agentId)===String(agentId))return{hasConflict:true,reason:`Agent is already booked (${v.startTime} - ${v.endTime})`,code:'VIEWING_AGENT_BUSY'};if(String(v.propertyId)===String(propertyId))return{hasConflict:true,reason:`Property already has a viewing (${v.startTime} - ${v.endTime})`,code:'VIEWING_SLOT_UNAVAILABLE'}}}return{hasConflict:false}}
+const assertViewingLead=async(organizationId:string,leadId:string,access?:CrmAccessContext)=>{if(access){await LeadService.getLeadById(organizationId,leadId,access);return}const lead=await Lead.exists({_id:leadId,organizationId});if(!lead)throw new ApiError(400,'Linked lead must belong to this agency')}
+const checkConflict=async(organizationId:string,agentId:string,propertyId:string,date:string,startTime:string,endTime:string,excludeViewingId?:string,session?:ClientSession)=>{const start=timeToMinutes(startTime),end=timeToMinutes(endTime);if(end<=start)return{hasConflict:true,reason:'End time must be after start time',code:'VIEWING_INVALID_WINDOW'};const query:any={organizationId,date,status:{$in:['Scheduled','Confirmed']},startTime:{$lt:endTime},endTime:{$gt:startTime},$or:[{agentId},{propertyId}]};if(excludeViewingId)query._id={$ne:excludeViewingId};let cursor:any=Viewing.findOne(query).select('agentId propertyId startTime endTime');if(session)cursor=cursor.session(session);const conflict:any=await cursor.lean();if(!conflict)return{hasConflict:false};if(String(conflict.agentId)===String(agentId))return{hasConflict:true,reason:`Agent is already booked (${conflict.startTime} - ${conflict.endTime})`,code:'VIEWING_AGENT_BUSY'};return{hasConflict:true,reason:`Property already has a viewing (${conflict.startTime} - ${conflict.endTime})`,code:'VIEWING_SLOT_UNAVAILABLE'}}
 const scheduleReminder=async(viewing:any,options:{session?:ClientSession;viewingMinutesBefore?:number}={})=>{const viewingMinutesBefore=options.viewingMinutesBefore??Number((await CrmService.getConfig(viewing.organizationId)).reminders?.viewingMinutesBefore||0);const when=new Date(`${viewing.date}T${viewing.startTime}:00+06:00`);const runAt=new Date(when.getTime()-viewingMinutesBefore*60_000);await OperationsQueueService.schedule({organizationId:viewing.organizationId,type:'viewing_reminder',entityId:viewing._id.toString(),runAt,payload:{agentId:referenceId(viewing.agentId)}},{session:options.session})}
-const createViewing=async(organizationId:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext):Promise<IViewing>=>{if(access&&!canManageTeamCrm(access)&&String(payload.agentId||'')!==access.userId)throw new ApiError(403,'Team members can only schedule viewings assigned to themselves');await CrmAssignableMemberService.assertAssignableMember(organizationId,String(payload.agentId||''),'viewing');if(payload.leadId&&access)await LeadService.getLeadById(organizationId,String(payload.leadId),access);assertViewingWindowIsFuture(payload.date!,payload.startTime!);await assertViewingRequestableProperty(organizationId,String(payload.propertyId));const conflict=await checkConflict(organizationId,String(payload.agentId),String(payload.propertyId),payload.date!,payload.startTime!,payload.endTime!);if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict','',conflict.code||'VIEWING_SLOT_UNAVAILABLE');const result:any=await Viewing.create({...payload,organizationId,clientPhone:payload.clientPhone?normalizePhone(payload.clientPhone):payload.clientPhone});await scheduleReminder(result);if(payload.leadId)await LeadLifecycleService.changeStatus(organizationId,String(payload.leadId),LEAD_STATUS.VIEWING_SCHEDULED,{actorId:actorId||String(payload.agentId),access,reason:'Viewing scheduled'});await OperationsQueueService.schedule({organizationId,type:'calendar_sync',entityId:result._id.toString(),runAt:new Date(Date.now()+1_000)});await DomainEventService.emit({organizationId,aggregateType:'viewing',aggregateId:result._id.toString(),eventType:'viewing.scheduled',leadId:referenceId(result.leadId),propertyId:referenceId(result.propertyId),actorId:actorId||referenceId(result.agentId),payload:{summary:`Viewing scheduled for ${result.date} at ${result.startTime}`,clientName:result.clientName}});return result}
+const createViewing=async(organizationId:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext):Promise<IViewing>=>{if(access&&!canManageTeamCrm(access)&&String(payload.agentId||'')!==access.userId)throw new ApiError(403,'Team members can only schedule viewings assigned to themselves');await CrmAssignableMemberService.assertAssignableMember(organizationId,String(payload.agentId||''),'viewing');if(payload.leadId)await assertViewingLead(organizationId,String(payload.leadId),access);assertViewingWindowIsFuture(payload.date!,payload.startTime!);await assertViewingRequestableProperty(organizationId,String(payload.propertyId));const conflict=await checkConflict(organizationId,String(payload.agentId),String(payload.propertyId),payload.date!,payload.startTime!,payload.endTime!);if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict','',conflict.code||'VIEWING_SLOT_UNAVAILABLE');const result:any=await Viewing.create({...payload,organizationId,clientPhone:payload.clientPhone?normalizePhone(payload.clientPhone):payload.clientPhone});await scheduleReminder(result);if(payload.leadId)await LeadLifecycleService.changeStatus(organizationId,String(payload.leadId),LEAD_STATUS.VIEWING_SCHEDULED,{actorId:actorId||String(payload.agentId),access,reason:'Viewing scheduled'});await OperationsQueueService.schedule({organizationId,type:'calendar_sync',entityId:result._id.toString(),runAt:new Date(Date.now()+1_000)});await DomainEventService.emit({organizationId,aggregateType:'viewing',aggregateId:result._id.toString(),eventType:'viewing.scheduled',leadId:referenceId(result.leadId),propertyId:referenceId(result.propertyId),actorId:actorId||referenceId(result.agentId),payload:{summary:`Viewing scheduled for ${result.date} at ${result.startTime}`,clientName:result.clientName}});return result}
 const resolvePublicViewingAgent = async (organizationId:string, preferredAgentId?:string):Promise<string> => {
   if (preferredAgentId) {
     const preferred = await CrmAssignableMemberService.getAssignableMemberForCapabilities(organizationId, preferredAgentId, ['viewing', 'lead'])
@@ -86,7 +89,7 @@ const getAllViewings = async (
   if (status) conditions.push({ status })
   if (date) conditions.push({ date })
   if (startDate || endDate) conditions.push({ date: { ...(startDate ? { $gte: startDate } : {}), ...(endDate ? { $lte: endDate } : {}) } })
-  if (searchTerm) conditions.push({ $or: ['clientName', 'clientPhone', 'clientEmail', 'notes'].map((field) => ({ [field]: { $regex: searchTerm, $options: 'i' } })) })
+  if (searchTerm) { const search = safeRegexPattern(searchTerm); conditions.push({ $or: ['clientName', 'clientPhone', 'clientEmail', 'notes'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) }) }
 
   const where = conditions.length ? { $and: conditions } : {}
   const calendarMode = viewMode === 'calendar'
@@ -100,9 +103,9 @@ const getAllViewings = async (
 
   const [result, total] = await Promise.all([
     Viewing.find(where)
-      .populate('propertyId', 'title price images address city')
-      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole'))
-      .populate({ path: 'leadId', select: 'name phone email leadStatus', match: { isLocked: { $ne: true } } })
+      .populate({ path: 'propertyId', select: 'title price images address city', match: { organizationId } })
+      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
+      .populate({ path: 'leadId', select: 'name phone email leadStatus', match: { organizationId, isLocked: { $ne: true } } })
       .sort(sort)
       .skip(skip)
       .limit(limit),
@@ -123,8 +126,8 @@ const getCalendarViewings = async (filters: IViewingCalendarFilter, access?: Crm
 
   const rows: any[] = await Viewing.find(where)
     .select('_id date startTime endTime status clientName propertyId agentId')
-    .populate('propertyId', 'title city')
-    .populate(userRefPopulate('agentId', 'name'))
+    .populate({ path: 'propertyId', select: 'title city', match: { organizationId } })
+    .populate(userRefPopulate('agentId', 'name', { organizationId }))
     .sort(paginationHelper.buildCalendarSort())
     .limit(2001)
     .lean()
@@ -149,7 +152,7 @@ const getCalendarViewings = async (filters: IViewingCalendarFilter, access?: Crm
   }))
 }
 
-const getViewingById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)}).populate('propertyId','title price images address city propertyType bedrooms bathrooms').populate(userRefPopulate('agentId', 'name email phoneNumber userRole')).populate({ path: 'leadId', select: 'name phone email leadStatus', match: { isLocked: { $ne: true } } });if(!result)throw new ApiError(404,'Viewing not found');return result}
+const getViewingById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)}).populate({path:'propertyId',select:'title price images address city propertyType bedrooms bathrooms',match:{organizationId}}).populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId })).populate({ path: 'leadId', select: 'name phone email leadStatus', match: { organizationId, isLocked: { $ne: true } } });if(!result)throw new ApiError(404,'Viewing not found');return result}
 const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext)=>{
   if(payload.clientPhone)payload.clientPhone=normalizePhone(payload.clientPhone)
 
@@ -174,7 +177,7 @@ const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewi
     const linkedLeadId=referenceId(payload.leadId??existing.leadId)
     // For ordinary edits retain the existing CRM visibility check. Completing a
     // viewing also re-checks the Lead inside this same transaction below.
-    if(linkedLeadId&&access&&payload.status!=='Completed')await LeadService.getLeadById(organizationId,linkedLeadId,access)
+    if(linkedLeadId&&payload.status!=='Completed')await assertViewingLead(organizationId,linkedLeadId,access)
 
     const date=String(payload.date??existing.date)
     const startTime=String(payload.startTime??existing.startTime)
@@ -274,9 +277,9 @@ const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewi
   }
 
   const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)})
-    .populate('propertyId','title price images address city')
-    .populate(userRefPopulate('agentId','name email phoneNumber userRole'))
-    .populate({path:'leadId',select:'name phone email leadStatus',match:{isLocked:{$ne:true}}})
+    .populate({path:'propertyId',select:'title price images address city',match:{organizationId}})
+    .populate(userRefPopulate('agentId','name email phoneNumber userRole',{organizationId}))
+    .populate({path:'leadId',select:'name phone email leadStatus',match:{organizationId,isLocked:{$ne:true}}})
   if(!result)throw new ApiError(404,'Viewing not found')
   return result
 }

@@ -1,5 +1,6 @@
 import mongoose, { Model } from 'mongoose'
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
+import type { OrganizationSocialLinks, OrganizationWebsiteSettings } from './organizationWebsite.contract'
 
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'grace' | 'cancel_at_period_end' | 'expired' | 'suspended'
 export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped'
@@ -107,26 +108,9 @@ export interface IOrganization {
   onboarding?: IOnboardingState
   subscription: ISubscription
   platformAccess?: IPlatformAccess
-  socialLinks?: {
-    facebook?: string
-    instagram?: string
-    twitter?: string
-    linkedin?: string
-    youtube?: string
-    whatsapp?: string
-  }
+  socialLinks?: OrganizationSocialLinks
   templateId?: WebsiteTemplateId
-  websiteSettings?: {
-    heroTitle?: string
-    heroSubtitle?: string
-    heroImage?: string
-    featuredPropertiesCount?: number
-    enableTestimonials?: boolean
-    enableLeadForm?: boolean
-    enableWhatsAppChat?: boolean
-    renderMode?: 'template' | 'builder'
-    content?: Record<string, any>
-  }
+  websiteSettings?: OrganizationWebsiteSettings
   teamSettings?: {
     defaultRole?: 'agent' | 'staff' | 'agency_admin'
     agentsCanViewAllLeads?: boolean

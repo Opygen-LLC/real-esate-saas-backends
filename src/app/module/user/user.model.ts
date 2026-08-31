@@ -51,6 +51,7 @@ const userSchema = new Schema<IUser, UserModel>(
 userSchema.index({ phoneNumber: 1 }, { unique: true, name: 'user_phone_unique' })
 userSchema.index({ email: 1 }, { unique: true, name: 'user_email_unique' })
 userSchema.index({ organizationId: 1, userRole: 1, status: 1 }, { name: 'user_tenant_role_status' })
+userSchema.index({ organizationId: 1, createdAt: -1 }, { name: 'user_tenant_created_desc' })
 userSchema.index({ organizationId: 1, 'accessRestriction.source': 1, status: 1 }, { name: 'user_tenant_access_restriction' })
 
 // One-to-one companion records. These virtuals intentionally keep the core

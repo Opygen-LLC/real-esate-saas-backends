@@ -7,6 +7,7 @@ import { emitProductionEvent } from '../../../shared/productionEvents'
 import paginationHelper from '../../helpers/paginationHelper'
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { assertSafeUrl, sanitizeRichText } from '../../helpers/sanitize'
+import { safeRegexPattern } from '../../helpers/searchQuery'
 import { DomainRecord } from '../domain/domain.model'
 import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
@@ -18,11 +19,67 @@ import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
 import { IOrganization, IOrganizationFilter, OnboardingStatus } from './organization.interface'
+import type { OrganizationSocialLinks, OrganizationWebsiteSettings, PublicOrganizationWebsite } from './organizationWebsite.contract'
 import { Organization } from './organization.model'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION, normalizeOnboardingState, normalizeOnboardingStep } from './onboarding.constants'
 
 
 const definedEntries = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
+
+const canonicalSocialLinks = (value?: OrganizationSocialLinks | null): Omit<OrganizationSocialLinks, 'twitter'> => {
+  const links = value || {}
+  return definedEntries({
+    facebook: links.facebook,
+    instagram: links.instagram,
+    youtube: links.youtube,
+    x: links.x || links.twitter,
+    whatsapp: links.whatsapp,
+    linkedin: links.linkedin,
+  }) as Omit<OrganizationSocialLinks, 'twitter'>
+}
+
+const appendSocialLinkUpdates = (
+  target: Record<string, unknown>,
+  value?: OrganizationSocialLinks | null,
+  unset?: Record<string, ''>,
+) => {
+  if (!value) return
+  const canonical: Record<string, unknown> = {
+    facebook: value.facebook,
+    instagram: value.instagram,
+    youtube: value.youtube,
+    x: value.x !== undefined ? value.x : value.twitter,
+    whatsapp: value.whatsapp,
+    linkedin: value.linkedin,
+  }
+  for (const [key, entry] of Object.entries(canonical)) {
+    if (entry === undefined) continue
+    target[`socialLinks.${key}`] = key === 'whatsapp' || entry === '' ? entry : assertSafeUrl(String(entry))
+  }
+  // Once X/Twitter is explicitly written, remove the legacy field so clearing X
+  // cannot accidentally fall back to an old Twitter URL on subsequent reads.
+  if (unset && (value.x !== undefined || value.twitter !== undefined)) unset['socialLinks.twitter'] = ''
+}
+
+const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) => ({
+  $set: set,
+  ...(Object.keys(unset).length ? { $unset: unset } : {}),
+})
+
+const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?: OrganizationWebsiteSettings | null) => {
+  if (!settings) return
+  for (const key of ['heroTitle', 'heroSubtitle', 'heroImage', 'featuredPropertiesCount', 'enableTestimonials', 'enableLeadForm', 'enableWhatsAppChat', 'renderMode', 'content'] as const) {
+    const value = settings[key]
+    if (value !== undefined) target[`websiteSettings.${key}`] = key === 'heroImage' && value ? assertSafeUrl(String(value)) : value
+  }
+  if (settings.footer?.showSocialLinks !== undefined) target['websiteSettings.footer.showSocialLinks'] = settings.footer.showSocialLinks
+  const visibility = settings.footer?.socialVisibility
+  if (visibility) {
+    for (const key of ['facebook', 'instagram', 'youtube', 'x'] as const) {
+      if (visibility[key] !== undefined) target[`websiteSettings.footer.socialVisibility.${key}`] = visibility[key]
+    }
+  }
+}
 
 
 const getPublicTenantIdentifiers = async (organizationId: string, subdomain?: string): Promise<string[]> => {
@@ -42,9 +99,13 @@ const getPublicTenantIdentifiers = async (organizationId: string, subdomain?: st
 }
 
 const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrganization> => {
-  if (!payload.organizationId) payload.organizationId = `org_${randomUUID()}`
-  if (await Organization.exists({ organizationId: payload.organizationId })) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
-  return Organization.create(payload)
+  const organizationId = payload.organizationId || `org_${randomUUID()}`
+  if (await Organization.exists({ organizationId })) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization ID already exists')
+
+  // New records persist the canonical X field only. Legacy `twitter` remains read-compatible
+  // through canonicalSocialLinks while the production migration window is open.
+  const socialLinks = payload.socialLinks ? canonicalSocialLinks(payload.socialLinks) : undefined
+  return Organization.create({ ...payload, organizationId, ...(socialLinks ? { socialLinks } : {}) })
 }
 
 const getMyOrganization = async (organizationId: string): Promise<(IOrganization & { effectiveAccess: EffectiveTenantAccess }) | null> => {
@@ -56,6 +117,7 @@ const getMyOrganization = async (organizationId: string): Promise<(IOrganization
   const effectiveAccess = TenantAccessService.evaluateOrganization(result)
   return {
     ...result,
+    socialLinks: canonicalSocialLinks(result.socialLinks),
     websiteStatus: result.websiteStatus || 'published',
     onboarding: normalizeOnboardingState(result.onboarding, result.createdAt || new Date()),
     websiteUrl: buildTenantWebsiteUrl(result.sub_domain || result.organizationId, verifiedDomain?.domain),
@@ -63,39 +125,26 @@ const getMyOrganization = async (organizationId: string): Promise<(IOrganization
   } as IOrganization & { effectiveAccess: EffectiveTenantAccess }
 }
 
-const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<IOrganization | null> => {
-  const normalized = domainOrSubdomain.toLowerCase().replace(/^www\./, '').split(':')[0]
-  let organization: IOrganization | null = await Organization.findOne({ sub_domain: normalized })
-  if (!organization) {
-    const alias = await SubdomainAlias.findOne({ alias: normalized }).lean()
-    if (alias) organization = await Organization.findOne({ organizationId: alias.organizationId })
-  }
-  if (!organization) {
-    const domain = await DomainRecord.findOne({ domain: normalized, entitlementStatus: { $ne: 'suspended' }, status: 'verified', tlsStatus: 'active' }).lean()
-    if (domain) organization = await Organization.findOne({ organizationId: domain.organizationId })
-  }
-  if (!organization) return null
-  await TenantAccessService.assertPublicWebsiteAccess(organization.organizationId)
-  return organization
-}
+const getOrganizationByDomain = async (domainOrSubdomain: string): Promise<PublicOrganizationWebsite> =>
+  getPublicSiteInfo(domainOrSubdomain)
 
-const getPublicSiteInfo = async (identifier: string): Promise<any> => {
+const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganizationWebsite> => {
   const cacheKey = identifier.toLowerCase().trim()
-  const cached = await Cache.tenantPublic.get<any>(cacheKey)
+  const cached = await Cache.tenantPublic.get<PublicOrganizationWebsite & { socialLinks?: OrganizationSocialLinks }>(cacheKey)
   if (cached?.organizationId) {
     await TenantAccessService.assertPublicWebsiteAccess(String(cached.organizationId))
-    return cached
+    return { ...cached, socialLinks: canonicalSocialLinks(cached.socialLinks) }
   }
 
   let org: any = await Organization.findOne({ $or: [{ sub_domain: cacheKey }, { organizationId: identifier }] })
-    .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
+    .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
     .lean()
 
   if (!org) {
     const alias = await SubdomainAlias.findOne({ alias: cacheKey }).lean()
     if (alias) {
       org = await Organization.findOne({ organizationId: alias.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
         .lean()
     }
   }
@@ -107,7 +156,7 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     if (verifiedDomain?.organizationId) {
       await Cache.tenantResolve.set(normalized, verifiedDomain.organizationId)
       org = await Organization.findOne({ organizationId: verifiedDomain.organizationId })
-        .select('organizationId agencyName agencyType licenseNumber email phone address city state country defaultLanguage addressDetails logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
+        .select('organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus entitlementRestrictions updatedAt')
         .lean()
     }
   }
@@ -119,25 +168,29 @@ const getPublicSiteInfo = async (identifier: string): Promise<any> => {
     Property.countDocuments({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }),
     User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
   ])
-  const result = {
-    ...org,
+  // Keep entitlement/runtime bookkeeping available for response shaping without
+  // exposing those internal fields through either public organization endpoint.
+  const { entitlementRestrictions, updatedAt, ...publicOrg } = org
+  const result: PublicOrganizationWebsite = {
+    ...publicOrg,
+    socialLinks: canonicalSocialLinks(org.socialLinks),
     defaultLanguage: org.defaultLanguage || 'en',
     metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
     metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
-    templateId: org.entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
+    templateId: entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1'),
     configuredTemplateId: org.templateId || 'template-1',
     font: org.font || 'Inter',
     primaryColor: org.primaryColor || '#1877F2',
     secondaryColor: org.secondaryColor || '#0f172a',
     websiteSettings: { renderMode: 'template', ...(org.websiteSettings || {}) },
-    brandingVersion: org.updatedAt ? new Date(org.updatedAt).toISOString() : '',
+    brandingVersion: updatedAt ? new Date(updatedAt).toISOString() : '',
     stats: { totalProperties, totalAgents },
   }
   const identifiers = [
     cacheKey,
     org.organizationId,
     org.sub_domain,
-    ...(org.entitlementRestrictions?.customDomain ? [] : [org.domain]),
+    ...(entitlementRestrictions?.customDomain ? [] : [org.domain]),
   ].filter(Boolean).map(String)
   await Promise.all(identifiers.map((key) => Cache.tenantPublic.set(key, result, 300)))
   await Promise.all(identifiers.map((key) => Cache.tenantResolve.set(key, org.organizationId, 300)))
@@ -150,9 +203,7 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
     ? await Organization.findOne({ organizationId }).select('templateId').lean()
     : null
 
-  const websiteSettings = payload.websiteSettings ? definedEntries(payload.websiteSettings as Record<string, unknown>) : undefined
   const updateData: Record<string, unknown> = definedEntries({
-    socialLinks: payload.socialLinks,
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
     metaTitle: payload.metaTitle,
@@ -163,12 +214,12 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
     font: payload.font,
   })
 
-  if (websiteSettings && Object.keys(websiteSettings).length) {
-    for (const [key, value] of Object.entries(websiteSettings)) updateData[`websiteSettings.${key}`] = value
-  }
+  const unsetData: Record<string, ''> = {}
+  appendSocialLinkUpdates(updateData, payload.socialLinks, unsetData)
+  appendWebsiteSettingUpdates(updateData, payload.websiteSettings)
   if (payload.templateId) updateData['websiteSettings.renderMode'] = 'template'
 
-  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: updateData }, { new: true })
+  const result = await Organization.findOneAndUpdate({ organizationId }, mongoUpdate(updateData, unsetData), { new: true })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   await CacheInvalidationService.invalidateTenant(organizationId)
   await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData) } })
@@ -253,9 +304,11 @@ const updateInvoiceBrandingSettings = async (organizationId: string, payload: Pi
 }
 
 const updateMyOrganization = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
-  const allowed = ['agencyName', 'agencyType', 'email', 'phone', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'socialLinks', 'teamSettings'] as const
-  const safePayload = Object.fromEntries(allowed.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]]))
-  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: safePayload }, { new: true })
+  const allowed = ['agencyName', 'agencyType', 'email', 'phone', 'licenseNumber', 'address', 'city', 'state', 'country', 'zipCode', 'defaultLanguage', 'addressDetails', 'areaConversion', 'serviceAreas', 'teamSettings'] as const
+  const safePayload: Record<string, unknown> = Object.fromEntries(allowed.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]]))
+  const unsetData: Record<string, ''> = {}
+  appendSocialLinkUpdates(safePayload, payload.socialLinks, unsetData)
+  const result = await Organization.findOneAndUpdate({ organizationId }, mongoUpdate(safePayload, unsetData), { new: true })
   if (result) {
     await CacheInvalidationService.invalidateTenant(organizationId)
     await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.updated', payload: { fields: Object.keys(safePayload) } })
@@ -280,14 +333,15 @@ const saveOnboarding = async (organizationId: string, payload: Record<string, an
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
     font: payload.font,
-    socialLinks: payload.socialLinks,
     'onboarding.status': 'in_progress',
     'onboarding.currentStep': currentStep,
     'onboarding.version': ONBOARDING_VERSION,
   })
-  if (payload.websiteSettings) for (const [key, value] of Object.entries(definedEntries(payload.websiteSettings))) update[`websiteSettings.${key}`] = value
+  const unsetData: Record<string, ''> = {}
+  appendSocialLinkUpdates(update, payload.socialLinks, unsetData)
+  appendWebsiteSettingUpdates(update, payload.websiteSettings)
 
-  const result = await Organization.findOneAndUpdate({ organizationId }, { $set: update }, { new: true })
+  const result = await Organization.findOneAndUpdate({ organizationId }, mongoUpdate(update, unsetData), { new: true })
   if (!result) throw new ApiError(404, 'Organization not found')
   await CacheInvalidationService.invalidateTenant(organizationId)
   return result
@@ -313,7 +367,10 @@ const finalizeOnboarding = async (organizationId: string, status: Extract<Onboar
 const getAllOrganizations = async (filters: IOrganizationFilter, paginationOptions: IPaginationOptions): Promise<IGenericResponse<IOrganization[]>> => {
   const { searchTerm, ...filterData } = filters
   const andConditions: Array<Record<string, unknown>> = []
-  if (searchTerm) andConditions.push({ $or: ['agencyName', 'email', 'phone', 'city', 'organizationId'].map((field) => ({ [field]: { $regex: searchTerm, $options: 'i' } })) })
+  if (searchTerm) {
+    const search = safeRegexPattern(searchTerm)
+    andConditions.push({ $or: ['agencyName', 'email', 'phone', 'city', 'organizationId'].map((field) => ({ [field]: { $regex: search, $options: 'i' } })) })
+  }
   if (Object.keys(filterData).length) andConditions.push({ $and: Object.entries(filterData).map(([field, value]) => ({ [field]: value })) })
   const whereConditions = andConditions.length > 0 ? { $and: andConditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)

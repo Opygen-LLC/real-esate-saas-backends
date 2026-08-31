@@ -244,7 +244,7 @@ const getPreview = async (token: string) => {
   const tokenHash = createHash('sha256').update(token).digest('hex')
   const preview = await WebsitePreviewToken.findOne({ tokenHash, expiresAt: { $gt: new Date() } }).lean()
   if (!preview) throw new ApiError(404, 'Preview token is invalid or expired')
-  const [page, org] = await Promise.all([WebsitePage.findById(preview.pageId).lean(), Organization.findOne({ organizationId: preview.organizationId }).lean()])
+  const [page, org] = await Promise.all([WebsitePage.findOne({ _id: preview.pageId, organizationId: preview.organizationId }).lean(), Organization.findOne({ organizationId: preview.organizationId }).lean()])
   if (!page || !org) throw new ApiError(404, 'Preview site not found')
   return { organization: { organizationId: org.organizationId, agencyName: org.agencyName, logo: org.logo, primaryColor: org.primaryColor, secondaryColor: org.secondaryColor, sub_domain: org.sub_domain }, page: { title: page.title, slug: page.slug, draftDocument: page.draftDocument, seo: page.seo }, expiresAt: preview.expiresAt }
 }

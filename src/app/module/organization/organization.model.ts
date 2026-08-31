@@ -186,7 +186,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     socialLinks: {
       facebook: { type: String, default: '' },
       instagram: { type: String, default: '' },
-      twitter: { type: String, default: '' },
+      twitter: { type: String, default: '' }, // legacy read compatibility; canonical writes use x
+      x: { type: String, default: '' },
       linkedin: { type: String, default: '' },
       youtube: { type: String, default: '' },
       whatsapp: { type: String, default: '' },
@@ -206,6 +207,15 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableWhatsAppChat: { type: Boolean, default: true },
       renderMode: { type: String, enum: ['template', 'builder'], default: 'template' },
       content: { type: Schema.Types.Mixed, default: {} },
+      footer: {
+        showSocialLinks: { type: Boolean, default: true },
+        socialVisibility: {
+          facebook: { type: Boolean, default: true },
+          instagram: { type: Boolean, default: true },
+          youtube: { type: Boolean, default: true },
+          x: { type: Boolean, default: true },
+        },
+      },
     },
     teamSettings: {
       defaultRole: { type: String, enum: ['agent', 'staff', 'agency_admin'], default: 'agent' },
