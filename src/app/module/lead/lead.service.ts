@@ -6,6 +6,7 @@ import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common
 import paginationHelper from '../../helpers/paginationHelper'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
+import { safeRegexPattern } from '../../helpers/searchQuery'
 import { ActivityService } from '../activity/activity.service'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { CrmService } from '../crm/crm.service'
@@ -311,8 +312,8 @@ const buildLeadWhere=(filters:ILeadFilter,access?:CrmAccessContext,includeLocked
   const ownerScope=crmReadOwnerFilter('assignedAgent',access)
   if(Object.keys(ownerScope).length)conditions.push(ownerScope)
   if(searchTerm){
-    const escaped=String(searchTerm).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
-    const regex={$regex:escaped,$options:'i'}
+    const search=safeRegexPattern(searchTerm)
+    const regex={$regex:search,$options:'i'}
     conditions.push({$or:[
       {name:regex},
       {locationPreference:regex},

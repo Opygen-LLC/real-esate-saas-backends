@@ -1,0 +1,30 @@
+import { readFileSync } from 'node:fs'
+
+const read = (path) => readFileSync(path, 'utf8')
+const checks = []
+const check = (name, ok) => checks.push({ name, ok: Boolean(ok) })
+const org = read('src/app/module/organization/organization.service.ts')
+const task = read('src/app/module/task/task.service.ts')
+const viewing = read('src/app/module/viewing/viewing.service.ts')
+const builder = read('src/app/module/websiteBuilder/websiteBuilder.service.ts')
+const reconcile = read('src/app/db/reconcilePhase3ProductionData.ts')
+const explain = read('src/app/db/verifyPhase3QueryPlans.ts')
+const relations = read('src/app/db/tenantRelationIntegrity.ts')
+
+check('public endpoints share canonical public-site service', /getOrganizationByDomain[\s\S]*getPublicSiteInfo\(domainOrSubdomain\)/.test(org))
+check('website writes invalidate tenant cache', /updateWebsiteSettings[\s\S]*CacheInvalidationService\.invalidateTenant\(organizationId\)/.test(org))
+check('task linkedProperty is tenant validated', /Property\.exists\(\{ _id: task\.linkedProperty, organizationId \}\)/.test(task))
+check('preview reads are tenant scoped', /_id: preview\.pageId, organizationId: preview\.organizationId/.test(builder))
+check('viewing conflict is targeted findOne', /Viewing\.findOne\(query\)/.test(viewing) && /\$or:\[\{agentId\},\{propertyId\}\]/.test(viewing))
+check('production reconciliation defaults to dry run', /if \(!cli\.apply\)/.test(reconcile) && reconcile.includes("mode=${cli.apply ? 'APPLY' : 'DRY-RUN'}"))
+check('production reconciliation requires explicit confirmation', reconcile.includes('phase3-production-reconciliation'))
+check('production reconciliation can fail the release gate on findings', reconcile.includes('--fail-on-findings'))
+check('production reconciliation preserves legacy twitter', /legacyTwitterDeleted:\s*0/.test(reconcile))
+check('tenant relation reconciliation uses lookup instead of whole-collection preload', relations.includes('$lookup') && !relations.includes('find({}).lean'))
+check('query plan verifier uses executionStats', explain.includes("explain('executionStats')") && explain.includes('COLLSCAN'))
+check('cursor indexes migration is explicit apply-only', read('src/app/db/migratePhase3QueryIndexes.ts').includes('phase3-query-indexes'))
+
+for (const item of checks) console.log(`${item.ok ? 'PASS' : 'FAIL'} ${item.name}`)
+const failed = checks.filter((item) => !item.ok)
+if (failed.length) process.exit(1)
+console.log(`Phase 3 backend production verifier passed ${checks.length}/${checks.length}`)

@@ -144,7 +144,13 @@
     "verify:phase1-data-integrity": "node scripts/verify-phase1-data-integrity.mjs",
     "migrate:phase1-query-indexes": "ts-node --transpile-only src/app/db/migratePhase1QueryIndexes.ts",
     "migrate:website-footer-phase2": "ts-node --transpile-only src/app/db/migrateWebsiteFooterPhase2.ts",
-    "verify:phase2-website-footer": "node scripts/verify-phase2-website-footer.mjs"
+    "verify:phase2-website-footer": "node scripts/verify-phase2-website-footer.mjs",
+    "migrate:phase3-query-indexes": "ts-node --transpile-only src/app/db/migratePhase3QueryIndexes.ts",
+    "reconcile:phase3-production": "ts-node --transpile-only src/app/db/reconcilePhase3ProductionData.ts",
+    "verify:phase3-query-plans": "ts-node --transpile-only src/app/db/verifyPhase3QueryPlans.ts",
+    "test:phase3-website": "vitest run src/tests/unit/phase3WebsiteHardening.unit.test.ts src/tests/contract/phase3WebsiteProduction.contract.test.ts src/tests/integration/phase3WebsiteFooter.integration.test.ts",
+    "verify:phase3-production": "node scripts/verify-phase3-production.mjs",
+    "gate:phase3-production": "pnpm format:check && pnpm typecheck && pnpm typecheck:test && pnpm build && node scripts/require-env.mjs TEST_DATABASE_URL && pnpm test:phase3-website && pnpm reconcile:phase3-production -- --fail-on-findings && pnpm verify:phase3-query-plans && pnpm verify:phase3-production"
   },
   "keywords": [
     "real-estate",

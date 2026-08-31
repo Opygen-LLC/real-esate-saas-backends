@@ -71,6 +71,7 @@ leadSchema.index({organizationId:1,assignedAgent:1,isConverted:1},{name:'lead_te
 leadSchema.index({organizationId:1,followUpDate:1,assignedAgent:1},{name:'lead_tenant_followup_assignee'})
 leadSchema.index({organizationId:1,source:1},{name:'lead_tenant_source'})
 leadSchema.index({organizationId:1,createdAt:-1},{name:'lead_tenant_created'})
+leadSchema.index({organizationId:1,createdAt:-1,_id:-1},{name:'lead_tenant_created_cursor'})
 leadSchema.index({organizationId:1,isConverted:1,createdAt:-1},{name:'lead_tenant_converted_created'})
 leadSchema.index({organizationId:1,assignedAgent:1,isConverted:1,followUpDate:1},{name:'lead_tenant_assignee_converted_followup'})
 leadSchema.index({organizationId:1,leadStatus:1,isConverted:1,createdAt:-1},{name:'lead_tenant_status_converted_created'})
