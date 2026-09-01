@@ -269,7 +269,7 @@ const initializeCapital = async (organizationId: string, actor: AccountingActor)
     if (existing) continue
     const parent = await withSession(FinanceAccount.findOne({ organizationId, code: definition.parent }), session).lean()
     if (!parent) throw new ApiError(httpStatus.CONFLICT, `Missing parent account ${definition.parent}`)
-    let code = definition.code
+    let code: string = definition.code
     for (let offset = 0; offset < 90; offset += 1) {
       const candidate = String(Number(definition.code) + offset).padStart(definition.code.length, '0')
       const occupied = await withSession(FinanceAccount.exists({ organizationId, code: candidate }), session)

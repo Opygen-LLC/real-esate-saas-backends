@@ -182,7 +182,7 @@ const buildMonthlyPeriods = (startDate: Date, endDate?: Date) => {
 const ensureFiscalYearAndPeriods = async (organizationId: string, actor: AccountingActor, startMonth: number, session?: ClientSession) => {
   const actorId = actorObjectId(actor)
   const window = fiscalYearWindow(new Date(), startMonth)
-  let year = await withSession(FinanceFiscalYear.findOne({ organizationId, startDate: window.startDate }), session).lean()
+  let year: any = await withSession(FinanceFiscalYear.findOne({ organizationId, startDate: window.startDate }), session).lean()
   if (!year) {
     const rows = await FinanceFiscalYear.create([{ organizationId, ...window, status: 'OPEN', createdBy: actorId }], session ? { session } : undefined)
     year = rows[0].toObject() as any
@@ -297,7 +297,7 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
     { $setOnInsert: { organizationId, code: 'EXEMPT', name: 'Exempt', type: 'EXEMPT', direction: 'OUTPUT', rateBasisPoints: 0, outputAccountId: accountId('2400'), status: 'ACTIVE', isSystemDefault: true, createdBy: actorId } },
     { upsert: true, session, setDefaultsOnInsert: true },
   )
-  const year = await ensureFiscalYearAndPeriods(organizationId, actor, fiscalYearStartMonth, session)
+  const year: any = await ensureFiscalYearAndPeriods(organizationId, actor, fiscalYearStartMonth, session)
   await audit(organizationId, actor, 'finance.accounting_initialized', 'financeAccountingSettings', String(settings._id), 'Double-entry accounting initialized', { baseCurrency, fiscalYearId: String(year._id) }, session)
   return { settings, fiscalYear: year, accountsCreatedOrPresent: defaultAccountDefinitions.length }
 })
@@ -755,7 +755,7 @@ const updateDraftJournal = async (organizationId: string, actor: AccountingActor
   if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
   if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Approved, posted or reversed journals are immutable')
   if (journal.sourceType !== 'MANUAL' && journal.sourceType !== 'OPENING_BALANCE') throw new ApiError(httpStatus.CONFLICT, 'Automated source journals cannot be edited manually')
-  const lines = input.lines || await withSession(FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }), session).lean().then((rows: any[]) => rows.map((line) => ({ accountId: String(line.accountId), debitMinor: line.debitMinor, creditMinor: line.creditMinor, description: line.description, propertyId: line.propertyId ? String(line.propertyId) : null, agentId: line.agentId ? String(line.agentId) : null, vendorId: line.vendorId ? String(line.vendorId) : null, clientId: line.clientId ? String(line.clientId) : null, shareholderId: line.shareholderId ? String(line.shareholderId) : null })))
+  const lines: any[] = input.lines || await withSession(FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }), session).lean().then((rows: any[]) => rows.map((line) => ({ accountId: String(line.accountId), debitMinor: line.debitMinor, creditMinor: line.creditMinor, description: line.description, propertyId: line.propertyId ? String(line.propertyId) : null, agentId: line.agentId ? String(line.agentId) : null, vendorId: line.vendorId ? String(line.vendorId) : null, clientId: line.clientId ? String(line.clientId) : null, shareholderId: line.shareholderId ? String(line.shareholderId) : null })))
   validateLineAmounts(lines, false)
   const accountMap = await assertJournalAccounts(organizationId, lines, journal.sourceType, session)
   assertAccountsUseCurrency(accountMap, journal.currency)

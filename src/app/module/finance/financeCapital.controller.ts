@@ -7,7 +7,7 @@ import type { AccountingActor } from './financeAccounting.interface'
 import { FinanceCapitalService } from './financeCapital.service'
 
 const actor = (req: Request): AccountingActor => ({ id: String(req.user?._id || req.user?.id || ''), role: req.user?.userRole || 'tenant', requestId: req.requestId, ip: req.ip, permissions: req.tenant?.permissions || [] })
-const ok = (res: Response, message: string, data: unknown, statusCode = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
+const ok = (res: Response, message: string, data: unknown, statusCode: number = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
 
 const initialize = catchAsync(async (req: Request, res: Response) => ok(res, 'Capital accounting initialized successfully', await FinanceCapitalService.initializeCapital(requireTenant(req), actor(req))))
 const listShareholders = catchAsync(async (req: Request, res: Response) => ok(res, 'Shareholders fetched successfully', await FinanceCapitalService.listShareholders(requireTenant(req))))

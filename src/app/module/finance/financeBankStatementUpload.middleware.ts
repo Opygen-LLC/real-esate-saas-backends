@@ -9,7 +9,7 @@ const upload = multer({
   fileFilter: (_req, file, callback) => {
     const name = file.originalname.toLowerCase()
     const allowed = name.endsWith('.csv') || name.endsWith('.xlsx') || file.mimetype.includes('csv') || file.mimetype.includes('spreadsheet')
-    callback(allowed ? null : new Error('Only CSV and XLSX bank statements are supported'), allowed)
+    callback((allowed ? null : new Error('Only CSV and XLSX bank statements are supported')) as any, allowed)
   },
 }).single('file')
 
