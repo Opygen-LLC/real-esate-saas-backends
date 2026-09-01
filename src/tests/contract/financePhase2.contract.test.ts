@@ -37,7 +37,7 @@ describe('Finance Phase 2 contract', () => {
     expect(model).toContain("organizationId: 1, sourceType: 1, sourceId: 1, entryRole: 1")
     expect(model).toContain("name: 'finance_journal_tenant_source_primary_unique'")
     expect(posting).toContain('financePostingIdentity')
-    expect(posting).toContain('DUPLICATE')
+    expect(posting).toContain('duplicatePosting')
     expect(posting).toContain("entryRole: 'PRIMARY'")
   })
 

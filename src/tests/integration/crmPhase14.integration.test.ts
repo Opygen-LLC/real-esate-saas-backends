@@ -152,7 +152,8 @@ suite('CRM Phase 14 production integration matrix', () => {
     vi.spyOn(RedisClient, 'getJson').mockResolvedValue(null)
     vi.spyOn(RedisClient, 'setJson').mockResolvedValue(undefined)
     vi.spyOn(RedisClient, 'del').mockResolvedValue(undefined)
-    vi.spyOn(RedisClient, 'command').mockImplementation(async (parts: Array<string | number>) => {
+    vi.spyOn(RedisClient, 'command').mockImplementation(async (...args: any[]) => {
+      const parts = args[0] as Array<string | number>
       const command = String(parts[0] || '').toUpperCase()
       if (command === 'SET') {
         redisStore.set(String(parts[1]), String(parts[2]))

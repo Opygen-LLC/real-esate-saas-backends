@@ -14,7 +14,7 @@ describe('User secret serialization', () => {
     })
 
     const json = user.toJSON() as Record<string, unknown>
-    const object = user.toObject() as Record<string, unknown>
+    const object = (user.toObject() as unknown) as Record<string, unknown>
 
     for (const value of [json, object]) {
       expect(value.password).toBeUndefined()
