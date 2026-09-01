@@ -8,6 +8,7 @@ import { AuthResult } from './auth.interface'
 import { AuthServices } from './auth.services'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { FinanceAccountingSettings } from '../finance/financeAccountingSettings.model'
+import { FinanceAccountingInitialization } from '../finance/financeInitialization.model'
 
 const cookieBase: CookieOptions = {
   secure: config.cookie_secure,
@@ -102,14 +103,29 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
     ? null
     : await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
   const advancedAccountingEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.advancedAccounting?.enabled)
-  const accountingSettings: any = organizationId && req.user?.userRole !== 'super-admin'
-    ? await FinanceAccountingSettings.findOne({ organizationId }).select('initializedAt activationStatus accountingStartDate makerCheckerRequired').lean()
-    : null
+  const [accountingSettings, accountingInitialization]: any[] = organizationId && req.user?.userRole !== 'super-admin'
+    ? await Promise.all([
+      FinanceAccountingSettings.findOne({ organizationId }).select('initializedAt activationStatus accountingStartDate makerCheckerRequired').lean(),
+      FinanceAccountingInitialization.findOne({ organizationId }).select('status updatedAt').lean(),
+    ])
+    : [null, null]
+  const accountingMode = advancedAccountingEntitled ? 'FULL' : accountingSettings?.initializedAt ? 'READ_ONLY' : 'LOCKED'
+  const migrationState = accountingInitialization?.status === 'ACTIVATING'
+    ? 'ACTIVATING'
+    : accountingSettings?.activationStatus === 'MIGRATION_REQUIRED'
+      ? 'MIGRATION_REQUIRED'
+      : accountingSettings?.activationStatus === 'LOCKED_READ_ONLY' || accountingMode === 'READ_ONLY'
+        ? 'LOCKED_READ_ONLY'
+        : accountingSettings?.initializedAt
+          ? 'ACTIVE'
+          : 'UNINITIALIZED'
   const accountingAccess = {
-    mode: advancedAccountingEntitled ? 'FULL' : accountingSettings?.initializedAt ? 'READ_ONLY' : 'LOCKED',
+    mode: accountingMode,
     entitled: advancedAccountingEntitled,
     initialized: Boolean(accountingSettings?.initializedAt),
     activationStatus: accountingSettings?.activationStatus || null,
+    migrationState,
+    initializationStatus: accountingInitialization?.status || null,
     accountingStartDate: accountingSettings?.accountingStartDate || null,
     makerCheckerRequired: Boolean(accountingSettings?.makerCheckerRequired),
   }

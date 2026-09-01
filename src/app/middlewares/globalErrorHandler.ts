@@ -57,11 +57,12 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   const expectedPublicWebsiteLock = code === API_ERROR_CODES.PUBLIC_WEBSITE_UNAVAILABLE
   const event = expectedPublicWebsiteLock ? 'request_rejected' : httpErrorEvent(statusCode)
   const level = expectedPublicWebsiteLock ? 'info' : httpLogLevelForStatus(statusCode, code)
+  const route = requestRoute(req)
   const commonLogMeta = {
     event,
     requestId: req.requestId,
     method: req.method,
-    route: requestRoute(req),
+    route,
     statusCode,
     organizationId: req.tenant?.organizationId,
     errorCode: code,
@@ -84,12 +85,23 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   if (code === API_ERROR_CODES.VALIDATION_ERROR) {
     emitProductionEvent('form_validation_failed', {
       method: req.method,
-      route: requestRoute(req),
+      route,
       organizationId: req.tenant?.organizationId,
       fields: Object.keys(fieldErrors).slice(0, 50),
       fieldCount: Object.keys(fieldErrors).length,
       requestId: req.requestId,
     })
+  }
+
+  if (route.includes('/finance') && [403, 409, 422, 500].includes(statusCode)) {
+    emitProductionEvent('finance_request_failed', {
+      method: req.method,
+      route,
+      statusCode,
+      errorCode: code,
+      organizationId: req.tenant?.organizationId,
+      requestId: req.requestId,
+    }, statusCode >= 500 ? 'error' : 'warn')
   }
 
   res.locals.apiErrorCode = code

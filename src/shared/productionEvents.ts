@@ -18,6 +18,7 @@ export const PRODUCTION_EVENT_NAMES = [
   'website_submission_deleted',
   'query_performance',
   'public_site_query_performance',
+  'finance_request_failed',
 ] as const
 
 export type ProductionEventName = typeof PRODUCTION_EVENT_NAMES[number]

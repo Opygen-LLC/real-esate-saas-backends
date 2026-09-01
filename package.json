@@ -183,7 +183,12 @@
     "test:advanced-accounting-phase7": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts src/tests/contract/advancedAccountingPhase3.contract.test.ts src/tests/contract/advancedAccountingPhase4.contract.test.ts src/tests/contract/advancedAccountingPhase5.contract.test.ts src/tests/contract/advancedAccountingPhase6.contract.test.ts src/tests/contract/advancedAccountingPhase7.contract.test.ts src/tests/contract/advancedAccountingPhase7.postingMatrix.contract.test.ts",
     "reconcile:finance-phase2": "ts-node --transpile-only src/app/db/reconcileFinancePhase2.ts",
     "repair:finance-phase2": "ts-node --transpile-only src/app/db/repairFinancePhase2.ts",
-    "test:finance-phase2": "vitest run src/tests/contract/financePhase2.contract.test.ts"
+    "test:finance-phase2": "vitest run src/tests/contract/financePhase2.contract.test.ts",
+    "test:finance-phase3:contract": "vitest run src/tests/contract/financePhase3Reliability.contract.test.ts",
+    "test:finance-phase3:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/financePhase3Integrity.integration.test.ts",
+    "verify:finance-phase3-production": "ts-node --transpile-only src/app/db/verifyFinancePhase3Production.ts",
+    "gate:finance-phase3": "pnpm typecheck && pnpm typecheck:test && pnpm test:finance-phase2 && pnpm test:finance-phase3:contract && pnpm build",
+    "gate:finance-phase3:staging": "pnpm gate:finance-phase3 && pnpm test:finance-phase3:integration && pnpm audit:finance -- --fail-on-findings && pnpm reconcile:finance-phase2 -- --fail-on-findings && pnpm verify:finance-phase3-production -- --fail-on-findings && pnpm test:smtp"
   },
   "keywords": [
     "real-estate",
