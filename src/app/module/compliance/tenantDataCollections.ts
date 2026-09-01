@@ -60,6 +60,12 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financevendors',
   'financebudgets',
   'financeaccountingsettings',
+  'financeaccounts',
+  'financefiscalyears',
+  'financefiscalperiods',
+  'financejournalentries',
+  'financejournallines',
+  'financeaccountingsequences',
 
   // Website / domain / public traffic
   'banners',

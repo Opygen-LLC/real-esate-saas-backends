@@ -64,6 +64,16 @@ export const TenantReferenceService = {
   assertContactBelongsToOrganization: (organizationId: string, id: unknown, session?: ClientSession) =>
     assertTenantDocument(Contact, organizationId, id, 'Contact', session),
 
+  assertClientBelongsToOrganization: async (organizationId: string, id: unknown, session?: ClientSession) => {
+    const normalized = normalizeId(id, 'Client')
+    let contactQuery = Contact.exists({ _id: normalized, organizationId })
+    let leadQuery = Lead.exists({ _id: normalized, organizationId })
+    if (session) { contactQuery = contactQuery.session(session); leadQuery = leadQuery.session(session) }
+    const [contact, lead] = await Promise.all([contactQuery, leadQuery])
+    if (!contact && !lead) throw new ApiError(httpStatus.BAD_REQUEST, 'Client does not belong to this agency')
+    return normalized
+  },
+
   assertUserBelongsToOrganization: (organizationId: string, id: unknown, session?: ClientSession) =>
     assertTenantDocument(User, organizationId, id, 'User', session),
 

@@ -136,6 +136,12 @@ const FINANCE_PREVIEW_COLLECTIONS = [
   'financevendors',
   'financebudgets',
   'financeaccountingsettings',
+  'financeaccounts',
+  'financefiscalyears',
+  'financefiscalperiods',
+  'financejournalentries',
+  'financejournallines',
+  'financeaccountingsequences',
 ] as const
 
 const WEBSITE_PREVIEW_COLLECTIONS = [

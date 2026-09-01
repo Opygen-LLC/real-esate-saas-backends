@@ -2,6 +2,7 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
+import { FinanceAccount, FinanceFiscalYear, FinanceJournalEntry } from './financeAccounting.model'
 
 type Actor = { id: string; role?: string; requestId?: string; ip?: string }
 
@@ -30,6 +31,27 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
 
   const before: any = await get(organizationId)
   const now = new Date()
+
+  const accountRefs = [
+    ...Object.values(input.defaultAccounts || {}),
+    ...Object.values(input.taxAccounts || {}),
+  ].filter((value): value is string => Boolean(value))
+  if (accountRefs.length) {
+    const unique = [...new Set(accountRefs.map(String))]
+    const owned = await FinanceAccount.countDocuments({ organizationId, _id: { $in: unique }, status: 'ACTIVE' })
+    if (owned != unique.length) throw new ApiError(httpStatus.BAD_REQUEST, 'One or more default accounting accounts do not belong to this organization or are inactive')
+  }
+
+  if (input.baseCurrency !== undefined && String(input.baseCurrency).toUpperCase() !== String(before.baseCurrency || 'BDT').toUpperCase()) {
+    if (await FinanceJournalEntry.exists({ organizationId, status: { $in: ['POSTED', 'REVERSED'] } })) {
+      throw new ApiError(httpStatus.CONFLICT, 'Base currency cannot be changed after journals have been posted')
+    }
+  }
+  if (input.fiscalYearStartMonth !== undefined && Number(input.fiscalYearStartMonth) !== Number(before.fiscalYearStartMonth || 1)) {
+    if (await FinanceFiscalYear.exists({ organizationId })) {
+      throw new ApiError(httpStatus.CONFLICT, 'Fiscal year start month cannot be changed after fiscal years have been initialized')
+    }
+  }
   const set: Record<string, unknown> = { updatedBy: actor.id }
   if (input.baseCurrency !== undefined) set.baseCurrency = String(input.baseCurrency).toUpperCase()
   if (input.accountingMethod !== undefined) set.accountingMethod = input.accountingMethod

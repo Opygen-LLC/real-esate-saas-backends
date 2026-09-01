@@ -5,6 +5,8 @@ import { FinanceController } from './finance.controller'
 import { FinanceValidation } from './finance.validation'
 import { FinanceAccountingSettingsController } from './financeAccountingSettings.controller'
 import { FinanceAccountingSettingsValidation } from './financeAccountingSettings.validation'
+import { FinanceAccountingController } from './financeAccounting.controller'
+import { FinanceAccountingValidation } from './financeAccounting.validation'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -12,9 +14,35 @@ const write = [authMiddlewares.auth(), authMiddlewares.requirePermission('financ
 const remove = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete')] as const
 const advancedRead = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read'), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
 const advancedWrite = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.write'), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
+const advancedDelete = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete'), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
 
 router.get('/accounting/settings', ...advancedRead, FinanceAccountingSettingsController.get)
 router.patch('/accounting/settings', ...advancedWrite, validateRequest(FinanceAccountingSettingsValidation.update), FinanceAccountingSettingsController.update)
+
+router.post('/accounting/initialize', ...advancedWrite, validateRequest(FinanceAccountingValidation.initialize), FinanceAccountingController.initialize)
+
+router.get('/accounting/accounts', ...advancedRead, validateRequest(FinanceAccountingValidation.listAccounts), FinanceAccountingController.listAccounts)
+router.post('/accounting/accounts', ...advancedWrite, validateRequest(FinanceAccountingValidation.createAccount), FinanceAccountingController.createAccount)
+router.get('/accounting/accounts/:id', ...advancedRead, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.getAccount)
+router.patch('/accounting/accounts/:id', ...advancedWrite, validateRequest(FinanceAccountingValidation.updateAccount), FinanceAccountingController.updateAccount)
+router.delete('/accounting/accounts/:id', ...advancedDelete, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.deleteAccount)
+
+router.get('/accounting/fiscal-years', ...advancedRead, FinanceAccountingController.listFiscalYears)
+router.post('/accounting/fiscal-years', ...advancedWrite, validateRequest(FinanceAccountingValidation.createFiscalYear), FinanceAccountingController.createFiscalYear)
+router.patch('/accounting/fiscal-years/:id/status', ...advancedWrite, validateRequest(FinanceAccountingValidation.fiscalYearStatus), FinanceAccountingController.setFiscalYearStatus)
+router.get('/accounting/fiscal-periods', ...advancedRead, validateRequest(FinanceAccountingValidation.listFiscalPeriods), FinanceAccountingController.listFiscalPeriods)
+router.patch('/accounting/fiscal-periods/:id/status', ...advancedWrite, validateRequest(FinanceAccountingValidation.fiscalPeriodStatus), FinanceAccountingController.setFiscalPeriodStatus)
+
+router.get('/accounting/journals', ...advancedRead, validateRequest(FinanceAccountingValidation.listJournals), FinanceAccountingController.listJournals)
+router.post('/accounting/journals', ...advancedWrite, validateRequest(FinanceAccountingValidation.createJournal), FinanceAccountingController.createJournal)
+router.get('/accounting/journals/:id', ...advancedRead, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.getJournal)
+router.patch('/accounting/journals/:id', ...advancedWrite, validateRequest(FinanceAccountingValidation.updateJournal), FinanceAccountingController.updateJournal)
+router.post('/accounting/journals/:id/post', ...advancedWrite, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.postJournal)
+router.post('/accounting/journals/:id/reverse', ...advancedWrite, validateRequest(FinanceAccountingValidation.reverseJournal), FinanceAccountingController.reverseJournal)
+router.delete('/accounting/journals/:id', ...advancedDelete, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.deleteJournal)
+
+router.post('/accounting/opening-balances', ...advancedWrite, validateRequest(FinanceAccountingValidation.openingBalances), FinanceAccountingController.openingBalances)
+router.get('/accounting/general-ledger', ...advancedRead, validateRequest(FinanceAccountingValidation.generalLedger), FinanceAccountingController.generalLedger)
 
 router.get('/overview', ...read, FinanceController.getOverview)
 router.get('/reports', ...read, FinanceController.getReports)

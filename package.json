@@ -163,7 +163,10 @@
     "reconcile:phase4-website-architecture": "ts-node --transpile-only src/app/db/reconcileWebsiteArchitecturePhase4.ts",
     "verify:phase4-website-architecture": "node scripts/verify-phase4-website-architecture.mjs",
     "test:phase4-website": "vitest run src/tests/contract/phase4WebsiteArchitecture.contract.test.ts src/tests/unit/phase4WebsiteArchitecture.unit.test.ts",
-    "gate:phase4-website": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-website && pnpm build && pnpm verify:phase4-website-architecture"
+    "gate:phase4-website": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-website && pnpm build && pnpm verify:phase4-website-architecture",
+    "migrate:advanced-accounting-phase2": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase2.ts",
+    "test:advanced-accounting-phase2": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts",
+    "verify:advanced-accounting-phase2": "node scripts/verify-advanced-accounting-phase2.mjs"
   },
   "keywords": [
     "real-estate",
