@@ -175,6 +175,7 @@ ${property ? `<section class="section"><div class="section-title">Property</div>
 <div class="totals">
   <div class="row"><span>Subtotal</span><strong>${amount(invoice.subtotal)}</strong></div>
   <div class="row"><span>Discount</span><strong>${amount(invoice.discount)}</strong></div>
+  ${Number(invoice.taxAmount || 0) > 0 ? `<div class="row"><span>Tax</span><strong>${amount(invoice.taxAmount)}</strong></div>` : ''}
   <div class="row grand"><span>Total</span><span>${amount(invoice.total)}</span></div>
   <div class="row"><span>Paid</span><strong>${amount(invoice.paidAmount)}</strong></div>
   <div class="row balance"><span>Outstanding</span><strong>${amount(outstanding)}</strong></div>

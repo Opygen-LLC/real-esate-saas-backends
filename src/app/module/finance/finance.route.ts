@@ -7,6 +7,9 @@ import { FinanceAccountingSettingsController } from './financeAccountingSettings
 import { FinanceAccountingSettingsValidation } from './financeAccountingSettings.validation'
 import { FinanceAccountingController } from './financeAccounting.controller'
 import { FinanceAccountingValidation } from './financeAccounting.validation'
+import { FinanceOperationsController } from './financeOperations.controller'
+import { FinanceOperationsValidation } from './financeOperations.validation'
+import { financeBankStatementUpload } from './financeBankStatementUpload.middleware'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -46,6 +49,44 @@ router.delete('/accounting/journals/:id', ...advancedDelete, validateRequest(Fin
 
 router.post('/accounting/opening-balances', ...advancedWrite, validateRequest(FinanceAccountingValidation.openingBalances), FinanceAccountingController.openingBalances)
 router.get('/accounting/general-ledger', ...advancedRead, validateRequest(FinanceAccountingValidation.generalLedger), FinanceAccountingController.generalLedger)
+
+
+// Phase 4 operational accounting
+router.post('/accounting/operations/initialize', ...advancedWrite, validateRequest(FinanceOperationsValidation.initialize), FinanceOperationsController.initialize)
+router.get('/accounting/receivables', ...advancedRead, validateRequest(FinanceOperationsValidation.receivables), FinanceOperationsController.receivables)
+router.get('/accounting/payables', ...advancedRead, validateRequest(FinanceOperationsValidation.payables), FinanceOperationsController.payables)
+
+router.get('/accounting/tax-codes', ...advancedRead, FinanceOperationsController.listTaxCodes)
+router.post('/accounting/tax-codes', ...advancedWrite, validateRequest(FinanceOperationsValidation.createTaxCode), FinanceOperationsController.createTaxCode)
+router.patch('/accounting/tax-codes/:id', ...advancedWrite, validateRequest(FinanceOperationsValidation.updateTaxCode), FinanceOperationsController.updateTaxCode)
+
+router.get('/accounting/bank-accounts', ...advancedRead, FinanceOperationsController.listBankAccounts)
+router.post('/accounting/bank-accounts', ...advancedWrite, validateRequest(FinanceOperationsValidation.createBankAccount), FinanceOperationsController.createBankAccount)
+router.patch('/accounting/bank-accounts/:id', ...advancedWrite, validateRequest(FinanceOperationsValidation.updateBankAccount), FinanceOperationsController.updateBankAccount)
+router.get('/accounting/bank-transfers', ...advancedRead, FinanceOperationsController.listBankTransfers)
+router.post('/accounting/bank-transfers', ...advancedWrite, validateRequest(FinanceOperationsValidation.createBankTransfer), FinanceOperationsController.createBankTransfer)
+
+router.get('/accounting/vendor-bills', ...advancedRead, validateRequest(FinanceOperationsValidation.vendorBillList), FinanceOperationsController.listVendorBills)
+router.post('/accounting/vendor-bills', ...advancedWrite, validateRequest(FinanceOperationsValidation.createVendorBill), FinanceOperationsController.createVendorBill)
+router.get('/accounting/vendor-bills/:id', ...advancedRead, validateRequest(FinanceOperationsValidation.vendorBillId), FinanceOperationsController.getVendorBill)
+router.patch('/accounting/vendor-bills/:id', ...advancedWrite, validateRequest(FinanceOperationsValidation.updateVendorBill), FinanceOperationsController.updateVendorBill)
+router.post('/accounting/vendor-bills/:id/approve', ...advancedWrite, validateRequest(FinanceOperationsValidation.vendorBillId), FinanceOperationsController.approveVendorBill)
+router.post('/accounting/vendor-bills/:id/post', ...advancedWrite, validateRequest(FinanceOperationsValidation.vendorBillId), FinanceOperationsController.postVendorBill)
+router.post('/accounting/vendor-bills/:id/payments', ...advancedWrite, validateRequest(FinanceOperationsValidation.payVendorBill), FinanceOperationsController.payVendorBill)
+router.post('/accounting/vendor-bills/:id/void', ...advancedWrite, validateRequest(FinanceOperationsValidation.voidVendorBill), FinanceOperationsController.voidVendorBill)
+
+router.get('/accounting/client-deposits', ...advancedRead, validateRequest(FinanceOperationsValidation.depositList), FinanceOperationsController.listDeposits)
+router.post('/accounting/client-deposits', ...advancedWrite, validateRequest(FinanceOperationsValidation.createDeposit), FinanceOperationsController.createDeposit)
+router.post('/accounting/client-deposits/:id/apply', ...advancedWrite, validateRequest(FinanceOperationsValidation.applyDeposit), FinanceOperationsController.applyDeposit)
+router.post('/accounting/client-deposits/:id/refund', ...advancedWrite, validateRequest(FinanceOperationsValidation.refundDeposit), FinanceOperationsController.refundDeposit)
+
+router.get('/accounting/bank-statements', ...advancedRead, validateRequest(FinanceOperationsValidation.statementList), FinanceOperationsController.listStatements)
+router.post('/accounting/bank-statements/import', ...advancedWrite, financeBankStatementUpload, validateRequest(FinanceOperationsValidation.bankStatementBody), FinanceOperationsController.importStatement)
+router.get('/accounting/bank-statements/:id', ...advancedRead, validateRequest(FinanceOperationsValidation.statementId), FinanceOperationsController.getStatement)
+router.get('/accounting/bank-statements/:id/ledger-candidates', ...advancedRead, validateRequest(FinanceOperationsValidation.ledgerCandidates), FinanceOperationsController.ledgerCandidates)
+router.post('/accounting/bank-statements/:id/lines/:lineId/match', ...advancedWrite, validateRequest(FinanceOperationsValidation.matchStatementLine), FinanceOperationsController.matchStatementLine)
+router.post('/accounting/bank-statements/:id/lines/:lineId/exclude', ...advancedWrite, validateRequest(FinanceOperationsValidation.excludeStatementLine), FinanceOperationsController.excludeStatementLine)
+router.post('/accounting/bank-statements/:id/reconcile', ...advancedWrite, validateRequest(FinanceOperationsValidation.statementId), FinanceOperationsController.reconcileStatement)
 
 router.get('/overview', ...read, FinanceController.getOverview)
 router.get('/reports', ...read, FinanceController.getReports)

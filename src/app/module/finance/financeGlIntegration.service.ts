@@ -9,6 +9,7 @@ import { FinanceAccountingService } from './financeAccounting.service'
 import { AccountingPostingService } from './accountingPosting.service'
 import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import { moneyToMinorUnits } from './finance.money'
+import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
 
 const withSession = <T>(query: T, session?: ClientSession): T => {
   if (session && typeof (query as any)?.session === 'function') (query as any).session(session)
@@ -35,6 +36,17 @@ const accountFromRef = async (organizationId: string, accountRef: unknown, expec
   const account = await withSession(FinanceAccount.findOne({ _id: accountRef, organizationId, status: 'ACTIVE', type: expectedType }), session).lean()
   if (!account) throw new ApiError(httpStatus.CONFLICT, `${label} is inactive, invalid, or belongs to another organization`)
   return account
+}
+
+
+const bankGlAccount = async (organizationId: string, bankAccountId: unknown, fallbackAccountRef: unknown, session?: ClientSession) => {
+  if (!bankAccountId) return accountFromRef(organizationId, fallbackAccountRef, 'ASSET', 'Default bank account', session)
+  if (!mongoose.isValidObjectId(String(bankAccountId))) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid finance bank account')
+  const bank = await withSession(FinanceBankAccount.findOne({ _id: bankAccountId, organizationId, status: 'ACTIVE' }), session).lean()
+  if (!bank) throw new ApiError(httpStatus.BAD_REQUEST, 'Finance bank account is inactive or belongs to another organization')
+  const gl = await withSession(FinanceAccount.findOne({ _id: bank.glAccountId, organizationId, status: 'ACTIVE' }), session).lean()
+  if (!gl || !['ASSET', 'LIABILITY'].includes(gl.type)) throw new ApiError(httpStatus.CONFLICT, 'Finance bank account is not linked to a valid active cash/bank General Ledger account')
+  return gl
 }
 
 const isAutomaticPostingReady = async (organizationId: string, session?: ClientSession) => {
@@ -75,7 +87,7 @@ const reverseLinkedJournal = async (organizationId: string, actor: AccountingAct
 const postManualTransaction = async (organizationId: string, actor: AccountingActor, transaction: any, version: number, session?: ClientSession) => {
   if (transaction.status !== 'paid' || Number(transaction.amount || 0) <= 0) return null
   const settings = await getSettings(organizationId, session)
-  const bank = await accountFromRef(organizationId, settings.defaultAccounts?.bank, 'ASSET', 'Default bank account', session)
+  const bank = await bankGlAccount(organizationId, transaction.bankAccountId, settings.defaultAccounts?.bank, session)
   const categoryAccount = await FinanceCategoryMappingService.resolveAccount(organizationId, actor, transaction.type, transaction.category, session)
   const amountMinor = minor(transaction.amount)
   const dimensions = { propertyId: propertyDimension(transaction.propertyId), vendorId: id(transaction.vendorId) }
@@ -99,19 +111,33 @@ const postInvoiceRevenue = async (organizationId: string, actor: AccountingActor
   const ar = await accountFromRef(organizationId, settings.defaultAccounts?.accountsReceivable, 'ASSET', 'Accounts Receivable account', session)
   const revenue = await accountFromRef(organizationId, settings.defaultAccounts?.commissionRevenue, 'REVENUE', 'Default commission revenue account', session)
   const amountMinor = minor(invoice.total)
+  const taxAmountMinor = minor(invoice.taxAmount || 0, 'tax amount')
+  if (taxAmountMinor > amountMinor) throw new ApiError(httpStatus.CONFLICT, 'Invoice tax amount cannot exceed invoice total')
+  const revenueMinor = amountMinor - taxAmountMinor
   const dimensions = { propertyId: propertyDimension(invoice.propertyId) }
+  const lines: FinanceJournalLineInput[] = [
+    { accountId: String(ar._id), debitMinor: amountMinor, description: invoice.clientName || invoice.invoiceNumber, ...dimensions },
+    { accountId: String(revenue._id), creditMinor: revenueMinor, description: invoice.clientName || invoice.invoiceNumber, ...dimensions },
+  ]
+  if (taxAmountMinor > 0) {
+    let taxAccountRef: unknown = settings.taxAccounts?.outputTax
+    if (invoice.taxCodeId) {
+      const tax = await withSession(FinanceTaxCode.findOne({ _id: invoice.taxCodeId, organizationId, status: 'ACTIVE', direction: 'OUTPUT' }), session).lean()
+      if (!tax) throw new ApiError(httpStatus.CONFLICT, 'Invoice output tax code is no longer valid')
+      taxAccountRef = tax.outputAccountId || taxAccountRef
+    }
+    const taxAccount = await accountFromRef(organizationId, taxAccountRef, 'LIABILITY', 'Output tax account', session)
+    lines.push({ accountId: String(taxAccount._id), creditMinor: taxAmountMinor, description: `${invoice.invoiceNumber} output tax`, ...dimensions })
+  }
   return postAutomaticJournal(organizationId, actor, {
     sourceType: 'INVOICE_REVENUE', sourceId: `${invoice._id}:v${version}`, currency: invoice.currency || 'BDT', postingDate: new Date(invoice.issueDate), description: `Revenue recognized for ${invoice.invoiceNumber}`, reference: invoice.invoiceNumber,
-    lines: [
-      { accountId: String(ar._id), debitMinor: amountMinor, description: invoice.clientName || invoice.invoiceNumber, ...dimensions },
-      { accountId: String(revenue._id), creditMinor: amountMinor, description: invoice.clientName || invoice.invoiceNumber, ...dimensions },
-    ],
+    lines,
   }, session)
 }
 
 const postInvoicePayment = async (organizationId: string, actor: AccountingActor, invoice: any, transaction: any, session?: ClientSession) => {
   const settings = await getSettings(organizationId, session)
-  const bank = await accountFromRef(organizationId, settings.defaultAccounts?.bank, 'ASSET', 'Default bank account', session)
+  const bank = await bankGlAccount(organizationId, transaction.bankAccountId, settings.defaultAccounts?.bank, session)
   const ar = await accountFromRef(organizationId, settings.defaultAccounts?.accountsReceivable, 'ASSET', 'Accounts Receivable account', session)
   const amountMinor = minor(transaction.amount)
   const dimensions = { propertyId: propertyDimension(invoice.propertyId) }
@@ -144,7 +170,7 @@ const postCommissionPayout = async (organizationId: string, actor: AccountingAct
   if (Number(commission.agentShare || 0) <= 0) return null
   const settings = await getSettings(organizationId, session)
   const payable = await accountFromRef(organizationId, settings.defaultAccounts?.commissionPayable, 'LIABILITY', 'Commission payable account', session)
-  const bank = await accountFromRef(organizationId, settings.defaultAccounts?.bank, 'ASSET', 'Default bank account', session)
+  const bank = await bankGlAccount(organizationId, transaction?.bankAccountId, settings.defaultAccounts?.bank, session)
   const amountMinor = minor(commission.agentShare, 'agent share')
   const dimensions = { propertyId: propertyDimension(commission.propertyId), agentId: id(commission.agentId) }
   return postAutomaticJournal(organizationId, actor, {

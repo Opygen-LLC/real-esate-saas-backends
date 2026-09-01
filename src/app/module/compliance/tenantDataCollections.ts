@@ -67,6 +67,14 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financejournallines',
   'financeaccountingsequences',
   'financecategoryaccountmappings',
+  'financebankaccounts',
+  'financevendorbills',
+  'financebanktransfers',
+  'financebankstatements',
+  'financebankstatementlines',
+  'financereconciliations',
+  'financeclientdeposits',
+  'financetaxcodes',
 
   // Website / domain / public traffic
   'banners',

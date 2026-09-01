@@ -6,6 +6,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
+import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
 import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import type {
   AccountingActor,
@@ -268,6 +269,21 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
   if (!settings) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to initialize accounting settings')
 
   await FinanceCategoryMappingService.ensureDefaults(organizationId, actor, session)
+  await FinanceBankAccount.updateOne(
+    { organizationId, glAccountId: accountId('1110') },
+    { $setOnInsert: { organizationId, name: 'Operating Bank', type: 'CHECKING', currency: baseCurrency, glAccountId: accountId('1110'), isDefaultOperating: true, status: 'ACTIVE', createdBy: actorId } },
+    { upsert: true, session, setDefaultsOnInsert: true },
+  )
+  await FinanceTaxCode.updateOne(
+    { organizationId, code: 'ZERO' },
+    { $setOnInsert: { organizationId, code: 'ZERO', name: 'Zero Rated', type: 'ZERO_RATED', direction: 'OUTPUT', rateBasisPoints: 0, outputAccountId: accountId('2400'), status: 'ACTIVE', isSystemDefault: true, createdBy: actorId } },
+    { upsert: true, session, setDefaultsOnInsert: true },
+  )
+  await FinanceTaxCode.updateOne(
+    { organizationId, code: 'EXEMPT' },
+    { $setOnInsert: { organizationId, code: 'EXEMPT', name: 'Exempt', type: 'EXEMPT', direction: 'OUTPUT', rateBasisPoints: 0, outputAccountId: accountId('2400'), status: 'ACTIVE', isSystemDefault: true, createdBy: actorId } },
+    { upsert: true, session, setDefaultsOnInsert: true },
+  )
   const year = await ensureFiscalYearAndPeriods(organizationId, actor, fiscalYearStartMonth, session)
   await audit(organizationId, actor, 'finance.accounting_initialized', 'financeAccountingSettings', String(settings._id), 'Double-entry accounting initialized', { baseCurrency, fiscalYearId: String(year._id) }, session)
   return { settings, fiscalYear: year, accountsCreatedOrPresent: defaultAccountDefinitions.length }
@@ -396,9 +412,14 @@ const updateAccount = async (organizationId: string, actor: AccountingActor, acc
     await assertParentAccount(organizationId, account.parentAccountId, nextType, session, accountId)
   }
   if (input.status === 'INACTIVE' && account.status !== 'INACTIVE') {
-    const mappedQuery = FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id })
-    if (session) mappedQuery.session(session)
-    if (await mappedQuery) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while finance categories are mapped to it')
+    const [mapped, bankLinked, taxLinked] = await Promise.all([
+      withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
+      withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id, status: 'ACTIVE' }), session),
+      withSession(FinanceTaxCode.exists({ organizationId, status: 'ACTIVE', $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
+    ])
+    if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while finance categories are mapped to it')
+    if (bankLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active bank account is linked to it')
+    if (taxLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active tax code is linked to it')
   }
   for (const key of ['code', 'name', 'type', 'normalBalance', 'currency', 'allowManualPosting', 'status'] as const) {
     if (input[key] !== undefined) account[key] = input[key]
@@ -419,14 +440,18 @@ const deleteAccount = async (organizationId: string, actor: AccountingActor, acc
   const account: any = await withSession(FinanceAccount.findOne({ _id: asObjectId(accountId, 'account id'), organizationId }), session)
   if (!account) throw new ApiError(httpStatus.NOT_FOUND, 'Finance account not found')
   if (account.isSystem) throw new ApiError(httpStatus.CONFLICT, 'System accounts cannot be deleted')
-  const [child, used, mapped] = await Promise.all([
+  const [child, used, mapped, bankLinked, taxLinked] = await Promise.all([
     withSession(FinanceAccount.exists({ organizationId, parentAccountId: account._id }), session),
     withSession(FinanceJournalLine.exists({ organizationId, accountId: account._id }), session),
     withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
+    withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id }), session),
+    withSession(FinanceTaxCode.exists({ organizationId, $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
   ])
   if (child) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while it has child accounts')
   if (used) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted after it has been used in a journal')
   if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while finance categories are mapped to it')
+  if (bankLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while a bank account is linked to it')
+  if (taxLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while a tax code is linked to it')
   await FinanceAccount.deleteOne({ _id: account._id, organizationId }, { session })
   await audit(organizationId, actor, 'finance.account_deleted', 'financeAccount', String(account._id), 'Unused custom finance account deleted', { code: account.code, name: account.name }, session)
   return { _id: String(account._id), deleted: true }

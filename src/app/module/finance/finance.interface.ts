@@ -12,6 +12,7 @@ export interface IFinanceTransaction {
   currency: 'BDT'
   transactionDate: Date
   paymentMethod: FinancePaymentMethod
+  bankAccountId?: mongoose.Types.ObjectId | string
   status: FinanceTransactionStatus
   description: string
   reference?: string
@@ -52,6 +53,7 @@ export interface IFinanceInvoicePayment {
   notes?: string
   recordedBy: mongoose.Types.ObjectId | string
   transactionId?: mongoose.Types.ObjectId | string
+  bankAccountId?: mongoose.Types.ObjectId | string
   journalEntryId?: mongoose.Types.ObjectId | string
 }
 
@@ -66,6 +68,8 @@ export interface IFinanceInvoice {
   lineItems: IFinanceInvoiceLineItem[]
   subtotal: number
   discount: number
+  taxCodeId?: mongoose.Types.ObjectId | string | null
+  taxAmount: number
   total: number
   paidAmount: number
   currency: 'BDT'

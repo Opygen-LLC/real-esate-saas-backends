@@ -34,6 +34,7 @@ import { renderInvoicePdf } from './invoicePdf.service'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { FinanceGlIntegrationService } from './financeGlIntegration.service'
+import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -146,8 +147,11 @@ const createTransaction = async (organizationId: string, actorId: string, payloa
   const normalized = normalizeTransactionPayload(payload)
   await assertTransactionRelations(organizationId, normalized)
   const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    if (normalized.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
+    const bankAccountId = accountingReady ? await resolveFinanceBankAccountId(organizationId, normalized.bankAccountId, session) : undefined
     const rows = await FinanceTransaction.create([{
       ...normalized,
+      bankAccountId,
       organizationId,
       currency: 'BDT',
       sourceType: 'manual',
@@ -229,7 +233,9 @@ const updateTransaction = async (organizationId: string, actorId: string, id: st
     if ('leadId' in payload) normalized.leadId = cleanOptionalId(payload.leadId) || null
     await assertTransactionRelations(organizationId, normalized)
 
-    const accountingFields = ['type', 'category', 'amount', 'transactionDate', 'propertyId', 'vendorId', 'description', 'reference']
+    if (normalized.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
+    if ('bankAccountId' in payload) normalized.bankAccountId = accountingReady ? (await resolveFinanceBankAccountId(organizationId, payload.bankAccountId, session) || null) : null
+    const accountingFields = ['type', 'category', 'amount', 'transactionDate', 'propertyId', 'vendorId', 'bankAccountId', 'description', 'reference']
     const accountingChanged = accountingFields.some((key) => key in payload)
     const wasPaid = existing.status === 'paid'
     const nextStatus = payload.status ?? existing.status
@@ -314,6 +320,33 @@ const calculateInvoiceAmounts = (organizationId: string, lineItems: IFinanceInvo
   }
 }
 
+const applyInvoiceTax = async (organizationId: string, amounts: ReturnType<typeof calculateInvoiceMoney>, taxCodeId: unknown, session?: ClientSession) => {
+  if (!taxCodeId) return { ...amounts, taxCodeId: null, taxAmount: 0 }
+  if (!mongoose.isValidObjectId(String(taxCodeId))) throw financeFieldError('taxCodeId', 'Select a valid tax code')
+  const query = FinanceTaxCode.findOne({ _id: taxCodeId, organizationId, status: 'ACTIVE', direction: 'OUTPUT' })
+  if (session) query.session(session)
+  const taxCode: any = await query.lean()
+  if (!taxCode) throw financeFieldError('taxCodeId', 'Tax code is inactive, invalid, or not an output tax code')
+  const taxableMinor = invoiceMoneyMinorUnits(Number(amounts.total || 0), 'amount')
+  const taxAmountMinor = Math.round((taxableMinor * Number(taxCode.rateBasisPoints || 0)) / 10000)
+  return {
+    ...amounts,
+    taxCodeId: taxCode._id,
+    taxAmount: moneyFromMinorUnits(taxAmountMinor),
+    total: moneyFromMinorUnits(taxableMinor + taxAmountMinor),
+  }
+}
+
+const resolveFinanceBankAccountId = async (organizationId: string, bankAccountId: unknown, session?: ClientSession) => {
+  if (!bankAccountId) return undefined
+  if (!mongoose.isValidObjectId(String(bankAccountId))) throw financeFieldError('bankAccountId', 'Select a valid finance bank account')
+  const query = FinanceBankAccount.findOne({ _id: bankAccountId, organizationId, status: 'ACTIVE' })
+  if (session) query.session(session)
+  const bank = await query.select('_id').lean()
+  if (!bank) throw financeFieldError('bankAccountId', 'Bank account is inactive or belongs to another organization')
+  return bank._id
+}
+
 const invoiceMoneyMinorUnits = (value: number, field: string) => {
   try {
     return moneyToMinorUnits(value, field)
@@ -377,6 +410,8 @@ const invoicePopulate = (query: any, organizationId: string) => query
   .populate(userRefPopulate('updatedBy', 'name email', { organizationId }))
   .populate(userRefPopulate('cancelledBy', 'name email', { organizationId }))
   .populate(userRefPopulate('payments.recordedBy', 'name email', { organizationId }))
+  .populate({ path: 'taxCodeId', select: 'code name type direction rateBasisPoints status', match: { organizationId } })
+  .populate({ path: 'payments.bankAccountId', select: 'name type', match: { organizationId } })
 
 const validateInvoiceDates = (issueDate: Date, dueDate?: Date | null) => {
   if (dueDate && dueDate.getTime() < issueDate.getTime()) throw financeFieldError('dueDate', 'Due date cannot be before the issue date')
@@ -403,7 +438,7 @@ const propertyAuditMetadata = (property: any) => property ? {
 } : { propertyId: null }
 
 const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
-  const amounts = calculateInvoiceAmounts(organizationId, payload.lineItems || [], Number(payload.discount || 0))
+  const baseAmounts = calculateInvoiceAmounts(organizationId, payload.lineItems || [], Number(payload.discount || 0))
   const issueDate = asDate(payload.issueDate)
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
@@ -411,6 +446,8 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
 
   const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    if (payload.taxCodeId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Tax/VAT accounting requires Advanced Accounting')
+    const amounts = await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId, session)
     const rows = await FinanceInvoice.create([{
       ...payload,
       ...amounts,
@@ -491,8 +528,12 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
     if (payload.status === 'draft' && existing.status !== 'draft') throw new ApiError(httpStatus.CONFLICT, 'A sent invoice cannot be reverted to draft')
 
     const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
-    const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined
-    if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
+    const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined || payload.taxCodeId !== undefined
+    if (payload.taxCodeId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Tax/VAT accounting requires Advanced Accounting')
+    if (amountFieldsChanged) {
+      const baseAmounts = calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount))
+      Object.assign(update, await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId !== undefined ? payload.taxCodeId : existing.taxCodeId, session))
+    }
     if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
     if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
     if ('propertyId' in payload) {
@@ -506,7 +547,7 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
     validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
 
     const recognizedBefore = !['draft', 'cancelled'].includes(existing.status)
-    const accountingChanged = amountFieldsChanged || ['issueDate', 'propertyId', 'status', 'clientName'].some((key) => key in payload)
+    const accountingChanged = amountFieldsChanged || ['issueDate', 'propertyId', 'status', 'clientName', 'taxCodeId'].some((key) => key in payload)
     if (accountingReady && recognizedBefore && existing.revenueJournalId && accountingChanged) {
       await FinanceGlIntegrationService.reverseLinkedJournal(
         organizationId,
@@ -606,6 +647,8 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     const amountPaid = moneyFromMinorUnits(amountPaidMinor)
     const paidAt = asDate(payload.paidAt)
     const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+    if (payload.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
+    const bankAccountId = accountingReady ? await resolveFinanceBankAccountId(organizationId, payload.bankAccountId, session) : undefined
 
     if (accountingReady && !invoice.revenueJournalId && Number(invoice.total || 0) > 0) {
       const version = Number(invoice.accountingVersion || 0) + 1
@@ -624,6 +667,7 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
       currency: 'BDT',
       transactionDate: paidAt,
       paymentMethod: payload.paymentMethod,
+      bankAccountId,
       status: 'paid',
       description: `Payment received for ${invoice.invoiceNumber}`,
       reference: payload.reference || invoice.invoiceNumber,
@@ -648,6 +692,7 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
       amount: amountPaid,
       paidAt,
       paymentMethod: payload.paymentMethod,
+      bankAccountId,
       reference: payload.reference || '',
       notes: payload.notes || '',
       recordedBy: actorObjectId(actor.id),
