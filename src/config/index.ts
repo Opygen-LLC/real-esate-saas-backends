@@ -256,12 +256,11 @@ if (isProduction) {
       }
     }
   }
-  if (!emailDevelopmentMode) {
-    requiredInProduction('SMTP_HOST')
-    requiredInProduction('SMTP_USER')
-    requiredInProduction('SMTP_PASSWORD', 8)
-    requiredInProduction('SMTP_FROM')
-  }
+  if (emailDevelopmentMode) throw new Error('EMAIL_DEV_MODE must be false in production')
+  requiredInProduction('SMTP_HOST')
+  requiredInProduction('SMTP_USER')
+  requiredInProduction('SMTP_PASSWORD', 8)
+  requiredInProduction('SMTP_FROM')
   if (smsEnabled) {
     const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
     requiredSms.forEach((name) => requiredInProduction(name))
@@ -329,7 +328,7 @@ export default {
     from: process.env.SMTP_FROM?.trim() || process.env.APP_EMAIL?.trim() || '',
     connection_timeout_ms: Math.max(1000, Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 5000)),
     socket_timeout_ms: Math.max(1000, Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 10000)),
-    verify_on_startup: envBoolean('SMTP_VERIFY_ON_STARTUP', isProduction),
+    verify_on_startup: isProduction ? true : envBoolean('SMTP_VERIFY_ON_STARTUP', false),
     health_cache_ms: Math.max(5000, Number(process.env.SMTP_HEALTH_CACHE_MS || 60000)),
     max_attempts: Math.max(1, Math.min(4, Number(process.env.SMTP_MAX_ATTEMPTS || 2))),
     retry_delay_ms: Math.max(100, Number(process.env.SMTP_RETRY_DELAY_MS || 500)),

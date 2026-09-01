@@ -36,6 +36,7 @@ import { sendAccountVerificationEmail, sendPasswordResetEmail } from './authEmai
 import { getTrialPolicy, trialEndFromPolicy } from '../platformSettings/trialPolicy.service'
 import { PlatformSettings } from '../platformSettings/platformSettings.model'
 import { RealtimeService } from '../realtime/realtime.service'
+import { logger } from '../../../shared/logger'
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_WINDOW_MS = 15 * 60 * 1000
@@ -135,9 +136,9 @@ const enforceOtpThrottle = async (email: string, purpose: OtpPurpose): Promise<v
     OtpChallenge.countDocuments({ email, purpose, channel: 'email', createdAt: { $gte: since } }),
     OtpChallenge.findOne({ email, purpose, channel: 'email' }).sort({ createdAt: -1 }).select('createdAt').lean(),
   ])
-  if (count >= 3) throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Too many verification requests. Try again later.')
+  if (count >= 3) throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Too many verification requests. Try again later.', '', 'OTP_THROTTLED')
   if (latest?.createdAt && Date.now() - new Date(latest.createdAt).getTime() < OTP_COOLDOWN_MS) {
-    throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Please wait before requesting another code')
+    throw new ApiError(httpStatus.TOO_MANY_REQUESTS, 'Please wait before requesting another code', '', 'OTP_THROTTLED')
   }
 }
 
@@ -596,8 +597,35 @@ const resendOtp = async (rawEmail: string, meta: RequestMeta): Promise<void> => 
 
 const requestPasswordReset = async (rawEmail: string, meta: RequestMeta): Promise<void> => {
   const email = normalizeEmail(rawEmail)
-  const user = await User.findOne({ email, isVerified: true, status: 'active' })
-  if (user) await createOtpChallenge(email, 'password_reset', meta, user as any)
+  const user = await User.findOne({ email }).select('_id name email organizationId isVerified status').lean()
+
+  if (!user) {
+    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_FOUND' })
+    return
+  }
+  if (!user.isVerified) {
+    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_VERIFIED', userId: user._id.toString() })
+    return
+  }
+  if (user.status !== 'active') {
+    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_ACTIVE', userId: user._id.toString() })
+    return
+  }
+
+  try {
+    await createOtpChallenge(email, 'password_reset', meta, user as any)
+  } catch (error) {
+    // Keep the public request endpoint enumeration-safe: an SMTP outage or
+    // account-specific OTP throttle must not reveal whether an email exists.
+    if (error instanceof ApiError && ['OTP_THROTTLED', 'EMAIL_DELIVERY_UNAVAILABLE'].includes(error.code || '')) {
+      logger.error('Password reset request could not be delivered', {
+        reasonCode: error.code || 'EMAIL_DELIVERY_UNAVAILABLE',
+        userId: user._id.toString(),
+      })
+      return
+    }
+    throw error
+  }
 }
 
 const verifyPasswordReset = async (rawEmail: string, code: string): Promise<{ resetToken: string }> => {

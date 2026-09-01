@@ -13,6 +13,7 @@ let AccountCredential: any
 let OtpChallenge: any
 let AuthSession: any
 let AuditEvent: any
+let runtimeConfig: any
 let readCapturedOtpForTest: (identity: string, purpose: string) => string | null
 
 const request = async (path: string, body: Record<string, unknown>) => {
@@ -64,6 +65,7 @@ suite('conditional registration verification and phase 3 routing protection', ()
     ;({ OtpChallenge } = await import('../../app/module/auth/otpChallenge.model'))
     ;({ AuthSession } = await import('../../app/module/auth/authSession.model'))
     ;({ AuditEvent } = await import('../../app/module/audit/audit.model'))
+    runtimeConfig = (await import('../../config')).default
     ;({ readCapturedOtpForTest } = await import('../../testSupport/otpCapture'))
 
     await PlatformSettings.create({ key: 'platform', authentication: { requireEmailOtpVerification: true } })
@@ -176,5 +178,92 @@ suite('conditional registration verification and phase 3 routing protection', ()
     expect(result.response.status).toBe(202)
     expect(await OtpChallenge.countDocuments({ email, purpose: 'password_reset', consumedAt: null })).toBe(1)
     expect(readCapturedOtpForTest(email, 'password_reset')).toMatch(/^\d{6}$/)
+  })
+
+
+  it('keeps password-reset requests enumeration-safe for missing, unverified and inactive accounts', async () => {
+    await OtpChallenge.deleteMany({ purpose: 'password_reset' })
+
+    const missing = await request('/api/v1/auth/password-reset/request', { email: 'missing@example.test' })
+    expect(missing.response.status).toBe(202)
+    expect(await OtpChallenge.countDocuments({ purpose: 'password_reset' })).toBe(0)
+
+    const verificationUser = await User.findOne({ email: 'otp-required@example.test' })
+    await User.updateOne({ _id: verificationUser._id }, { $set: { isVerified: false, status: 'active' } })
+    const unverified = await request('/api/v1/auth/password-reset/request', { email: 'otp-required@example.test' })
+    expect(unverified.response.status).toBe(202)
+    expect(await OtpChallenge.countDocuments({ email: 'otp-required@example.test', purpose: 'password_reset' })).toBe(0)
+    await User.updateOne({ _id: verificationUser._id }, { $set: { isVerified: true, status: 'active' } })
+
+    const activeUser = await User.findOne({ email: 'auto-verified@example.test' })
+    await User.updateOne({ _id: activeUser._id }, { $set: { status: 'blocked' } })
+    const inactive = await request('/api/v1/auth/password-reset/request', { email: 'auto-verified@example.test' })
+    expect(inactive.response.status).toBe(202)
+    expect(await OtpChallenge.countDocuments({ email: 'auto-verified@example.test', purpose: 'password_reset' })).toBe(0)
+    await User.updateOne({ _id: activeUser._id }, { $set: { status: 'active' } })
+  })
+
+  it('rolls back the reset challenge when real email delivery is unavailable without exposing account existence', async () => {
+    const email = 'auto-verified@example.test'
+    await OtpChallenge.deleteMany({ email, purpose: 'password_reset' })
+    const original = {
+      development_mode: runtimeConfig.email.development_mode,
+      host: runtimeConfig.email.host,
+      user: runtimeConfig.email.user,
+      password: runtimeConfig.email.password,
+      from: runtimeConfig.email.from,
+    }
+    Object.assign(runtimeConfig.email, { development_mode: false, host: '', user: '', password: '', from: '' })
+    try {
+      const result = await request('/api/v1/auth/password-reset/request', { email })
+      expect(result.response.status).toBe(202)
+      expect(result.body?.message).toBe('If the account exists, a reset code was sent.')
+      expect(await OtpChallenge.countDocuments({ email, purpose: 'password_reset', consumedAt: null })).toBe(0)
+    } finally {
+      Object.assign(runtimeConfig.email, original)
+    }
+  })
+
+  it('invalidates older reset OTPs, rejects expired codes, resets the password, and revokes existing sessions', async () => {
+    const email = 'auto-verified@example.test'
+    await OtpChallenge.deleteMany({ email, purpose: 'password_reset' })
+
+    await request('/api/v1/auth/password-reset/request', { email })
+    const first = await OtpChallenge.findOne({ email, purpose: 'password_reset' }).sort({ createdAt: -1 }).lean()
+    expect(first?.consumedAt).toBeNull()
+
+    await request('/api/v1/auth/password-reset/request', { email })
+    const refreshedFirst = await OtpChallenge.findById(first._id).lean()
+    expect(refreshedFirst?.consumedAt).toBeInstanceOf(Date)
+    expect(await OtpChallenge.countDocuments({ email, purpose: 'password_reset', consumedAt: null })).toBe(1)
+
+    const expiredCode = readCapturedOtpForTest(email, 'password_reset')
+    expect(expiredCode).toMatch(/^\d{6}$/)
+    await OtpChallenge.updateOne({ email, purpose: 'password_reset', consumedAt: null }, { $set: { expiresAt: new Date(Date.now() - 1_000) } })
+    const expired = await request('/api/v1/auth/password-reset/verify', { email, verificationCode: expiredCode })
+    expect(expired.response.status).toBe(401)
+
+    await request('/api/v1/auth/password-reset/request', { email })
+    const validCode = readCapturedOtpForTest(email, 'password_reset')
+    expect(validCode).toMatch(/^\d{6}$/)
+    const verified = await request('/api/v1/auth/password-reset/verify', { email, verificationCode: validCode })
+    expect(verified.response.status).toBe(200)
+    expect(verified.body?.data?.resetToken).toEqual(expect.any(String))
+
+    const activeUser = await User.findOne({ email }).lean()
+    expect(await AuthSession.countDocuments({ userId: activeUser._id, revokedAt: null })).toBeGreaterThan(0)
+
+    const completed = await request('/api/v1/auth/password-reset/complete', {
+      resetToken: verified.body.data.resetToken,
+      newPassword: 'BetterPass123!',
+    })
+    expect(completed.response.status).toBe(200)
+    expect(await AuthSession.countDocuments({ userId: activeUser._id, revokedAt: null })).toBe(0)
+
+    const oldLogin = await request('/api/v1/auth/login', { email, password: 'Production123!' })
+    expect(oldLogin.response.status).toBe(401)
+    const newLogin = await request('/api/v1/auth/login', { email, password: 'BetterPass123!' })
+    expect(newLogin.response.status).toBe(200)
+    expect(authCookieHeader(newLogin.response)).toContain('accessToken=')
   })
 })
