@@ -256,7 +256,8 @@ const applyDueChange = async (
     })
 
     if (scheduledRequest && scheduledRequest.status !== 'applied') {
-      scheduledRequest.status = 'applied'
+      const request = scheduledRequest
+      request.status = 'applied'
       scheduledRequest.appliedAt = now
       scheduledRequest.reviewedAt = scheduledRequest.reviewedAt || now
       await scheduledRequest.save(session ? { session } : undefined)

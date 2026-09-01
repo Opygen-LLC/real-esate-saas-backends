@@ -322,7 +322,9 @@ export default {
     development_mode: emailDevelopmentMode,
     host: process.env.SMTP_HOST?.trim() || '',
     port: Math.max(1, Number(process.env.SMTP_PORT || 587)),
-    secure: envBoolean('SMTP_SECURE', false),
+    secure: process.env.SMTP_SECURE !== undefined
+      ? envBoolean('SMTP_SECURE', false)
+      : Number(process.env.SMTP_PORT || 587) === 465,
     user: process.env.SMTP_USER?.trim() || process.env.APP_EMAIL?.trim() || '',
     password: process.env.SMTP_PASSWORD || process.env.APP_PASSWORD || '',
     from: process.env.SMTP_FROM?.trim() || process.env.APP_EMAIL?.trim() || '',

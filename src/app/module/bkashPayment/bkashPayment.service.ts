@@ -235,10 +235,11 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
       }
     }
 
-    const quoteType = quoteSnapshot.changeType
+    const changeType = quoteSnapshot.changeType
+    const quoteType = changeType
     activatedChangeType = quoteType
     const currentPeriodEnd = organization.subscription?.currentPeriodEnd ? new Date(organization.subscription.currentPeriodEnd) : null
-    deferredDowngrade = quoteType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
+    deferredDowngrade = changeType === 'downgrade' && Boolean(currentPeriodEnd && currentPeriodEnd > now)
     const midCycleImmediateChange = (quoteType === 'upgrade' || quoteType === 'version_change')
       && Boolean(quoteSnapshot.preserveRenewalDate && currentPeriodEnd && currentPeriodEnd > now)
     renewalDatePreserved = midCycleImmediateChange
@@ -426,21 +427,39 @@ const activateSubscription = async (attempt: IBkashPayment, payment: BkashGatewa
     eventType: 'subscription.payment_confirmed',
     previousSubscriptionStatus,
   })
-  RealtimeService.emitOrganization(attempt.organizationId, {
-    type: 'subscription.changed',
-    action: deferredDowngrade ? 'scheduled' : 'confirmed',
-    entityId: attempt.paymentId || attempt.invoiceNumber,
-    eventType: deferredDowngrade ? 'subscription.downgrade_scheduled' : 'subscription.payment_confirmed',
-    payload: {
-      plan: attempt.planId,
-      planVersion: attempt.planVersion || 1,
-      billingCycle: attempt.billingCycle,
-      changeType: activatedChangeType,
-      scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
-      currentPeriodEnd: attempt.quoteSnapshot?.currentPeriodEnd ? new Date(attempt.quoteSnapshot.currentPeriodEnd).toISOString() : null,
-      renewalDatePreserved,
-    },
-  })
+  if (deferredDowngrade) {
+    RealtimeService.emitOrganization(attempt.organizationId, {
+      type: 'subscription.changed',
+      action: 'scheduled',
+      entityId: attempt.paymentId || attempt.invoiceNumber,
+      eventType: 'subscription.downgrade_scheduled',
+      payload: {
+        plan: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        billingCycle: attempt.billingCycle,
+        changeType: activatedChangeType,
+        scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
+        currentPeriodEnd: attempt.quoteSnapshot?.currentPeriodEnd ? new Date(attempt.quoteSnapshot.currentPeriodEnd).toISOString() : null,
+        renewalDatePreserved,
+      },
+    })
+  } else {
+    RealtimeService.emitOrganization(attempt.organizationId, {
+      type: 'subscription.changed',
+      action: 'confirmed',
+      entityId: attempt.paymentId || attempt.invoiceNumber,
+      eventType: 'subscription.payment_confirmed',
+      payload: {
+        plan: attempt.planId,
+        planVersion: attempt.planVersion || 1,
+        billingCycle: attempt.billingCycle,
+        changeType: activatedChangeType,
+        scheduledEffectiveAt: isoDateOrNull(scheduledEffectiveAt),
+        currentPeriodEnd: attempt.quoteSnapshot?.currentPeriodEnd ? new Date(attempt.quoteSnapshot.currentPeriodEnd).toISOString() : null,
+        renewalDatePreserved,
+      },
+    })
+  }
 }
 
 const handleCallback = async (paymentId: string, callbackStatus: string) => {

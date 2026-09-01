@@ -911,6 +911,7 @@ const getPublicPage = async (identifier: string, slug = '/') => {
 const getSitemap = async (identifier: string) => {
   const org = await resolvePublicOrganization(identifier)
   const base = await canonicalBase(org)
+  // Public property listings filter by status: 'Available', quotaLocked: { $ne: true }
   const [pages, properties] = await Promise.all([WebsitePage.find({ organizationId: org.organizationId, status: 'published' }).select('slug updatedAt').lean(), Property.find({ organizationId: org.organizationId, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } }).select('_id updatedAt').lean()])
   return { base, urls: [...pages.map((p: any) => ({ loc: `${base}${p.slug === '/' ? '' : p.slug}`, lastmod: p.updatedAt })), ...properties.map((p: any) => ({ loc: `${base}/properties/${p._id}`, lastmod: p.updatedAt }))] }
 }

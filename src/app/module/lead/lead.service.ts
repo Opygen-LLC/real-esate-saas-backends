@@ -235,6 +235,7 @@ const createLeadWithOutcome=async(organizationId:string,payload:Partial<ILead>,c
   prepared.responseDueAt=new Date(now.getTime()+(config.responseSlaMinutes||30)*60_000)
   prepared.lastContact=undefined
   if(prepared.attribution)prepared.attribution={...prepared.attribution,firstTouchAt:now,lastTouchAt:now}
+  // EntitlementService.assertLimit(organizationId,'leads') is governed by reserveLeadAllowance:
   const ownedAllowanceReservation = !options.allowanceReservation
     ? await EntitlementService.reserveLeadAllowance(organizationId, 1, { source: options.allowanceSource || 'api' })
     : null

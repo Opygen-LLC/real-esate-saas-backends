@@ -364,9 +364,10 @@ const decidePayment = async (paymentNumber: string, decision: { status: 'confirm
       }
     }
 
-    const quoteType = quoteSnapshot.changeType
+    const changeType = quoteSnapshot.changeType
+    const quoteType = changeType
     const existingEnd = org.subscription?.currentPeriodEnd ? new Date(org.subscription.currentPeriodEnd) : null
-    const deferredDowngrade = quoteType === 'downgrade' && Boolean(existingEnd && existingEnd > now)
+    const deferredDowngrade = changeType === 'downgrade' && Boolean(existingEnd && existingEnd > now)
     const midCycleImmediateChange = (quoteType === 'upgrade' || quoteType === 'version_change')
       && Boolean(quoteSnapshot.preserveRenewalDate && existingEnd && existingEnd > now)
     const start = deferredDowngrade && existingEnd

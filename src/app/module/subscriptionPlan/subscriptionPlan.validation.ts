@@ -35,18 +35,22 @@ const planEntitlementsInput = z.object({
 
 // These fields remain readable on historical immutable plan versions, but they
 // are no longer legal inputs for a plan family or new plan version.
+const forbiddenRenewalGrowthFields = {
+  baseMonthlyLeadAllowance: z.never().optional(),
+  renewalLeadBonus: z.never().optional(),
+  renewalBonusEnabled: z.never().optional(),
+  maxRenewalLeadBonus: z.never().optional(),
+  continuityGraceDays: z.never().optional(),
+  leadAllowanceModel: z.never().optional(),
+}
+
 const forbiddenLegacyWriteFields = {
   displayOrder: z.never().optional(),
   upgradeRank: z.never().optional(),
   maxLeads: z.never().optional(),
   maxRecurringLeadAddon: z.never().optional(),
   leadPolicyVersion: z.never().optional(),
-  leadAllowanceModel: z.never().optional(),
-  baseMonthlyLeadAllowance: z.never().optional(),
-  renewalLeadBonus: z.never().optional(),
-  renewalBonusEnabled: z.never().optional(),
-  maxRenewalLeadBonus: z.never().optional(),
-  continuityGraceDays: z.never().optional(),
+  ...forbiddenRenewalGrowthFields,
 }
 
 const forbiddenLifecycleCreateFields = {

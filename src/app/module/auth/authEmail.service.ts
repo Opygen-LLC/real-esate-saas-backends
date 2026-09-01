@@ -25,8 +25,8 @@ const shell = (heading: string, intro: string, code: string, footer: string) => 
     </div>
   </div>`
 
-const deliver = async (to: string, subject: string, html: string): Promise<void> => {
-  const sent = await sendEmail(to, subject, html)
+const deliver = async (to: string, subject: string, html: string, text?: string): Promise<void> => {
+  const sent = await sendEmail(to, subject, html, text)
   if (!sent) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Verification email could not be delivered. Please try again shortly.', '', 'EMAIL_DELIVERY_UNAVAILABLE')
 }
 
@@ -42,6 +42,7 @@ export const sendAccountVerificationEmail = async (input: { email: string; code:
       input.code,
       'If you did not create this account, you can safely ignore this email.',
     ),
+    `Hi ${recipient},\n\nYour verification code for ${agency} is: ${input.code}\n\nThis code expires in 5 minutes and can only be used once.\n\nIf you did not create this account, you can safely ignore this email.`,
   )
 }
 
@@ -56,5 +57,6 @@ export const sendPasswordResetEmail = async (input: { email: string; code: strin
       input.code,
       'If you did not request a password reset, you can ignore this email and your password will remain unchanged.',
     ),
+    `Hi ${recipient},\n\nYour password reset verification code is: ${input.code}\n\nThis code expires in 5 minutes and can only be used once.\n\nIf you did not request a password reset, you can safely ignore this email and your password will remain unchanged.`,
   )
 }

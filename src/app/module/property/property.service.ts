@@ -257,7 +257,8 @@ const getAllProperties = async (
 ): Promise<IGenericResponse<IProperty[]>> => {
   const organizationId = String(filters.organizationId || '')
   const profile = createQueryProfile('/api/v1/property', organizationId)
-  const requestedSort = safePropertySort(paginationOptions.sortBy, paginationOptions.sortOrder)
+  const { sortBy, sortOrder } = paginationOptions
+  const requestedSort = safePropertySort(sortBy, sortOrder)
   if (paginationOptions.cursor && (requestedSort.sortBy !== 'createdAt' || requestedSort.sortOrder !== 'desc')) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Property cursor pagination requires sortBy=createdAt&sortOrder=desc')
   }

@@ -116,7 +116,7 @@ export const emailProviderStatus = () => ({
   lastCheckedAt: lastHealthCheckAt ? new Date(lastHealthCheckAt).toISOString() : null,
 })
 
-export const sendEmailDetailed = async (to: string, subject: string, html: string): Promise<EmailDeliveryResult> => {
+export const sendEmailDetailed = async (to: string, subject: string, html: string, text?: string): Promise<EmailDeliveryResult> => {
   // This check MUST happen before transporter() so EMAIL_DEV_MODE can never
   // accidentally deliver real messages merely because SMTP is also configured.
   if (config.email.development_mode) {
@@ -136,9 +136,25 @@ export const sendEmailDetailed = async (to: string, subject: string, html: strin
     return { delivered: false, simulated: false, code: lastDeliveryCode }
   }
 
+  const plainText = text || html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+
   for (let attempt = 1; attempt <= config.email.max_attempts; attempt += 1) {
     try {
-      const info = await client.sendMail({ from: config.email.from, to, subject, html })
+      const info = await client.sendMail({
+        from: config.email.from,
+        to,
+        subject,
+        html,
+        text: plainText,
+      })
       lastDeliveryCode = 'EMAIL_SENT'
       lastHealthResult = true
       lastHealthCheckAt = Date.now()
@@ -151,6 +167,7 @@ export const sendEmailDetailed = async (to: string, subject: string, html: strin
       logger.error('Email delivery failed', { ...errorMetadata(error), deliveryCode: code, attempt, retry })
       lastHealthResult = false
       lastHealthCheckAt = Date.now()
+      transport = null // Reset transport on failure so retries re-establish a fresh connection
       if (!retry) return { delivered: false, simulated: false, code }
       await sleep(config.email.retry_delay_ms * attempt)
     }
@@ -160,7 +177,7 @@ export const sendEmailDetailed = async (to: string, subject: string, html: strin
   return { delivered: false, simulated: false, code: lastDeliveryCode }
 }
 
-const sendEmail = async (to: string, subject: string, html: string): Promise<boolean> =>
-  (await sendEmailDetailed(to, subject, html)).delivered
+const sendEmail = async (to: string, subject: string, html: string, text?: string): Promise<boolean> =>
+  (await sendEmailDetailed(to, subject, html, text)).delivered
 
 export default sendEmail

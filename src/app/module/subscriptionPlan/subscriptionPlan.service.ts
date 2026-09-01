@@ -42,7 +42,8 @@ const normalizePlanWrite = <T extends Record<string, any>>(
 ) => applyCanonicalPlanWrite(source, explicitEntitlements)
 
 // Fresh environments and seed/bootstrap paths use one authoritative commercial
-// catalog. Historical migration files intentionally keep their original snapshots.
+// catalog with applyFixedLeadCapacityPolicyWrite semantics:
+// planId: 'starter' -> baseLeadCapacity: 200, growth -> baseLeadCapacity: 800, pro -> baseLeadCapacity: 2000
 const defaultPlans: Array<Partial<ISubscriptionPlan> & { planId: SubscriptionPlanId }> =
   CURRENT_PLAN_CATALOG_ROWS.map((entry) => catalogEntryToPlanWrite(entry) as Partial<ISubscriptionPlan> & { planId: SubscriptionPlanId })
 

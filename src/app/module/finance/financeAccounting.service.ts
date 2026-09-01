@@ -276,7 +276,7 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
         'taxAccounts.inputTax': accountId('1310'),
         'taxAccounts.withholdingTax': accountId('2410'),
       },
-      $setOnInsert: { organizationId, initializedAt: now, initializedBy: actor.id },
+      $setOnInsert: { organizationId },
     },
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true, session },
   ).lean()
@@ -566,10 +566,10 @@ const resolvePostingPeriod = async (organizationId: string, postingDate: Date, r
     period = await query.lean()
   }
   if (!period) throw new ApiError(httpStatus.CONFLICT, 'No fiscal period exists for the posting date. Initialize or create a fiscal year first.')
-  if (period.status === 'CLOSED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { periodStatus: 'CLOSED' })
-  if (period.status === 'SOFT_LOCKED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { periodStatus: 'SOFT_LOCKED' })
+  if (period.status === 'CLOSED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', 'FISCAL_PERIOD_CLOSED', { periodStatus: 'CLOSED' })
+  if (period.status === 'SOFT_LOCKED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', 'FISCAL_PERIOD_SOFT_LOCKED', { periodStatus: 'SOFT_LOCKED' })
   const year = await getFiscalYear(organizationId, String(period.fiscalYearId), session)
-  if (year.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal year is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { fiscalYearStatus: 'CLOSED' })
+  if (year.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal year is not allowed', '', 'FISCAL_PERIOD_CLOSED', { fiscalYearStatus: 'CLOSED' })
   return { period, year }
 }
 
@@ -593,7 +593,7 @@ const validateLineAmounts = (lines: FinanceJournalLineInput[], requireBalanced: 
     credit += BigInt(creditMinor)
   })
   if (requireBalanced && debit !== credit) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Journal cannot be posted because total debits do not equal total credits', '', FINANCE_ERROR_CODES.unbalanced, { debitMinor: debit.toString(), creditMinor: credit.toString() })
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Journal cannot be posted because total debits do not equal total credits', '', 'JOURNAL_NOT_BALANCED', { debitMinor: debit.toString(), creditMinor: credit.toString() })
   }
   return { debitMinor: debit.toString(), creditMinor: credit.toString(), balanced: debit === credit }
 }
@@ -633,7 +633,7 @@ const assertAccountsUseCurrency = (accounts: Map<string, any>, currency: string)
   const expected = String(currency).toUpperCase()
   const mismatch = [...accounts.values()].find((account: any) => String(account.currency).toUpperCase() !== expected)
   if (mismatch) {
-    throw new ApiError(httpStatus.BAD_REQUEST, `Account ${mismatch.code} uses ${mismatch.currency}, but this ledger posts in base currency ${expected}`, '', FINANCE_ERROR_CODES.currencyMismatch)
+    throw new ApiError(httpStatus.BAD_REQUEST, `Account ${mismatch.code} uses ${mismatch.currency}, but this ledger posts in base currency ${expected}`, '', 'ACCOUNTING_CURRENCY_MISMATCH')
   }
 }
 
@@ -755,7 +755,7 @@ const createManualJournal = async (organizationId: string, actor: AccountingActo
 const updateDraftJournal = async (organizationId: string, actor: AccountingActor, id: string, input: Partial<FinanceJournalInput>) => accountingTransaction(async (session) => {
   const journal: any = await withSession(FinanceJournalEntry.findOne({ _id: asObjectId(id, 'journal id'), organizationId }), session)
   if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
-  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Approved, posted or reversed journals are immutable')
+  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Posted or reversed journals are immutable')
   if (journal.sourceType !== 'MANUAL' && journal.sourceType !== 'OPENING_BALANCE') throw new ApiError(httpStatus.CONFLICT, 'Automated source journals cannot be edited manually')
   const lines: any[] = input.lines || await withSession(FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }), session).lean().then((rows: any[]) => rows.map((line) => ({ accountId: String(line.accountId), debitMinor: line.debitMinor, creditMinor: line.creditMinor, description: line.description, propertyId: line.propertyId ? String(line.propertyId) : null, agentId: line.agentId ? String(line.agentId) : null, vendorId: line.vendorId ? String(line.vendorId) : null, clientId: line.clientId ? String(line.clientId) : null, shareholderId: line.shareholderId ? String(line.shareholderId) : null })))
   validateLineAmounts(lines, false)
