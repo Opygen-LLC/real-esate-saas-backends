@@ -6,6 +6,7 @@ import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
+import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import type {
   AccountingActor,
   FinanceAccountType,
@@ -19,6 +20,7 @@ import type {
 import {
   FinanceAccount,
   FinanceAccountingSequence,
+  FinanceCategoryAccountMapping,
   FinanceFiscalPeriod,
   FinanceFiscalYear,
   FinanceJournalEntry,
@@ -137,7 +139,11 @@ const defaultAccountDefinitions: Array<{
   { code: '5500', name: 'Software', type: 'EXPENSE', parentCode: '5000', systemKey: 'SOFTWARE_EXPENSE', allowManualPosting: true },
   { code: '5600', name: 'Legal Fees', type: 'EXPENSE', parentCode: '5000', systemKey: 'LEGAL_FEES_EXPENSE', allowManualPosting: true },
   { code: '5700', name: 'Bank Charges', type: 'EXPENSE', parentCode: '5000', systemKey: 'BANK_CHARGES_EXPENSE', allowManualPosting: true },
+  { code: '5710', name: 'Travel & Transport', type: 'EXPENSE', parentCode: '5000', systemKey: 'TRAVEL_EXPENSE', allowManualPosting: true },
+  { code: '5720', name: 'Utilities', type: 'EXPENSE', parentCode: '5000', systemKey: 'UTILITIES_EXPENSE', allowManualPosting: true },
+  { code: '5730', name: 'Maintenance', type: 'EXPENSE', parentCode: '5000', systemKey: 'MAINTENANCE_EXPENSE', allowManualPosting: true },
   { code: '5800', name: 'Rounding Adjustments', type: 'EXPENSE', parentCode: '5000', systemKey: 'ROUNDING', allowManualPosting: false },
+  { code: '5900', name: 'General Operating Expenses', type: 'EXPENSE', parentCode: '5000', systemKey: 'GENERAL_OPERATING_EXPENSE', allowManualPosting: true },
 ]
 
 const fiscalYearWindow = (reference: Date, startMonth: number) => {
@@ -261,6 +267,7 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
   ).lean()
   if (!settings) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to initialize accounting settings')
 
+  await FinanceCategoryMappingService.ensureDefaults(organizationId, actor, session)
   const year = await ensureFiscalYearAndPeriods(organizationId, actor, fiscalYearStartMonth, session)
   await audit(organizationId, actor, 'finance.accounting_initialized', 'financeAccountingSettings', String(settings._id), 'Double-entry accounting initialized', { baseCurrency, fiscalYearId: String(year._id) }, session)
   return { settings, fiscalYear: year, accountsCreatedOrPresent: defaultAccountDefinitions.length }
@@ -388,6 +395,11 @@ const updateAccount = async (organizationId: string, actor: AccountingActor, acc
   } else if (input.type !== undefined && account.parentAccountId) {
     await assertParentAccount(organizationId, account.parentAccountId, nextType, session, accountId)
   }
+  if (input.status === 'INACTIVE' && account.status !== 'INACTIVE') {
+    const mappedQuery = FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id })
+    if (session) mappedQuery.session(session)
+    if (await mappedQuery) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while finance categories are mapped to it')
+  }
   for (const key of ['code', 'name', 'type', 'normalBalance', 'currency', 'allowManualPosting', 'status'] as const) {
     if (input[key] !== undefined) account[key] = input[key]
   }
@@ -407,12 +419,14 @@ const deleteAccount = async (organizationId: string, actor: AccountingActor, acc
   const account: any = await withSession(FinanceAccount.findOne({ _id: asObjectId(accountId, 'account id'), organizationId }), session)
   if (!account) throw new ApiError(httpStatus.NOT_FOUND, 'Finance account not found')
   if (account.isSystem) throw new ApiError(httpStatus.CONFLICT, 'System accounts cannot be deleted')
-  const [child, used] = await Promise.all([
+  const [child, used, mapped] = await Promise.all([
     withSession(FinanceAccount.exists({ organizationId, parentAccountId: account._id }), session),
     withSession(FinanceJournalLine.exists({ organizationId, accountId: account._id }), session),
+    withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
   ])
   if (child) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while it has child accounts')
   if (used) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted after it has been used in a journal')
+  if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while finance categories are mapped to it')
   await FinanceAccount.deleteOne({ _id: account._id, organizationId }, { session })
   await audit(organizationId, actor, 'finance.account_deleted', 'financeAccount', String(account._id), 'Unused custom finance account deleted', { code: account.code, name: account.name }, session)
   return { _id: String(account._id), deleted: true }
@@ -751,7 +765,7 @@ const deleteDraftJournal = async (organizationId: string, actor: AccountingActor
   return { _id: String(journal._id), deleted: true }
 })
 
-const reverseJournal = async (organizationId: string, actor: AccountingActor, id: string, input: { reversalDate?: string | Date; reason: string }) => accountingTransaction(async (session) => {
+const reverseJournalInternal = async (organizationId: string, actor: AccountingActor, id: string, input: { reversalDate?: string | Date; reason: string }, session?: ClientSession) => {
   const original: any = await withSession(FinanceJournalEntry.findOne({ _id: asObjectId(id, 'journal id'), organizationId }), session).lean()
   if (!original) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
   if (original.status !== 'POSTED') throw new ApiError(httpStatus.CONFLICT, 'Only a posted journal can be reversed')
@@ -785,7 +799,9 @@ const reverseJournal = async (organizationId: string, actor: AccountingActor, id
   await FinanceJournalLine.updateMany({ organizationId, journalEntryId: original._id }, { $set: { journalStatus: 'REVERSED' } }, { session })
   await audit(organizationId, actor, 'finance.journal_reversed', 'financeJournalEntry', String(original._id), String(input.reason).trim(), { journalNumber: original.journalNumber, reversalJournalId: String(reversal._id), reversalJournalNumber: reversal.journalNumber }, session)
   return { original: await getJournal(organizationId, String(original._id), session), reversal: await getJournal(organizationId, String(reversal._id), session) }
-})
+}
+
+const reverseJournal = async (organizationId: string, actor: AccountingActor, id: string, input: { reversalDate?: string | Date; reason: string }) => accountingTransaction((session) => reverseJournalInternal(organizationId, actor, id, input, session))
 
 const createOpeningBalances = async (organizationId: string, actor: AccountingActor, input: FinanceJournalInput) => accountingTransaction(async (session) => {
   validateLineAmounts(input.lines, true)
@@ -889,5 +905,6 @@ export const FinanceAccountingService = {
   accountingTransaction,
   createJournalDraftInternal,
   postJournalInternal,
+  reverseJournalInternal,
   validateLineAmounts,
 }

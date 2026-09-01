@@ -33,6 +33,7 @@ import {
 import { renderInvoicePdf } from './invoicePdf.service'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
+import { FinanceGlIntegrationService } from './financeGlIntegration.service'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -106,9 +107,24 @@ const financeCommercialTransaction = async <T>(work: (session?: ClientSession) =
       return value
     } finally { await session.endSession() }
   }
-  if (config.env === 'production') throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Invoice payments require a MongoDB replica set or mongos in production')
+  if (config.env === 'production') throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Financial accounting writes require a MongoDB replica set or mongos in production')
   return work()
 }
+
+const withOptionalAutomaticAccounting = async <T>(organizationId: string, work: (session: ClientSession | undefined, accountingReady: boolean) => Promise<T>): Promise<T> => {
+  const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId)
+  if (!accountingReady) return work(undefined, false)
+  return financeCommercialTransaction((session) => work(session, true))
+}
+
+const querySession = <T>(query: T, session?: ClientSession): T => {
+  if (session && typeof (query as any)?.session === 'function') (query as any).session(session)
+  return query
+}
+
+const financeAccountingActor = (actor: FinanceActorContext | string) => typeof actor === 'string'
+  ? { id: actor }
+  : { id: actor.id, role: actor.role, requestId: actor.requestId, ip: actor.ip }
 
 const normalizeTransactionPayload = (payload: Partial<IFinanceTransaction>) => ({
   ...payload,
@@ -129,12 +145,25 @@ const assertTransactionRelations = async (organizationId: string, payload: Parti
 const createTransaction = async (organizationId: string, actorId: string, payload: Partial<IFinanceTransaction>) => {
   const normalized = normalizeTransactionPayload(payload)
   await assertTransactionRelations(organizationId, normalized)
-  const result = await FinanceTransaction.create({
-    ...normalized,
-    organizationId,
-    currency: 'BDT',
-    sourceType: 'manual',
-    createdBy: actorObjectId(actorId),
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const rows = await FinanceTransaction.create([{
+      ...normalized,
+      organizationId,
+      currency: 'BDT',
+      sourceType: 'manual',
+      createdBy: actorObjectId(actorId),
+    }], session ? { session } : undefined)
+    const transaction: any = rows[0]
+    if (accountingReady && transaction.status === 'paid') {
+      const version = 1
+      const journal: any = await FinanceGlIntegrationService.postManualTransaction(organizationId, financeAccountingActor(actorId), transaction, version, session)
+      if (journal?._id) {
+        transaction.accountingVersion = version
+        transaction.accountingJournalId = journal._id
+        await transaction.save(session ? { session } : undefined)
+      }
+    }
+    return transaction
   })
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', result._id.toString(), 'finance.transaction.created', `${result.type} transaction created: ${result.description}`)
   return result
@@ -187,31 +216,73 @@ const listTransactions = async (organizationId: string, query: Record<string, un
 }
 
 const updateTransaction = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceTransaction>) => {
-  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
-  if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-  if (existing.status === 'voided') throw new ApiError(httpStatus.CONFLICT, 'Voided transactions cannot be changed')
-  if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be managed from their source record')
-  const normalized: any = { ...payload, updatedBy: actorObjectId(actorId) }
-  if (payload.transactionDate) normalized.transactionDate = asDate(payload.transactionDate)
-  if ('vendorId' in payload) normalized.vendorId = cleanOptionalId(payload.vendorId) || null
-  if ('propertyId' in payload) normalized.propertyId = cleanOptionalId(payload.propertyId) || null
-  if ('leadId' in payload) normalized.leadId = cleanOptionalId(payload.leadId) || null
-  await assertTransactionRelations(organizationId, normalized)
-  const result = await FinanceTransaction.findOneAndUpdate({ _id: id, organizationId, deletedAt: null }, normalized, { new: true, runValidators: true })
-    .populate({ path: 'vendorId', select: 'name category', match: { organizationId } }).populate({ path: 'propertyId', select: 'title', match: { organizationId } })
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const existing: any = await querySession(FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }), session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
+    if (existing.status === 'voided') throw new ApiError(httpStatus.CONFLICT, 'Voided transactions cannot be changed')
+    if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be managed from their source record')
+
+    const normalized: any = { ...payload, updatedBy: actorObjectId(actorId) }
+    if (payload.transactionDate) normalized.transactionDate = asDate(payload.transactionDate)
+    if ('vendorId' in payload) normalized.vendorId = cleanOptionalId(payload.vendorId) || null
+    if ('propertyId' in payload) normalized.propertyId = cleanOptionalId(payload.propertyId) || null
+    if ('leadId' in payload) normalized.leadId = cleanOptionalId(payload.leadId) || null
+    await assertTransactionRelations(organizationId, normalized)
+
+    const accountingFields = ['type', 'category', 'amount', 'transactionDate', 'propertyId', 'vendorId', 'description', 'reference']
+    const accountingChanged = accountingFields.some((key) => key in payload)
+    const wasPaid = existing.status === 'paid'
+    const nextStatus = payload.status ?? existing.status
+
+    if (accountingReady && existing.accountingJournalId && wasPaid && (accountingChanged || nextStatus !== 'paid')) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(
+        organizationId,
+        financeAccountingActor(actorId),
+        existing.accountingJournalId,
+        `Transaction ${existing._id} changed or left paid status`,
+        new Date(),
+        session,
+      )
+      existing.accountingJournalId = null
+    }
+
+    Object.assign(existing, normalized)
+    if (accountingReady && nextStatus === 'paid' && (!existing.accountingJournalId || accountingChanged || !wasPaid)) {
+      const version = Number(existing.accountingVersion || 0) + 1
+      const journal: any = await FinanceGlIntegrationService.postManualTransaction(organizationId, financeAccountingActor(actorId), existing, version, session)
+      if (journal?._id) {
+        existing.accountingVersion = version
+        existing.accountingJournalId = journal._id
+      }
+    }
+    await existing.save(session ? { session } : undefined)
+    return existing
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.updated', `Transaction updated: ${result?.description || id}`)
-  return result
+  return FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
+    .populate({ path: 'vendorId', select: 'name category', match: { organizationId } })
+    .populate({ path: 'propertyId', select: 'title', match: { organizationId } })
 }
 
 const voidTransaction = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
-  if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-  if (existing.status === 'voided') return existing
-  if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be reversed from their source record')
-  existing.status = 'voided'; existing.voidedAt = new Date(); existing.voidedBy = actorObjectId(actorId); existing.voidReason = reason; existing.updatedBy = actorObjectId(actorId)
-  await existing.save()
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const existing: any = await querySession(FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }), session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
+    if (existing.status === 'voided') return existing
+    if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be reversed from their source record')
+    if (accountingReady && existing.accountingJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accountingJournalId, reason, new Date(), session)
+    }
+    existing.status = 'voided'
+    existing.voidedAt = new Date()
+    existing.voidedBy = actorObjectId(actorId)
+    existing.voidReason = reason
+    existing.updatedBy = actorObjectId(actorId)
+    await existing.save(session ? { session } : undefined)
+    return existing
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.voided', `Transaction voided: ${reason}`)
-  return existing
+  return result
 }
 
 const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
@@ -338,16 +409,36 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   validateInvoiceDates(issueDate, dueDate)
   const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
   if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
-  const result = await FinanceInvoice.create({
-    ...payload,
-    ...amounts,
-    propertyId: property?._id, leadId: cleanOptionalId(payload.leadId),
-    dueDate, issueDate,
-    invoiceNumber: makeNumber('INV'),
-    paidAmount: 0, payments: [], currency: 'BDT',
-    status: payload.status || 'draft',
-    organizationId, createdBy: actorObjectId(invoiceActorId(actor)),
+
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const rows = await FinanceInvoice.create([{
+      ...payload,
+      ...amounts,
+      propertyId: property?._id,
+      leadId: cleanOptionalId(payload.leadId),
+      dueDate,
+      issueDate,
+      invoiceNumber: makeNumber('INV'),
+      paidAmount: 0,
+      payments: [],
+      currency: 'BDT',
+      status: payload.status || 'draft',
+      organizationId,
+      createdBy: actorObjectId(invoiceActorId(actor)),
+    }], session ? { session } : undefined)
+    const invoice: any = rows[0]
+    if (accountingReady && invoice.status === 'sent' && Number(invoice.total || 0) > 0) {
+      const version = 1
+      const journal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
+      if (journal?._id) {
+        invoice.accountingVersion = version
+        invoice.revenueJournalId = journal._id
+        await invoice.save(session ? { session } : undefined)
+      }
+    }
+    return invoice
   })
+
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`),
     invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency, ...propertyAuditMetadata(property) }),
@@ -385,60 +476,94 @@ const getInvoiceById = async (organizationId: string, id: string) => {
 const paidInvoiceMetadataFields = new Set(['clientPhone', 'clientEmail', 'notes'])
 
 const updateInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, payload: Partial<IFinanceInvoice>) => {
-  const existing: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  if (existing.status === 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Voided invoices cannot be edited')
+  let linkedProperty: any = undefined
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const existing: any = await querySession(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (existing.status === 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Voided invoices cannot be edited')
 
-  const keys = Object.keys(payload)
-  const hasPayment = Number(existing.paidAmount || 0) > 0 || ['partial', 'paid'].includes(existing.status)
-  if (hasPayment) {
-    const forbidden = keys.filter((key) => !paidInvoiceMetadataFields.has(key))
-    if (forbidden.length) throw new ApiError(httpStatus.CONFLICT, `Paid financial records are immutable. Only client phone, client email, and notes may be updated.`)
-  }
-  if (payload.status === 'draft' && existing.status !== 'draft') throw new ApiError(httpStatus.CONFLICT, 'A sent invoice cannot be reverted to draft')
+    const keys = Object.keys(payload)
+    const hasPayment = Number(existing.paidAmount || 0) > 0 || ['partial', 'paid'].includes(existing.status)
+    if (hasPayment) {
+      const forbidden = keys.filter((key) => !paidInvoiceMetadataFields.has(key))
+      if (forbidden.length) throw new ApiError(httpStatus.CONFLICT, 'Paid financial records are immutable. Only client phone, client email, and notes may be updated.')
+    }
+    if (payload.status === 'draft' && existing.status !== 'draft') throw new ApiError(httpStatus.CONFLICT, 'A sent invoice cannot be reverted to draft')
 
-  const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
-  const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined
-  if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
-  if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
-  if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
-  let property: any = undefined
-  if ('propertyId' in payload) {
-    property = await resolveInvoiceProperty(organizationId, payload.propertyId)
-    update.propertyId = property?._id || null
-  }
-  if ('leadId' in payload) {
-    update.leadId = cleanOptionalId(payload.leadId) || null
-    if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
-  }
-  validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
+    const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
+    const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined
+    if (amountFieldsChanged) Object.assign(update, calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount)))
+    if (payload.issueDate) update.issueDate = asDate(payload.issueDate)
+    if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
+    if ('propertyId' in payload) {
+      linkedProperty = await resolveInvoiceProperty(organizationId, payload.propertyId)
+      update.propertyId = linkedProperty?._id || null
+    }
+    if ('leadId' in payload) {
+      update.leadId = cleanOptionalId(payload.leadId) || null
+      if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
+    }
+    validateInvoiceDates(update.issueDate || existing.issueDate, 'dueDate' in update ? update.dueDate : existing.dueDate)
 
-  const result: any = await invoicePopulate(FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }), organizationId)
-  const auditProperty = 'propertyId' in payload ? property : result?.propertyId
+    const recognizedBefore = !['draft', 'cancelled'].includes(existing.status)
+    const accountingChanged = amountFieldsChanged || ['issueDate', 'propertyId', 'status', 'clientName'].some((key) => key in payload)
+    if (accountingReady && recognizedBefore && existing.revenueJournalId && accountingChanged) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(
+        organizationId,
+        financeAccountingActor(actor),
+        existing.revenueJournalId,
+        `Invoice ${existing.invoiceNumber} was revised`,
+        new Date(),
+        session,
+      )
+    }
+
+    const updateQuery: any = FinanceInvoice.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true, session })
+    const updated: any = await updateQuery
+    if (!updated) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    const recognizedAfter = !['draft', 'cancelled'].includes(updated.status)
+    const needsRevenueJournal = accountingReady && recognizedAfter && Number(updated.total || 0) > 0
+      && (!existing.revenueJournalId || accountingChanged)
+    if (needsRevenueJournal) {
+      const version = Number(existing.accountingVersion || 0) + 1
+      const journal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), updated, version, session)
+      if (journal?._id) {
+        updated.accountingVersion = version
+        updated.revenueJournalId = journal._id
+        await updated.save(session ? { session } : undefined)
+      }
+    }
+    return updated
+  })
+
+  const populated: any = await getInvoiceById(organizationId, id)
+  const auditProperty = 'propertyId' in payload ? linkedProperty : populated?.propertyId
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: keys, financialFieldsChanged: amountFieldsChanged, ...propertyAuditMetadata(auditProperty) }),
+    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: Object.keys(payload), financialFieldsChanged: payload.lineItems !== undefined || payload.discount !== undefined, ...propertyAuditMetadata(auditProperty) }),
   ])
-  if ('propertyId' in payload && property) {
-    const previousPropertyId = existing.propertyId ? String(existing.propertyId) : ''
-    const nextPropertyId = String(property._id)
-    if (previousPropertyId !== nextPropertyId) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: id, propertyId: nextPropertyId, action: 'updated' })
-  }
-  return result
+  if ('propertyId' in payload && linkedProperty) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: id, propertyId: String(linkedProperty._id), action: 'updated' })
+  return populated
 }
 
 const voidInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason: string) => {
-  const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  if (invoice.status === 'cancelled') return invoice
-  if (invoice.status === 'draft') throw new ApiError(httpStatus.CONFLICT, 'Draft invoices should be archived instead of voided')
-  if (Number(invoice.paidAmount || 0) > 0 || ['partial', 'paid'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be voided')
-  invoice.status = 'cancelled'
-  invoice.cancelledAt = new Date()
-  invoice.cancelledBy = actorObjectId(actor.id)
-  invoice.cancelReason = reason
-  invoice.updatedBy = actorObjectId(actor.id)
-  await invoice.save()
+  const invoice: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const row: any = await querySession(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), session)
+    if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (row.status === 'cancelled') return row
+    if (row.status === 'draft') throw new ApiError(httpStatus.CONFLICT, 'Draft invoices should be archived instead of voided')
+    if (Number(row.paidAmount || 0) > 0 || ['partial', 'paid'].includes(row.status)) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be voided')
+    if (accountingReady && row.revenueJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), row.revenueJournalId, reason, new Date(), session)
+    }
+    row.status = 'cancelled'
+    row.cancelledAt = new Date()
+    row.cancelledBy = actorObjectId(actor.id)
+    row.cancelReason = reason
+    row.updatedBy = actorObjectId(actor.id)
+    await row.save(session ? { session } : undefined)
+    return row
+  })
   await Promise.all([
     emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`),
     invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
@@ -480,15 +605,61 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     if (amountPaidMinor > outstandingMinor) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${moneyFromMinorUnits(outstandingMinor).toFixed(2)}`)
     const amountPaid = moneyFromMinorUnits(amountPaidMinor)
     const paidAt = asDate(payload.paidAt)
-    const transactionDocs: any[] = await FinanceTransaction.create([{ organizationId, type: 'income', category: 'Invoice payment', amount: amountPaid, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Payment received for ${invoice.invoiceNumber}`, reference: payload.reference || invoice.invoiceNumber, sourceType: 'invoice_payment', sourceId: invoice._id, propertyId: invoice.propertyId || undefined, leadId: invoice.leadId || undefined, createdBy: actorObjectId(actor.id) }], session ? { session } : undefined)
-    const transaction = transactionDocs[0]
-    invoice.payments.push({ amount: amountPaid, paidAt, paymentMethod: payload.paymentMethod, reference: payload.reference || '', notes: payload.notes || '', recordedBy: actorObjectId(actor.id), transactionId: transaction._id })
+    const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+
+    if (accountingReady && !invoice.revenueJournalId && Number(invoice.total || 0) > 0) {
+      const version = Number(invoice.accountingVersion || 0) + 1
+      const revenueJournal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
+      if (revenueJournal?._id) {
+        invoice.accountingVersion = version
+        invoice.revenueJournalId = revenueJournal._id
+      }
+    }
+
+    const transactionDocs: any[] = await FinanceTransaction.create([{
+      organizationId,
+      type: 'income',
+      category: 'Invoice payment',
+      amount: amountPaid,
+      currency: 'BDT',
+      transactionDate: paidAt,
+      paymentMethod: payload.paymentMethod,
+      status: 'paid',
+      description: `Payment received for ${invoice.invoiceNumber}`,
+      reference: payload.reference || invoice.invoiceNumber,
+      sourceType: 'invoice_payment',
+      sourceId: invoice._id,
+      propertyId: invoice.propertyId || undefined,
+      leadId: invoice.leadId || undefined,
+      createdBy: actorObjectId(actor.id),
+    }], session ? { session } : undefined)
+    const transaction: any = transactionDocs[0]
+    let paymentJournal: any = null
+    if (accountingReady) {
+      paymentJournal = await FinanceGlIntegrationService.postInvoicePayment(organizationId, financeAccountingActor(actor), invoice, transaction, session)
+      if (paymentJournal?._id) {
+        transaction.accountingVersion = 1
+        transaction.accountingJournalId = paymentJournal._id
+        await transaction.save(session ? { session } : undefined)
+      }
+    }
+
+    invoice.payments.push({
+      amount: amountPaid,
+      paidAt,
+      paymentMethod: payload.paymentMethod,
+      reference: payload.reference || '',
+      notes: payload.notes || '',
+      recordedBy: actorObjectId(actor.id),
+      transactionId: transaction._id,
+      journalEntryId: paymentJournal?._id,
+    })
     const nextPaidMinor = paidMinor + amountPaidMinor
     invoice.paidAmount = moneyFromMinorUnits(nextPaidMinor)
     invoice.status = nextPaidMinor >= totalMinor ? 'paid' : 'partial'
     invoice.updatedBy = actorObjectId(actor.id)
     await invoice.save(session ? { session } : undefined)
-    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
+    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), journalEntryId: paymentJournal?._id ? String(paymentJournal._id) : null, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
     return invoice.invoiceNumber
   })
   await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
@@ -518,19 +689,32 @@ const createCommission = async (organizationId: string, actorId: string, payload
   if (payload.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, payload.propertyId)
   if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
   const calculated = calculateCommissionAmounts(payload)
-  const result = await FinanceCommission.create({
-    ...payload,
-    ...calculated,
-    organizationId,
-    commissionNumber: makeNumber('COM'),
-    propertyId: cleanOptionalId(payload.propertyId),
-    leadId: cleanOptionalId(payload.leadId),
-    dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined,
-    currency: 'BDT',
-    createdBy: actorObjectId(actorId),
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const rows = await FinanceCommission.create([{
+      ...payload,
+      ...calculated,
+      organizationId,
+      commissionNumber: makeNumber('COM'),
+      propertyId: cleanOptionalId(payload.propertyId),
+      leadId: cleanOptionalId(payload.leadId),
+      dueDate: payload.dueDate ? asDate(payload.dueDate) : undefined,
+      currency: 'BDT',
+      createdBy: actorObjectId(actorId),
+    }], session ? { session } : undefined)
+    const commission: any = rows[0]
+    if (accountingReady && commission.status === 'approved' && Number(commission.agentShare || 0) > 0) {
+      const version = 1
+      const journal: any = await FinanceGlIntegrationService.postCommissionAccrual(organizationId, financeAccountingActor(actorId), commission, version, session)
+      if (journal?._id) {
+        commission.accountingVersion = version
+        commission.accrualJournalId = journal._id
+        await commission.save(session ? { session } : undefined)
+      }
+    }
+    return commission
   })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', result._id.toString(), 'finance.commission.created', `Commission ${result.commissionNumber} created`)
-  return result.populate(userRefPopulate('agentId', 'name email', { organizationId }))
+  return FinanceCommission.findOne({ _id: result._id, organizationId }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
 }
 
 const listCommissions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
@@ -552,40 +736,69 @@ const listCommissions = async (organizationId: string, query: Record<string, unk
 }
 
 const updateCommission = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceCommission>) => {
-  const existing: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
-  if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
-  const calculated = calculateCommissionAmounts(payload, existing)
-  const update: any = { ...payload, ...calculated, updatedBy: actorObjectId(actorId) }
-  if ('propertyId' in payload) {
-    update.propertyId = cleanOptionalId(payload.propertyId) || null
-    if (update.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, update.propertyId)
-  }
-  if ('leadId' in payload) {
-    update.leadId = cleanOptionalId(payload.leadId) || null
-    if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
-  }
-  if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
-  const result = await FinanceCommission.findOneAndUpdate({ _id: id, organizationId, archivedAt: null }, update, { new: true, runValidators: true }).populate(userRefPopulate('agentId', 'name email', { organizationId })).populate({ path: 'propertyId', select: 'title', match: { organizationId } })
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const existing: any = await querySession(FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }), session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+    if (['paid', 'cancelled'].includes(existing.status)) throw new ApiError(httpStatus.CONFLICT, `${existing.status === 'paid' ? 'Paid' : 'Cancelled'} commissions cannot be edited`)
+    if (payload.agentId) await ensureAgent(organizationId, String(payload.agentId))
+    const calculated = calculateCommissionAmounts(payload, existing)
+    const update: any = { ...payload, ...calculated, updatedBy: actorObjectId(actorId) }
+    if ('propertyId' in payload) {
+      update.propertyId = cleanOptionalId(payload.propertyId) || null
+      if (update.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, update.propertyId)
+    }
+    if ('leadId' in payload) {
+      update.leadId = cleanOptionalId(payload.leadId) || null
+      if (update.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, update.leadId)
+    }
+    if ('dueDate' in payload) update.dueDate = payload.dueDate ? asDate(payload.dueDate) : null
+
+    const accountingChanged = ['agentId', 'propertyId', 'commissionAmount', 'agentShare', 'companyShare', 'grossDealValue', 'commissionRate', 'agentSplitPercent', 'manualOverride', 'status'].some((key) => key in payload)
+    const wasApproved = existing.status === 'approved'
+    const nextStatus = payload.status ?? existing.status
+    if (accountingReady && wasApproved && existing.accrualJournalId && (accountingChanged || nextStatus !== 'approved')) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accrualJournalId, `Commission ${existing.commissionNumber} was revised`, new Date(), session)
+    }
+
+    Object.assign(existing, update)
+    await existing.save(session ? { session } : undefined)
+    if (accountingReady && nextStatus === 'approved' && Number(existing.agentShare || 0) > 0 && (!existing.accrualJournalId || accountingChanged || !wasApproved)) {
+      const version = Number(existing.accountingVersion || 0) + 1
+      const journal: any = await FinanceGlIntegrationService.postCommissionAccrual(organizationId, financeAccountingActor(actorId), existing, version, session)
+      if (journal?._id) {
+        existing.accountingVersion = version
+        existing.accrualJournalId = journal._id
+        await existing.save(session ? { session } : undefined)
+      }
+    }
+    return existing
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.updated', `Commission ${result?.commissionNumber || id} updated`)
-  return result
+  return FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
+    .populate(userRefPopulate('agentId', 'name email', { organizationId }))
+    .populate({ path: 'propertyId', select: 'title', match: { organizationId } })
 }
 
 const cancelCommission = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (commission.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
-  if (commission.status === 'cancelled') return commission.populate(userRefPopulate('agentId', 'name email', { organizationId }))
-  if (!['pending', 'approved'].includes(commission.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot cancel a ${commission.status} commission`)
-  commission.status = 'cancelled'
-  commission.cancelledAt = new Date()
-  commission.cancelledBy = actorObjectId(actorId)
-  commission.cancelReason = reason.trim()
-  commission.updatedBy = actorObjectId(actorId)
-  await commission.save()
+  const commission: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const row: any = await querySession(FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }), session)
+    if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+    if (row.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
+    if (row.status === 'cancelled') return row
+    if (!['pending', 'approved'].includes(row.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot cancel a ${row.status} commission`)
+    if (accountingReady && row.status === 'approved' && row.accrualJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), row.accrualJournalId, reason, new Date(), session)
+    }
+    row.status = 'cancelled'
+    row.cancelledAt = new Date()
+    row.cancelledBy = actorObjectId(actorId)
+    row.cancelReason = reason.trim()
+    row.updatedBy = actorObjectId(actorId)
+    await row.save(session ? { session } : undefined)
+    return row
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.cancelled', `Commission ${commission.commissionNumber} cancelled`)
-  return commission.populate(userRefPopulate('agentId', 'name email', { organizationId }))
+  return FinanceCommission.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
 }
 
 const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Cancelled commission removed by agency owner') => {
@@ -606,19 +819,65 @@ const archiveCommission = async (organizationId: string, actor: FinanceActorCont
 }
 
 const payCommission = async (organizationId: string, actorId: string, id: string, payload: any) => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
-  if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (commission.status !== 'approved') throw new ApiError(httpStatus.CONFLICT, 'Only approved commissions can be paid')
-  const paidAt = asDate(payload.paidAt)
-  let transactionId: mongoose.Types.ObjectId | undefined
-  if (commission.agentShare > 0) {
-    const transaction: any = await FinanceTransaction.create({ organizationId, type: 'expense', category: 'Agent commission', amount: commission.agentShare, currency: 'BDT', transactionDate: paidAt, paymentMethod: payload.paymentMethod, status: 'paid', description: `Commission payout to ${commission.agentId?.name || 'agent'} (${commission.commissionNumber})`, reference: payload.reference || commission.commissionNumber, sourceType: 'commission_payout', sourceId: commission._id, createdBy: actorObjectId(actorId) })
-    transactionId = transaction._id
-  }
-  commission.status = 'paid'; commission.paidAt = paidAt; commission.paymentMethod = payload.paymentMethod; commission.paymentReference = payload.reference || ''; commission.payoutTransactionId = transactionId; commission.updatedBy = actorObjectId(actorId)
-  await commission.save()
-  await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.paid', `Commission ${commission.commissionNumber} paid`)
-  return commission
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const query: any = FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
+    if (session) query.session(session)
+    const commission: any = await query
+    if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+    if (commission.status !== 'approved') throw new ApiError(httpStatus.CONFLICT, 'Only approved commissions can be paid')
+    const paidAt = asDate(payload.paidAt)
+
+    if (accountingReady && Number(commission.agentShare || 0) > 0 && !commission.accrualJournalId) {
+      const version = Number(commission.accountingVersion || 0) + 1
+      const accrual: any = await FinanceGlIntegrationService.postCommissionAccrual(organizationId, financeAccountingActor(actorId), commission, version, session)
+      if (accrual?._id) {
+        commission.accountingVersion = version
+        commission.accrualJournalId = accrual._id
+      }
+    }
+
+    let transaction: any = null
+    if (commission.agentShare > 0) {
+      const rows: any[] = await FinanceTransaction.create([{
+        organizationId,
+        type: 'expense',
+        category: 'Agent commission',
+        amount: commission.agentShare,
+        currency: 'BDT',
+        transactionDate: paidAt,
+        paymentMethod: payload.paymentMethod,
+        status: 'paid',
+        description: `Commission payout to ${commission.agentId?.name || 'agent'} (${commission.commissionNumber})`,
+        reference: payload.reference || commission.commissionNumber,
+        sourceType: 'commission_payout',
+        sourceId: commission._id,
+        propertyId: commission.propertyId || undefined,
+        createdBy: actorObjectId(actorId),
+      }], session ? { session } : undefined)
+      transaction = rows[0]
+    }
+
+    commission.status = 'paid'
+    commission.paidAt = paidAt
+    commission.paymentMethod = payload.paymentMethod
+    commission.paymentReference = payload.reference || ''
+    commission.payoutTransactionId = transaction?._id
+    commission.updatedBy = actorObjectId(actorId)
+
+    if (accountingReady && transaction) {
+      const payoutJournal: any = await FinanceGlIntegrationService.postCommissionPayout(organizationId, financeAccountingActor(actorId), commission, transaction, session)
+      if (payoutJournal?._id) {
+        commission.payoutJournalId = payoutJournal._id
+        transaction.accountingVersion = 1
+        transaction.accountingJournalId = payoutJournal._id
+        await transaction.save(session ? { session } : undefined)
+      }
+    }
+    await commission.save(session ? { session } : undefined)
+    return commission
+  })
+  await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.paid', `Commission ${result.commissionNumber} paid`)
+  return result
 }
 
 const createVendor = async (organizationId: string, actorId: string, payload: Partial<IFinanceVendor>) => {

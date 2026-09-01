@@ -141,3 +141,18 @@ export interface AccountingActor {
   permissions?: string[]
   system?: boolean
 }
+
+export type FinanceCategoryMappingType = 'income' | 'expense'
+
+export interface IFinanceCategoryAccountMapping {
+  organizationId: string
+  transactionType: FinanceCategoryMappingType
+  category: string
+  categoryKey: string
+  accountId: Types.ObjectId
+  isSystemDefault: boolean
+  createdBy: Types.ObjectId
+  updatedBy?: Types.ObjectId | null
+  createdAt?: Date
+  updatedAt?: Date
+}

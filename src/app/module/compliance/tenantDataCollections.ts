@@ -66,6 +66,7 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financejournalentries',
   'financejournallines',
   'financeaccountingsequences',
+  'financecategoryaccountmappings',
 
   // Website / domain / public traffic
   'banners',

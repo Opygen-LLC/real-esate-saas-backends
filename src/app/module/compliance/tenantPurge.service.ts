@@ -142,6 +142,7 @@ const FINANCE_PREVIEW_COLLECTIONS = [
   'financejournalentries',
   'financejournallines',
   'financeaccountingsequences',
+  'financecategoryaccountmappings',
 ] as const
 
 const WEBSITE_PREVIEW_COLLECTIONS = [

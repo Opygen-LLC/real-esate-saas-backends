@@ -33,6 +33,9 @@ router.patch('/accounting/fiscal-years/:id/status', ...advancedWrite, validateRe
 router.get('/accounting/fiscal-periods', ...advancedRead, validateRequest(FinanceAccountingValidation.listFiscalPeriods), FinanceAccountingController.listFiscalPeriods)
 router.patch('/accounting/fiscal-periods/:id/status', ...advancedWrite, validateRequest(FinanceAccountingValidation.fiscalPeriodStatus), FinanceAccountingController.setFiscalPeriodStatus)
 
+router.get('/accounting/category-mappings', ...advancedRead, FinanceAccountingController.listCategoryMappings)
+router.put('/accounting/category-mappings', ...advancedWrite, validateRequest(FinanceAccountingValidation.categoryMapping), FinanceAccountingController.setCategoryMapping)
+
 router.get('/accounting/journals', ...advancedRead, validateRequest(FinanceAccountingValidation.listJournals), FinanceAccountingController.listJournals)
 router.post('/accounting/journals', ...advancedWrite, validateRequest(FinanceAccountingValidation.createJournal), FinanceAccountingController.createJournal)
 router.get('/accounting/journals/:id', ...advancedRead, validateRequest(FinanceAccountingValidation.idParam), FinanceAccountingController.getJournal)

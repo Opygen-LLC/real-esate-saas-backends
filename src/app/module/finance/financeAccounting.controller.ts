@@ -5,6 +5,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import { requireTenant } from '../../middlewares/auth'
 import type { AccountingActor } from './financeAccounting.interface'
 import { FinanceAccountingService } from './financeAccounting.service'
+import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 
 const actor = (req: Request): AccountingActor => ({
   id: String(req.user?._id || req.user?.id || ''),
@@ -27,6 +28,10 @@ const setFiscalYearStatus = catchAsync(async (req: Request, res: Response) => se
 const listFiscalPeriods = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Fiscal periods fetched successfully', data: await FinanceAccountingService.listFiscalPeriods(requireTenant(req), req.query.fiscalYearId as string | undefined) }))
 const setFiscalPeriodStatus = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Fiscal period status updated successfully', data: await FinanceAccountingService.setFiscalPeriodStatus(requireTenant(req), actor(req), req.params.id, req.body.status) }))
 
+
+const listCategoryMappings = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Finance category mappings fetched successfully', data: await FinanceCategoryMappingService.list(requireTenant(req)) }))
+const setCategoryMapping = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Finance category mapping updated successfully', data: await FinanceCategoryMappingService.setMapping(requireTenant(req), actor(req), req.body) }))
+
 const listJournals = catchAsync(async (req: Request, res: Response) => {
   const result = await FinanceAccountingService.listJournals(requireTenant(req), req.query)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal entries fetched successfully', data: result.data, meta: result.meta })
@@ -40,13 +45,14 @@ const deleteJournal = catchAsync(async (req: Request, res: Response) => sendResp
 const openingBalances = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Opening balances posted successfully', data: await FinanceAccountingService.createOpeningBalances(requireTenant(req), actor(req), req.body) }))
 const generalLedger = catchAsync(async (req: Request, res: Response) => {
   const result = await FinanceAccountingService.getGeneralLedger(requireTenant(req), req.query)
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'General Ledger fetched successfully', data: result.data, meta: { ...result.meta, summary: result.summary } })
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'General Ledger fetched successfully', data: result.data, meta: { ...result.meta, summary: result.summary } as any })
 })
 
 export const FinanceAccountingController = {
   initialize,
   listAccounts, getAccount, createAccount, updateAccount, deleteAccount,
   listFiscalYears, createFiscalYear, setFiscalYearStatus, listFiscalPeriods, setFiscalPeriodStatus,
+  listCategoryMappings, setCategoryMapping,
   listJournals, getJournal, createJournal, updateJournal, postJournal, reverseJournal, deleteJournal,
   openingBalances,
   generalLedger,

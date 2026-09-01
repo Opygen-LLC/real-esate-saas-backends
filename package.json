@@ -166,7 +166,9 @@
     "gate:phase4-website": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-website && pnpm build && pnpm verify:phase4-website-architecture",
     "migrate:advanced-accounting-phase2": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase2.ts",
     "test:advanced-accounting-phase2": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts",
-    "verify:advanced-accounting-phase2": "node scripts/verify-advanced-accounting-phase2.mjs"
+    "verify:advanced-accounting-phase2": "node scripts/verify-advanced-accounting-phase2.mjs",
+    "migrate:advanced-accounting-phase3": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase3.ts",
+    "verify:advanced-accounting-phase3": "node scripts/verify-advanced-accounting-phase3.mjs"
   },
   "keywords": [
     "real-estate",

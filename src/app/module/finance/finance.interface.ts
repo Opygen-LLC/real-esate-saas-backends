@@ -22,6 +22,8 @@ export interface IFinanceTransaction {
   recurring?: boolean
   sourceType?: 'manual' | 'invoice_payment' | 'commission_payout'
   sourceId?: mongoose.Types.ObjectId | string
+  accountingVersion?: number
+  accountingJournalId?: mongoose.Types.ObjectId | string | null
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string
   voidedAt?: Date
@@ -50,6 +52,7 @@ export interface IFinanceInvoicePayment {
   notes?: string
   recordedBy: mongoose.Types.ObjectId | string
   transactionId?: mongoose.Types.ObjectId | string
+  journalEntryId?: mongoose.Types.ObjectId | string
 }
 
 export interface IFinanceInvoice {
@@ -77,6 +80,8 @@ export interface IFinanceInvoice {
   propertyId?: mongoose.Types.ObjectId | string
   leadId?: mongoose.Types.ObjectId | string
   payments: IFinanceInvoicePayment[]
+  accountingVersion?: number
+  revenueJournalId?: mongoose.Types.ObjectId | string | null
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string
   createdAt?: Date
@@ -110,6 +115,9 @@ export interface IFinanceCommission {
   paymentMethod?: FinancePaymentMethod
   paymentReference?: string
   payoutTransactionId?: mongoose.Types.ObjectId | string
+  accountingVersion?: number
+  accrualJournalId?: mongoose.Types.ObjectId | string | null
+  payoutJournalId?: mongoose.Types.ObjectId | string | null
   notes?: string
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string

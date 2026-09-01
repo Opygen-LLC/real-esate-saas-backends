@@ -56,6 +56,7 @@ export const FinanceAccountingValidation = {
   fiscalYearStatus: z.object({ params: z.object({ id: objectId }), body: z.object({ status: z.enum(['OPEN', 'CLOSING', 'CLOSED']) }).strict() }),
   fiscalPeriodStatus: z.object({ params: z.object({ id: objectId }), body: z.object({ status: z.enum(['OPEN', 'SOFT_LOCKED', 'CLOSED']) }).strict() }),
   listFiscalPeriods: z.object({ query: z.object({ fiscalYearId: objectId.optional() }).passthrough() }),
+  categoryMapping: z.object({ body: z.object({ transactionType: z.enum(['income', 'expense']), category: z.string().trim().min(1).max(100), accountId: objectId }).strict() }),
   createJournal: z.object({ body: journalBody }),
   updateJournal: z.object({ params: z.object({ id: objectId }), body: journalBody.partial().refine((body) => Object.keys(body).length > 0, { message: 'At least one journal field must be provided' }) }),
   reverseJournal: z.object({ params: z.object({ id: objectId }), body: z.object({ reason: z.string().trim().min(5).max(500), reversalDate: dateValue.optional() }).strict() }),

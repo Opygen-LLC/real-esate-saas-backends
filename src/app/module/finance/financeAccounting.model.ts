@@ -6,6 +6,7 @@ import type {
   IFinanceFiscalYear,
   IFinanceJournalEntry,
   IFinanceJournalLine,
+  IFinanceCategoryAccountMapping,
 } from './financeAccounting.interface'
 
 const actorRef = { type: Schema.Types.ObjectId, ref: 'User', required: true } as const
@@ -129,6 +130,20 @@ financeJournalLineSchema.index({ organizationId: 1, vendorId: 1, postingDate: 1 
 financeJournalLineSchema.index({ organizationId: 1, clientId: 1, postingDate: 1 }, { name: 'finance_journal_line_tenant_client_date' })
 financeJournalLineSchema.index({ organizationId: 1, sourceType: 1, postingDate: 1 }, { name: 'finance_journal_line_tenant_source_date' })
 
+
+const financeCategoryAccountMappingSchema = new Schema<IFinanceCategoryAccountMapping>({
+  organizationId: { type: String, required: true, trim: true },
+  transactionType: { type: String, enum: ['income', 'expense'], required: true },
+  category: { type: String, required: true, trim: true, maxlength: 100 },
+  categoryKey: { type: String, required: true, trim: true, lowercase: true, maxlength: 120 },
+  accountId: { type: Schema.Types.ObjectId, ref: 'FinanceAccount', required: true },
+  isSystemDefault: { type: Boolean, default: false },
+  createdBy: actorRef,
+  updatedBy: optionalActorRef,
+}, { timestamps: true, versionKey: false })
+financeCategoryAccountMappingSchema.index({ organizationId: 1, transactionType: 1, categoryKey: 1 }, { unique: true, name: 'finance_category_mapping_tenant_type_category_unique' })
+financeCategoryAccountMappingSchema.index({ organizationId: 1, accountId: 1 }, { name: 'finance_category_mapping_tenant_account' })
+
 const financeAccountingSequenceSchema = new Schema<IFinanceAccountingSequence>({
   organizationId: { type: String, required: true, trim: true },
   key: { type: String, required: true, trim: true, maxlength: 80 },
@@ -142,3 +157,4 @@ export const FinanceFiscalPeriod: Model<IFinanceFiscalPeriod> = mongoose.models.
 export const FinanceJournalEntry: Model<IFinanceJournalEntry> = mongoose.models.FinanceJournalEntry || mongoose.model<IFinanceJournalEntry>('FinanceJournalEntry', financeJournalEntrySchema)
 export const FinanceJournalLine: Model<IFinanceJournalLine> = mongoose.models.FinanceJournalLine || mongoose.model<IFinanceJournalLine>('FinanceJournalLine', financeJournalLineSchema)
 export const FinanceAccountingSequence: Model<IFinanceAccountingSequence> = mongoose.models.FinanceAccountingSequence || mongoose.model<IFinanceAccountingSequence>('FinanceAccountingSequence', financeAccountingSequenceSchema)
+export const FinanceCategoryAccountMapping: Model<IFinanceCategoryAccountMapping> = mongoose.models.FinanceCategoryAccountMapping || mongoose.model<IFinanceCategoryAccountMapping>('FinanceCategoryAccountMapping', financeCategoryAccountMappingSchema)
