@@ -61,7 +61,7 @@ export const FinanceAccountingValidation = {
   updateJournal: z.object({ params: z.object({ id: objectId }), body: journalBody.partial().refine((body) => Object.keys(body).length > 0, { message: 'At least one journal field must be provided' }) }),
   reverseJournal: z.object({ params: z.object({ id: objectId }), body: z.object({ reason: z.string().trim().min(5).max(500), reversalDate: dateValue.optional() }).strict() }),
   listJournals: z.object({ query: z.object({
-    status: z.enum(['DRAFT', 'POSTED', 'REVERSED']).optional(),
+    status: z.enum(['DRAFT', 'APPROVED', 'POSTED', 'REVERSED']).optional(),
     sourceType: z.string().trim().max(80).optional(),
     startDate: dateValue.optional(), endDate: dateValue.optional(),
     page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(100).optional(),

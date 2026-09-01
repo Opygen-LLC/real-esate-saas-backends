@@ -128,6 +128,9 @@ const createOrReplace = async (organizationId: string, input: TenantEntitlementO
         effectiveAfter: snapshotInput(after),
       },
     }, session)
+    if (Boolean(before.limits.hasAdvancedAccounting) !== Boolean(after.limits.hasAdvancedAccounting)) {
+      await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: after.limits.hasAdvancedAccounting ? 'finance.advanced_accounting_enabled' : 'finance.advanced_accounting_disabled', entityType: 'organization', entityId: organizationId, reason: input.reason, requestId: actor.requestId, ip: actor.ip, metadata: { eventCode: after.limits.hasAdvancedAccounting ? 'ADVANCED_ACCOUNTING_ENABLED' : 'ADVANCED_ACCOUNTING_DISABLED', before: Boolean(before.limits.hasAdvancedAccounting), after: Boolean(after.limits.hasAdvancedAccounting), overrideVersion: created.version, expiresAt } }, session)
+    }
   })
 
   await publishSubscriptionEntitlementReconciliation(reconciliation)
@@ -156,6 +159,9 @@ const revoke = async (organizationId: string, reason: string, actor: Actor) => {
       reason: `Tenant-specific entitlement override v${row.version} revoked`,
     })
     await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: 'subscription.tenant_entitlement_override_revoked', entityType: 'tenantEntitlementOverride', entityId: String(row._id), reason, requestId: actor.requestId, ip: actor.ip, metadata: { version: row.version, effectiveBefore: snapshotInput(before), effectiveAfter: snapshotInput(after) } }, session)
+    if (Boolean(before.limits.hasAdvancedAccounting) !== Boolean(after.limits.hasAdvancedAccounting)) {
+      await writeAudit({ organizationId, actorId: actor.id, actorRole: 'super-admin', action: after.limits.hasAdvancedAccounting ? 'finance.advanced_accounting_enabled' : 'finance.advanced_accounting_disabled', entityType: 'organization', entityId: organizationId, reason, requestId: actor.requestId, ip: actor.ip, metadata: { eventCode: after.limits.hasAdvancedAccounting ? 'ADVANCED_ACCOUNTING_ENABLED' : 'ADVANCED_ACCOUNTING_DISABLED', before: Boolean(before.limits.hasAdvancedAccounting), after: Boolean(after.limits.hasAdvancedAccounting), overrideVersion: row.version } }, session)
+    }
   })
   await publishSubscriptionEntitlementReconciliation(reconciliation)
   await CacheInvalidationService.invalidateTenant(organizationId)
@@ -206,6 +212,24 @@ const applyDueExpirations = async (limit = 50, now = new Date()) => {
         const after = await EntitlementService.resolve(dueRow.organizationId, session, { allowInactive: true, allowUnavailable: true })
         reconciliation = await reconcileOrganizationEntitlements(dueRow.organizationId, snapshotInput(before), snapshotInput(after), { session, actorId: 'system:tenant-override-expiry', reason: `Tenant-specific entitlement override v${dueRow.version} expired` })
         await writeAudit({ organizationId: dueRow.organizationId, actorId: 'system:tenant-override-expiry', actorRole: 'system', action: 'subscription.tenant_entitlement_override_expired', entityType: 'tenantEntitlementOverride', entityId: String(dueRow._id), reason: 'Tenant-specific entitlement override reached its configured expiry', metadata: { version: dueRow.version, expiresAt: dueRow.expiresAt } }, session)
+        if (Boolean(before.limits.hasAdvancedAccounting) !== Boolean(after.limits.hasAdvancedAccounting)) {
+          await writeAudit({
+            organizationId: dueRow.organizationId,
+            actorId: 'system:tenant-override-expiry',
+            actorRole: 'system',
+            action: after.limits.hasAdvancedAccounting ? 'finance.advanced_accounting_enabled' : 'finance.advanced_accounting_disabled',
+            entityType: 'organization',
+            entityId: dueRow.organizationId,
+            reason: 'Tenant-specific Advanced Accounting override expired',
+            metadata: {
+              eventCode: after.limits.hasAdvancedAccounting ? 'ADVANCED_ACCOUNTING_ENABLED' : 'ADVANCED_ACCOUNTING_DISABLED',
+              before: Boolean(before.limits.hasAdvancedAccounting),
+              after: Boolean(after.limits.hasAdvancedAccounting),
+              overrideVersion: dueRow.version,
+              expiresAt: dueRow.expiresAt,
+            },
+          }, session)
+        }
         expired += 1
       })
       await publishSubscriptionEntitlementReconciliation(reconciliation)

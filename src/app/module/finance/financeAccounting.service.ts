@@ -8,6 +8,7 @@ import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
 import { FinanceLoan, FinanceShareholder, FinanceShareholderLoan } from './financeCapital.model'
+import { FinanceBudget, FinanceCommission, FinanceInvoice, FinanceTransaction, FinanceVendor } from './finance.model'
 import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import type {
   AccountingActor,
@@ -239,6 +240,16 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
 
   const accountId = (code: string) => accountsByCode.get(code)?._id || null
   const now = new Date()
+  const hasExistingLedger = Boolean(await withSession(FinanceJournalEntry.exists({ organizationId, status: { $in: ['POSTED', 'REVERSED'] } }), session))
+  const legacyPresence = !hasExistingLedger ? await Promise.all([
+    withSession(FinanceTransaction.exists({ organizationId }), session),
+    withSession(FinanceInvoice.exists({ organizationId }), session),
+    withSession(FinanceCommission.exists({ organizationId }), session),
+    withSession(FinanceVendor.exists({ organizationId }), session),
+    withSession(FinanceBudget.exists({ organizationId }), session),
+  ]) : []
+  const legacyFinanceExists = !hasExistingLedger && legacyPresence.some(Boolean)
+  const activationStatus = hasExistingLedger ? 'ACTIVE' : legacyFinanceExists ? 'MIGRATION_REQUIRED' : String(settings?.activationStatus || 'ACTIVE')
   settings = await FinanceAccountingSettings.findOneAndUpdate(
     { organizationId },
     {
@@ -246,6 +257,7 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
         baseCurrency,
         accountingMethod: 'ACCRUAL',
         fiscalYearStartMonth,
+        activationStatus,
         initializedAt: settings?.initializedAt || now,
         initializedBy: settings?.initializedBy || actor.id,
         updatedBy: actor.id,
@@ -516,12 +528,14 @@ const setFiscalYearStatus = async (organizationId: string, actor: AccountingActo
   const row: any = await withSession(FinanceFiscalYear.findOne({ _id: asObjectId(id, 'fiscal year id'), organizationId }), session)
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Fiscal year not found')
   const before = row.status
+  if (status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Use the controlled year-end close workflow to close a fiscal year')
+  if (before === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'A closed fiscal year cannot be reopened directly')
   row.status = status
   row.updatedBy = actorObjectId(actor)
-  row.closedAt = status === 'CLOSED' ? new Date() : null
-  row.closedBy = status === 'CLOSED' ? actorObjectId(actor) : null
+  row.closedAt = null
+  row.closedBy = null
   await row.save({ session })
-  await audit(organizationId, actor, status === 'CLOSED' ? 'finance.fiscal_year_closed' : 'finance.fiscal_year_status_changed', 'financeFiscalYear', String(row._id), `Fiscal year status changed to ${status}`, { before, after: status }, session)
+  await audit(organizationId, actor, 'finance.fiscal_year_status_changed', 'financeFiscalYear', String(row._id), `Fiscal year status changed to ${status}`, { before, after: status }, session)
   return row.toObject()
 })
 
@@ -529,16 +543,18 @@ const setFiscalPeriodStatus = async (organizationId: string, actor: AccountingAc
   const row: any = await withSession(FinanceFiscalPeriod.findOne({ _id: asObjectId(id, 'fiscal period id'), organizationId }), session)
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Fiscal period not found')
   const before = row.status
+  if (status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Use the controlled period close workflow to close a fiscal period')
+  if (before === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Use the controlled period reopen workflow to reopen a closed period')
   row.status = status
   row.updatedBy = actorObjectId(actor)
-  row.closedAt = status === 'CLOSED' ? new Date() : null
-  row.closedBy = status === 'CLOSED' ? actorObjectId(actor) : null
+  row.closedAt = null
+  row.closedBy = null
   await row.save({ session })
-  await audit(organizationId, actor, status === 'CLOSED' ? 'finance.fiscal_period_closed' : status === 'OPEN' && before !== 'OPEN' ? 'finance.fiscal_period_reopened' : 'finance.fiscal_period_status_changed', 'financeFiscalPeriod', String(row._id), `Fiscal period status changed to ${status}`, { before, after: status }, session)
+  await audit(organizationId, actor, 'finance.fiscal_period_status_changed', 'financeFiscalPeriod', String(row._id), `Fiscal period status changed to ${status}`, { before, after: status }, session)
   return row.toObject()
 })
 
-const resolvePostingPeriod = async (organizationId: string, postingDate: Date, requestedPeriodId?: string, session?: ClientSession) => {
+const resolvePostingPeriod = async (organizationId: string, postingDate: Date, requestedPeriodId?: string, session?: ClientSession, allowClosedPeriod = false) => {
   let period: any
   if (requestedPeriodId) {
     period = await getFiscalPeriod(organizationId, requestedPeriodId, session)
@@ -549,8 +565,8 @@ const resolvePostingPeriod = async (organizationId: string, postingDate: Date, r
     period = await query.lean()
   }
   if (!period) throw new ApiError(httpStatus.CONFLICT, 'No fiscal period exists for the posting date. Initialize or create a fiscal year first.')
-  if (period.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', 'FISCAL_PERIOD_CLOSED')
-  if (period.status === 'SOFT_LOCKED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', 'FISCAL_PERIOD_SOFT_LOCKED')
+  if (period.status === 'CLOSED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', 'FISCAL_PERIOD_CLOSED')
+  if (period.status === 'SOFT_LOCKED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', 'FISCAL_PERIOD_SOFT_LOCKED')
   const year = await getFiscalYear(organizationId, String(period.fiscalYearId), session)
   if (year.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal year is not allowed', '', 'FISCAL_YEAR_CLOSED')
   return { period, year }
@@ -649,7 +665,7 @@ const createJournalDraftInternal = async (
   organizationId: string,
   actor: AccountingActor,
   input: FinanceJournalInput,
-  options: { sourceType: string; sourceId?: string | null; idempotencyKey?: string | null; entryRole?: 'PRIMARY' | 'REVERSAL'; reversalOf?: string | null } = { sourceType: 'MANUAL' },
+  options: { sourceType: string; sourceId?: string | null; idempotencyKey?: string | null; entryRole?: 'PRIMARY' | 'REVERSAL'; reversalOf?: string | null; allowClosedPeriod?: boolean } = { sourceType: 'MANUAL' },
   session?: ClientSession,
 ) => {
   await assertAccountingInitialized(organizationId, session)
@@ -661,9 +677,17 @@ const createJournalDraftInternal = async (
   if (session) settingsQuery.session(session)
   const settings = await settingsQuery.lean()
   if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before creating journals')
+  const activationStatus = String(settings.activationStatus || 'ACTIVE')
+  const migrationSources = new Set(['OPENING_BALANCE', 'OPENING_BALANCE_MIGRATION', 'YEAR_END_CLOSE_PNL', 'YEAR_END_TRANSFER_EARNINGS'])
+  if (activationStatus === 'MIGRATION_REQUIRED' && !migrationSources.has(sourceType)) {
+    throw new ApiError(httpStatus.CONFLICT, 'Complete the accounting initialization migration before posting to the General Ledger', '', 'ACCOUNTING_MIGRATION_REQUIRED')
+  }
+  if (settings.accountingStartDate && postingDate < new Date(settings.accountingStartDate) && !migrationSources.has(sourceType) && sourceType !== 'REVERSAL') {
+    throw new ApiError(httpStatus.CONFLICT, "Posting date is before this organization\'s accounting start date", '', 'ACCOUNTING_START_DATE_LOCK')
+  }
   const accounts = await assertJournalAccounts(organizationId, input.lines, sourceType, session)
   assertAccountsUseCurrency(accounts, settings.baseCurrency)
-  const { period, year } = await resolvePostingPeriod(organizationId, postingDate, input.fiscalPeriodId, session)
+  const { period, year } = await resolvePostingPeriod(organizationId, postingDate, input.fiscalPeriodId, session, Boolean(options.allowClosedPeriod))
   const journalNumber = await nextJournalNumber(organizationId, postingDate, session)
   const actorId = actorObjectId(actor)
   let journalRows
@@ -729,7 +753,7 @@ const createManualJournal = async (organizationId: string, actor: AccountingActo
 const updateDraftJournal = async (organizationId: string, actor: AccountingActor, id: string, input: Partial<FinanceJournalInput>) => accountingTransaction(async (session) => {
   const journal: any = await withSession(FinanceJournalEntry.findOne({ _id: asObjectId(id, 'journal id'), organizationId }), session)
   if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
-  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Posted or reversed journals are immutable')
+  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Approved, posted or reversed journals are immutable')
   if (journal.sourceType !== 'MANUAL' && journal.sourceType !== 'OPENING_BALANCE') throw new ApiError(httpStatus.CONFLICT, 'Automated source journals cannot be edited manually')
   const lines = input.lines || await withSession(FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }), session).lean().then((rows: any[]) => rows.map((line) => ({ accountId: String(line.accountId), debitMinor: line.debitMinor, creditMinor: line.creditMinor, description: line.description, propertyId: line.propertyId ? String(line.propertyId) : null, agentId: line.agentId ? String(line.agentId) : null, vendorId: line.vendorId ? String(line.vendorId) : null, clientId: line.clientId ? String(line.clientId) : null, shareholderId: line.shareholderId ? String(line.shareholderId) : null })))
   validateLineAmounts(lines, false)
@@ -757,9 +781,32 @@ const updateDraftJournal = async (organizationId: string, actor: AccountingActor
   return getJournal(organizationId, String(journal._id), session)
 })
 
+const approveJournal = async (organizationId: string, actor: AccountingActor, id: string) => accountingTransaction(async (session) => {
+  const journal: any = await withSession(FinanceJournalEntry.findOne({ _id: asObjectId(id, 'journal id'), organizationId }), session)
+  if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
+  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Only draft journals can be approved')
+  if (journal.sourceType !== 'MANUAL') throw new ApiError(httpStatus.CONFLICT, 'Automated journals are approved by their source workflow')
+  const actorId = actorObjectId(actor)
+  if (String(journal.createdBy) === String(actorId)) throw new ApiError(httpStatus.CONFLICT, 'Maker-checker requires a different user to approve this journal', '', 'MAKER_CHECKER_SAME_ACTOR')
+  const now = new Date()
+  journal.status = 'APPROVED'
+  journal.approvedBy = actorId
+  journal.approvedAt = now
+  await journal.save({ session })
+  await FinanceJournalLine.updateMany({ organizationId, journalEntryId: journal._id }, { $set: { journalStatus: 'APPROVED' } }, { session })
+  await audit(organizationId, actor, 'finance.journal_approved', 'financeJournalEntry', String(journal._id), 'Manual journal approved under maker-checker workflow', { journalNumber: journal.journalNumber, makerId: String(journal.createdBy), checkerId: actor.id }, session)
+  return getJournal(organizationId, String(journal._id), session)
+})
+
 const postJournalInternal = async (organizationId: string, actor: AccountingActor, id: string, session?: ClientSession) => {
   const journal = await getJournal(organizationId, id, session)
-  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Only draft journals can be posted')
+  if (!['DRAFT', 'APPROVED'].includes(journal.status)) throw new ApiError(httpStatus.CONFLICT, 'Only draft or approved journals can be posted')
+  const settings = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
+  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before posting journals')
+  if (journal.sourceType === 'MANUAL' && settings.makerCheckerRequired) {
+    if (journal.status !== 'APPROVED' || !journal.approvedBy) throw new ApiError(httpStatus.CONFLICT, 'This manual journal requires approval by a different user before posting', '', 'JOURNAL_APPROVAL_REQUIRED')
+    if (String(journal.createdBy) === String(journal.approvedBy)) throw new ApiError(httpStatus.CONFLICT, 'Maker and checker must be different users', '', 'MAKER_CHECKER_SAME_ACTOR')
+  }
   const normalizedLines = (journal.lines as any[]).map((line) => ({
     accountId: String(line.accountId?._id || line.accountId),
     debitMinor: line.debitMinor,
@@ -774,12 +821,19 @@ const postJournalInternal = async (organizationId: string, actor: AccountingActo
   const totals = validateLineAmounts(normalizedLines, true)
   const accountMap = await assertJournalAccounts(organizationId, normalizedLines, journal.sourceType, session)
   assertAccountsUseCurrency(accountMap, journal.currency)
-  await resolvePostingPeriod(organizationId, journal.postingDate, String(journal.fiscalPeriodId), session)
+  const closingSource = ['YEAR_END_CLOSE_PNL', 'YEAR_END_TRANSFER_EARNINGS'].includes(String(journal.sourceType || ''))
+  await resolvePostingPeriod(organizationId, journal.postingDate, String(journal.fiscalPeriodId), session, closingSource)
   const actorId = actorObjectId(actor)
   const now = new Date()
+  const allowedSourceStatus = journal.status as FinanceJournalStatus
+  const postSet: Record<string, unknown> = { status: 'POSTED', postedBy: actorId, postedAt: now }
+  if (!journal.approvedBy) {
+    postSet.approvedBy = actorId
+    postSet.approvedAt = now
+  }
   const updated = await FinanceJournalEntry.findOneAndUpdate(
-    { _id: journal._id, organizationId, status: 'DRAFT' },
-    { $set: { status: 'POSTED', approvedBy: actorId, postedBy: actorId, postedAt: now } },
+    { _id: journal._id, organizationId, status: allowedSourceStatus },
+    { $set: postSet },
     { new: true, session },
   ).lean()
   if (!updated) throw new ApiError(httpStatus.CONFLICT, 'Journal was changed by another request and could not be posted')
@@ -793,7 +847,7 @@ const postJournal = async (organizationId: string, actor: AccountingActor, id: s
 const deleteDraftJournal = async (organizationId: string, actor: AccountingActor, id: string) => accountingTransaction(async (session) => {
   const journal: any = await withSession(FinanceJournalEntry.findOne({ _id: asObjectId(id, 'journal id'), organizationId }), session)
   if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
-  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Posted or reversed journals cannot be deleted')
+  if (journal.status !== 'DRAFT') throw new ApiError(httpStatus.CONFLICT, 'Approved, posted or reversed journals cannot be deleted')
   await FinanceJournalLine.deleteMany({ organizationId, journalEntryId: journal._id }, { session })
   await FinanceJournalEntry.deleteOne({ _id: journal._id, organizationId }, { session })
   await audit(organizationId, actor, 'finance.journal_draft_deleted', 'financeJournalEntry', String(journal._id), 'Draft journal deleted', { journalNumber: journal.journalNumber }, session)
@@ -936,6 +990,7 @@ export const FinanceAccountingService = {
   listJournals,
   createManualJournal,
   updateDraftJournal,
+  approveJournal,
   postJournal,
   deleteDraftJournal,
   reverseJournal,

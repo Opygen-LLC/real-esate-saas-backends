@@ -1,7 +1,6 @@
 import httpStatus from 'http-status'
 import mongoose, { type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
-import { EntitlementService } from '../entitlement/entitlement.service'
 import type { AccountingActor, FinanceJournalLineInput } from './financeAccounting.interface'
 import { FinanceAccount, FinanceJournalEntry } from './financeAccounting.model'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
@@ -50,10 +49,14 @@ const bankGlAccount = async (organizationId: string, bankAccountId: unknown, fal
 }
 
 const isAutomaticPostingReady = async (organizationId: string, session?: ClientSession) => {
-  const resolved = await EntitlementService.resolve(organizationId, session, { allowInactive: true })
-  if (!resolved.limits?.entitlements?.advancedAccounting?.enabled) return false
+  // Once an organization has an ACTIVE ledger, keep that ledger synchronized
+  // even during a subscription downgrade. Advanced-accounting UI/API writes are
+  // still entitlement-gated, but legacy/basic Finance is allowed to continue and
+  // must not create an accounting gap that only becomes visible after re-upgrade.
   const initialized = await withSession(FinanceAccount.exists({ organizationId, systemKey: 'ASSETS_ROOT', status: 'ACTIVE' }), session)
-  return Boolean(initialized)
+  if (!initialized) return false
+  const settings = await withSession(FinanceAccountingSettings.findOne({ organizationId }).select('activationStatus'), session).lean()
+  return Boolean(settings && String(settings.activationStatus || 'ACTIVE') === 'ACTIVE')
 }
 
 const postAutomaticJournal = async (

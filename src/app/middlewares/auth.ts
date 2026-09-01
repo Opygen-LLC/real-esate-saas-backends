@@ -14,6 +14,8 @@ import { TenantPurgeBarrier } from '../module/compliance/tenantPurgeBarrier.serv
 import { TenantAccessService } from '../module/tenantAccess/tenantAccess.service'
 import { EntitlementService } from '../module/entitlement/entitlement.service'
 import { ENTITLEMENT_CAPABILITIES, type EntitlementCapability } from '../module/entitlement/entitlement.types'
+import { FinanceAccountingSettings } from '../module/finance/financeAccountingSettings.model'
+import { FinanceAccountingInitialization } from '../module/finance/financeInitialization.model'
 
 const authenticate = async (req: Request): Promise<void> => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
@@ -90,6 +92,37 @@ const requireEntitlement = (capability: EntitlementCapability) => async (req: Re
   } catch (error) { next(error) }
 }
 
+const requireAdvancedAccountingReadAccess = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) await authenticate(req)
+    const organizationId = requireTenant(req)
+    const resolved = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
+    const entitled = Boolean(resolved.limits?.entitlements?.advancedAccounting?.enabled)
+    if (!entitled) {
+      const settings = await FinanceAccountingSettings.findOne({ organizationId }).select('_id initializedAt activationStatus').lean()
+      if (!settings?.initializedAt) {
+        throw new ApiError(403, 'advanced accounting is not enabled for this organization', '', 'ENTITLEMENT_REQUIRED', {
+          entitlement: 'ADVANCED_ACCOUNTING', currentPlan: resolved.organization?.subscription?.plan, upgradeRequired: true,
+        })
+      }
+      ;(req as any).advancedAccountingReadOnly = true
+    }
+    next()
+  } catch (error) { next(error) }
+}
+
+const rejectAccountingMigrationLock = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) await authenticate(req)
+    const organizationId = requireTenant(req)
+    const activating = await FinanceAccountingInitialization.exists({ organizationId, status: 'ACTIVATING' })
+    if (activating) {
+      throw new ApiError(409, 'Finance is temporarily locked while historical accounting balances are being activated. Retry after the activation finishes.', '', 'ACCOUNTING_MIGRATION_IN_PROGRESS')
+    }
+    next()
+  } catch (error) { next(error) }
+}
+
 const authSuperAdmin = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   try { await authenticate(req); if (req.user!.userRole !== 'super-admin') throw new ApiError(403, 'Platform administrator access required'); next() }
   catch (error) { next(error) }
@@ -99,4 +132,4 @@ export const requireTenant = (req: Request): string => {
   return req.tenant.organizationId
 }
 export { Permission, permissionMatrix, permissionsForRole, roleHasPermission }
-export const authMiddlewares = { auth, authSuperAdmin, requirePermission, requireAnyPermission, requireEntitlement }
+export const authMiddlewares = { auth, authSuperAdmin, requirePermission, requireAnyPermission, requireEntitlement, requireAdvancedAccountingReadAccess, rejectAccountingMigrationLock }

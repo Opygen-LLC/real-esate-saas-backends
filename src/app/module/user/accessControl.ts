@@ -11,6 +11,13 @@ export const permissionValues = [
   'crm.configure', 'crm.export',
   'messaging.manage', 'whatsapp.manage',
   'finance.read', 'finance.write', 'finance.delete',
+  'finance.accounting.read', 'finance.accounts.manage',
+  'finance.journal.create', 'finance.journal.approve', 'finance.journal.post', 'finance.journal.reverse',
+  'finance.receivables.manage', 'finance.payables.manage',
+  'finance.bank.manage', 'finance.bank.reconcile',
+  'finance.shareholders.read', 'finance.shareholders.manage', 'finance.loans.manage',
+  'finance.tax.manage', 'finance.period.close', 'finance.period.reopen',
+  'finance.reports.read', 'finance.reports.export', 'finance.audit.read',
 ] as const
 
 
@@ -32,6 +39,11 @@ export const permissionMatrix: Record<string, Permission[]> = {
     'crm.configure', 'crm.export',
     'messaging.manage', 'whatsapp.manage',
     'finance.read', 'finance.write',
+    'finance.accounting.read', 'finance.accounts.manage',
+    'finance.journal.create', 'finance.journal.approve', 'finance.journal.post', 'finance.journal.reverse',
+    'finance.receivables.manage', 'finance.payables.manage', 'finance.bank.manage', 'finance.bank.reconcile',
+    'finance.shareholders.read', 'finance.shareholders.manage', 'finance.loans.manage', 'finance.tax.manage',
+    'finance.period.close', 'finance.reports.read', 'finance.reports.export', 'finance.audit.read',
   ],
   agent: [
     'dashboard.read', 'properties.read', 'properties.write',
@@ -66,6 +78,25 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'users.write': ['users.read'],
   'finance.write': ['finance.read'],
   'finance.delete': ['finance.read'],
+  'finance.accounting.read': ['finance.read'],
+  'finance.accounts.manage': ['finance.accounting.read'],
+  'finance.journal.create': ['finance.accounting.read'],
+  'finance.journal.approve': ['finance.accounting.read'],
+  'finance.journal.post': ['finance.accounting.read'],
+  'finance.journal.reverse': ['finance.accounting.read'],
+  'finance.receivables.manage': ['finance.accounting.read'],
+  'finance.payables.manage': ['finance.accounting.read'],
+  'finance.bank.manage': ['finance.accounting.read'],
+  'finance.bank.reconcile': ['finance.accounting.read', 'finance.bank.manage'],
+  'finance.shareholders.read': ['finance.accounting.read'],
+  'finance.shareholders.manage': ['finance.shareholders.read'],
+  'finance.loans.manage': ['finance.accounting.read'],
+  'finance.tax.manage': ['finance.accounting.read'],
+  'finance.period.close': ['finance.accounting.read'],
+  'finance.period.reopen': ['finance.accounting.read', 'finance.period.close'],
+  'finance.reports.read': ['finance.accounting.read'],
+  'finance.reports.export': ['finance.reports.read'],
+  'finance.audit.read': ['finance.accounting.read'],
   'analytics.advanced': ['analytics.read'],
   'crm.configure': ['leads.read', 'users.read'],
   'crm.export': ['leads.read', 'contacts.read'],
@@ -73,7 +104,7 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'whatsapp.manage': ['leads.read'],
 }
 
-const ownerOnlyPermissions = new Set<Permission>(['billing.manage', 'finance.delete', 'website.submissions.delete'])
+const ownerOnlyPermissions = new Set<Permission>(['billing.manage', 'finance.delete', 'finance.period.reopen', 'website.submissions.delete'])
 
 export const normalizeCustomPermissions = (input: string[] = [], options: { allowBilling?: boolean } = {}): Permission[] => {
   const allowed = new Set<string>(permissionValues)
@@ -160,8 +191,27 @@ export const permissionCatalog = [
     { permission: 'domains.manage', label: 'Custom domain', description: 'Configure a custom domain when included in the agency plan.' },
   ] },
   { group: 'Finance & billing', items: [
-    { permission: 'finance.read', label: 'View finance', description: 'View finance reports and transactions.' },
-    { permission: 'finance.write', label: 'Manage finance', description: 'Create and update finance records.' },
+    { permission: 'finance.read', label: 'View finance', description: 'View legacy finance reports and transactions.' },
+    { permission: 'finance.write', label: 'Manage finance', description: 'Create and update legacy finance records.' },
+    { permission: 'finance.accounting.read', label: 'View accounting', description: 'View Advanced Accounting workspace and ledger data when entitled or preserved read-only.' },
+    { permission: 'finance.accounts.manage', label: 'Manage Chart of Accounts', description: 'Create and maintain custom General Ledger accounts.' },
+    { permission: 'finance.journal.create', label: 'Create journals', description: 'Create and edit draft manual journal entries.' },
+    { permission: 'finance.journal.approve', label: 'Approve journals', description: 'Approve draft journals when maker-checker is enabled.' },
+    { permission: 'finance.journal.post', label: 'Post journals', description: 'Post approved or permitted draft journals to the General Ledger.' },
+    { permission: 'finance.journal.reverse', label: 'Reverse journals', description: 'Create controlled reversal entries for posted journals.' },
+    { permission: 'finance.receivables.manage', label: 'Manage receivables', description: 'Manage Accounts Receivable operations.' },
+    { permission: 'finance.payables.manage', label: 'Manage payables', description: 'Manage vendor bills and Accounts Payable.' },
+    { permission: 'finance.bank.manage', label: 'Manage banking', description: 'Manage finance bank accounts and transfers.' },
+    { permission: 'finance.bank.reconcile', label: 'Reconcile banks', description: 'Import statements, match transactions and complete bank reconciliation.' },
+    { permission: 'finance.shareholders.read', label: 'View shareholders', description: 'View shareholder registry and equity history.' },
+    { permission: 'finance.shareholders.manage', label: 'Manage shareholders', description: 'Manage shareholder registry, equity and dividends.' },
+    { permission: 'finance.loans.manage', label: 'Manage loans', description: 'Manage shareholder and company loans.' },
+    { permission: 'finance.tax.manage', label: 'Manage tax', description: 'Create and maintain tax/VAT configuration.' },
+    { permission: 'finance.period.close', label: 'Close accounting periods', description: 'Complete month-end and year-end accounting close.' },
+    { permission: 'finance.period.reopen', label: 'Reopen accounting periods', description: 'Owner-only permission to reopen previously closed periods.' },
+    { permission: 'finance.reports.read', label: 'View financial statements', description: 'View GL-based financial statements and advanced reports.' },
+    { permission: 'finance.reports.export', label: 'Export financial reports', description: 'Download financial reports as PDF, CSV or XLSX.' },
+    { permission: 'finance.audit.read', label: 'View finance audit trail', description: 'View accounting audit and close history.' },
     { permission: 'billing.manage', label: 'Manage subscription', description: 'Owner-only subscription and billing management.' },
   ] },
 ] as const

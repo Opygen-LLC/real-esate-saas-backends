@@ -39,6 +39,7 @@ const listJournals = catchAsync(async (req: Request, res: Response) => {
 const getJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal entry fetched successfully', data: await FinanceAccountingService.getJournal(requireTenant(req), req.params.id) }))
 const createJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Journal draft created successfully', data: await FinanceAccountingService.createManualJournal(requireTenant(req), actor(req), req.body) }))
 const updateJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal draft updated successfully', data: await FinanceAccountingService.updateDraftJournal(requireTenant(req), actor(req), req.params.id, req.body) }))
+const approveJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal approved successfully', data: await FinanceAccountingService.approveJournal(requireTenant(req), actor(req), req.params.id) }))
 const postJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal posted successfully', data: await FinanceAccountingService.postJournal(requireTenant(req), actor(req), req.params.id) }))
 const reverseJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Journal reversed successfully', data: await FinanceAccountingService.reverseJournal(requireTenant(req), actor(req), req.params.id, req.body) }))
 const deleteJournal = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Draft journal deleted successfully', data: await FinanceAccountingService.deleteDraftJournal(requireTenant(req), actor(req), req.params.id) }))
@@ -53,7 +54,7 @@ export const FinanceAccountingController = {
   listAccounts, getAccount, createAccount, updateAccount, deleteAccount,
   listFiscalYears, createFiscalYear, setFiscalYearStatus, listFiscalPeriods, setFiscalPeriodStatus,
   listCategoryMappings, setCategoryMapping,
-  listJournals, getJournal, createJournal, updateJournal, postJournal, reverseJournal, deleteJournal,
+  listJournals, getJournal, createJournal, updateJournal, approveJournal, postJournal, reverseJournal, deleteJournal,
   openingBalances,
   generalLedger,
 }

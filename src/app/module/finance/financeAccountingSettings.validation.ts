@@ -13,6 +13,7 @@ export const FinanceAccountingSettingsValidation = {
     baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
     accountingMethod: z.literal('ACCRUAL').optional(),
     fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
+    makerCheckerRequired: z.boolean().optional(),
     defaultAccounts: accountMap.partial().optional(),
     taxAccounts: taxMap.partial().optional(),
   }).strict().refine((body) => Object.keys(body).length > 0, { message: 'At least one accounting setting must be provided' }) }),

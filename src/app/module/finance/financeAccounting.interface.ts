@@ -5,7 +5,7 @@ export type FinanceNormalBalance = 'DEBIT' | 'CREDIT'
 export type FinanceAccountStatus = 'ACTIVE' | 'INACTIVE'
 export type FinanceFiscalYearStatus = 'OPEN' | 'CLOSING' | 'CLOSED'
 export type FinanceFiscalPeriodStatus = 'OPEN' | 'SOFT_LOCKED' | 'CLOSED'
-export type FinanceJournalStatus = 'DRAFT' | 'POSTED' | 'REVERSED'
+export type FinanceJournalStatus = 'DRAFT' | 'APPROVED' | 'POSTED' | 'REVERSED'
 export type FinanceJournalEntryRole = 'PRIMARY' | 'REVERSAL'
 
 export interface IFinanceAccount {
@@ -73,6 +73,7 @@ export interface IFinanceJournalEntry {
   fiscalPeriodId: Types.ObjectId
   createdBy: Types.ObjectId
   approvedBy?: Types.ObjectId | null
+  approvedAt?: Date | null
   postedBy?: Types.ObjectId | null
   postedAt?: Date | null
   reversalOf?: Types.ObjectId | null

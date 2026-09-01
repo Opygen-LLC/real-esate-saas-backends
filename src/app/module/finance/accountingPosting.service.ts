@@ -32,7 +32,11 @@ const assertPostingPermission = (actor: AccountingActor) => {
 }
 
 const postAutomatedInSession = async (organizationId: string, actor: AccountingActor, input: AutomatedAccountingPostingInput, session?: ClientSession) => {
-  await assertAdvancedAccountingEntitlement(organizationId, session)
+  // System-generated postings are allowed to keep an already-initialized ledger
+  // synchronized while the tenant is temporarily downgraded/read-only. User-
+  // initiated advanced-accounting writes are still protected by the entitlement
+  // middleware and, when this service is called directly, by this check.
+  if (!actor.system) await assertAdvancedAccountingEntitlement(organizationId, session)
   assertPostingPermission(actor)
   const sourceType = String(input.sourceType || '').trim().toUpperCase()
   const sourceId = String(input.sourceId || '').trim()
@@ -40,6 +44,7 @@ const postAutomatedInSession = async (organizationId: string, actor: AccountingA
   if (!sourceId) throw new ApiError(httpStatus.BAD_REQUEST, 'Automated accounting source id is required')
   const settings = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
   if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before posting automated entries')
+  if (String(settings.activationStatus || 'ACTIVE') !== 'ACTIVE') throw new ApiError(httpStatus.CONFLICT, 'Complete the accounting initialization migration before automatic GL posting', '', 'ACCOUNTING_MIGRATION_REQUIRED')
   const currency = String(input.currency || settings.baseCurrency).toUpperCase()
   if (currency !== settings.baseCurrency) throw new ApiError(httpStatus.BAD_REQUEST, `Accounting posting currency ${currency} does not match organization base currency ${settings.baseCurrency}`, '', 'ACCOUNTING_CURRENCY_MISMATCH')
   FinanceAccountingService.validateLineAmounts(input.lines, true)

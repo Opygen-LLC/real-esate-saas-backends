@@ -11,6 +11,11 @@ const defaultSettings = (organizationId: string) => ({
   baseCurrency: 'BDT',
   accountingMethod: 'ACCRUAL' as const,
   fiscalYearStartMonth: 1,
+  makerCheckerRequired: false,
+  activationStatus: 'ACTIVE' as const,
+  accountingStartDate: null,
+  activatedAt: null,
+  activatedBy: null,
   defaultAccounts: {},
   taxAccounts: {},
   initializedAt: null,
@@ -56,6 +61,7 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
   if (input.baseCurrency !== undefined) set.baseCurrency = String(input.baseCurrency).toUpperCase()
   if (input.accountingMethod !== undefined) set.accountingMethod = input.accountingMethod
   if (input.fiscalYearStartMonth !== undefined) set.fiscalYearStartMonth = input.fiscalYearStartMonth
+  if (input.makerCheckerRequired !== undefined) set.makerCheckerRequired = Boolean(input.makerCheckerRequired)
   for (const [key, value] of Object.entries(input.defaultAccounts || {})) set[`defaultAccounts.${key}`] = value
   for (const [key, value] of Object.entries(input.taxAccounts || {})) set[`taxAccounts.${key}`] = value
 
@@ -89,6 +95,8 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
         baseCurrency: before.baseCurrency,
         accountingMethod: before.accountingMethod,
         fiscalYearStartMonth: before.fiscalYearStartMonth,
+        makerCheckerRequired: before.makerCheckerRequired,
+        activationStatus: before.activationStatus,
         defaultAccounts: before.defaultAccounts,
         taxAccounts: before.taxAccounts,
       },
@@ -96,6 +104,8 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
         baseCurrency: after.baseCurrency,
         accountingMethod: after.accountingMethod,
         fiscalYearStartMonth: after.fiscalYearStartMonth,
+        makerCheckerRequired: after.makerCheckerRequired,
+        activationStatus: after.activationStatus,
         defaultAccounts: after.defaultAccounts,
         taxAccounts: after.taxAccounts,
       },

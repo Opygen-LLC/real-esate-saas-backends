@@ -8,6 +8,11 @@ const financeAccountingSettingsSchema = new Schema<IFinanceAccountingSettings>({
   baseCurrency: { type: String, required: true, default: 'BDT', uppercase: true, trim: true, minlength: 3, maxlength: 3 },
   accountingMethod: { type: String, enum: ['ACCRUAL'], required: true, default: 'ACCRUAL' },
   fiscalYearStartMonth: { type: Number, required: true, default: 1, min: 1, max: 12 },
+  makerCheckerRequired: { type: Boolean, required: true, default: false },
+  activationStatus: { type: String, enum: ['ACTIVE', 'MIGRATION_REQUIRED', 'LOCKED_READ_ONLY'], required: true, default: 'ACTIVE' },
+  accountingStartDate: { type: Date, default: null },
+  activatedAt: { type: Date, default: null },
+  activatedBy: { type: String, default: null },
   defaultAccounts: {
     accountsReceivable: nullableAccount, accountsPayable: nullableAccount, bank: nullableAccount,
     commissionRevenue: nullableAccount, commissionExpense: nullableAccount, commissionPayable: nullableAccount,

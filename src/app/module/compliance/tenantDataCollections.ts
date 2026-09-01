@@ -80,6 +80,8 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financeshareholderloans',
   'financedividends',
   'financeloans',
+  'financeaccountinginitializations',
+  'financelegacypaymentmethodmappings',
 
   // Website / domain / public traffic
   'banners',

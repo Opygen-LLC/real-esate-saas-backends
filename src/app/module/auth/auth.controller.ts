@@ -7,6 +7,7 @@ import { randomToken } from '../../helpers/crypto'
 import { AuthResult } from './auth.interface'
 import { AuthServices } from './auth.services'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { FinanceAccountingSettings } from '../finance/financeAccountingSettings.model'
 
 const cookieBase: CookieOptions = {
   secure: config.cookie_secure,
@@ -100,6 +101,18 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
   const resolvedEntitlements = req.user?.userRole === 'super-admin' || !organizationId
     ? null
     : await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
+  const advancedAccountingEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.advancedAccounting?.enabled)
+  const accountingSettings: any = organizationId && req.user?.userRole !== 'super-admin'
+    ? await FinanceAccountingSettings.findOne({ organizationId }).select('initializedAt activationStatus accountingStartDate makerCheckerRequired').lean()
+    : null
+  const accountingAccess = {
+    mode: advancedAccountingEntitled ? 'FULL' : accountingSettings?.initializedAt ? 'READ_ONLY' : 'LOCKED',
+    entitled: advancedAccountingEntitled,
+    initialized: Boolean(accountingSettings?.initializedAt),
+    activationStatus: accountingSettings?.activationStatus || null,
+    accountingStartDate: accountingSettings?.accountingStartDate || null,
+    makerCheckerRequired: Boolean(accountingSettings?.makerCheckerRequired),
+  }
   sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -108,8 +121,9 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
       authenticated: true,
       user: { ...req.user, permissions: req.tenant?.permissions || (req.user as any)?.permissions || [] },
       entitlements: {
-        ADVANCED_ACCOUNTING: Boolean(resolvedEntitlements?.limits?.entitlements?.advancedAccounting?.enabled),
+        ADVANCED_ACCOUNTING: advancedAccountingEntitled,
       },
+      accountingAccess,
       session: await AuthServices.getCurrentSessionSummary(
         req.cookies?.[config.security.refresh_cookie_name],
         String(req.user?._id || req.user?.id || ''),
