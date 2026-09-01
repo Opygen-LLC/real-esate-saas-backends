@@ -61,6 +61,7 @@ const trialLimits = async () => {
     hasSmsAutomation: policy.hasSmsAutomation,
     hasPremiumTemplates: policy.hasPremiumTemplates,
     hasLeadAutomations: policy.hasLeadAutomations,
+    hasAdvancedAccounting: policy.hasAdvancedAccounting,
   }
 }
 
@@ -78,6 +79,7 @@ export const trialEntitlements = {
   hasSmsAutomation: DEFAULT_TRIAL_POLICY.hasSmsAutomation,
   hasPremiumTemplates: DEFAULT_TRIAL_POLICY.hasPremiumTemplates,
   hasLeadAutomations: DEFAULT_TRIAL_POLICY.hasLeadAutomations,
+  hasAdvancedAccounting: DEFAULT_TRIAL_POLICY.hasAdvancedAccounting,
 }
 
 type ResolveOptions = { allowInactive?: boolean; allowUnavailable?: boolean }
@@ -191,6 +193,7 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     hasSmsAutomation: Boolean(plan?.hasSmsAutomation ?? baseTrial.hasSmsAutomation),
     hasLeadAutomations: Boolean(plan?.hasLeadAutomations ?? baseTrial.hasLeadAutomations),
     hasPremiumTemplates: Boolean(plan?.hasPremiumTemplates ?? baseTrial.hasPremiumTemplates),
+    hasAdvancedAccounting: Boolean(plan?.hasAdvancedAccounting ?? baseTrial.hasAdvancedAccounting),
   }, activeTenantOverride)
   const effectiveEntitlements = {
     ...(baseTrial.entitlements || {}),
@@ -206,6 +209,7 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     smsAutomation: { enabled: overridden.hasSmsAutomation },
     leadAutomations: { enabled: overridden.hasLeadAutomations },
     premiumTemplates: { enabled: overridden.hasPremiumTemplates },
+    advancedAccounting: { enabled: overridden.hasAdvancedAccounting },
   }
   return {
     organization,

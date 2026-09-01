@@ -21,6 +21,7 @@ export interface CurrentPlanCatalogEntry {
     leadAutomation: boolean
     smsAutomation: boolean
     premiumTemplates: boolean
+    advancedAccounting: boolean
   }
   isPopular: boolean
 }
@@ -62,6 +63,7 @@ export const CURRENT_PLAN_CATALOG = {
       leadAutomation: false,
       smsAutomation: false,
       premiumTemplates: false,
+      advancedAccounting: false,
     },
     isPopular: false,
   },
@@ -95,6 +97,7 @@ export const CURRENT_PLAN_CATALOG = {
       leadAutomation: true,
       smsAutomation: false,
       premiumTemplates: true,
+      advancedAccounting: false,
     },
     isPopular: true,
   },
@@ -120,6 +123,7 @@ export const CURRENT_PLAN_CATALOG = {
       'WhatsApp Integration',
       'Lead Automations',
       'Premium Templates',
+      'Advanced Accounting',
     ],
     features: {
       customDomain: true,
@@ -128,6 +132,7 @@ export const CURRENT_PLAN_CATALOG = {
       leadAutomation: true,
       smsAutomation: true,
       premiumTemplates: true,
+      advancedAccounting: true,
     },
     isPopular: false,
   },
@@ -157,5 +162,6 @@ export const catalogEntryToPlanWrite = (entry: CurrentPlanCatalogEntry): Record<
   hasLeadAutomations: entry.features.leadAutomation,
   hasSmsAutomation: entry.features.smsAutomation,
   hasPremiumTemplates: entry.features.premiumTemplates,
+  hasAdvancedAccounting: entry.features.advancedAccounting,
   isPopular: entry.isPopular,
 })

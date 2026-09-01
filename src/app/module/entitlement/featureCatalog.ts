@@ -8,7 +8,7 @@ import {
 } from './entitlement.types'
 
 type LimitLegacyField = 'maxAgents' | 'maxProperties' | 'maxLeads' | 'maxStorageMb' | 'maxMonthlyVisitors'
-type BooleanLegacyField = 'hasCustomDomain' | 'hasAdvancedAnalytics' | 'hasWhatsAppIntegration' | 'hasSmsAutomation' | 'hasLeadAutomations' | 'hasPremiumTemplates'
+type BooleanLegacyField = 'hasCustomDomain' | 'hasAdvancedAnalytics' | 'hasWhatsAppIntegration' | 'hasSmsAutomation' | 'hasLeadAutomations' | 'hasPremiumTemplates' | 'hasAdvancedAccounting'
 
 export interface FeatureCatalogEntry {
   id: EntitlementFeatureId
@@ -30,6 +30,7 @@ export const FEATURE_CATALOG: Record<EntitlementFeatureId, FeatureCatalogEntry> 
   smsAutomation: { id: 'smsAutomation', label: 'SMS automation', kind: 'boolean', legacyField: 'hasSmsAutomation' },
   leadAutomations: { id: 'leadAutomations', label: 'Lead automation', kind: 'boolean', legacyField: 'hasLeadAutomations' },
   premiumTemplates: { id: 'premiumTemplates', label: 'Premium templates', kind: 'boolean', legacyField: 'hasPremiumTemplates' },
+  advancedAccounting: { id: 'advancedAccounting', label: 'Advanced accounting', kind: 'boolean', legacyField: 'hasAdvancedAccounting' },
 }
 
 const asPlainEntitlements = (value: unknown): Record<string, unknown> => {
@@ -53,7 +54,11 @@ export const buildEntitlementsFromLegacy = (source: Partial<LegacyEntitlementFie
   for (const id of ENTITLEMENT_FEATURE_IDS) {
     const feature = FEATURE_CATALOG[id]
     if (feature.kind === 'boolean') {
-      result[id] = { enabled: Boolean(source[feature.legacyField]) }
+      const rawValue = source[feature.legacyField]
+      const enabled = id === 'advancedAccounting' && typeof rawValue !== 'boolean'
+        ? ['agency', 'enterprise'].includes(String(source.planId || source.plan || '').toLowerCase())
+        : Boolean(rawValue)
+      result[id] = { enabled }
       continue
     }
     const limit = Math.max(0, Math.trunc(Number(source[feature.legacyField] ?? 0)))

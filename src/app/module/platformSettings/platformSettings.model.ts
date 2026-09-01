@@ -51,6 +51,7 @@ const platformSettingsSchema = new Schema({
     hasWhatsAppIntegration: { type: Boolean, default: false },
     hasSmsAutomation: { type: Boolean, default: false },
     hasLeadAutomations: { type: Boolean, default: false },
+    hasAdvancedAccounting: { type: Boolean, default: false },
   },
   areaConversion: {
     kathaSqft: { type: Number, default: 720, min: 1 },

@@ -3,11 +3,18 @@ import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
 import { FinanceController } from './finance.controller'
 import { FinanceValidation } from './finance.validation'
+import { FinanceAccountingSettingsController } from './financeAccountingSettings.controller'
+import { FinanceAccountingSettingsValidation } from './financeAccountingSettings.validation'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
 const write = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.write')] as const
 const remove = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete')] as const
+const advancedRead = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read'), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
+const advancedWrite = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.write'), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
+
+router.get('/accounting/settings', ...advancedRead, FinanceAccountingSettingsController.get)
+router.patch('/accounting/settings', ...advancedWrite, validateRequest(FinanceAccountingSettingsValidation.update), FinanceAccountingSettingsController.update)
 
 router.get('/overview', ...read, FinanceController.getOverview)
 router.get('/reports', ...read, FinanceController.getReports)

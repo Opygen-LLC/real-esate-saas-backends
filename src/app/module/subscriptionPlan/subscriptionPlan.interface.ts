@@ -41,6 +41,7 @@ export interface ISubscriptionPlan {
   hasLeadAutomations: boolean
   hasSmsAutomation: boolean
   hasPremiumTemplates: boolean
+  hasAdvancedAccounting: boolean
   maxStorageMb: number
   maxMonthlyVisitors: number
   isPopular?: boolean

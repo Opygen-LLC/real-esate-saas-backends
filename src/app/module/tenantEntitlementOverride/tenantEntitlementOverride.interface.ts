@@ -25,6 +25,7 @@ export interface ITenantEntitlementOverride {
     smsAutomation?: boolean
     leadAutomations?: boolean
     premiumTemplates?: boolean
+    advancedAccounting?: boolean
   }
   startsAt: Date
   expiresAt?: Date | null

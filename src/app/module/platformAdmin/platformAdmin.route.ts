@@ -76,7 +76,7 @@ const adminAddonBody = z.object({ params: organizationParams, body: z.object({ d
 const numericOverride = z.object({ mode: z.enum(['add', 'set']), value: z.number().int().nonnegative() }).strict()
 const tenantOverrideBody = z.object({ params: organizationParams, body: z.object({
   resources: z.object({ leads: numericOverride.optional(), properties: numericOverride.optional(), teamMembers: numericOverride.optional(), storageMb: numericOverride.optional(), monthlyVisitors: numericOverride.optional() }).strict().optional(),
-  features: z.object({ customDomain: z.boolean().optional(), advancedAnalytics: z.boolean().optional(), whatsappIntegration: z.boolean().optional(), smsAutomation: z.boolean().optional(), leadAutomations: z.boolean().optional(), premiumTemplates: z.boolean().optional() }).strict().optional(),
+  features: z.object({ customDomain: z.boolean().optional(), advancedAnalytics: z.boolean().optional(), whatsappIntegration: z.boolean().optional(), smsAutomation: z.boolean().optional(), leadAutomations: z.boolean().optional(), premiumTemplates: z.boolean().optional(), advancedAccounting: z.boolean().optional() }).strict().optional(),
   expiresAt: z.string().datetime().nullable().optional(), reason: z.string().trim().min(10).max(500),
 }).refine((body) => Object.values(body.resources || {}).some(Boolean) || Object.values(body.features || {}).some((value) => typeof value === 'boolean'), { message: 'At least one tenant-specific entitlement override is required' }) })
 

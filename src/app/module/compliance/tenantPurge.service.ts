@@ -135,6 +135,7 @@ const FINANCE_PREVIEW_COLLECTIONS = [
   'financecommissions',
   'financevendors',
   'financebudgets',
+  'financeaccountingsettings',
 ] as const
 
 const WEBSITE_PREVIEW_COLLECTIONS = [

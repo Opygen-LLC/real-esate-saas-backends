@@ -26,6 +26,7 @@ export interface ResourceEntitlementSnapshot {
   hasSmsAutomation: boolean
   hasPremiumTemplates: boolean
   hasLeadAutomations: boolean
+  hasAdvancedAccounting?: boolean
 }
 
 export interface ResourceEntitlementReconciliationResult {

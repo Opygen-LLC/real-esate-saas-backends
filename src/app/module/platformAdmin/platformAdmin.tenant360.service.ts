@@ -397,6 +397,8 @@ export const getTenant360 = async (organizationId: string) => {
         hasSmsAutomation: Boolean(effectiveSnapshot.limits.hasSmsAutomation),
         hasPremiumTemplates: Boolean(effectiveSnapshot.limits.hasPremiumTemplates),
         hasLeadAutomations: Boolean(effectiveSnapshot.limits.hasLeadAutomations),
+        hasAdvancedAccounting: Boolean(effectiveSnapshot.limits.hasAdvancedAccounting),
+        entitlements: effectiveSnapshot.limits.entitlements,
       },
     },
     leadCapacity: {

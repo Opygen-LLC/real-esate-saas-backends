@@ -33,6 +33,7 @@
     "migrate:registration-continuation": "ts-node --transpile-only src/app/db/migrateRegistrationContinuationToken.ts",
     "test:smtp": "node scripts/verify-smtp.mjs",
     "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
+    "migrate:advanced-accounting-phase1": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase1.ts",
     "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",
     "migrate:phase2-notifications": "ts-node --transpile-only src/app/db/migratePhase2NotificationLifecycle.ts",
     "migrate:phase4-subscription-confirmation": "ts-node --transpile-only src/app/db/migratePhase4SubscriptionConfirmation.ts",

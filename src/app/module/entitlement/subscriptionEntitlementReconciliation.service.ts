@@ -28,6 +28,7 @@ export interface SubscriptionEntitlementInput {
   hasSmsAutomation?: boolean
   hasPremiumTemplates?: boolean
   hasLeadAutomations?: boolean
+  hasAdvancedAccounting?: boolean
   /** Internal marker: the input already contains tenant-specific override effects. */
   tenantOverrideApplied?: boolean
 }
@@ -76,6 +77,7 @@ const resolveCatalogPolicy = async (input: SubscriptionEntitlementInput | null |
       hasSmsAutomation: Boolean(policy.hasSmsAutomation),
       hasPremiumTemplates: Boolean(policy.hasPremiumTemplates),
       hasLeadAutomations: Boolean(policy.hasLeadAutomations),
+      hasAdvancedAccounting: Boolean(policy.hasAdvancedAccounting),
     }
   }
 
@@ -112,6 +114,7 @@ export const resolveSubscriptionEntitlementSnapshot = async (
     hasSmsAutomation: booleanOrUndefined(input?.hasSmsAutomation) ?? booleanOrUndefined(catalog?.hasSmsAutomation) ?? fallback?.hasSmsAutomation ?? false,
     hasPremiumTemplates: booleanOrUndefined(input?.hasPremiumTemplates) ?? booleanOrUndefined(catalog?.hasPremiumTemplates) ?? fallback?.hasPremiumTemplates ?? false,
     hasLeadAutomations: booleanOrUndefined(input?.hasLeadAutomations) ?? booleanOrUndefined(catalog?.hasLeadAutomations) ?? fallback?.hasLeadAutomations ?? false,
+    hasAdvancedAccounting: booleanOrUndefined(input?.hasAdvancedAccounting) ?? booleanOrUndefined(catalog?.hasAdvancedAccounting) ?? fallback?.hasAdvancedAccounting ?? ['agency', 'enterprise'].includes(plan.toLowerCase()),
   }
 }
 
@@ -126,6 +129,7 @@ const hasDowngrade = (previous: SubscriptionEntitlementSnapshot, current: Subscr
   || (previous.hasSmsAutomation && !current.hasSmsAutomation)
   || (previous.hasPremiumTemplates && !current.hasPremiumTemplates)
   || (previous.hasLeadAutomations && !current.hasLeadAutomations)
+  || (previous.hasAdvancedAccounting && !current.hasAdvancedAccounting)
 
 const hasUpgrade = (previous: SubscriptionEntitlementSnapshot, current: SubscriptionEntitlementSnapshot) =>
   current.maxTeamMembers > previous.maxTeamMembers
@@ -138,6 +142,7 @@ const hasUpgrade = (previous: SubscriptionEntitlementSnapshot, current: Subscrip
   || (!previous.hasSmsAutomation && current.hasSmsAutomation)
   || (!previous.hasPremiumTemplates && current.hasPremiumTemplates)
   || (!previous.hasLeadAutomations && current.hasLeadAutomations)
+  || (!previous.hasAdvancedAccounting && current.hasAdvancedAccounting)
 
 /**
  * Canonical orchestration point for every effective subscription entitlement change.
@@ -162,9 +167,9 @@ export const reconcileOrganizationEntitlements = async (
       maxStorageMb: snapshot.maxStorageMb, maxMonthlyVisitors: 0, hasCustomDomain: snapshot.hasCustomDomain,
       hasAdvancedAnalytics: snapshot.hasAdvancedAnalytics, hasWhatsAppIntegration: snapshot.hasWhatsAppIntegration,
       hasSmsAutomation: snapshot.hasSmsAutomation, hasLeadAutomations: snapshot.hasLeadAutomations,
-      hasPremiumTemplates: snapshot.hasPremiumTemplates,
+      hasPremiumTemplates: snapshot.hasPremiumTemplates, hasAdvancedAccounting: Boolean(snapshot.hasAdvancedAccounting),
     }, tenantOverride)
-    return { ...snapshot, maxLeads: applied.maxLeads, maxProperties: applied.maxProperties, maxTeamMembers: applied.maxTeamMembers, maxStorageMb: applied.maxStorageMb, hasCustomDomain: applied.hasCustomDomain, hasAdvancedAnalytics: applied.hasAdvancedAnalytics, hasWhatsAppIntegration: applied.hasWhatsAppIntegration, hasSmsAutomation: applied.hasSmsAutomation, hasLeadAutomations: applied.hasLeadAutomations, hasPremiumTemplates: applied.hasPremiumTemplates }
+    return { ...snapshot, maxLeads: applied.maxLeads, maxProperties: applied.maxProperties, maxTeamMembers: applied.maxTeamMembers, maxStorageMb: applied.maxStorageMb, hasCustomDomain: applied.hasCustomDomain, hasAdvancedAnalytics: applied.hasAdvancedAnalytics, hasWhatsAppIntegration: applied.hasWhatsAppIntegration, hasSmsAutomation: applied.hasSmsAutomation, hasLeadAutomations: applied.hasLeadAutomations, hasPremiumTemplates: applied.hasPremiumTemplates, hasAdvancedAccounting: applied.hasAdvancedAccounting }
   }
   if (!newPlan.tenantOverrideApplied) current = applyOverride(current)
   if (!previousPlan?.tenantOverrideApplied) previous = applyOverride(previous)

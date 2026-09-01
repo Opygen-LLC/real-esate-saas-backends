@@ -25,6 +25,7 @@ const tenantEntitlementOverrideSchema = new Schema<ITenantEntitlementOverride>({
     smsAutomation: { type: Boolean, default: undefined },
     leadAutomations: { type: Boolean, default: undefined },
     premiumTemplates: { type: Boolean, default: undefined },
+    advancedAccounting: { type: Boolean, default: undefined },
   },
   startsAt: { type: Date, required: true, default: Date.now, index: true },
   expiresAt: { type: Date, default: null, index: true },

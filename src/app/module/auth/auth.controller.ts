@@ -6,6 +6,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import { randomToken } from '../../helpers/crypto'
 import { AuthResult } from './auth.interface'
 import { AuthServices } from './auth.services'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const cookieBase: CookieOptions = {
   secure: config.cookie_secure,
@@ -95,6 +96,10 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate')
   res.setHeader('Pragma', 'no-cache')
   res.setHeader('Vary', 'Cookie')
+  const organizationId = String(req.user?.organizationId || '')
+  const resolvedEntitlements = req.user?.userRole === 'super-admin' || !organizationId
+    ? null
+    : await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
   sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -102,10 +107,13 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
     data: {
       authenticated: true,
       user: { ...req.user, permissions: req.tenant?.permissions || (req.user as any)?.permissions || [] },
+      entitlements: {
+        ADVANCED_ACCOUNTING: Boolean(resolvedEntitlements?.limits?.entitlements?.advancedAccounting?.enabled),
+      },
       session: await AuthServices.getCurrentSessionSummary(
         req.cookies?.[config.security.refresh_cookie_name],
         String(req.user?._id || req.user?.id || ''),
-        String(req.user?.organizationId || ''),
+        organizationId,
       ),
     },
   })

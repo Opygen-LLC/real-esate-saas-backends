@@ -10,10 +10,17 @@ export const ENTITLEMENT_FEATURE_IDS = [
   'smsAutomation',
   'leadAutomations',
   'premiumTemplates',
+  'advancedAccounting',
 ] as const
 
 export type EntitlementFeatureId = (typeof ENTITLEMENT_FEATURE_IDS)[number]
 export type EntitlementFeatureKind = 'integer_limit' | 'storage_limit' | 'usage_limit' | 'boolean'
+
+export const ENTITLEMENT_CAPABILITIES = {
+  ADVANCED_ACCOUNTING: 'advancedAccounting',
+} as const
+
+export type EntitlementCapability = keyof typeof ENTITLEMENT_CAPABILITIES
 
 export interface EntitlementValue {
   enabled: boolean
@@ -34,4 +41,5 @@ export interface LegacyEntitlementFields {
   hasSmsAutomation: boolean
   hasLeadAutomations: boolean
   hasPremiumTemplates: boolean
+  hasAdvancedAccounting: boolean
 }

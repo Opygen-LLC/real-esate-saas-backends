@@ -22,6 +22,7 @@ export interface TrialPolicy {
   hasWhatsAppIntegration: boolean
   hasSmsAutomation: boolean
   hasLeadAutomations: boolean
+  hasAdvancedAccounting: boolean
 }
 
 const DEFAULT_TRIAL_LEGACY = {
@@ -36,6 +37,7 @@ const DEFAULT_TRIAL_LEGACY = {
   hasWhatsAppIntegration: false,
   hasSmsAutomation: false,
   hasLeadAutomations: false,
+  hasAdvancedAccounting: false,
 }
 
 export const DEFAULT_TRIAL_POLICY: TrialPolicy = {

@@ -57,6 +57,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     hasLeadAutomations: { type: Boolean, default: false },
     hasSmsAutomation: { type: Boolean, default: false },
     hasPremiumTemplates: { type: Boolean, default: false },
+    hasAdvancedAccounting: { type: Boolean, default: false },
     maxStorageMb: { type: Number, default: 1024, min: 0 },
     maxMonthlyVisitors: { type: Number, default: 10000, min: 0 },
     isPopular: { type: Boolean, default: false },

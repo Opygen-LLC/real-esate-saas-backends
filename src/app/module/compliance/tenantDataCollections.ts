@@ -59,6 +59,7 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financecommissions',
   'financevendors',
   'financebudgets',
+  'financeaccountingsettings',
 
   // Website / domain / public traffic
   'banners',

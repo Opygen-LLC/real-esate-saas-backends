@@ -43,6 +43,7 @@ const snapshotInput = (resolved: any): SubscriptionEntitlementInput => ({
   hasSmsAutomation: Boolean(resolved.limits.hasSmsAutomation),
   hasPremiumTemplates: Boolean(resolved.limits.hasPremiumTemplates),
   hasLeadAutomations: Boolean(resolved.limits.hasLeadAutomations),
+  hasAdvancedAccounting: Boolean(resolved.limits.hasAdvancedAccounting),
   tenantOverrideApplied: true,
 })
 
@@ -192,6 +193,7 @@ const applyDueExpirations = async (limit = 50, now = new Date()) => {
           hasSmsAutomation: Boolean(baseAfterExpiry.limits.hasSmsAutomation),
           hasLeadAutomations: Boolean(baseAfterExpiry.limits.hasLeadAutomations),
           hasPremiumTemplates: Boolean(baseAfterExpiry.limits.hasPremiumTemplates),
+          hasAdvancedAccounting: Boolean(baseAfterExpiry.limits.hasAdvancedAccounting),
         }, dueRow as ITenantEntitlementOverride)
         const before = {
           ...baseAfterExpiry,

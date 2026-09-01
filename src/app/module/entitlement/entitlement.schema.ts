@@ -17,4 +17,5 @@ export const entitlementConfigSchema = new Schema({
   smsAutomation: { type: entitlementValueSchema, default: undefined },
   leadAutomations: { type: entitlementValueSchema, default: undefined },
   premiumTemplates: { type: entitlementValueSchema, default: undefined },
+  advancedAccounting: { type: entitlementValueSchema, default: undefined },
 }, { _id: false })

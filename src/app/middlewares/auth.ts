@@ -12,6 +12,8 @@ import { toAuthUserDto } from '../module/user/userProfile.service'
 import { enforceSubscriptionAccess } from './subscriptionAccess'
 import { TenantPurgeBarrier } from '../module/compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../module/tenantAccess/tenantAccess.service'
+import { EntitlementService } from '../module/entitlement/entitlement.service'
+import { ENTITLEMENT_CAPABILITIES, type EntitlementCapability } from '../module/entitlement/entitlement.types'
 
 const authenticate = async (req: Request): Promise<void> => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
@@ -69,6 +71,25 @@ const requireAnyPermission = (...permissions: Permission[]) => async (req: Reque
     next()
   } catch (error) { next(error) }
 }
+
+const requireEntitlement = (capability: EntitlementCapability) => async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user) await authenticate(req)
+    const organizationId = requireTenant(req)
+    const featureId = ENTITLEMENT_CAPABILITIES[capability]
+    const resolved = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
+    const enabled = Boolean(resolved.limits?.entitlements?.[featureId]?.enabled)
+    if (!enabled) {
+      throw new ApiError(403, `${capability.replace(/_/g, ' ').toLowerCase()} is not enabled for this organization`, '', 'ENTITLEMENT_REQUIRED', {
+        entitlement: capability,
+        currentPlan: resolved.organization?.subscription?.plan,
+        upgradeRequired: true,
+      })
+    }
+    next()
+  } catch (error) { next(error) }
+}
+
 const authSuperAdmin = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   try { await authenticate(req); if (req.user!.userRole !== 'super-admin') throw new ApiError(403, 'Platform administrator access required'); next() }
   catch (error) { next(error) }
@@ -78,4 +99,4 @@ export const requireTenant = (req: Request): string => {
   return req.tenant.organizationId
 }
 export { Permission, permissionMatrix, permissionsForRole, roleHasPermission }
-export const authMiddlewares = { auth, authSuperAdmin, requirePermission, requireAnyPermission }
+export const authMiddlewares = { auth, authSuperAdmin, requirePermission, requireAnyPermission, requireEntitlement }
