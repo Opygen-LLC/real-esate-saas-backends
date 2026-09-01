@@ -600,15 +600,11 @@ const requestPasswordReset = async (rawEmail: string, meta: RequestMeta): Promis
   const user = await User.findOne({ email }).select('_id name email organizationId isVerified status').lean()
 
   if (!user) {
-    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_FOUND' })
+    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_FOUND', email })
     return
   }
-  if (!user.isVerified) {
-    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_VERIFIED', userId: user._id.toString() })
-    return
-  }
-  if (user.status !== 'active') {
-    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_NOT_ACTIVE', userId: user._id.toString() })
+  if (user.status === 'blocked') {
+    logger.info('Password reset request suppressed', { reasonCode: 'ACCOUNT_BLOCKED', userId: user._id.toString() })
     return
   }
 
@@ -653,6 +649,11 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
         if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
         const user = await User.findById(challenge.userId).session(session)
         if (!user) throw new ApiError(401, 'Invalid reset request')
+        if (!user.isVerified || user.status === 'pending') {
+          user.isVerified = true
+          if (user.status === 'pending') user.status = 'active'
+          await user.save({ session })
+        }
         const updatedCredential = await AccountCredential.findOneAndUpdate(
           { userId: user._id },
           { $set: { passwordHash: await hashPassword(newPassword), passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null } },
@@ -687,6 +688,11 @@ const completePasswordReset = async (resetToken: string, newPassword: string, me
   if (!challenge?.userId) throw new ApiError(401, 'Invalid or expired reset token')
   const user = await User.findById(challenge.userId)
   if (!user) throw new ApiError(401, 'Invalid reset request')
+  if (!user.isVerified || user.status === 'pending') {
+    user.isVerified = true
+    if (user.status === 'pending') user.status = 'active'
+    await user.save()
+  }
   const passwordHash = await hashPassword(newPassword)
   const updatedCredential = await AccountCredential.findOneAndUpdate(
     { userId: user._id },

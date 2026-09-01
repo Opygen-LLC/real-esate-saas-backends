@@ -146,10 +146,14 @@ export const sendEmailDetailed = async (to: string, subject: string, html: strin
     .replace(/\s+/g, ' ')
     .trim()
 
+  const fromAddress = config.email.from.includes('<')
+    ? config.email.from
+    : `"Real Estate SaaS" <${config.email.from}>`
+
   for (let attempt = 1; attempt <= config.email.max_attempts; attempt += 1) {
     try {
       const info = await client.sendMail({
-        from: config.email.from,
+        from: fromAddress,
         to,
         subject,
         html,
