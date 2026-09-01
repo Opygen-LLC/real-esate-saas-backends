@@ -174,7 +174,9 @@
     "verify:advanced-accounting-phase4": "node scripts/verify-advanced-accounting-phase4.mjs",
     "migrate:advanced-accounting-phase5": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase5.ts",
     "test:advanced-accounting-phase5": "vitest run src/tests/contract/advancedAccountingPhase5.contract.test.ts",
-    "verify:advanced-accounting-phase5": "node scripts/verify-advanced-accounting-phase5.mjs"
+    "verify:advanced-accounting-phase5": "node scripts/verify-advanced-accounting-phase5.mjs",
+    "verify:advanced-accounting-phase6": "vitest run src/tests/contract/advancedAccountingPhase6.contract.test.ts",
+    "test:advanced-accounting-phase6": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts src/tests/contract/advancedAccountingPhase3.contract.test.ts src/tests/contract/advancedAccountingPhase4.contract.test.ts src/tests/contract/advancedAccountingPhase5.contract.test.ts src/tests/contract/advancedAccountingPhase6.contract.test.ts"
   },
   "keywords": [
     "real-estate",

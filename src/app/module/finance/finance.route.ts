@@ -12,6 +12,8 @@ import { FinanceOperationsValidation } from './financeOperations.validation'
 import { financeBankStatementUpload } from './financeBankStatementUpload.middleware'
 import { FinanceCapitalController } from './financeCapital.controller'
 import { FinanceCapitalValidation } from './financeCapital.validation'
+import { FinanceReportingController } from './financeReporting.controller'
+import { FinanceReportingValidation } from './financeReporting.validation'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -51,6 +53,21 @@ router.delete('/accounting/journals/:id', ...advancedDelete, validateRequest(Fin
 
 router.post('/accounting/opening-balances', ...advancedWrite, validateRequest(FinanceAccountingValidation.openingBalances), FinanceAccountingController.openingBalances)
 router.get('/accounting/general-ledger', ...advancedRead, validateRequest(FinanceAccountingValidation.generalLedger), FinanceAccountingController.generalLedger)
+
+// Phase 6 GL financial statements and advanced reporting
+router.get('/accounting/reports/trial-balance', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.trialBalance)
+router.get('/accounting/reports/balance-sheet', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.balanceSheet)
+router.get('/accounting/reports/profit-loss', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.profitLoss)
+router.get('/accounting/reports/cash-flow', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.cashFlow)
+router.get('/accounting/reports/statement-of-equity', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.statementOfEquity)
+router.get('/accounting/reports/general-ledger', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.generalLedger)
+router.get('/accounting/reports/ar-aging', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.arAging)
+router.get('/accounting/reports/ap-aging', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.apAging)
+router.get('/accounting/reports/property-profitability', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.propertyProfitability)
+router.get('/accounting/reports/tax', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.tax)
+router.get('/accounting/reports/budget-vs-actual', ...advancedRead, validateRequest(FinanceReportingValidation.common), FinanceReportingController.budgetVsActual)
+router.get('/accounting/reports/drilldown', ...advancedRead, validateRequest(FinanceReportingValidation.drilldown), FinanceReportingController.drilldown)
+router.get('/accounting/reports/export/:report', ...advancedRead, validateRequest(FinanceReportingValidation.export), FinanceReportingController.exportReport)
 
 
 // Phase 4 operational accounting
