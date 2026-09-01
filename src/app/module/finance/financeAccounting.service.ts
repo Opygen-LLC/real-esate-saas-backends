@@ -29,6 +29,7 @@ import {
   FinanceJournalEntry,
   FinanceJournalLine,
 } from './financeAccounting.model'
+import { FINANCE_ERROR_CODES, LEGACY_FINANCE_CURRENCY, assertLegacyFinanceCurrency } from './finance.contract'
 
 const MAX_LEDGER_PAGE = 200
 const POSTED_LINE_STATUSES: FinanceJournalStatus[] = ['POSTED', 'REVERSED']
@@ -202,7 +203,7 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
   if (!organizationId) throw new ApiError(httpStatus.FORBIDDEN, 'Tenant context required')
   const actorId = actorObjectId(actor)
   let settings = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
-  const baseCurrency = String(settings?.baseCurrency || 'BDT').toUpperCase()
+  const baseCurrency = assertLegacyFinanceCurrency(settings?.baseCurrency || LEGACY_FINANCE_CURRENCY, 'Organization accounting base currency')
   const fiscalYearStartMonth = Number(settings?.fiscalYearStartMonth || 1)
   const accountsByCode = new Map<string, any>()
 
@@ -345,7 +346,7 @@ const assertParentAccount = async (organizationId: string, parentAccountId: unkn
 const assertAccountingInitialized = async (organizationId: string, session?: ClientSession) => {
   const query = FinanceAccount.exists({ organizationId, isSystem: true, systemKey: 'ASSETS_ROOT' })
   if (session) query.session(session)
-  if (!await query) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using the double-entry ledger')
+  if (!await query) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using the double-entry ledger', '', FINANCE_ERROR_CODES.notInitialized)
 }
 
 const createAccount = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => accountingTransaction(async (session) => {
@@ -355,10 +356,10 @@ const createAccount = async (organizationId: string, actor: AccountingActor, inp
   const settingsQuery = FinanceAccountingSettings.findOne({ organizationId })
   if (session) settingsQuery.session(session)
   const settings = await settingsQuery.lean()
-  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before creating accounts')
+  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before creating accounts', '', FINANCE_ERROR_CODES.notInitialized)
   const accountCurrency = String(input.currency || settings.baseCurrency).toUpperCase()
   if (accountCurrency !== String(settings.baseCurrency).toUpperCase()) {
-    throw new ApiError(httpStatus.BAD_REQUEST, `Custom account currency ${accountCurrency} must match base ledger currency ${settings.baseCurrency}`, '', 'ACCOUNTING_CURRENCY_MISMATCH')
+    throw new ApiError(httpStatus.BAD_REQUEST, `Custom account currency ${accountCurrency} must match base ledger currency ${settings.baseCurrency}`, '', FINANCE_ERROR_CODES.currencyMismatch)
   }
   let created: any
   try {
@@ -398,9 +399,9 @@ const updateAccount = async (organizationId: string, actor: AccountingActor, acc
     const settingsQuery = FinanceAccountingSettings.findOne({ organizationId })
     if (session) settingsQuery.session(session)
     const settings = await settingsQuery.lean()
-    if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before updating accounts')
+    if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before updating accounts', '', FINANCE_ERROR_CODES.notInitialized)
     if (String(input.currency).toUpperCase() !== String(settings.baseCurrency).toUpperCase()) {
-      throw new ApiError(httpStatus.BAD_REQUEST, `Custom account currency must match base ledger currency ${settings.baseCurrency}`, '', 'ACCOUNTING_CURRENCY_MISMATCH')
+      throw new ApiError(httpStatus.BAD_REQUEST, `Custom account currency must match base ledger currency ${settings.baseCurrency}`, '', FINANCE_ERROR_CODES.currencyMismatch)
     }
   }
   const nextType = (input.type || account.type) as FinanceAccountType
@@ -565,10 +566,10 @@ const resolvePostingPeriod = async (organizationId: string, postingDate: Date, r
     period = await query.lean()
   }
   if (!period) throw new ApiError(httpStatus.CONFLICT, 'No fiscal period exists for the posting date. Initialize or create a fiscal year first.')
-  if (period.status === 'CLOSED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', 'FISCAL_PERIOD_CLOSED')
-  if (period.status === 'SOFT_LOCKED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', 'FISCAL_PERIOD_SOFT_LOCKED')
+  if (period.status === 'CLOSED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal period is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { periodStatus: 'CLOSED' })
+  if (period.status === 'SOFT_LOCKED' && !allowClosedPeriod) throw new ApiError(httpStatus.CONFLICT, 'Posting into a soft-locked fiscal period is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { periodStatus: 'SOFT_LOCKED' })
   const year = await getFiscalYear(organizationId, String(period.fiscalYearId), session)
-  if (year.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal year is not allowed', '', 'FISCAL_YEAR_CLOSED')
+  if (year.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Posting into a closed fiscal year is not allowed', '', FINANCE_ERROR_CODES.periodClosed, { fiscalYearStatus: 'CLOSED' })
   return { period, year }
 }
 
@@ -592,7 +593,7 @@ const validateLineAmounts = (lines: FinanceJournalLineInput[], requireBalanced: 
     credit += BigInt(creditMinor)
   })
   if (requireBalanced && debit !== credit) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Journal cannot be posted because total debits do not equal total credits', '', 'JOURNAL_NOT_BALANCED', { debitMinor: debit.toString(), creditMinor: credit.toString() })
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Journal cannot be posted because total debits do not equal total credits', '', FINANCE_ERROR_CODES.unbalanced, { debitMinor: debit.toString(), creditMinor: credit.toString() })
   }
   return { debitMinor: debit.toString(), creditMinor: credit.toString(), balanced: debit === credit }
 }
@@ -618,7 +619,7 @@ const assertJournalAccounts = async (organizationId: string, lines: FinanceJourn
   const query = FinanceAccount.find({ organizationId, _id: { $in: ids }, status: 'ACTIVE' }).lean()
   if (session) query.session(session)
   const accounts = await query
-  if (accounts.length !== ids.length) throw new ApiError(httpStatus.BAD_REQUEST, 'One or more journal accounts do not belong to this organization or are inactive')
+  if (accounts.length !== ids.length) throw new ApiError(httpStatus.BAD_REQUEST, 'One or more journal accounts do not belong to this organization or are inactive', '', FINANCE_ERROR_CODES.invalidAccountMapping)
   const accountMap = new Map<string, any>(accounts.map((account: any) => [String(account._id), account]))
   if (sourceType === 'MANUAL' || sourceType === 'OPENING_BALANCE') {
     const blocked = ids.find((id) => !accountMap.get(id)?.allowManualPosting)
@@ -632,7 +633,7 @@ const assertAccountsUseCurrency = (accounts: Map<string, any>, currency: string)
   const expected = String(currency).toUpperCase()
   const mismatch = [...accounts.values()].find((account: any) => String(account.currency).toUpperCase() !== expected)
   if (mismatch) {
-    throw new ApiError(httpStatus.BAD_REQUEST, `Account ${mismatch.code} uses ${mismatch.currency}, but this ledger posts in base currency ${expected}`, '', 'ACCOUNTING_CURRENCY_MISMATCH')
+    throw new ApiError(httpStatus.BAD_REQUEST, `Account ${mismatch.code} uses ${mismatch.currency}, but this ledger posts in base currency ${expected}`, '', FINANCE_ERROR_CODES.currencyMismatch)
   }
 }
 
@@ -676,11 +677,12 @@ const createJournalDraftInternal = async (
   const settingsQuery = FinanceAccountingSettings.findOne({ organizationId })
   if (session) settingsQuery.session(session)
   const settings = await settingsQuery.lean()
-  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before creating journals')
+  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before creating journals', '', FINANCE_ERROR_CODES.notInitialized)
+  assertLegacyFinanceCurrency(settings.baseCurrency || LEGACY_FINANCE_CURRENCY, 'Organization accounting base currency')
   const activationStatus = String(settings.activationStatus || 'ACTIVE')
   const migrationSources = new Set(['OPENING_BALANCE', 'OPENING_BALANCE_MIGRATION', 'YEAR_END_CLOSE_PNL', 'YEAR_END_TRANSFER_EARNINGS'])
   if (activationStatus === 'MIGRATION_REQUIRED' && !migrationSources.has(sourceType)) {
-    throw new ApiError(httpStatus.CONFLICT, 'Complete the accounting initialization migration before posting to the General Ledger', '', 'ACCOUNTING_MIGRATION_REQUIRED')
+    throw new ApiError(httpStatus.CONFLICT, 'Complete the accounting initialization migration before posting to the General Ledger', '', FINANCE_ERROR_CODES.migrationRequired)
   }
   if (settings.accountingStartDate && postingDate < new Date(settings.accountingStartDate) && !migrationSources.has(sourceType) && sourceType !== 'REVERSAL') {
     throw new ApiError(httpStatus.CONFLICT, "Posting date is before this organization\'s accounting start date", '', 'ACCOUNTING_START_DATE_LOCK')
@@ -711,7 +713,7 @@ const createJournalDraftInternal = async (
       reversalOf: options.reversalOf ? asObjectId(options.reversalOf, 'reversal journal id') : null,
     }], session ? { session } : undefined)
   } catch (error: any) {
-    if (error?.code === 11000) throw new ApiError(httpStatus.CONFLICT, 'This accounting source or idempotency key has already been posted or drafted', '', 'DUPLICATE_ACCOUNTING_POSTING')
+    if (error?.code === 11000) throw new ApiError(httpStatus.CONFLICT, 'This accounting source or idempotency key has already been posted or drafted', '', FINANCE_ERROR_CODES.duplicatePosting)
     throw error
   }
   const journal = journalRows[0]

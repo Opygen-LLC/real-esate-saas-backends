@@ -1,0 +1,1171 @@
+{
+  "schemaVersion": 2,
+  "domain": "finance",
+  "currencyContract": {
+    "baseCurrency": "BDT",
+    "legacyCurrency": "BDT",
+    "multiCurrencyEnabled": false
+  },
+  "moneyContract": {
+    "legacyStorage": "major-units",
+    "accountingStorage": "minor-units",
+    "minorUnitsPerMajor": 100,
+    "conversionBoundary": "finance.money.ts"
+  },
+  "idempotencyContract": {
+    "identity": [
+      "organizationId",
+      "sourceType",
+      "sourceId"
+    ],
+    "primaryEntryRole": "PRIMARY"
+  },
+  "errorCodes": [
+    "FINANCE_PERMISSION_REQUIRED",
+    "ENTITLEMENT_REQUIRED",
+    "ACCOUNTING_MIGRATION_REQUIRED",
+    "ACCOUNTING_MIGRATION_IN_PROGRESS",
+    "ACCOUNTING_CURRENCY_MISMATCH",
+    "ACCOUNTING_PERIOD_CLOSED",
+    "ACCOUNTING_NOT_INITIALIZED",
+    "ACCOUNTING_UNBALANCED",
+    "INVALID_ACCOUNT_MAPPING",
+    "DUPLICATE_ACCOUNTING_POSTING"
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/finance/accounting/accounts",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.listAccounts"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/accounts",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.createAccount"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/accounting/accounts/:id",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/accounts/:id",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/accounts/:id",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.updateAccount"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/audit",
+      "access": "advanced-read",
+      "permission": "finance.audit.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceCloseValidation.audit"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/bank-accounts",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-accounts",
+      "access": "advanced-write",
+      "permission": "finance.bank.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.createBankAccount"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/bank-accounts/:id",
+      "access": "advanced-write",
+      "permission": "finance.bank.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.updateBankAccount"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/bank-statements",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.statementList"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/bank-statements/:id",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.statementId"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/bank-statements/:id/ledger-candidates",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.ledgerCandidates"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-statements/:id/lines/:lineId/exclude",
+      "access": "advanced-write",
+      "permission": "finance.bank.reconcile",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.excludeStatementLine"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-statements/:id/lines/:lineId/match",
+      "access": "advanced-write",
+      "permission": "finance.bank.reconcile",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.matchStatementLine"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-statements/:id/reconcile",
+      "access": "advanced-write",
+      "permission": "finance.bank.reconcile",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.statementId"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-statements/import",
+      "access": "advanced-write",
+      "permission": "finance.bank.reconcile",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.bankStatementBody"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/bank-transfers",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/bank-transfers",
+      "access": "advanced-write",
+      "permission": "finance.bank.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.createBankTransfer"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/capital/initialize",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.initialize"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/category-mappings",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "PUT",
+      "path": "/finance/accounting/category-mappings",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.categoryMapping"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/client-deposits",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.depositList"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/client-deposits",
+      "access": "advanced-write",
+      "permission": "finance.receivables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.createDeposit"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/client-deposits/:id/apply",
+      "access": "advanced-write",
+      "permission": "finance.receivables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.applyDeposit"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/client-deposits/:id/refund",
+      "access": "advanced-write",
+      "permission": "finance.receivables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.refundDeposit"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/dividends",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/dividends",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.createDividend"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/dividends/:id/approve",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.dividendId"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/dividends/:id/declare",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.dividendId"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/dividends/:id/payments",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.payDividend"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/equity-transactions",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.listEquity"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/equity-transactions",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.createEquity"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/fiscal-periods",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.listFiscalPeriods"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/fiscal-periods/:id/close",
+      "access": "advanced-write",
+      "permission": "finance.period.close",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCloseValidation.close"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/fiscal-periods/:id/close-checklist",
+      "access": "advanced-read",
+      "permission": "finance.period.close",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceCloseValidation.id"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/fiscal-periods/:id/reopen",
+      "access": "advanced-write",
+      "permission": "finance.period.reopen",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCloseValidation.reopen"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/fiscal-periods/:id/status",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.fiscalPeriodStatus"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/fiscal-years",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/fiscal-years",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.createFiscalYear"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/fiscal-years/:id/status",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.fiscalYearStatus"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/fiscal-years/:id/year-end-close",
+      "access": "advanced-write",
+      "permission": "finance.period.close",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCloseValidation.close"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/general-ledger",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.generalLedger"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/initialization/activate",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceInitializationValidation.activate"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/initialization/payment-method-mappings",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "PUT",
+      "path": "/finance/accounting/initialization/payment-method-mappings",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceInitializationValidation.paymentMapping"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/initialization/preview",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceInitializationValidation.preview"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/initialization/status",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/initialize",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.initialize"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/journals",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.listJournals"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/journals",
+      "access": "advanced-write",
+      "permission": "finance.journal.create",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.createJournal"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/accounting/journals/:id",
+      "access": "advanced-write",
+      "permission": "finance.journal.create",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/journals/:id",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/journals/:id",
+      "access": "advanced-write",
+      "permission": "finance.journal.create",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.updateJournal"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/journals/:id/approve",
+      "access": "advanced-write",
+      "permission": "finance.journal.approve",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/journals/:id/post",
+      "access": "advanced-write",
+      "permission": "finance.journal.post",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.idParam"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/journals/:id/reverse",
+      "access": "advanced-write",
+      "permission": "finance.journal.reverse",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.reverseJournal"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/loans",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/loans",
+      "access": "advanced-write",
+      "permission": "finance.loans.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.createLoan"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/loans/:id/payments",
+      "access": "advanced-write",
+      "permission": "finance.loans.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.payLoan"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/opening-balances",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingValidation.openingBalances"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/operations/initialize",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.initialize"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/payables",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.payables"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/receivables",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.receivables"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/ap-aging",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/ar-aging",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/balance-sheet",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/budget-vs-actual",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/cash-flow",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/drilldown",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.drilldown"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/export/:report",
+      "access": "advanced-read",
+      "permission": "finance.reports.export",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.export"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/general-ledger",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/profit-loss",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/property-profitability",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/statement-of-equity",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/tax",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/reports/trial-balance",
+      "access": "advanced-read",
+      "permission": "finance.reports.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceReportingValidation.common"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/retained-earnings",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.retainedEarnings"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/settings",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/settings",
+      "access": "advanced-write",
+      "permission": "finance.accounts.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceAccountingSettingsValidation.update"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/shareholder-loans",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/shareholder-loans",
+      "access": "advanced-write",
+      "permission": "finance.loans.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.createShareholderLoan"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/shareholder-loans/:id/payments",
+      "access": "advanced-write",
+      "permission": "finance.loans.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.payShareholderLoan"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/shareholders",
+      "access": "advanced-read",
+      "permission": "finance.shareholders.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/shareholders",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.createShareholder"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/shareholders/:id",
+      "access": "advanced-write",
+      "permission": "finance.shareholders.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceCapitalValidation.updateShareholder"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/tax-codes",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/tax-codes",
+      "access": "advanced-write",
+      "permission": "finance.tax.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.createTaxCode"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/tax-codes/:id",
+      "access": "advanced-write",
+      "permission": "finance.tax.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.updateTaxCode"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/vendor-bills",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.vendorBillList"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/vendor-bills",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.createVendorBill"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/accounting/vendor-bills/:id",
+      "access": "advanced-read",
+      "permission": "finance.accounting.read",
+      "entitlement": "ADVANCED_ACCOUNTING_OR_PRESERVED_READ_ONLY",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.vendorBillId"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/accounting/vendor-bills/:id",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.updateVendorBill"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/vendor-bills/:id/approve",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.vendorBillId"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/vendor-bills/:id/payments",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.payVendorBill"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/vendor-bills/:id/post",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.vendorBillId"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/accounting/vendor-bills/:id/void",
+      "access": "advanced-write",
+      "permission": "finance.payables.manage",
+      "entitlement": "ADVANCED_ACCOUNTING",
+      "migrationLock": false,
+      "validation": "FinanceOperationsValidation.voidVendorBill"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/budgets",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/budgets",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.createBudget"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/budgets/:id",
+      "access": "legacy-delete",
+      "permission": "finance.delete",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.deleteRecord"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/budgets/:id",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.updateBudget"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/commissions",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/commissions",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.createCommission"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/commissions/:id",
+      "access": "legacy-delete",
+      "permission": "finance.delete",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.deleteRecord"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/commissions/:id",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.updateCommission"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/commissions/:id/cancel",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.cancelCommission"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/commissions/:id/pay",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.payCommission"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/invoices",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/invoices",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.createInvoice"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/invoices/:id",
+      "access": "legacy-delete",
+      "permission": "finance.delete",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.archiveInvoice"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/invoices/:id",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/invoices/:id",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.updateInvoice"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/invoices/:id/payments",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.recordInvoicePayment"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/invoices/:id/pdf",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/invoices/:id/void",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.voidInvoice"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/overview",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "GET",
+      "path": "/finance/reports",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "GET",
+      "path": "/finance/reports/transactions.csv",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "GET",
+      "path": "/finance/transactions",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/transactions",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.createTransaction"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/transactions/:id",
+      "access": "legacy-delete",
+      "permission": "finance.delete",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.deleteRecord"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/transactions/:id",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.updateTransaction"
+    },
+    {
+      "method": "POST",
+      "path": "/finance/transactions/:id/void",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.voidTransaction"
+    },
+    {
+      "method": "GET",
+      "path": "/finance/vendors",
+      "access": "legacy-read",
+      "permission": "finance.read",
+      "entitlement": null,
+      "migrationLock": false,
+      "validation": null
+    },
+    {
+      "method": "POST",
+      "path": "/finance/vendors",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.createVendor"
+    },
+    {
+      "method": "DELETE",
+      "path": "/finance/vendors/:id",
+      "access": "legacy-delete",
+      "permission": "finance.delete",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.deleteRecord"
+    },
+    {
+      "method": "PATCH",
+      "path": "/finance/vendors/:id",
+      "access": "legacy-write",
+      "permission": "finance.write",
+      "entitlement": null,
+      "migrationLock": true,
+      "validation": "FinanceValidation.updateVendor"
+    }
+  ]
+}

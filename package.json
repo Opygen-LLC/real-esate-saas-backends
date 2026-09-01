@@ -180,7 +180,10 @@
     "test:advanced-accounting-phase6": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts src/tests/contract/advancedAccountingPhase3.contract.test.ts src/tests/contract/advancedAccountingPhase4.contract.test.ts src/tests/contract/advancedAccountingPhase5.contract.test.ts src/tests/contract/advancedAccountingPhase6.contract.test.ts",
     "migrate:advanced-accounting-phase7": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase7.ts",
     "verify:advanced-accounting-phase7": "node scripts/verify-advanced-accounting-phase7.mjs",
-    "test:advanced-accounting-phase7": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts src/tests/contract/advancedAccountingPhase3.contract.test.ts src/tests/contract/advancedAccountingPhase4.contract.test.ts src/tests/contract/advancedAccountingPhase5.contract.test.ts src/tests/contract/advancedAccountingPhase6.contract.test.ts src/tests/contract/advancedAccountingPhase7.contract.test.ts src/tests/contract/advancedAccountingPhase7.postingMatrix.contract.test.ts"
+    "test:advanced-accounting-phase7": "vitest run src/tests/contract/advancedAccountingPhase2.contract.test.ts src/tests/contract/advancedAccountingPhase3.contract.test.ts src/tests/contract/advancedAccountingPhase4.contract.test.ts src/tests/contract/advancedAccountingPhase5.contract.test.ts src/tests/contract/advancedAccountingPhase6.contract.test.ts src/tests/contract/advancedAccountingPhase7.contract.test.ts src/tests/contract/advancedAccountingPhase7.postingMatrix.contract.test.ts",
+    "reconcile:finance-phase2": "ts-node --transpile-only src/app/db/reconcileFinancePhase2.ts",
+    "repair:finance-phase2": "ts-node --transpile-only src/app/db/repairFinancePhase2.ts",
+    "test:finance-phase2": "vitest run src/tests/contract/financePhase2.contract.test.ts"
   },
   "keywords": [
     "real-estate",

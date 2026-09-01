@@ -10,6 +10,7 @@ import { FinanceAccountingService } from './financeAccounting.service'
 import { FinanceOperationsService } from './financeOperations.service'
 import { FinanceReportingService } from './financeReporting.service'
 import type { AccountingActor, FinanceJournalLineInput } from './financeAccounting.interface'
+import { FINANCE_ERROR_CODES } from './finance.contract'
 
 const objectId = (value: unknown, label: string) => {
   const id = String(value || '').trim()
@@ -80,7 +81,7 @@ const closePeriod = async (organizationId: string, actor: AccountingActor, perio
   // soft-lock it. Posting-period resolution rejects SOFT_LOCKED periods, so no
   // journal can race in between the final checklist and the CLOSED transition.
   const firstChecklist = await periodChecklist(organizationId, periodId)
-  if (!firstChecklist.canClose) throw new ApiError(httpStatus.CONFLICT, `Period cannot be closed: ${firstChecklist.blockers.join('; ')}`, '', 'PERIOD_CLOSE_BLOCKED', { blockers: firstChecklist.blockers })
+  if (!firstChecklist.canClose) throw new ApiError(httpStatus.CONFLICT, `Period cannot be closed: ${firstChecklist.blockers.join('; ')}`, '', FINANCE_ERROR_CODES.periodClosed, { blockers: firstChecklist.blockers })
 
   let acquiredLock = false
   if (current.status === 'OPEN') {
@@ -101,7 +102,7 @@ const closePeriod = async (organizationId: string, actor: AccountingActor, perio
 
   try {
     const finalChecklist = await periodChecklist(organizationId, periodId)
-    if (!finalChecklist.canClose) throw new ApiError(httpStatus.CONFLICT, `Period cannot be closed: ${finalChecklist.blockers.join('; ')}`, '', 'PERIOD_CLOSE_BLOCKED', { blockers: finalChecklist.blockers })
+    if (!finalChecklist.canClose) throw new ApiError(httpStatus.CONFLICT, `Period cannot be closed: ${finalChecklist.blockers.join('; ')}`, '', FINANCE_ERROR_CODES.periodClosed, { blockers: finalChecklist.blockers })
 
     return await FinanceAccountingService.accountingTransaction(async (session) => {
       const p: any = await withSession(FinanceFiscalPeriod.findOne({ _id: periodObjectId, organizationId, status: 'SOFT_LOCKED' }), session)
@@ -129,9 +130,9 @@ const closePeriod = async (organizationId: string, actor: AccountingActor, perio
 const reopenPeriod = async (organizationId: string, actor: AccountingActor, periodId: string, reason: string) => FinanceAccountingService.accountingTransaction(async (session) => {
   const p: any = await withSession(FinanceFiscalPeriod.findOne({ _id: objectId(periodId, 'fiscal period id'), organizationId }), session)
   if (!p) throw new ApiError(httpStatus.NOT_FOUND, 'Fiscal period not found')
-  if (p.status !== 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Only a closed period can be reopened')
+  if (p.status !== 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'Only a closed period can be reopened', '', FINANCE_ERROR_CODES.periodClosed)
   const y: any = await withSession(FinanceFiscalYear.findOne({ _id: p.fiscalYearId, organizationId }), session).lean()
-  if (y?.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'This period belongs to a closed fiscal year. Year-end closing must be addressed before reopening the period.')
+  if (y?.status === 'CLOSED') throw new ApiError(httpStatus.CONFLICT, 'This period belongs to a closed fiscal year. Year-end closing must be addressed before reopening the period.', '', FINANCE_ERROR_CODES.periodClosed)
   p.status = 'OPEN'; p.closedAt = null; p.closedBy = null; p.updatedBy = actorObjectId(actor)
   await p.save({ session })
   await audit(organizationId, actor, 'finance.period_reopened', 'financeFiscalPeriod', String(p._id), reason, { eventCode: 'PERIOD_REOPENED', before: { status: 'CLOSED' }, after: { status: 'OPEN' } }, session)
@@ -140,7 +141,7 @@ const reopenPeriod = async (organizationId: string, actor: AccountingActor, peri
 
 const accountBySystemKey = async (organizationId: string, systemKey: string, session?: ClientSession) => {
   const row = await withSession(FinanceAccount.findOne({ organizationId, systemKey, status: 'ACTIVE' }), session).lean()
-  if (!row) throw new ApiError(httpStatus.CONFLICT, `${systemKey} account is missing or inactive`)
+  if (!row) throw new ApiError(httpStatus.CONFLICT, `${systemKey} account is missing or inactive`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return row as any
 }
 

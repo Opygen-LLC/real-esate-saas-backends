@@ -2,13 +2,14 @@ import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
-import { FinanceAccount, FinanceFiscalYear, FinanceJournalEntry } from './financeAccounting.model'
+import { FinanceAccount, FinanceFiscalYear } from './financeAccounting.model'
+import { assertLegacyFinanceCurrency, FINANCE_ERROR_CODES, LEGACY_FINANCE_CURRENCY } from './finance.contract'
 
 type Actor = { id: string; role?: string; requestId?: string; ip?: string }
 
 const defaultSettings = (organizationId: string) => ({
   organizationId,
-  baseCurrency: 'BDT',
+  baseCurrency: LEGACY_FINANCE_CURRENCY,
   accountingMethod: 'ACCRUAL' as const,
   fiscalYearStartMonth: 1,
   makerCheckerRequired: false,
@@ -35,8 +36,6 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
   if (!actor.id) throw new ApiError(httpStatus.UNAUTHORIZED, 'Authenticated actor required')
 
   const before: any = await get(organizationId)
-  const now = new Date()
-
   const accountRefs = [
     ...Object.values(input.defaultAccounts || {}),
     ...Object.values(input.taxAccounts || {}),
@@ -47,10 +46,16 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
     if (owned != unique.length) throw new ApiError(httpStatus.BAD_REQUEST, 'One or more default accounting accounts do not belong to this organization or are inactive')
   }
 
-  if (input.baseCurrency !== undefined && String(input.baseCurrency).toUpperCase() !== String(before.baseCurrency || 'BDT').toUpperCase()) {
-    if (await FinanceJournalEntry.exists({ organizationId, status: { $in: ['POSTED', 'REVERSED'] } })) {
-      throw new ApiError(httpStatus.CONFLICT, 'Base currency cannot be changed after journals have been posted')
-    }
+  if (input.baseCurrency !== undefined) assertLegacyFinanceCurrency(input.baseCurrency)
+  // Existing tenants created by earlier Advanced Accounting phases may contain
+  // a non-BDT base currency. Do not let another settings update perpetuate that
+  // incompatible state; the Phase 2 reconciliation/migration tooling reports
+  // and repairs it explicitly before ledger writes resume.
+  if (String(before.baseCurrency || LEGACY_FINANCE_CURRENCY).toUpperCase() !== LEGACY_FINANCE_CURRENCY) {
+    throw new ApiError(httpStatus.CONFLICT, 'Accounting base currency must be reconciled to BDT before settings can be changed', '', FINANCE_ERROR_CODES.currencyMismatch, {
+      expectedCurrency: LEGACY_FINANCE_CURRENCY,
+      actualCurrency: before.baseCurrency,
+    })
   }
   if (input.fiscalYearStartMonth !== undefined && Number(input.fiscalYearStartMonth) !== Number(before.fiscalYearStartMonth || 1)) {
     if (await FinanceFiscalYear.exists({ organizationId })) {
@@ -58,7 +63,7 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
     }
   }
   const set: Record<string, unknown> = { updatedBy: actor.id }
-  if (input.baseCurrency !== undefined) set.baseCurrency = String(input.baseCurrency).toUpperCase()
+  if (input.baseCurrency !== undefined) set.baseCurrency = assertLegacyFinanceCurrency(input.baseCurrency)
   if (input.accountingMethod !== undefined) set.accountingMethod = input.accountingMethod
   if (input.fiscalYearStartMonth !== undefined) set.fiscalYearStartMonth = input.fiscalYearStartMonth
   if (input.makerCheckerRequired !== undefined) set.makerCheckerRequired = Boolean(input.makerCheckerRequired)
@@ -69,11 +74,7 @@ const update = async (organizationId: string, actor: Actor, input: Record<string
     { organizationId },
     {
       $set: set,
-      $setOnInsert: {
-        organizationId,
-        initializedAt: now,
-        initializedBy: actor.id,
-      },
+      $setOnInsert: { organizationId },
     },
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
   ).lean()

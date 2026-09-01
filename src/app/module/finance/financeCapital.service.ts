@@ -8,9 +8,10 @@ import { FinanceAccountingSettings } from './financeAccountingSettings.model'
 import { FinanceAccountingService } from './financeAccounting.service'
 import { AccountingPostingService } from './accountingPosting.service'
 import { FinanceBankAccount } from './financeOperations.model'
-import { moneyToMinorUnits } from './finance.money'
+import { moneyFromMinorUnits, moneyToMinorUnits } from './finance.money'
 import { FinanceDividend, FinanceEquityTransaction, FinanceLoan, FinanceShareholder, FinanceShareholderLoan } from './financeCapital.model'
 import type { FinanceEquityTransactionType, FinanceLoanPaymentFrequency } from './financeCapital.interface'
+import { assertLegacyFinanceCurrency, FINANCE_ERROR_CODES, LEGACY_FINANCE_CURRENCY, normalizeAutomatedJournalSourceType } from './finance.contract'
 
 const actorObjectId = (actor: AccountingActor) => {
   const value = String(actor.id || '')
@@ -58,18 +59,19 @@ const nextNumber = async (organizationId: string, key: string, prefix: string, d
 }
 const settings = async (organizationId: string, session?: ClientSession) => {
   const row = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
-  if (!row) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using capital accounting')
+  if (!row) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using capital accounting', '', FINANCE_ERROR_CODES.notInitialized)
+  assertLegacyFinanceCurrency(row.baseCurrency || LEGACY_FINANCE_CURRENCY, 'Organization accounting base currency')
   return row
 }
 const accountById = async (organizationId: string, id: unknown, type: string | string[], label: string, session?: ClientSession) => {
   const types = Array.isArray(type) ? type : [type]
   const row = await withSession(FinanceAccount.findOne({ _id: objectId(id, label), organizationId, status: 'ACTIVE', type: { $in: types } }), session).lean()
-  if (!row || !row.allowManualPosting) throw new ApiError(httpStatus.BAD_REQUEST, `${label} is invalid, inactive, non-posting, or belongs to another organization`)
+  if (!row || !row.allowManualPosting) throw new ApiError(httpStatus.BAD_REQUEST, `${label} is invalid, inactive, non-posting, or belongs to another organization`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return row
 }
 const systemAccount = async (organizationId: string, key: string, types: string[], label: string, session?: ClientSession) => {
   const row = await withSession(FinanceAccount.findOne({ organizationId, systemKey: key, status: 'ACTIVE', type: { $in: types } }), session).lean()
-  if (!row) throw new ApiError(httpStatus.CONFLICT, `${label} is not configured. Re-run Phase 5 accounting migration/initialization.`)
+  if (!row) throw new ApiError(httpStatus.CONFLICT, `${label} is not configured. Re-run accounting initialization.`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return row
 }
 const bankAccount = async (organizationId: string, id: unknown, session?: ClientSession) => {
@@ -162,7 +164,7 @@ const createEquityTransaction = async (organizationId: string, actor: Accounting
     } else {
       lines.push({ accountId: String(shareCapital._id), debitMinor: amountMinor, description: type === 'SHARE_BUYBACK' ? 'Share buyback' : 'Capital return', shareholderId: String(holder._id) }, { accountId: String(bank.gl._id), creditMinor: amountMinor, description: `${type} paid`, shareholderId: String(holder._id) })
     }
-    journal = await post(organizationId, actor, { sourceType: `EQUITY_${type}`, sourceId: String(row._id), postingDate: transactionDate, entryDate: transactionDate, description: `${type.replace(/_/g, ' ')} - ${holder.name}`, reference: input.reference || number, currency: s.baseCurrency, lines }, session)
+    journal = await post(organizationId, actor, { sourceType: normalizeAutomatedJournalSourceType(`EQUITY_${type}`), sourceId: String(row._id), postingDate: transactionDate, entryDate: transactionDate, description: `${type.replace(/_/g, ' ')} - ${holder.name}`, reference: input.reference || number, currency: s.baseCurrency, lines }, session)
     row.bankAccountId = bank._id; row.journalEntryId = journal._id; await row.save({ session })
     if (type === 'SHARE_ISSUE') holder.sharesHeld += shares
     if (['SHARE_BUYBACK','CAPITAL_RETURN'].includes(type) && shares) holder.sharesHeld -= shares
@@ -217,7 +219,7 @@ const declareDividend = async (organizationId: string, actor: AccountingActor, i
 })
 const payDividend = async (organizationId: string, actor: AccountingActor, id: string, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const row: any = await withSession(FinanceDividend.findOne({ _id: objectId(id, 'dividend id'), organizationId, status: 'DECLARED' }), session); if (!row) throw new ApiError(httpStatus.CONFLICT, 'Only declared dividends can be paid')
-  const remaining = row.amountMinor - row.paidMinor; const amountMinor = moneyMinor(input.amount ?? remaining / 100, 'dividend payment'); if (amountMinor > remaining) throw new ApiError(httpStatus.CONFLICT, 'Dividend payment exceeds the remaining declared amount')
+  const remaining = row.amountMinor - row.paidMinor; const amountMinor = moneyMinor(input.amount ?? moneyFromMinorUnits(remaining), 'dividend payment'); if (amountMinor > remaining) throw new ApiError(httpStatus.CONFLICT, 'Dividend payment exceeds the remaining declared amount')
   const bank = await bankAccount(organizationId, input.bankAccountId, session); const paymentId = new mongoose.Types.ObjectId(); const paidAt = input.paidAt ? dateValue(input.paidAt, 'payment date') : new Date(); const shareholderId = row.shareholderId ? String(row.shareholderId) : null
   const journal: any = await post(organizationId, actor, { sourceType: 'DIVIDEND_PAYMENT', sourceId: String(paymentId), postingDate: paidAt, entryDate: paidAt, description: `Dividend payment ${row.dividendNumber}`, reference: input.reference || row.dividendNumber, lines: [{ accountId: String(row.dividendPayableAccountId), debitMinor: amountMinor, description: 'Dividend payable cleared', shareholderId }, { accountId: String(bank.gl._id), creditMinor: amountMinor, description: 'Dividend cash payment', shareholderId }] }, session)
   row.payments.push({ _id: paymentId, paidAt, amountMinor, bankAccountId: bank._id, reference: input.reference || '', journalEntryId: journal._id, recordedBy: actorObjectId(actor) }); row.paidMinor += amountMinor; if (row.paidMinor === row.amountMinor) row.status = 'PAID'; row.updatedBy = actorObjectId(actor); await row.save({ session })

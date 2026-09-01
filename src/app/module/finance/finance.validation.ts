@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { moneyToMinorUnits } from './finance.money'
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid record id')
 const optionalObjectId = objectId.optional().or(z.literal(''))
@@ -7,10 +8,8 @@ const paymentMethod = z.enum(['cash', 'bank', 'bkash', 'nagad', 'card', 'cheque'
 const money = z.coerce.number().finite('Enter a valid amount').positive('Amount must be greater than zero').max(1_000_000_000_000)
 const category = z.string().trim().min(2).max(100)
 const optionalUrl = z.string().url().max(2000).optional().or(z.literal(''))
-const MONEY_SCALE = 100
-const toMinorUnits = (value: number) => Math.round((value + Math.sign(value) * Number.EPSILON) * MONEY_SCALE)
 const invoiceSubtotalMinor = (lineItems: Array<{ quantity: number; unitPrice: number }>) =>
-  lineItems.reduce((sum, item) => sum + Math.round(Number(item.quantity) * toMinorUnits(Number(item.unitPrice))), 0)
+  lineItems.reduce((sum, item) => sum + Math.round(Number(item.quantity) * moneyToMinorUnits(Number(item.unitPrice), 'unitPrice')), 0)
 
 const createTransaction = z.object({ body: z.object({
   type: z.enum(['income', 'expense']),
@@ -72,7 +71,7 @@ const createInvoice = z.object({ body: z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dueDate'], message: 'Due date cannot be before the issue date' })
   }
   const subtotalMinor = invoiceSubtotalMinor(value.lineItems)
-  const discountMinor = toMinorUnits(Number(value.discount || 0))
+  const discountMinor = moneyToMinorUnits(Number(value.discount || 0), 'discount')
   if (discountMinor > subtotalMinor) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed subtotal' })
   }
@@ -138,8 +137,8 @@ const validateCreateCommissionMode = (value: any, ctx: z.RefinementCtx) => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['companyShare'], message: 'Enter a valid company share' })
   }
   if (value.commissionAmount !== undefined && value.agentShare !== undefined && value.companyShare !== undefined) {
-    const commissionMinor = Math.round(value.commissionAmount * 100)
-    const sharesMinor = Math.round(value.agentShare * 100) + Math.round(value.companyShare * 100)
+    const commissionMinor = moneyToMinorUnits(Number(value.commissionAmount), 'commissionAmount')
+    const sharesMinor = moneyToMinorUnits(Number(value.agentShare), 'agentShare') + moneyToMinorUnits(Number(value.companyShare), 'companyShare')
     if (commissionMinor !== sharesMinor) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['agentShare'], message: 'Agent share and company share must equal the commission amount' })
     }

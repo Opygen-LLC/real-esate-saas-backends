@@ -13,7 +13,8 @@ import { FinanceAccountingService } from './financeAccounting.service'
 import { Property } from '../property/property.model'
 import { Organization } from '../organization/organization.model'
 import type { FinanceReportExport, FinanceReportExportFormat, FinanceReportKey } from './financeReporting.interface'
-import { moneyToMinorUnits } from './finance.money'
+import { moneyFromMinorUnits, moneyToMinorUnits } from './finance.money'
+import { assertLegacyFinanceCurrency, FINANCE_ERROR_CODES } from './finance.contract'
 
 const POSTED_LINE_STATUSES = ['POSTED', 'REVERSED']
 
@@ -52,10 +53,11 @@ const normalizeRange = (query: Record<string, unknown>, requireStart = true) => 
 }
 const ensureInitialized = async (organizationId: string) => {
   const settings = await FinanceAccountingSettings.findOne({ organizationId }).lean()
-  if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize Advanced Accounting before running financial statements')
+  if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize Advanced Accounting before running financial statements', '', FINANCE_ERROR_CODES.notInitialized)
+  assertLegacyFinanceCurrency(settings.baseCurrency, 'Organization accounting base currency')
   return settings
 }
-const money = (minor: number, currency: string) => `${currency} ${(minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const money = (minor: number, currency: string) => `${currency} ${moneyFromMinorUnits(minor).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const accountBalanceForType = (type: string, debit: number, credit: number) => type === 'ASSET' || type === 'EXPENSE' ? debit - credit : credit - debit
 const periodMatch = (organizationId: string, startDate: Date | undefined, endDate: Date) => ({
   organizationId,

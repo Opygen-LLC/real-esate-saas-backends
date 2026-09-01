@@ -12,6 +12,7 @@ import type { LegacyFinancePaymentMethod } from './financeInitialization.interfa
 import { FinanceAccountingService } from './financeAccounting.service'
 import { FinanceReportingService } from './financeReporting.service'
 import { moneyToMinorUnits } from './finance.money'
+import { assertLegacyFinanceCurrency, FINANCE_ERROR_CODES } from './finance.contract'
 
 const objectId = (value: unknown, label: string) => {
   const id = String(value || '').trim()
@@ -118,7 +119,8 @@ const preview = async (organizationId: string, actor: AccountingActor, startDate
   const tomorrow = new Date(); tomorrow.setUTCHours(0, 0, 0, 0); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
   if (startDate >= tomorrow) throw new ApiError(httpStatus.BAD_REQUEST, 'Accounting start date cannot be in the future')
   const settings: any = await FinanceAccountingSettings.findOne({ organizationId }).lean()
-  if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize the Chart of Accounts before preparing historical migration')
+  if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize the Chart of Accounts before preparing historical migration', '', FINANCE_ERROR_CODES.notInitialized)
+  assertLegacyFinanceCurrency(settings.baseCurrency, 'Organization accounting base currency')
   const existingOpening = await FinanceJournalEntry.findOne({ organizationId, sourceType: 'OPENING_BALANCE_MIGRATION', sourceId: `MIGRATION:${organizationId}` }).lean()
   if (existingOpening) return { alreadyActivated: true, openingJournalId: String(existingOpening._id), snapshot: await historicalSnapshot(organizationId, startDate) }
   const nonMigrationPosted = await FinanceJournalEntry.exists({ organizationId, status: { $in: ['POSTED', 'REVERSED'] }, sourceType: { $nin: ['OPENING_BALANCE', 'OPENING_BALANCE_MIGRATION'] } })
@@ -157,7 +159,7 @@ const activate = async (organizationId: string, actor: AccountingActor, input: a
     const trialBalance = await FinanceReportingService.trialBalance(organizationId, { startDate, endDate: startDate })
     return { batch: existingBeforeLock, journal, idempotent: true, trialBalance: { balanced: trialBalance.balanced, totals: trialBalance.totals } }
   }
-  if (existingBeforeLock?.status === 'ACTIVATING') throw new ApiError(httpStatus.CONFLICT, 'Accounting migration activation is already in progress', '', 'ACCOUNTING_MIGRATION_IN_PROGRESS')
+  if (existingBeforeLock?.status === 'ACTIVATING') throw new ApiError(httpStatus.CONFLICT, 'Accounting migration activation is already in progress', '', FINANCE_ERROR_CODES.migrationInProgress)
   if (!existingBeforeLock || existingBeforeLock.status !== 'PREVIEWED') throw new ApiError(httpStatus.CONFLICT, 'Preview and reconcile historical finance before activating accounting', '', 'ACCOUNTING_MIGRATION_PREVIEW_REQUIRED')
 
   const lock = await FinanceAccountingInitialization.findOneAndUpdate(
@@ -170,7 +172,8 @@ const activate = async (organizationId: string, actor: AccountingActor, input: a
   try {
     const result = await FinanceAccountingService.accountingTransaction(async (session) => {
       const settings: any = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
-      if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize the Chart of Accounts before activating accounting')
+      if (!settings?.initializedAt) throw new ApiError(httpStatus.CONFLICT, 'Initialize the Chart of Accounts before activating accounting', '', FINANCE_ERROR_CODES.notInitialized)
+      assertLegacyFinanceCurrency(settings.baseCurrency, 'Organization accounting base currency')
       const existingBatch: any = await withSession(FinanceAccountingInitialization.findOne({ organizationId }), session).lean()
       if (existingBatch?.status === 'ACTIVATED') return { batch: existingBatch, journal: existingBatch.openingJournalId ? await FinanceAccountingService.getJournal(organizationId, String(existingBatch.openingJournalId), session) : null, idempotent: true }
       if (existingBatch?.status !== 'ACTIVATING') throw new ApiError(httpStatus.CONFLICT, 'Accounting migration activation lock was lost', '', 'ACCOUNTING_MIGRATION_CONFLICT')
@@ -222,7 +225,7 @@ const activate = async (organizationId: string, actor: AccountingActor, input: a
       if (retainedAdjustmentMinor < 0) lines.push({ accountId: String(retained._id), debitMinor: Math.abs(retainedAdjustmentMinor), description: 'Opening accumulated deficit / migration balancing balance' })
       debit = lines.reduce((n, l) => n + Number(l.debitMinor || 0), 0)
       credit = lines.reduce((n, l) => n + Number(l.creditMinor || 0), 0)
-      if (debit !== credit) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Opening migration journal is not balanced')
+      if (debit !== credit) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Opening migration journal is not balanced', '', FINANCE_ERROR_CODES.unbalanced)
 
       let journal: any = null
       if (lines.length >= 2 && debit > 0) {
@@ -242,7 +245,7 @@ const activate = async (organizationId: string, actor: AccountingActor, input: a
       return { batch, journal, retainedAdjustmentMinor, idempotent: false }
     })
     const trialBalance = await FinanceReportingService.trialBalance(organizationId, { startDate, endDate: startDate })
-    if (!trialBalance.balanced) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Accounting activation completed but Trial Balance is not balanced', '', 'TRIAL_BALANCE_NOT_BALANCED')
+    if (!trialBalance.balanced) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Accounting activation completed but Trial Balance is not balanced', '', FINANCE_ERROR_CODES.unbalanced)
     return { ...result, trialBalance: { balanced: trialBalance.balanced, totals: trialBalance.totals } }
   } catch (error) {
     // Release the short migration write lock on failure so legacy/basic Finance can

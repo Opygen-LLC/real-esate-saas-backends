@@ -16,6 +16,7 @@ import { EntitlementService } from '../module/entitlement/entitlement.service'
 import { ENTITLEMENT_CAPABILITIES, type EntitlementCapability } from '../module/entitlement/entitlement.types'
 import { FinanceAccountingSettings } from '../module/finance/financeAccountingSettings.model'
 import { FinanceAccountingInitialization } from '../module/finance/financeInitialization.model'
+import { FINANCE_ERROR_CODES } from '../module/finance/finance.contract'
 
 const authenticate = async (req: Request): Promise<void> => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[config.security.access_cookie_name]
@@ -58,7 +59,10 @@ const auth = (...roles: string[]) => async (req: Request, _res: Response, next: 
 const requirePermission = (permission: Permission) => async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   try {
     if (!req.user) await authenticate(req)
-    if (!req.tenant?.permissions.includes(permission)) throw new ApiError(403, `Missing permission: ${permission}`)
+    if (!req.tenant?.permissions.includes(permission)) {
+      const financePermission = String(permission).startsWith('finance.')
+      throw new ApiError(403, `Missing permission: ${permission}`, '', financePermission ? FINANCE_ERROR_CODES.permissionRequired : undefined, financePermission ? { requiredPermission: permission } : undefined)
+    }
     await enforceSubscriptionAccess(req)
     await TenantPurgeBarrier.assertRequestWritable(req.method, req.tenant?.organizationId)
     next()
@@ -82,7 +86,7 @@ const requireEntitlement = (capability: EntitlementCapability) => async (req: Re
     const resolved = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
     const enabled = Boolean(resolved.limits?.entitlements?.[featureId]?.enabled)
     if (!enabled) {
-      throw new ApiError(403, `${capability.replace(/_/g, ' ').toLowerCase()} is not enabled for this organization`, '', 'ENTITLEMENT_REQUIRED', {
+      throw new ApiError(403, `${capability.replace(/_/g, ' ').toLowerCase()} is not enabled for this organization`, '', FINANCE_ERROR_CODES.entitlementRequired, {
         entitlement: capability,
         currentPlan: resolved.organization?.subscription?.plan,
         upgradeRequired: true,
@@ -101,7 +105,7 @@ const requireAdvancedAccountingReadAccess = async (req: Request, _res: Response,
     if (!entitled) {
       const settings = await FinanceAccountingSettings.findOne({ organizationId }).select('_id initializedAt activationStatus').lean()
       if (!settings?.initializedAt) {
-        throw new ApiError(403, 'advanced accounting is not enabled for this organization', '', 'ENTITLEMENT_REQUIRED', {
+        throw new ApiError(403, 'advanced accounting is not enabled for this organization', '', FINANCE_ERROR_CODES.entitlementRequired, {
           entitlement: 'ADVANCED_ACCOUNTING', currentPlan: resolved.organization?.subscription?.plan, upgradeRequired: true,
         })
       }
@@ -117,7 +121,7 @@ const rejectAccountingMigrationLock = async (req: Request, _res: Response, next:
     const organizationId = requireTenant(req)
     const activating = await FinanceAccountingInitialization.exists({ organizationId, status: 'ACTIVATING' })
     if (activating) {
-      throw new ApiError(409, 'Finance is temporarily locked while historical accounting balances are being activated. Retry after the activation finishes.', '', 'ACCOUNTING_MIGRATION_IN_PROGRESS')
+      throw new ApiError(409, 'Finance is temporarily locked while historical accounting balances are being activated. Retry after the activation finishes.', '', FINANCE_ERROR_CODES.migrationInProgress)
     }
     next()
   } catch (error) { next(error) }

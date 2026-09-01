@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose'
+import type { LegacyFinanceCurrency } from './finance.contract'
 
 export type FinanceShareholderType = 'INDIVIDUAL' | 'COMPANY'
 export type FinanceShareholderStatus = 'ACTIVE' | 'INACTIVE'
@@ -35,7 +36,7 @@ export interface IFinanceEquityTransaction {
   amountMinor: number
   shareCapitalMinor: number
   additionalPaidInCapitalMinor: number
-  currency: string
+  currency: LegacyFinanceCurrency
   transactionDate: Date
   bankAccountId?: Types.ObjectId | null
   reference?: string
@@ -68,7 +69,7 @@ export interface IFinanceShareholderLoan {
   startDate: Date
   maturityDate?: Date | null
   paymentFrequency: FinanceLoanPaymentFrequency
-  currency: string
+  currency: LegacyFinanceCurrency
   bankAccountId: Types.ObjectId
   liabilityAccountId: Types.ObjectId
   interestExpenseAccountId: Types.ObjectId
@@ -100,7 +101,7 @@ export interface IFinanceDividend {
   description: string
   amountMinor: number
   paidMinor: number
-  currency: string
+  currency: LegacyFinanceCurrency
   declarationDate: Date
   paymentDueDate?: Date | null
   status: FinanceDividendStatus
@@ -141,7 +142,7 @@ export interface IFinanceLoan {
   startDate: Date
   maturityDate?: Date | null
   paymentFrequency: FinanceLoanPaymentFrequency
-  currency: string
+  currency: LegacyFinanceCurrency
   bankAccountId: Types.ObjectId
   liabilityAccountId: Types.ObjectId
   interestExpenseAccountId: Types.ObjectId

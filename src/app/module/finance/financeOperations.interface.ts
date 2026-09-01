@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose'
+import type { LegacyFinanceCurrency } from './finance.contract'
 
 export type FinanceBankAccountType = 'CHECKING' | 'SAVINGS' | 'PETTY_CASH' | 'CLIENT_MONEY' | 'CREDIT_CARD' | 'MOBILE_WALLET'
 export type FinanceBankAccountStatus = 'ACTIVE' | 'INACTIVE'
@@ -17,7 +18,7 @@ export interface IFinanceBankAccount {
   bankName?: string
   accountName?: string
   accountNumberMasked?: string
-  currency: string
+  currency: LegacyFinanceCurrency
   glAccountId: Types.ObjectId
   isDefaultOperating: boolean
   status: FinanceBankAccountStatus
@@ -52,7 +53,7 @@ export interface IFinanceVendorBill {
   vendorInvoiceNumber?: string
   billDate: Date
   dueDate?: Date
-  currency: string
+  currency: LegacyFinanceCurrency
   lines: IFinanceVendorBillLine[]
   subtotalMinor: number
   taxCodeId?: Types.ObjectId | null
@@ -80,7 +81,7 @@ export interface IFinanceBankTransfer {
   sourceBankAccountId: Types.ObjectId
   destinationBankAccountId: Types.ObjectId
   amountMinor: number
-  currency: string
+  currency: LegacyFinanceCurrency
   transferDate: Date
   reference?: string
   description?: string
@@ -98,7 +99,7 @@ export interface IFinanceBankStatement {
   endDate: Date
   openingBalanceMinor: number
   closingBalanceMinor: number
-  currency: string
+  currency: LegacyFinanceCurrency
   status: FinanceBankStatementStatus
   sourceFileName?: string
   reconciledAt?: Date | null
@@ -170,7 +171,7 @@ export interface IFinanceClientDeposit {
   amountMinor: number
   appliedMinor: number
   refundedMinor: number
-  currency: string
+  currency: LegacyFinanceCurrency
   receivedAt: Date
   reference?: string
   notes?: string

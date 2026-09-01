@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose'
+import type { LegacyFinanceCurrency } from './finance.contract'
 
 export type FinanceAccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'
 export type FinanceNormalBalance = 'DEBIT' | 'CREDIT'
@@ -15,7 +16,7 @@ export interface IFinanceAccount {
   type: FinanceAccountType
   parentAccountId?: Types.ObjectId | null
   normalBalance: FinanceNormalBalance
-  currency: string
+  currency: LegacyFinanceCurrency
   systemKey?: string | null
   isSystem: boolean
   allowManualPosting: boolean
@@ -68,7 +69,7 @@ export interface IFinanceJournalEntry {
   idempotencyKey?: string | null
   description: string
   reference?: string
-  currency: string
+  currency: LegacyFinanceCurrency
   fiscalYearId: Types.ObjectId
   fiscalPeriodId: Types.ObjectId
   createdBy: Types.ObjectId
@@ -92,7 +93,7 @@ export interface IFinanceJournalLine {
   debitMinor: number
   creditMinor: number
   description?: string
-  currency: string
+  currency: LegacyFinanceCurrency
   journalStatus: FinanceJournalStatus
   postingDate: Date
   sourceType: string

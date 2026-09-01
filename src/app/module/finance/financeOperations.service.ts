@@ -16,6 +16,7 @@ import {
   FinanceClientDeposit, FinanceReconciliation, FinanceTaxCode, FinanceVendorBill,
 } from './financeOperations.model'
 import type { FinanceClientDepositStatus, FinanceTaxDirection } from './financeOperations.interface'
+import { assertLegacyFinanceCurrency, FINANCE_ERROR_CODES, LEGACY_FINANCE_CURRENCY } from './finance.contract'
 
 const actorObjectId = (actor: AccountingActor) => {
   const value = String(actor.id || '')
@@ -66,14 +67,15 @@ const nextNumber = async (organizationId: string, key: string, prefix: string, d
 }
 const settings = async (organizationId: string, session?: ClientSession) => {
   const row = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
-  if (!row) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using operational accounting')
+  if (!row) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before using operational accounting', '', FINANCE_ERROR_CODES.notInitialized)
+  assertLegacyFinanceCurrency(row.baseCurrency || LEGACY_FINANCE_CURRENCY, 'Organization accounting base currency')
   return row
 }
 const account = async (organizationId: string, value: unknown, types: string[], label: string, session?: ClientSession, requireDirectPosting = true) => {
   const row = await withSession(FinanceAccount.findOne({ _id: objectId(value, label), organizationId, status: 'ACTIVE' }), session).lean()
-  if (!row) throw new ApiError(httpStatus.BAD_REQUEST, `${label} is invalid, inactive, or belongs to another organization`)
-  if (!types.includes(row.type)) throw new ApiError(httpStatus.BAD_REQUEST, `${label} must be a ${types.join(' or ')} account`)
-  if (requireDirectPosting && !row.allowManualPosting) throw new ApiError(httpStatus.BAD_REQUEST, `${label} does not allow direct posting`)
+  if (!row) throw new ApiError(httpStatus.BAD_REQUEST, `${label} is invalid, inactive, or belongs to another organization`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
+  if (!types.includes(row.type)) throw new ApiError(httpStatus.BAD_REQUEST, `${label} must be a ${types.join(' or ')} account`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
+  if (requireDirectPosting && !row.allowManualPosting) throw new ApiError(httpStatus.BAD_REQUEST, `${label} does not allow direct posting`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return row
 }
 const bankAccount = async (organizationId: string, id: unknown, session?: ClientSession, active = true) => {
@@ -219,7 +221,7 @@ const createBankAccount = async (organizationId: string, actor: AccountingActor,
   const type = String(input.type).toUpperCase()
   const allowedTypes = type === 'CREDIT_CARD' ? ['LIABILITY'] : ['ASSET']
   const gl = await account(organizationId, input.glAccountId, allowedTypes, 'bank GL account', session)
-  if (String(gl.currency).toUpperCase() !== String(s.baseCurrency).toUpperCase()) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank account GL currency must match base currency')
+  if (String(gl.currency).toUpperCase() !== String(s.baseCurrency).toUpperCase()) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank account GL currency must match base currency', '', FINANCE_ERROR_CODES.currencyMismatch)
   if (input.isDefaultOperating) await FinanceBankAccount.updateMany({ organizationId, isDefaultOperating: true }, { $set: { isDefaultOperating: false, updatedBy: actorObjectId(actor) } }, { session })
   let row: any
   try {
@@ -264,7 +266,7 @@ const transferBankFunds = async (organizationId: string, actor: AccountingActor,
   const source = await bankAccount(organizationId, input.sourceBankAccountId, session)
   const destination = await bankAccount(organizationId, input.destinationBankAccountId, session)
   if (String(source._id) === String(destination._id)) throw new ApiError(httpStatus.BAD_REQUEST, 'Source and destination bank accounts must be different')
-  if (source.currency !== destination.currency) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank transfer accounts must use the same currency')
+  if (source.currency !== destination.currency) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank transfer accounts must use the same currency', '', FINANCE_ERROR_CODES.currencyMismatch)
   const amountMinor = positiveMinor(input.amount, 'transfer amount')
   const transferDate = dateValue(input.transferDate || new Date(), 'transfer date')
   const transferNumber = await nextNumber(organizationId, 'bank-transfer', 'TRF', transferDate, session)
@@ -413,7 +415,7 @@ const payVendorBill = async (organizationId: string, actor: AccountingActor, id:
   const outstanding = Number(row.totalMinor) - Number(row.paidMinor)
   if (amountMinor > outstanding) throw new ApiError(httpStatus.BAD_REQUEST, 'Payment cannot exceed vendor bill outstanding balance')
   const bank = await bankAccount(organizationId, input.bankAccountId, session)
-  if (bank.currency !== row.currency) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank account currency must match vendor bill currency')
+  if (bank.currency !== row.currency) throw new ApiError(httpStatus.BAD_REQUEST, 'Bank account currency must match vendor bill currency', '', FINANCE_ERROR_CODES.currencyMismatch)
   const s = await settings(organizationId, session)
   const ap = await account(organizationId, s.defaultAccounts?.accountsPayable, ['LIABILITY'], 'Accounts Payable account', session)
   const paidAt = dateValue(input.paidAt || new Date(), 'payment date')

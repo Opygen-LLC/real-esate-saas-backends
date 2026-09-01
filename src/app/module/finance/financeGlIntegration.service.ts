@@ -9,6 +9,7 @@ import { AccountingPostingService } from './accountingPosting.service'
 import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import { moneyToMinorUnits } from './finance.money'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
+import { FINANCE_ERROR_CODES, LEGACY_FINANCE_CURRENCY, type FinanceAutomatedJournalSourceType, type LegacyFinanceCurrency } from './finance.contract'
 
 const withSession = <T>(query: T, session?: ClientSession): T => {
   if (session && typeof (query as any)?.session === 'function') (query as any).session(session)
@@ -26,14 +27,14 @@ const minor = (amount: unknown, field = 'amount') => {
 
 const getSettings = async (organizationId: string, session?: ClientSession) => {
   const settings = await withSession(FinanceAccountingSettings.findOne({ organizationId }), session).lean()
-  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before automatic GL posting')
+  if (!settings) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before automatic GL posting', '', FINANCE_ERROR_CODES.notInitialized)
   return settings
 }
 
 const accountFromRef = async (organizationId: string, accountRef: unknown, expectedType: string, label: string, session?: ClientSession) => {
-  if (!accountRef || !mongoose.isValidObjectId(String(accountRef))) throw new ApiError(httpStatus.CONFLICT, `${label} is not configured in accounting settings`)
+  if (!accountRef || !mongoose.isValidObjectId(String(accountRef))) throw new ApiError(httpStatus.CONFLICT, `${label} is not configured in accounting settings`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   const account = await withSession(FinanceAccount.findOne({ _id: accountRef, organizationId, status: 'ACTIVE', type: expectedType }), session).lean()
-  if (!account) throw new ApiError(httpStatus.CONFLICT, `${label} is inactive, invalid, or belongs to another organization`)
+  if (!account) throw new ApiError(httpStatus.CONFLICT, `${label} is inactive, invalid, or belongs to another organization`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return account
 }
 
@@ -44,7 +45,7 @@ const bankGlAccount = async (organizationId: string, bankAccountId: unknown, fal
   const bank = await withSession(FinanceBankAccount.findOne({ _id: bankAccountId, organizationId, status: 'ACTIVE' }), session).lean()
   if (!bank) throw new ApiError(httpStatus.BAD_REQUEST, 'Finance bank account is inactive or belongs to another organization')
   const gl = await withSession(FinanceAccount.findOne({ _id: bank.glAccountId, organizationId, status: 'ACTIVE' }), session).lean()
-  if (!gl || !['ASSET', 'LIABILITY'].includes(gl.type)) throw new ApiError(httpStatus.CONFLICT, 'Finance bank account is not linked to a valid active cash/bank General Ledger account')
+  if (!gl || !['ASSET', 'LIABILITY'].includes(gl.type)) throw new ApiError(httpStatus.CONFLICT, 'Finance bank account is not linked to a valid active cash/bank General Ledger account', '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return gl
 }
 
@@ -62,7 +63,7 @@ const isAutomaticPostingReady = async (organizationId: string, session?: ClientS
 const postAutomaticJournal = async (
   organizationId: string,
   actor: AccountingActor,
-  input: { sourceType: string; sourceId: string; postingDate: Date; entryDate?: Date; description: string; reference?: string; lines: FinanceJournalLineInput[]; idempotencyKey?: string; currency?: string },
+  input: { sourceType: FinanceAutomatedJournalSourceType; sourceId: string; postingDate: Date; entryDate?: Date; description: string; reference?: string; lines: FinanceJournalLineInput[]; idempotencyKey?: string; currency?: LegacyFinanceCurrency },
   session?: ClientSession,
 ) => AccountingPostingService.postAutomatedInSession(organizationId, { ...actor, system: true }, {
   sourceType: input.sourceType,
@@ -104,7 +105,7 @@ const postManualTransaction = async (organizationId: string, actor: AccountingAc
       { accountId: String(bank._id), creditMinor: amountMinor, description: transaction.description, ...dimensions },
     ]
   return postAutomaticJournal(organizationId, actor, {
-    sourceType: 'MANUAL_TRANSACTION', sourceId: `${transaction._id}:v${version}`, currency: transaction.currency || 'BDT', postingDate: new Date(transaction.transactionDate), description: `Manual ${transaction.type}: ${transaction.description}`, reference: transaction.reference || '', lines,
+    sourceType: 'MANUAL_TRANSACTION', sourceId: `${transaction._id}:v${version}`, currency: transaction.currency || LEGACY_FINANCE_CURRENCY, postingDate: new Date(transaction.transactionDate), description: `Manual ${transaction.type}: ${transaction.description}`, reference: transaction.reference || '', lines,
   }, session)
 }
 
@@ -133,7 +134,7 @@ const postInvoiceRevenue = async (organizationId: string, actor: AccountingActor
     lines.push({ accountId: String(taxAccount._id), creditMinor: taxAmountMinor, description: `${invoice.invoiceNumber} output tax`, ...dimensions })
   }
   return postAutomaticJournal(organizationId, actor, {
-    sourceType: 'INVOICE_REVENUE', sourceId: `${invoice._id}:v${version}`, currency: invoice.currency || 'BDT', postingDate: new Date(invoice.issueDate), description: `Revenue recognized for ${invoice.invoiceNumber}`, reference: invoice.invoiceNumber,
+    sourceType: 'INVOICE_REVENUE', sourceId: `${invoice._id}:v${version}`, currency: invoice.currency || LEGACY_FINANCE_CURRENCY, postingDate: new Date(invoice.issueDate), description: `Revenue recognized for ${invoice.invoiceNumber}`, reference: invoice.invoiceNumber,
     lines,
   }, session)
 }
@@ -145,7 +146,7 @@ const postInvoicePayment = async (organizationId: string, actor: AccountingActor
   const amountMinor = minor(transaction.amount)
   const dimensions = { propertyId: propertyDimension(invoice.propertyId) }
   return postAutomaticJournal(organizationId, actor, {
-    sourceType: 'INVOICE_PAYMENT', sourceId: String(transaction._id), currency: transaction.currency || invoice.currency || 'BDT', postingDate: new Date(transaction.transactionDate), description: `Payment received for ${invoice.invoiceNumber}`, reference: transaction.reference || invoice.invoiceNumber,
+    sourceType: 'INVOICE_PAYMENT', sourceId: String(transaction._id), currency: transaction.currency || invoice.currency || LEGACY_FINANCE_CURRENCY, postingDate: new Date(transaction.transactionDate), description: `Payment received for ${invoice.invoiceNumber}`, reference: transaction.reference || invoice.invoiceNumber,
     lines: [
       { accountId: String(bank._id), debitMinor: amountMinor, description: invoice.invoiceNumber, ...dimensions },
       { accountId: String(ar._id), creditMinor: amountMinor, description: invoice.invoiceNumber, ...dimensions },
@@ -161,7 +162,7 @@ const postCommissionAccrual = async (organizationId: string, actor: AccountingAc
   const amountMinor = minor(commission.agentShare, 'agent share')
   const dimensions = { propertyId: propertyDimension(commission.propertyId), agentId: id(commission.agentId) }
   return postAutomaticJournal(organizationId, actor, {
-    sourceType: 'COMMISSION_ACCRUAL', sourceId: `${commission._id}:v${version}`, currency: commission.currency || 'BDT', postingDate: new Date(commission.updatedAt || commission.createdAt || new Date()), description: `Agent commission accrued ${commission.commissionNumber}`, reference: commission.dealReference || commission.commissionNumber,
+    sourceType: 'COMMISSION_ACCRUAL', sourceId: `${commission._id}:v${version}`, currency: commission.currency || LEGACY_FINANCE_CURRENCY, postingDate: new Date(commission.updatedAt || commission.createdAt || new Date()), description: `Agent commission accrued ${commission.commissionNumber}`, reference: commission.dealReference || commission.commissionNumber,
     lines: [
       { accountId: String(expense._id), debitMinor: amountMinor, description: commission.commissionNumber, ...dimensions },
       { accountId: String(payable._id), creditMinor: amountMinor, description: commission.commissionNumber, ...dimensions },
@@ -177,7 +178,7 @@ const postCommissionPayout = async (organizationId: string, actor: AccountingAct
   const amountMinor = minor(commission.agentShare, 'agent share')
   const dimensions = { propertyId: propertyDimension(commission.propertyId), agentId: id(commission.agentId) }
   return postAutomaticJournal(organizationId, actor, {
-    sourceType: 'COMMISSION_PAYOUT', sourceId: String(transaction?._id || commission._id), currency: transaction?.currency || commission.currency || 'BDT', postingDate: new Date(commission.paidAt || transaction?.transactionDate || new Date()), description: `Agent commission paid ${commission.commissionNumber}`, reference: commission.paymentReference || commission.commissionNumber,
+    sourceType: 'COMMISSION_PAYOUT', sourceId: String(transaction?._id || commission._id), currency: transaction?.currency || commission.currency || LEGACY_FINANCE_CURRENCY, postingDate: new Date(commission.paidAt || transaction?.transactionDate || new Date()), description: `Agent commission paid ${commission.commissionNumber}`, reference: commission.paymentReference || commission.commissionNumber,
     lines: [
       { accountId: String(payable._id), debitMinor: amountMinor, description: commission.commissionNumber, ...dimensions },
       { accountId: String(bank._id), creditMinor: amountMinor, description: commission.commissionNumber, ...dimensions },

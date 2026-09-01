@@ -18,13 +18,14 @@ import { FinanceInitializationController } from './financeInitialization.control
 import { FinanceInitializationValidation } from './financeInitialization.validation'
 import { FinanceCloseController } from './financeClose.controller'
 import { FinanceCloseValidation } from './financeClose.validation'
+import type { FinancePermission } from './finance.contract'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
 const write = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock] as const
 const remove = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete'), authMiddlewares.rejectAccountingMigrationLock] as const
-const advancedRead = (permission: any = 'finance.accounting.read') => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireAdvancedAccountingReadAccess] as const
-const advancedWrite = (permission: any) => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
+const advancedRead = (permission: FinancePermission = 'finance.accounting.read') => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireAdvancedAccountingReadAccess] as const
+const advancedWrite = (permission: FinancePermission) => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
 
 router.get('/accounting/settings', ...advancedRead(), FinanceAccountingSettingsController.get)
 router.patch('/accounting/settings', ...advancedWrite('finance.accounts.manage'), validateRequest(FinanceAccountingSettingsValidation.update), FinanceAccountingSettingsController.update)

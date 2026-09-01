@@ -4,6 +4,7 @@ import ApiError from '../../../errors/ApiError'
 import { writeAudit } from '../audit/audit.service'
 import type { AccountingActor, FinanceCategoryMappingType } from './financeAccounting.interface'
 import { FinanceAccount, FinanceCategoryAccountMapping } from './financeAccounting.model'
+import { FINANCE_ERROR_CODES } from './finance.contract'
 
 export const FINANCE_OPERATIONAL_CATEGORIES = [
   'Property sales',
@@ -80,9 +81,9 @@ const ensurePhase3ExpenseAccount = async (organizationId: string, actor: Account
   let account = await withSession(FinanceAccount.findOne({ organizationId, systemKey }), session).lean()
   if (account) return account
   const definition = phase3ExpenseAccounts[systemKey]
-  if (!definition) throw new ApiError(httpStatus.CONFLICT, `Required accounting account ${systemKey} is not configured. Re-run accounting initialization.`)
+  if (!definition) throw new ApiError(httpStatus.CONFLICT, `Required accounting account ${systemKey} is not configured. Re-run accounting initialization.`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   const parent = await withSession(FinanceAccount.findOne({ organizationId, systemKey: 'EXPENSES_ROOT' }), session).lean()
-  if (!parent) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before configuring finance category mappings')
+  if (!parent) throw new ApiError(httpStatus.CONFLICT, 'Initialize accounting before configuring finance category mappings', '', FINANCE_ERROR_CODES.notInitialized)
   const rows = await FinanceAccount.create([{
     organizationId,
     code: definition.code,
@@ -108,7 +109,7 @@ const ensurePhase3ExpenseAccount = async (organizationId: string, actor: Account
 const findSystemAccount = async (organizationId: string, systemKey: string, actor: AccountingActor, session?: ClientSession) => {
   if (phase3ExpenseAccounts[systemKey]) return ensurePhase3ExpenseAccount(organizationId, actor, systemKey, session)
   const account = await withSession(FinanceAccount.findOne({ organizationId, systemKey, status: 'ACTIVE' }), session).lean()
-  if (!account) throw new ApiError(httpStatus.CONFLICT, `Required accounting account ${systemKey} is not configured. Re-run accounting initialization.`)
+  if (!account) throw new ApiError(httpStatus.CONFLICT, `Required accounting account ${systemKey} is not configured. Re-run accounting initialization.`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return account
 }
 
@@ -194,9 +195,9 @@ const resolveAccount = async (organizationId: string, actor: AccountingActor, tr
       { upsert: true, new: true, session, setDefaultsOnInsert: true },
     ).lean()
   }
-  if (!mapping) throw new ApiError(httpStatus.CONFLICT, `No GL mapping exists for ${transactionType} category ${category}`)
+  if (!mapping) throw new ApiError(httpStatus.CONFLICT, `No GL mapping exists for ${transactionType} category ${category}`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   const account = await withSession(FinanceAccount.findOne({ _id: mapping.accountId, organizationId, status: 'ACTIVE', type: expectedAccountType(transactionType), allowManualPosting: true }), session).lean()
-  if (!account) throw new ApiError(httpStatus.CONFLICT, `The GL account mapped to ${category} is inactive or invalid`)
+  if (!account) throw new ApiError(httpStatus.CONFLICT, `The GL account mapped to ${category} is inactive or invalid`, '', FINANCE_ERROR_CODES.invalidAccountMapping)
   return account
 }
 

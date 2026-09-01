@@ -10,7 +10,7 @@ const taxMap = z.object({ outputTax: accountId.optional(), inputTax: accountId.o
 
 export const FinanceAccountingSettingsValidation = {
   update: z.object({ body: z.object({
-    baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
+    baseCurrency: z.literal('BDT').optional(),
     accountingMethod: z.literal('ACCRUAL').optional(),
     fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
     makerCheckerRequired: z.boolean().optional(),

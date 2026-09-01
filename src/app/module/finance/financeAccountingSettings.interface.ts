@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose'
+import type { LegacyFinanceCurrency } from './finance.contract'
 
 export type FinanceAccountRef = Types.ObjectId | string | null
 export type AccountingMethod = 'ACCRUAL'
@@ -6,7 +7,7 @@ export type FinanceAccountingActivationStatus = 'ACTIVE' | 'MIGRATION_REQUIRED' 
 
 export interface IFinanceAccountingSettings {
   organizationId: string
-  baseCurrency: string
+  baseCurrency: LegacyFinanceCurrency
   accountingMethod: AccountingMethod
   fiscalYearStartMonth: number
   makerCheckerRequired: boolean
@@ -31,9 +32,9 @@ export interface IFinanceAccountingSettings {
     inputTax?: FinanceAccountRef
     withholdingTax?: FinanceAccountRef
   }
-  initializedAt: Date
-  initializedBy: string
-  updatedBy: string
+  initializedAt?: Date | null
+  initializedBy?: string | null
+  updatedBy?: string | null
   createdAt?: Date
   updatedAt?: Date
 }
