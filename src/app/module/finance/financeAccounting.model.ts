@@ -120,7 +120,7 @@ const financeJournalLineSchema = new Schema<IFinanceJournalLine>({
   agentId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   vendorId: { type: Schema.Types.ObjectId, ref: 'FinanceVendor', default: null },
   clientId: { type: Schema.Types.ObjectId, default: null },
-  shareholderId: { type: Schema.Types.ObjectId, default: null },
+  shareholderId: { type: Schema.Types.ObjectId, ref: 'FinanceShareholder', default: null },
 }, { timestamps: true, versionKey: false })
 financeJournalLineSchema.index({ organizationId: 1, journalEntryId: 1, lineNumber: 1 }, { unique: true, name: 'finance_journal_line_tenant_journal_line_unique' })
 financeJournalLineSchema.index({ organizationId: 1, accountId: 1, postingDate: 1, journalStatus: 1 }, { name: 'finance_journal_line_tenant_account_date_status' })

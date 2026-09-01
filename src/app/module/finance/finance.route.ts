@@ -10,6 +10,8 @@ import { FinanceAccountingValidation } from './financeAccounting.validation'
 import { FinanceOperationsController } from './financeOperations.controller'
 import { FinanceOperationsValidation } from './financeOperations.validation'
 import { financeBankStatementUpload } from './financeBankStatementUpload.middleware'
+import { FinanceCapitalController } from './financeCapital.controller'
+import { FinanceCapitalValidation } from './financeCapital.validation'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -87,6 +89,26 @@ router.get('/accounting/bank-statements/:id/ledger-candidates', ...advancedRead,
 router.post('/accounting/bank-statements/:id/lines/:lineId/match', ...advancedWrite, validateRequest(FinanceOperationsValidation.matchStatementLine), FinanceOperationsController.matchStatementLine)
 router.post('/accounting/bank-statements/:id/lines/:lineId/exclude', ...advancedWrite, validateRequest(FinanceOperationsValidation.excludeStatementLine), FinanceOperationsController.excludeStatementLine)
 router.post('/accounting/bank-statements/:id/reconcile', ...advancedWrite, validateRequest(FinanceOperationsValidation.statementId), FinanceOperationsController.reconcileStatement)
+
+// Phase 5 capital structure, dividends and financing
+router.post('/accounting/capital/initialize', ...advancedWrite, validateRequest(FinanceCapitalValidation.initialize), FinanceCapitalController.initialize)
+router.get('/accounting/shareholders', ...advancedRead, FinanceCapitalController.listShareholders)
+router.post('/accounting/shareholders', ...advancedWrite, validateRequest(FinanceCapitalValidation.createShareholder), FinanceCapitalController.createShareholder)
+router.patch('/accounting/shareholders/:id', ...advancedWrite, validateRequest(FinanceCapitalValidation.updateShareholder), FinanceCapitalController.updateShareholder)
+router.get('/accounting/equity-transactions', ...advancedRead, validateRequest(FinanceCapitalValidation.listEquity), FinanceCapitalController.listEquityTransactions)
+router.post('/accounting/equity-transactions', ...advancedWrite, validateRequest(FinanceCapitalValidation.createEquity), FinanceCapitalController.createEquityTransaction)
+router.get('/accounting/shareholder-loans', ...advancedRead, FinanceCapitalController.listShareholderLoans)
+router.post('/accounting/shareholder-loans', ...advancedWrite, validateRequest(FinanceCapitalValidation.createShareholderLoan), FinanceCapitalController.createShareholderLoan)
+router.post('/accounting/shareholder-loans/:id/payments', ...advancedWrite, validateRequest(FinanceCapitalValidation.payShareholderLoan), FinanceCapitalController.payShareholderLoan)
+router.get('/accounting/dividends', ...advancedRead, FinanceCapitalController.listDividends)
+router.post('/accounting/dividends', ...advancedWrite, validateRequest(FinanceCapitalValidation.createDividend), FinanceCapitalController.createDividend)
+router.post('/accounting/dividends/:id/approve', ...advancedWrite, validateRequest(FinanceCapitalValidation.dividendId), FinanceCapitalController.approveDividend)
+router.post('/accounting/dividends/:id/declare', ...advancedWrite, validateRequest(FinanceCapitalValidation.dividendId), FinanceCapitalController.declareDividend)
+router.post('/accounting/dividends/:id/payments', ...advancedWrite, validateRequest(FinanceCapitalValidation.payDividend), FinanceCapitalController.payDividend)
+router.get('/accounting/loans', ...advancedRead, FinanceCapitalController.listLoans)
+router.post('/accounting/loans', ...advancedWrite, validateRequest(FinanceCapitalValidation.createLoan), FinanceCapitalController.createLoan)
+router.post('/accounting/loans/:id/payments', ...advancedWrite, validateRequest(FinanceCapitalValidation.payLoan), FinanceCapitalController.payLoan)
+router.get('/accounting/retained-earnings', ...advancedRead, validateRequest(FinanceCapitalValidation.retainedEarnings), FinanceCapitalController.retainedEarnings)
 
 router.get('/overview', ...read, FinanceController.getOverview)
 router.get('/reports', ...read, FinanceController.getReports)

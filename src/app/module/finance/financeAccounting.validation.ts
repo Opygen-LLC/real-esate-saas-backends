@@ -70,7 +70,7 @@ export const FinanceAccountingValidation = {
   generalLedger: z.object({ query: z.object({
     accountId: objectId.optional(),
     startDate: dateValue.optional(), endDate: dateValue.optional(),
-    propertyId: objectId.optional(), agentId: objectId.optional(), vendorId: objectId.optional(), clientId: objectId.optional(),
+    propertyId: objectId.optional(), agentId: objectId.optional(), vendorId: objectId.optional(), clientId: objectId.optional(), shareholderId: objectId.optional(),
     sourceType: z.string().trim().max(80).optional(),
     page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(200).optional(),
   }).passthrough() }),

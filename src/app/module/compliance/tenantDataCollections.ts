@@ -75,6 +75,11 @@ export const TENANT_DELETION_COLLECTIONS = [
   'financereconciliations',
   'financeclientdeposits',
   'financetaxcodes',
+  'financeshareholders',
+  'financeequitytransactions',
+  'financeshareholderloans',
+  'financedividends',
+  'financeloans',
 
   // Website / domain / public traffic
   'banners',

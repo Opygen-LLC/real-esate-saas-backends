@@ -7,6 +7,7 @@ import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
+import { FinanceLoan, FinanceShareholder, FinanceShareholderLoan } from './financeCapital.model'
 import { FinanceCategoryMappingService } from './financeCategoryMapping.service'
 import type {
   AccountingActor,
@@ -412,14 +413,18 @@ const updateAccount = async (organizationId: string, actor: AccountingActor, acc
     await assertParentAccount(organizationId, account.parentAccountId, nextType, session, accountId)
   }
   if (input.status === 'INACTIVE' && account.status !== 'INACTIVE') {
-    const [mapped, bankLinked, taxLinked] = await Promise.all([
+    const [mapped, bankLinked, taxLinked, shareholderLoanLinked, companyLoanLinked] = await Promise.all([
       withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
       withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id, status: 'ACTIVE' }), session),
       withSession(FinanceTaxCode.exists({ organizationId, status: 'ACTIVE', $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
+      withSession(FinanceShareholderLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
+      withSession(FinanceLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
     ])
     if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while finance categories are mapped to it')
     if (bankLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active bank account is linked to it')
     if (taxLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active tax code is linked to it')
+    if (shareholderLoanLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active shareholder loan uses it')
+    if (companyLoanLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active company loan uses it')
   }
   for (const key of ['code', 'name', 'type', 'normalBalance', 'currency', 'allowManualPosting', 'status'] as const) {
     if (input[key] !== undefined) account[key] = input[key]
@@ -582,7 +587,12 @@ const assertJournalLineRelations = async (organizationId: string, line: FinanceJ
   if (line.agentId) checks.push(TenantReferenceService.assertAgentBelongsToOrganization(organizationId, line.agentId, session))
   if (line.vendorId) checks.push(TenantReferenceService.assertFinanceVendorBelongsToOrganization(organizationId, line.vendorId, session))
   if (line.clientId) checks.push(TenantReferenceService.assertClientBelongsToOrganization(organizationId, line.clientId, session))
-  if (line.shareholderId) throw new ApiError(httpStatus.BAD_REQUEST, 'Shareholder journal dimensions are not available until the Shareholders module is enabled')
+  if (line.shareholderId) checks.push((async () => {
+    const shareholderId = asObjectId(line.shareholderId, 'shareholder id')
+    const query = FinanceShareholder.exists({ _id: shareholderId, organizationId })
+    if (session) query.session(session)
+    if (!(await query)) throw new ApiError(httpStatus.BAD_REQUEST, 'Shareholder does not belong to this organization')
+  })())
   await Promise.all(checks)
 }
 
@@ -859,6 +869,11 @@ const getGeneralLedger = async (organizationId: string, query: Record<string, un
   if (query.agentId) { await TenantReferenceService.assertAgentBelongsToOrganization(organizationId, query.agentId); filter.agentId = asObjectId(query.agentId, 'agent id') }
   if (query.vendorId) { await TenantReferenceService.assertFinanceVendorBelongsToOrganization(organizationId, query.vendorId); filter.vendorId = asObjectId(query.vendorId, 'vendor id') }
   if (query.clientId) { await TenantReferenceService.assertClientBelongsToOrganization(organizationId, query.clientId); filter.clientId = asObjectId(query.clientId, 'client id') }
+  if (query.shareholderId) {
+    const shareholderId = asObjectId(query.shareholderId, 'shareholder id')
+    if (!await FinanceShareholder.exists({ _id: shareholderId, organizationId })) throw new ApiError(httpStatus.NOT_FOUND, 'Shareholder not found')
+    filter.shareholderId = shareholderId
+  }
   if (query.sourceType) filter.sourceType = String(query.sourceType).trim().toUpperCase()
   const page = Math.max(1, Number(query.page || 1))
   const limit = Math.min(MAX_LEDGER_PAGE, Math.max(1, Number(query.limit || 50)))

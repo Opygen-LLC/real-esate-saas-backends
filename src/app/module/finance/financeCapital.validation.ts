@@ -1,0 +1,26 @@
+import { z } from 'zod'
+const objectId = z.string().trim().regex(/^[a-f\d]{24}$/i, 'Must be a valid ObjectId')
+const optionalObjectId = objectId.nullable().optional()
+const dateValue = z.union([z.string().trim().min(1), z.date()])
+const money = z.coerce.number().finite().positive().max(9_000_000_000_000)
+const nonNegativeMoney = z.coerce.number().finite().min(0).max(9_000_000_000_000)
+const shares = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+const frequency = z.enum(['WEEKLY','MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','OTHER'])
+const loanPayment = z.object({ principal: nonNegativeMoney.default(0), interest: nonNegativeMoney.default(0), bankAccountId: objectId.optional(), paidAt: dateValue.optional(), reference: z.string().trim().max(200).optional() }).strict().refine((v: any) => v.principal + v.interest > 0, { message: 'Principal or interest is required' })
+
+export const FinanceCapitalValidation = {
+  initialize: z.object({ body: z.object({}).strict().optional() }),
+  shareholderId: z.object({ params: z.object({ id: objectId }) }),
+  createShareholder: z.object({ body: z.object({ name: z.string().trim().min(1).max(180), type: z.enum(['INDIVIDUAL','COMPANY']), email: z.string().trim().email().max(200).optional().or(z.literal('')), phone: z.string().trim().max(80).optional(), shareClass: z.string().trim().min(1).max(80).optional(), sharesHeld: shares.default(0), joinedAt: dateValue, status: z.enum(['ACTIVE','INACTIVE']).optional(), notes: z.string().trim().max(2000).optional() }).strict() }),
+  updateShareholder: z.object({ params: z.object({ id: objectId }), body: z.object({ name: z.string().trim().min(1).max(180).optional(), type: z.enum(['INDIVIDUAL','COMPANY']).optional(), email: z.string().trim().email().max(200).optional().or(z.literal('')), phone: z.string().trim().max(80).optional(), shareClass: z.string().trim().min(1).max(80).optional(), sharesHeld: shares.optional(), joinedAt: dateValue.optional(), status: z.enum(['ACTIVE','INACTIVE']).optional(), notes: z.string().trim().max(2000).optional() }).strict().refine((v: any) => Object.keys(v).length > 0, { message: 'At least one shareholder field is required' }) }),
+  listEquity: z.object({ query: z.object({ shareholderId: objectId.optional(), type: z.enum(['CAPITAL_CONTRIBUTION','SHARE_ISSUE','SHARE_TRANSFER','SHARE_BUYBACK','CAPITAL_RETURN','OWNER_DRAW','DIVIDEND_DECLARATION','DIVIDEND_PAYMENT']).optional() }).passthrough() }),
+  createEquity: z.object({ body: z.object({ type: z.enum(['CAPITAL_CONTRIBUTION','SHARE_ISSUE','SHARE_TRANSFER','SHARE_BUYBACK','CAPITAL_RETURN','OWNER_DRAW']), shareholderId: optionalObjectId, counterpartyShareholderId: optionalObjectId, shares: shares.default(0), amount: nonNegativeMoney.default(0), shareCapitalAmount: nonNegativeMoney.optional(), additionalPaidInCapitalAmount: nonNegativeMoney.optional(), bankAccountId: optionalObjectId, transactionDate: dateValue, reference: z.string().trim().max(200).optional(), notes: z.string().trim().max(2000).optional() }).strict() }),
+  createShareholderLoan: z.object({ body: z.object({ shareholderId: objectId, principal: money, interestRatePercent: z.coerce.number().min(0).max(1000).default(0), startDate: dateValue, maturityDate: dateValue.optional(), paymentFrequency: frequency.default('MONTHLY'), bankAccountId: objectId, liabilityAccountId: optionalObjectId, interestExpenseAccountId: optionalObjectId, reference: z.string().trim().max(200).optional(), notes: z.string().trim().max(2000).optional() }).strict() }),
+  payShareholderLoan: z.object({ params: z.object({ id: objectId }), body: loanPayment }),
+  createDividend: z.object({ body: z.object({ shareholderId: optionalObjectId, description: z.string().trim().min(1).max(500), amount: money, declarationDate: dateValue, paymentDueDate: dateValue.optional(), notes: z.string().trim().max(2000).optional() }).strict() }),
+  dividendId: z.object({ params: z.object({ id: objectId }) }),
+  payDividend: z.object({ params: z.object({ id: objectId }), body: z.object({ amount: money.optional(), bankAccountId: objectId, paidAt: dateValue.optional(), reference: z.string().trim().max(200).optional() }).strict() }),
+  createLoan: z.object({ body: z.object({ lender: z.string().trim().min(1).max(180), principal: money, interestRatePercent: z.coerce.number().min(0).max(1000).default(0), startDate: dateValue, maturityDate: dateValue.optional(), paymentFrequency: frequency.default('MONTHLY'), bankAccountId: objectId, liabilityAccountId: optionalObjectId, interestExpenseAccountId: optionalObjectId, reference: z.string().trim().max(200).optional(), notes: z.string().trim().max(2000).optional() }).strict() }),
+  payLoan: z.object({ params: z.object({ id: objectId }), body: z.object({ principal: nonNegativeMoney.default(0), interest: nonNegativeMoney.default(0), fees: nonNegativeMoney.default(0), bankAccountId: objectId.optional(), paidAt: dateValue.optional(), reference: z.string().trim().max(200).optional() }).strict().refine((v: any) => v.principal + v.interest + v.fees > 0, { message: 'Principal, interest, or fees is required' }) }),
+  retainedEarnings: z.object({ query: z.object({ startDate: dateValue.optional(), endDate: dateValue.optional() }).passthrough() }),
+}
