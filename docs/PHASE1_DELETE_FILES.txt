@@ -1,8 +1,0 @@
-src/app/module/bkashPayment/bkashPayment.client.ts
-src/app/module/bkashPayment/bkashPayment.controller.ts
-src/app/module/bkashPayment/bkashPayment.interface.ts
-src/app/module/bkashPayment/bkashPayment.model.ts
-src/app/module/bkashPayment/bkashPayment.route.ts
-src/app/module/bkashPayment/bkashPayment.service.ts
-src/app/module/bkashPayment/bkashPayment.validation.ts
-src/app/module/bkashPayment/bkashPayment.verification.ts
