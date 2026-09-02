@@ -1,6 +1,20 @@
 import { Schema, model } from 'mongoose'
 import { ILead, LeadModel } from './lead.interface'
 import { LEAD_STATUS, LEAD_STATUS_VALUES, normalizeLeadStatus } from './leadStatus.contract'
+import { CONSTRUCTION_STAGES, CONSTRUCTION_TYPES, DESIGN_REQUIREMENTS, INQUIRY_PROJECT_TYPES, INQUIRY_PURPOSES } from '../../shared/inquiryPurpose.contract'
+
+const inquiryProjectDetailsSchema = new Schema({
+  projectType: { type: String, enum: INQUIRY_PROJECT_TYPES },
+  landSize: { type: String, trim: true, maxlength: 120 },
+  numberOfFloors: { type: Number, min: 1, max: 200 },
+  approximateBuiltUpArea: { type: String, trim: true, maxlength: 120 },
+  designRequirement: { type: String, enum: DESIGN_REQUIREMENTS },
+  constructionType: { type: String, enum: CONSTRUCTION_TYPES },
+  constructionStage: { type: String, enum: CONSTRUCTION_STAGES },
+  expectedStartDate: { type: String, trim: true, maxlength: 10 },
+  budgetRange: { type: String, trim: true, maxlength: 120 },
+  location: { type: String, trim: true, maxlength: 300 },
+}, { _id: false })
 
 const leadSchema = new Schema<ILead, LeadModel>({
   organizationId:{type:String,required:true,index:true},
@@ -17,6 +31,8 @@ const leadSchema = new Schema<ILead, LeadModel>({
   locationPreference:{type:String,default:''},
   propertyType:{type:String,default:'Apartment'},
   bedrooms:{type:Number,default:1},
+  inquiryPurpose:{type:String,enum:INQUIRY_PURPOSES,index:true},
+  projectDetails:{type:inquiryProjectDetailsSchema,default:undefined},
   leadStatus:{type:String,enum:LEAD_STATUS_VALUES,default:LEAD_STATUS.NEW,required:true,index:true},
   assignedAgent:{type:Schema.Types.ObjectId,ref:'User',index:true},
   leadAllowanceReservationId:{type:String,index:true},

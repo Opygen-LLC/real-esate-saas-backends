@@ -11,6 +11,16 @@ const optionalUrl = z.string().url().max(2000).optional().or(z.literal(''))
 const invoiceSubtotalMinor = (lineItems: Array<{ quantity: number; unitPrice: number }>) =>
   lineItems.reduce((sum, item) => sum + Math.round(Number(item.quantity) * moneyToMinorUnits(Number(item.unitPrice), 'unitPrice')), 0)
 
+const billingProfileBody = z.object({
+  legalName: z.string().trim().min(2).max(200),
+  email: z.string().trim().email().max(200).optional().or(z.literal('')),
+  phone: z.string().trim().max(40).optional(),
+  address: z.string().trim().max(1200).optional(),
+  taxId: z.string().trim().max(120).optional(),
+}).strict()
+const updateBillingProfile = z.object({ body: billingProfileBody })
+const removeBillingProfile = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict().optional() })
+
 const createTransaction = z.object({ body: z.object({
   type: z.enum(['income', 'expense']),
   category,
@@ -227,6 +237,8 @@ const updateBudget = z.object({ body: z.object({
 }).strict().refine((value) => Object.keys(value).length > 0, 'At least one field is required') })
 
 export const FinanceValidation = {
+  updateBillingProfile,
+  removeBillingProfile,
   createTransaction,
   updateTransaction,
   voidTransaction,

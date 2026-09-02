@@ -26,6 +26,7 @@ import { WebsiteSubmission } from './websiteSubmission.model'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { writeAudit } from '../audit/audit.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { inquiryPurposeLabel } from '../../shared/inquiryPurpose.contract'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -63,12 +64,15 @@ const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'su
     type: 'website_submission.changed',
     action: 'created',
     entityId: submission._id.toString(),
+    payload: payload.inquiryPurpose ? { inquiryPurpose: payload.inquiryPurpose, notificationTitle: `New ${inquiryPurposeLabel(payload.inquiryPurpose)} inquiry` } : undefined,
   })
   emitProductionEvent('website_submission_received', {
     organizationId: payload.organizationId,
     submissionId: submission._id.toString(),
     submissionType: payload.submissionType,
     crmTransferStatus: payload.crmTransferStatus || 'NOT_APPLICABLE',
+    inquiryPurpose: payload.inquiryPurpose || null,
+    notificationTitle: payload.inquiryPurpose ? `New ${inquiryPurposeLabel(payload.inquiryPurpose)} inquiry` : 'New website inquiry',
   })
   return submission
 }
@@ -115,6 +119,8 @@ const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadS
     budgetMax: payload.budgetMax,
     propertyType: payload.propertyType || '',
     locationPreference: payload.locationPreference || '',
+    inquiryPurpose: payload.inquiryPurpose,
+    projectDetails: payload.projectDetails,
     sourcePage: sourcePageFromLandingPage(landingPage, payload.propertyInterest ? '/properties' : ''),
     pageUrl: landingPage,
     crmTransferStatus: 'PENDING',
@@ -295,6 +301,7 @@ const list = async (
   const conditions: Record<string, unknown>[] = [{ organizationId }, { deletedAt: null }]
   if (filters.submissionType) conditions.push({ submissionType: filters.submissionType })
   if (filters.status) conditions.push({ status: filters.status })
+  if (filters.inquiryPurpose) conditions.push({ inquiryPurpose: filters.inquiryPurpose })
   if (filters.propertyId) conditions.push({ propertyId: filters.propertyId })
   if (filters.sourcePage) conditions.push({ sourcePage: filters.sourcePage })
 
@@ -308,7 +315,7 @@ const list = async (
       conditions.push({ $or: [{ phone: normalizedPhone }, { phone: raw }] })
     } else {
       const prefix = { $regex: `^${escaped}`, $options: 'i' }
-      conditions.push({ $or: [{ name: prefix }, { sourcePage: prefix }, { message: prefix }] })
+      conditions.push({ $or: [{ name: prefix }, { sourcePage: prefix }, { message: prefix }, { inquiryPurpose: prefix }] })
     }
   }
 
@@ -338,6 +345,15 @@ const list = async (
   profile.finish(data.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
 
   return { meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' }, data }
+}
+
+const inquiryPurposeAnalytics = async (organizationId: string) => {
+  const rows = await WebsiteSubmission.aggregate([
+    { $match: { organizationId, deletedAt: null, inquiryPurpose: { $exists: true, $ne: null } } },
+    { $group: { _id: '$inquiryPurpose', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+  ])
+  return rows.map((row) => ({ inquiryPurpose: row._id, label: inquiryPurposeLabel(row._id), count: row.count }))
 }
 
 const getById = async (organizationId: string, id: string, options: WebsiteSubmissionReadOptions = {}) => {
@@ -539,6 +555,8 @@ const moveToCrm = async (
         budgetMax: claim.budgetMax,
         propertyType: claim.propertyType || undefined,
         locationPreference: claim.locationPreference || undefined,
+        inquiryPurpose: claim.inquiryPurpose || undefined,
+        projectDetails: claim.projectDetails || undefined,
         notes: claim.message || '',
         attribution: claim.attribution || undefined,
       },
@@ -651,6 +669,7 @@ export const WebsiteSubmissionService = {
   captureViewing,
   captureReview,
   list,
+  inquiryPurposeAnalytics,
   getById,
   updateStatus,
   deleteSubmission,

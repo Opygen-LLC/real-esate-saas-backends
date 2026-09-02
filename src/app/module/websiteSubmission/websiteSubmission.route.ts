@@ -14,6 +14,12 @@ router.get(
 )
 
 router.get(
+  '/analytics/inquiry-purposes',
+  authMiddlewares.requirePermission('website.submissions.read'),
+  WebsiteSubmissionController.inquiryPurposeAnalytics,
+)
+
+router.get(
   '/:id',
   authMiddlewares.requirePermission('website.submissions.read'),
   validateRequest(WebsiteSubmissionValidation.idParams),

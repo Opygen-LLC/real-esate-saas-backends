@@ -211,6 +211,23 @@ export type IPropertyFilter = {
   bathrooms?: number | string
   minArea?: number | string
   maxArea?: number | string
+  areaUnit?: string
+  minFloor?: number | string
+  maxFloor?: number | string
+  pricingMode?: string
+  minUnitRate?: number | string
+  maxUnitRate?: number | string
+  minRoadWidthFeet?: number | string
+  facing?: string
+  approvalAuthority?: string
+  minRooms?: number | string
+  starRating?: number | string
+  hotelOperatingStatus?: string
+  minLandArea?: number | string
+  maxLandArea?: number | string
+  landAreaUnit?: string
+  minSecurityDeposit?: number | string
+  availableBy?: string
   furnished?: boolean | string
   isFeatured?: boolean | string
   agentId?: string

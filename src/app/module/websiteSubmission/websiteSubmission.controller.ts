@@ -21,7 +21,7 @@ const readOptions = (req: Request) => {
 const list = catchAsync(async (req: Request, res: Response) => {
   const result = await WebsiteSubmissionService.list(
     requireTenant(req),
-    pick(req.query, ['searchTerm', 'submissionType', 'status', 'propertyId', 'sourcePage', 'submittedFrom', 'submittedTo']),
+    pick(req.query, ['searchTerm', 'submissionType', 'status', 'inquiryPurpose', 'propertyId', 'sourcePage', 'submittedFrom', 'submittedTo']),
     pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor']),
     readOptions(req),
   )
@@ -33,6 +33,14 @@ const list = catchAsync(async (req: Request, res: Response) => {
     data: result.data,
   })
 })
+
+
+const inquiryPurposeAnalytics = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
+  statusCode: httpStatus.OK,
+  success: true,
+  message: 'Website inquiry analytics fetched successfully',
+  data: await WebsiteSubmissionService.inquiryPurposeAnalytics(requireTenant(req)),
+}))
 
 const getById = catchAsync(async (req: Request, res: Response) => sendResponse(res, {
   statusCode: httpStatus.OK,
@@ -87,4 +95,4 @@ const updateStatus = catchAsync(async (req: Request, res: Response) => sendRespo
   data: await WebsiteSubmissionService.updateStatus(requireTenant(req), req.params.id, req.body.status, readOptions(req)),
 }))
 
-export const WebsiteSubmissionController = { list, getById, updateStatus, deleteSubmission, moveToCrm }
+export const WebsiteSubmissionController = { list, inquiryPurposeAnalytics, getById, updateStatus, deleteSubmission, moveToCrm }

@@ -83,7 +83,8 @@ const resolveInvoiceLogoDataUri = async (organization: any): Promise<string> => 
 const renderInvoiceHtml = (invoice: any, organization: any, logoDataUri = '') => {
   const outstanding = Math.max(0, Number(invoice.total || 0) - Number(invoice.paidAmount || 0))
   const primary = safeHex(organization?.primaryColor)
-  const address = [organization?.address, organization?.city, organization?.state, organization?.country].filter(Boolean).join(', ')
+  const issuer = organization?.invoiceIssuerSnapshot || invoice?.issuerSnapshot || {}
+  const address = String(issuer?.address || [organization?.address, organization?.city, organization?.state, organization?.country].filter(Boolean).join(', '))
   const lineRows = (invoice.lineItems || []).map((item: any) => `
     <tr>
       <td>${escapeHtml(item.description)}</td>
@@ -144,10 +145,11 @@ ${cancelled ? '<div class="watermark">VOID</div>' : ''}
 <header class="header">
   <div>
     ${logoDataUri ? `<img class="brand-logo" src="${logoDataUri}" alt="Agency logo" />` : ''}
-    <div class="brand">${escapeHtml(organization?.agencyName || 'Real Estate Agency')}</div>
+    <div class="brand">${escapeHtml(issuer?.legalName || organization?.agencyName || 'Real Estate Agency')}</div>
     ${address ? `<div class="muted">${escapeHtml(address)}</div>` : ''}
-    ${organization?.phone ? `<div class="muted">${escapeHtml(organization.phone)}</div>` : ''}
-    ${organization?.email ? `<div class="muted">${escapeHtml(organization.email)}</div>` : ''}
+    ${issuer?.phone || organization?.phone ? `<div class="muted">${escapeHtml(issuer?.phone || organization.phone)}</div>` : ''}
+    ${issuer?.email || organization?.email ? `<div class="muted">${escapeHtml(issuer?.email || organization.email)}</div>` : ''}
+    ${issuer?.taxId ? `<div class="muted">Tax/VAT: ${escapeHtml(issuer.taxId)}</div>` : ''}
   </div>
   <div>
     <div class="title">INVOICE</div>

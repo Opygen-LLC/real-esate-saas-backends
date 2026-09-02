@@ -1,5 +1,6 @@
 import mongoose, { Model } from 'mongoose'
 import type { LeadStatus } from './leadStatus.contract'
+import type { InquiryProjectDetails, InquiryPurpose } from '../../shared/inquiryPurpose.contract'
 
 export type ILeadStatus = LeadStatus
 export type ILeadSource = 'Website'|'WhatsApp'|'Facebook'|'Instagram'|'Google'|'Referral'|'WalkIn'|'Portal'|'Phone'|'Email'|'Ad'|'Other'
@@ -53,6 +54,8 @@ export interface ILead {
   locationPreference?:string
   propertyType?:string
   bedrooms?:number
+  inquiryPurpose?: InquiryPurpose
+  projectDetails?: InquiryProjectDetails
   leadStatus:ILeadStatus
   assignedAgent?:mongoose.Types.ObjectId|string
 

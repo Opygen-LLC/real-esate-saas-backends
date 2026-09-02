@@ -64,7 +64,7 @@ const assertGenericLeadPatchFields=(payload:Partial<ILead>)=>{
 const mergeInto=async(existing:any,payload:Partial<ILead>,context:{source:string;duplicateLeadId?:string;actorId?:string})=>{
   const changed:string[]=[]
   const set=(key:string,value:any)=>{if(value!==undefined&&value!==''&&JSON.stringify(existing.get(key))!==JSON.stringify(value)){existing.set(key,value);changed.push(key)}}
-  ;['name','email','normalizedEmail','phone','normalizedPhone','locationPreference','propertyType','bedrooms','budgetMin','budgetMax','followUpDate'].forEach(k=>set(k,(payload as any)[k]))
+  ;['name','email','normalizedEmail','phone','normalizedPhone','locationPreference','propertyType','bedrooms','budgetMin','budgetMax','followUpDate','inquiryPurpose','projectDetails'].forEach(k=>set(k,(payload as any)[k]))
   if(payload.propertyInterest?.length){existing.propertyInterest=uniqueStrings([...(existing.propertyInterest||[]),...payload.propertyInterest]);changed.push('propertyInterest')}
   if(payload.attribution){const first=existing.attribution?.firstTouchAt||payload.attribution.firstTouchAt||new Date();existing.attribution={...(existing.attribution?.toObject?.()||existing.attribution||{}),...payload.attribution,firstTouchAt:first,lastTouchAt:new Date()};changed.push('attribution')}
   const scored=scoreLead({...existing.toObject(),...payload});existing.leadScore=scored.score;existing.scoreReasons=scored.reasons

@@ -103,6 +103,7 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
   const scalarVisibility: Array<[PublicPropertyField, string]> = [
     ['bedrooms', 'bedrooms'],
     ['bathrooms', 'bathrooms'],
+    ['floor', 'floorNumber'],
     ['yearBuilt', 'yearBuilt'],
     ['parking', 'parking'],
     ['furnished', 'furnished'],
@@ -124,10 +125,14 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
   if (property.propertyType === 'HotelResort') {
     for (const key of [
       'hotelName', 'hotelType', 'starRating', 'hotelOperatingStatus', 'yearEstablished', 'lastRenovationYear',
-      'totalRooms', 'operationalRooms', 'suites', 'villas', 'cottages', 'totalBeds', 'landArea', 'landAreaUnit',
-      'builtUpArea', 'builtUpAreaUnit',
+      'totalRooms', 'operationalRooms', 'suites', 'villas', 'cottages', 'totalBeds',
     ]) {
       if (property[key] !== undefined && property[key] !== null && property[key] !== '') result[key] = property[key]
+    }
+    if (!hidden.has('area')) {
+      for (const key of ['landArea', 'landAreaUnit', 'builtUpArea', 'builtUpAreaUnit']) {
+        if (property[key] !== undefined && property[key] !== null && property[key] !== '') result[key] = property[key]
+      }
     }
     if (property.hotelInvestment && Array.isArray(property.hotelInvestment.publicFields)) {
       const publicInvestment: Record<string, unknown> = {}

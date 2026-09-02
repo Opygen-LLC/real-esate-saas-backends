@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import type { IFinanceIssuerSnapshot } from './financeBillingProfile.interface'
 
 export type FinanceTransactionType = 'income' | 'expense'
 export type FinanceTransactionStatus = 'pending' | 'paid' | 'cancelled' | 'voided'
@@ -65,6 +66,7 @@ export interface IFinanceInvoice {
   clientName: string
   clientPhone?: string
   clientEmail?: string
+  issuerSnapshot?: IFinanceIssuerSnapshot
   issueDate: Date
   dueDate?: Date
   lineItems: IFinanceInvoiceLineItem[]

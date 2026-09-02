@@ -7,6 +7,7 @@ import {
   WEBSITE_SUBMISSION_STATUSES,
   WEBSITE_SUBMISSION_TYPES,
 } from './websiteSubmission.interface'
+import { CONSTRUCTION_STAGES, CONSTRUCTION_TYPES, DESIGN_REQUIREMENTS, INQUIRY_PROJECT_TYPES, INQUIRY_PURPOSES } from '../../shared/inquiryPurpose.contract'
 
 const attributionSchema = new Schema(
   {
@@ -20,6 +21,19 @@ const attributionSchema = new Schema(
   },
   { _id: false },
 )
+
+const inquiryProjectDetailsSchema = new Schema({
+  projectType: { type: String, enum: INQUIRY_PROJECT_TYPES },
+  landSize: { type: String, trim: true, maxlength: 120 },
+  numberOfFloors: { type: Number, min: 1, max: 200 },
+  approximateBuiltUpArea: { type: String, trim: true, maxlength: 120 },
+  designRequirement: { type: String, enum: DESIGN_REQUIREMENTS },
+  constructionType: { type: String, enum: CONSTRUCTION_TYPES },
+  constructionStage: { type: String, enum: CONSTRUCTION_STAGES },
+  expectedStartDate: { type: String, trim: true, maxlength: 10 },
+  budgetRange: { type: String, trim: true, maxlength: 120 },
+  location: { type: String, trim: true, maxlength: 300 },
+}, { _id: false })
 
 const websiteSubmissionSchema = new Schema<IWebsiteSubmission>(
   {
@@ -35,6 +49,8 @@ const websiteSubmissionSchema = new Schema<IWebsiteSubmission>(
     budgetMax: { type: Number, min: 0 },
     propertyType: { type: String, trim: true, maxlength: 100, default: '' },
     locationPreference: { type: String, trim: true, maxlength: 300, default: '' },
+    inquiryPurpose: { type: String, enum: INQUIRY_PURPOSES, index: true },
+    projectDetails: { type: inquiryProjectDetailsSchema, default: undefined },
     sourcePage: { type: String, trim: true, maxlength: 500, default: '' },
     pageUrl: { type: String, trim: true, maxlength: 1200, default: '' },
     linkedEntityType: { type: String, enum: WEBSITE_SUBMISSION_LINKED_ENTITY_TYPES, index: true },
@@ -75,6 +91,7 @@ const websiteSubmissionSchema = new Schema<IWebsiteSubmission>(
 websiteSubmissionSchema.index({ organizationId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, status: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, submissionType: 1, submittedAt: -1 })
+websiteSubmissionSchema.index({ organizationId: 1, inquiryPurpose: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, propertyId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, linkedEntityType: 1, linkedEntityId: 1, submittedAt: -1 })
 websiteSubmissionSchema.index({ organizationId: 1, crmTransferStatus: 1, submittedAt: -1 })

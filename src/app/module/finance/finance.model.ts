@@ -79,6 +79,18 @@ const invoicePaymentSchema = new Schema(
   { _id: true },
 )
 
+
+const invoiceIssuerSnapshotSchema = new Schema(
+  {
+    legalName: { type: String, required: true, trim: true, maxlength: 200 },
+    email: { type: String, trim: true, lowercase: true, maxlength: 200, default: '' },
+    phone: { type: String, trim: true, maxlength: 40, default: '' },
+    address: { type: String, trim: true, maxlength: 1200, default: '' },
+    taxId: { type: String, trim: true, maxlength: 120, default: '' },
+  },
+  { _id: false },
+)
+
 const invoiceSchema = new Schema<IFinanceInvoice>(
   {
     organizationId: { type: String, required: true, index: true },
@@ -86,6 +98,7 @@ const invoiceSchema = new Schema<IFinanceInvoice>(
     clientName: { type: String, required: true, trim: true, maxlength: 160 },
     clientPhone: { type: String, trim: true, maxlength: 40, default: '' },
     clientEmail: { type: String, trim: true, lowercase: true, maxlength: 200, default: '' },
+    issuerSnapshot: { type: invoiceIssuerSnapshotSchema, default: undefined },
     issueDate: { type: Date, required: true, index: true },
     dueDate: { type: Date, index: true },
     lineItems: { type: [invoiceLineItemSchema], required: true },

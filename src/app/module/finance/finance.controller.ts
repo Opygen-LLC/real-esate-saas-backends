@@ -10,6 +10,20 @@ const actorId = (req: Request) => req.user?._id || req.user?.id || ''
 const financeActor = (req: Request) => ({ id: actorId(req), role: req.user?.userRole || 'tenant', requestId: req.requestId, ip: req.ip })
 const pagination = (req: Request, cursor = false) => pick(req.query, cursor ? ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'] : ['page', 'limit', 'sortBy', 'sortOrder'])
 
+
+const getBillingProfile = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.getBillingProfile(requireTenant(req))
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Billing information fetched successfully', data })
+})
+const updateBillingProfile = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.updateBillingProfile(requireTenant(req), financeActor(req), req.body)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Billing information updated successfully', data })
+})
+const removeBillingProfile = catchAsync(async (req: Request, res: Response) => {
+  const data = await FinanceService.removeBillingProfile(requireTenant(req), financeActor(req), req.body?.reason)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Billing information removed successfully', data })
+})
+
 const getOverview = catchAsync(async (req: Request, res: Response) => {
   const data = await FinanceService.getOverview(requireTenant(req), req.query)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Finance overview fetched successfully', data })
@@ -144,6 +158,7 @@ const archiveBudget = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const FinanceController = {
+  getBillingProfile, updateBillingProfile, removeBillingProfile,
   getOverview, getReports, exportTransactions,
   listTransactions, createTransaction, updateTransaction, voidTransaction, deleteTransaction,
   listInvoices, createInvoice, getInvoice, updateInvoice, voidInvoice, archiveInvoice, recordInvoicePayment, downloadInvoicePdf,

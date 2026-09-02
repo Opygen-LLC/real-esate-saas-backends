@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { WEBSITE_SUBMISSION_STATUSES, WEBSITE_SUBMISSION_TYPES } from './websiteSubmission.interface'
+import { INQUIRY_PURPOSES } from '../../shared/inquiryPurpose.contract'
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid reference')
 
@@ -8,6 +9,7 @@ const listQuery = z.object({
     searchTerm: z.string().trim().max(200).optional(),
     submissionType: z.enum(WEBSITE_SUBMISSION_TYPES).optional(),
     status: z.enum(WEBSITE_SUBMISSION_STATUSES).optional(),
+    inquiryPurpose: z.enum(INQUIRY_PURPOSES).optional(),
     propertyId: objectId.optional(),
     sourcePage: z.string().trim().max(500).optional(),
     submittedFrom: z.string().datetime().optional(),

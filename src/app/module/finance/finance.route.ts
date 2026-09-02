@@ -144,6 +144,10 @@ router.post('/accounting/loans', ...advancedWrite('finance.loans.manage'), valid
 router.post('/accounting/loans/:id/payments', ...advancedWrite('finance.loans.manage'), validateRequest(FinanceCapitalValidation.payLoan), FinanceCapitalController.payLoan)
 router.get('/accounting/retained-earnings', ...advancedRead(), validateRequest(FinanceCapitalValidation.retainedEarnings), FinanceCapitalController.retainedEarnings)
 
+router.get('/billing-profile', ...read, FinanceController.getBillingProfile)
+router.put('/billing-profile', ...write, validateRequest(FinanceValidation.updateBillingProfile), FinanceController.updateBillingProfile)
+router.delete('/billing-profile', ...remove, validateRequest(FinanceValidation.removeBillingProfile), FinanceController.removeBillingProfile)
+
 router.get('/overview', ...read, FinanceController.getOverview)
 router.get('/reports', ...read, FinanceController.getReports)
 router.get('/reports/transactions.csv', ...read, FinanceController.exportTransactions)

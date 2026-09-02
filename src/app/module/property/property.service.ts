@@ -162,7 +162,7 @@ const numericFilter = (value: unknown, label: string): number | undefined => {
   return parsed
 }
 
-const PROPERTY_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'price', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
+const PROPERTY_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'price', 'pricing.unitRate', 'area', 'floorNumber', 'totalRooms', 'title', 'status', 'city', 'propertyType', 'listingType', 'bedrooms', 'bathrooms', 'isFeatured'])
 const MAX_PROPERTY_EXPORT_ROWS = 20_000
 
 const safePropertySort = (sortBy?: string, sortOrder?: string | number): { sortBy: string; sortOrder: 'asc' | 'desc' } => ({
@@ -172,26 +172,11 @@ const safePropertySort = (sortBy?: string, sortOrder?: string | number): { sortB
 
 const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Record<string, unknown>> => {
   const {
-    searchTerm,
-    organizationId,
-    propertyType,
-    listingType,
-    status,
-    city,
-    state,
-    divisionId,
-    districtId,
-    upazilaId,
-    minPrice,
-    maxPrice,
-    bedrooms,
-    bathrooms,
-    minArea,
-    maxArea,
-    furnished,
-    isFeatured,
-    agentId,
-    quotaLocked,
+    searchTerm, organizationId, propertyType, listingType, status, city, state, divisionId, districtId, upazilaId,
+    minPrice, maxPrice, bedrooms, bathrooms, minArea, maxArea, areaUnit, minFloor, maxFloor,
+    pricingMode, minUnitRate, maxUnitRate, minRoadWidthFeet, facing, approvalAuthority,
+    minRooms, starRating, hotelOperatingStatus, minLandArea, maxLandArea, landAreaUnit,
+    minSecurityDeposit, availableBy, furnished, isFeatured, agentId, quotaLocked,
   } = filters
 
   const andConditions: Array<Record<string, unknown>> = []
@@ -205,16 +190,10 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
         { customDomain: exactCaseInsensitiveRegex(organizationId, { maxLength: 255, label: 'Organization identifier' }) },
       ],
     })
-
     if (org) {
-      andConditions.push({
-        $or: [
-          { organizationId: org.organizationId },
-          { organizationId: org.sub_domain },
-          { organizationId: org._id.toString() },
-          { organizationId },
-        ],
-      })
+      andConditions.push({ $or: [
+        { organizationId: org.organizationId }, { organizationId: org.sub_domain }, { organizationId: org._id.toString() }, { organizationId },
+      ] })
     } else andConditions.push({ organizationId })
   }
 
@@ -222,24 +201,17 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
     const raw = String(searchTerm).trim()
     const search = safeRegexPattern(raw)
     const prefix = { $regex: `^${search}`, $options: 'i' }
-    andConditions.push({
-      $or: [
-        { title: prefix },
-        { slug: raw.toLowerCase() },
-        { address: prefix },
-        { city: prefix },
-        { state: prefix },
-        { 'bangladeshAddress.postalCode': prefix },
-      ],
-    })
+    andConditions.push({ $or: [
+      { title: prefix }, { slug: raw.toLowerCase() }, { address: prefix }, { city: prefix }, { state: prefix },
+      { 'bangladeshAddress.area': prefix }, { 'bangladeshAddress.upazila': prefix }, { 'bangladeshAddress.mouza': prefix },
+      { 'bangladeshAddress.postalCode': prefix }, { hotelName: prefix }, { buildingName: prefix }, { developerName: prefix },
+    ] })
   }
 
   if (propertyType) andConditions.push({ propertyType })
   if (listingType) andConditions.push({ listingType })
   if (status) {
-    const statusValues = (Array.isArray(status) ? status : String(status).split(','))
-      .map((value) => String(value).trim())
-      .filter(Boolean)
+    const statusValues = (Array.isArray(status) ? status : String(status).split(',')).map((value) => String(value).trim()).filter(Boolean)
     if (statusValues.length === 1) andConditions.push({ status: statusValues[0] })
     else if (statusValues.length > 1) andConditions.push({ status: { $in: statusValues } })
   }
@@ -252,18 +224,47 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   if (quotaLocked === false || quotaLocked === 'false') andConditions.push({ quotaLocked: { $ne: true } })
   if (quotaLocked === true || quotaLocked === 'true') andConditions.push({ quotaLocked: true })
 
-  const minPriceValue = numericFilter(minPrice, 'Minimum price')
-  const maxPriceValue = numericFilter(maxPrice, 'Maximum price')
+  const ranges: Array<[unknown, unknown, string, string]> = [
+    [minPrice, maxPrice, 'price', 'Price'],
+    [minArea, maxArea, 'area', 'Area'],
+    [minFloor, maxFloor, 'floorNumber', 'Floor'],
+    [minUnitRate, maxUnitRate, 'pricing.unitRate', 'Unit rate'],
+    [minLandArea, maxLandArea, 'landArea', 'Land area'],
+  ]
+  for (const [minRaw, maxRaw, field, label] of ranges) {
+    const minValue = numericFilter(minRaw as any, `Minimum ${label.toLowerCase()}`)
+    const maxValue = numericFilter(maxRaw as any, `Maximum ${label.toLowerCase()}`)
+    if (minValue !== undefined && maxValue !== undefined && minValue > maxValue) {
+      throw new ApiError(httpStatus.BAD_REQUEST, `Maximum ${label.toLowerCase()} must be greater than or equal to minimum ${label.toLowerCase()}`)
+    }
+    if (minValue !== undefined || maxValue !== undefined) andConditions.push({ [field]: { ...(minValue !== undefined ? { $gte: minValue } : {}), ...(maxValue !== undefined ? { $lte: maxValue } : {}) } })
+  }
+
   const bedroomsValue = numericFilter(bedrooms, 'Bedrooms')
   const bathroomsValue = numericFilter(bathrooms, 'Bathrooms')
-  const minAreaValue = numericFilter(minArea, 'Minimum area')
-  const maxAreaValue = numericFilter(maxArea, 'Maximum area')
-  if (minPriceValue !== undefined && maxPriceValue !== undefined && minPriceValue > maxPriceValue) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum price must be greater than or equal to minimum price')
-  if (minAreaValue !== undefined && maxAreaValue !== undefined && minAreaValue > maxAreaValue) throw new ApiError(httpStatus.BAD_REQUEST, 'Maximum area must be greater than or equal to minimum area')
-  if (minPriceValue !== undefined || maxPriceValue !== undefined) andConditions.push({ price: { ...(minPriceValue !== undefined ? { $gte: minPriceValue } : {}), ...(maxPriceValue !== undefined ? { $lte: maxPriceValue } : {}) } })
+  const roadWidthValue = numericFilter(minRoadWidthFeet, 'Minimum road width')
+  const roomsValue = numericFilter(minRooms, 'Minimum rooms')
+  const ratingValue = numericFilter(starRating, 'Star rating')
+  const depositValue = numericFilter(minSecurityDeposit, 'Minimum security deposit')
   if (bedroomsValue !== undefined) andConditions.push({ bedrooms: { $gte: bedroomsValue } })
   if (bathroomsValue !== undefined) andConditions.push({ bathrooms: { $gte: bathroomsValue } })
-  if (minAreaValue !== undefined || maxAreaValue !== undefined) andConditions.push({ area: { ...(minAreaValue !== undefined ? { $gte: minAreaValue } : {}), ...(maxAreaValue !== undefined ? { $lte: maxAreaValue } : {}) } })
+  if (roadWidthValue !== undefined) andConditions.push({ roadWidthFeet: { $gte: roadWidthValue } })
+  if (roomsValue !== undefined) andConditions.push({ totalRooms: { $gte: roomsValue } })
+  if (ratingValue !== undefined) andConditions.push({ starRating: { $gte: ratingValue } })
+  if (depositValue !== undefined) andConditions.push({ 'rentalTerms.securityDeposit': { $gte: depositValue } })
+
+  if (areaUnit) andConditions.push({ areaUnit })
+  if (landAreaUnit) andConditions.push({ landAreaUnit })
+  if (pricingMode) andConditions.push({ 'pricing.mode': pricingMode })
+  if (facing) andConditions.push({ facing })
+  if (approvalAuthority) andConditions.push({ 'regulatory.approvalAuthority': approvalAuthority })
+  if (hotelOperatingStatus) andConditions.push({ hotelOperatingStatus })
+  if (availableBy) {
+    const availableDate = new Date(String(availableBy))
+    if (Number.isNaN(availableDate.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Available by must be a valid date')
+    availableDate.setHours(23, 59, 59, 999)
+    andConditions.push({ 'rentalTerms.availableFrom': { $lte: availableDate } })
+  }
   if (furnished !== undefined && furnished !== '') andConditions.push({ furnished: furnished === 'true' || furnished === true })
   if (isFeatured !== undefined && isFeatured !== '') andConditions.push({ isFeatured: isFeatured === 'true' || isFeatured === true })
 
@@ -319,6 +320,19 @@ const PROPERTY_EXPORT_COLUMNS: CrmExportColumn[] = [
   { header: 'Bathrooms', key: 'bathrooms', width: 12 },
   { header: 'Area', key: 'area', width: 14 },
   { header: 'Area Unit', key: 'areaUnit', width: 12 },
+  { header: 'Pricing Mode', key: 'pricingMode', width: 16 },
+  { header: 'Unit Rate', key: 'unitRate', width: 18 },
+  { header: 'Floor', key: 'floorNumber', width: 10 },
+  { header: 'Road Width (ft)', key: 'roadWidthFeet', width: 15 },
+  { header: 'Facing', key: 'facing', width: 14 },
+  { header: 'Approval Authority', key: 'approvalAuthority', width: 18 },
+  { header: 'Hotel Rooms', key: 'totalRooms', width: 12 },
+  { header: 'Star Rating', key: 'starRating', width: 12 },
+  { header: 'Hotel Status', key: 'hotelOperatingStatus', width: 20 },
+  { header: 'Land Area', key: 'landArea', width: 14 },
+  { header: 'Land Area Unit', key: 'landAreaUnit', width: 14 },
+  { header: 'Security Deposit', key: 'securityDeposit', width: 18 },
+  { header: 'Available From', key: 'availableFrom', width: 18 },
   { header: 'Agent', key: 'agent', width: 28 },
   { header: 'Furnished', key: 'furnished', width: 12 },
   { header: 'Featured', key: 'isFeatured', width: 12 },
@@ -339,7 +353,7 @@ const getPropertyExportRows = async (
     .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
     .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
     .limit(MAX_PROPERTY_EXPORT_ROWS)
-    .select('title propertyType listingType status price currency bangladeshAddress city state address bedrooms bathrooms area areaUnit agentId furnished isFeatured createdAt updatedAt')
+    .select('title propertyType listingType status price pricing rentalTerms currency bangladeshAddress city state address bedrooms bathrooms area areaUnit floorNumber roadWidthFeet facing regulatory totalRooms starRating hotelOperatingStatus landArea landAreaUnit agentId furnished isFeatured createdAt updatedAt')
     .lean()
 
   return properties.map((property: any) => ({
@@ -357,6 +371,19 @@ const getPropertyExportRows = async (
     bathrooms: property.bathrooms ?? '',
     area: property.area ?? '',
     areaUnit: property.areaUnit || '',
+    pricingMode: property.pricing?.mode || 'TOTAL',
+    unitRate: property.pricing?.unitRate ?? '',
+    floorNumber: property.floorNumber ?? '',
+    roadWidthFeet: property.roadWidthFeet ?? '',
+    facing: property.facing || '',
+    approvalAuthority: property.regulatory?.approvalAuthority && property.regulatory.approvalAuthority !== 'none' ? property.regulatory.approvalAuthority : '',
+    totalRooms: property.totalRooms ?? '',
+    starRating: property.starRating ?? '',
+    hotelOperatingStatus: property.hotelOperatingStatus || '',
+    landArea: property.landArea ?? '',
+    landAreaUnit: property.landAreaUnit || '',
+    securityDeposit: property.rentalTerms?.securityDeposit ?? '',
+    availableFrom: property.rentalTerms?.availableFrom || '',
     agent: property.agentId?.name || property.agentId?.email || '',
     furnished: Boolean(property.furnished),
     isFeatured: Boolean(property.isFeatured),

@@ -187,4 +187,60 @@ suite('phase 5 finance billing lifecycle', () => {
     expect(createdAudit?.metadata?.propertyReference).toBe('gulshan-lake-residence')
   })
 
+  it('persists income and expense transactions and returns them in the correct date windows', async () => {
+    const now = new Date()
+    const historicalDate = new Date('2024-06-15T08:00:00.000Z')
+    const income = await FinanceService.createTransaction(organizationId, actor.id, {
+      type: 'income', category: 'Other Income', amount: 125000, transactionDate: now,
+      paymentMethod: 'bank', status: 'paid', description: 'Phase 5 current income',
+    })
+    const expense = await FinanceService.createTransaction(organizationId, actor.id, {
+      type: 'expense', category: 'Operations', amount: 25000, transactionDate: now,
+      paymentMethod: 'cash', status: 'paid', description: 'Phase 5 current expense',
+    })
+    const historical = await FinanceService.createTransaction(organizationId, actor.id, {
+      type: 'expense', category: 'Operations', amount: 5000, transactionDate: historicalDate,
+      paymentMethod: 'cash', status: 'paid', description: 'Phase 5 historical expense',
+    })
+
+    expect(await FinanceTransaction.exists({ _id: income._id, organizationId })).toBeTruthy()
+    expect(await FinanceTransaction.exists({ _id: expense._id, organizationId })).toBeTruthy()
+
+    const today = now.toISOString().slice(0, 10)
+    const current = await FinanceService.listTransactions(organizationId, { startDate: today, endDate: today }, { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' })
+    const currentIds = current.data.map((row: any) => String(row._id))
+    expect(currentIds).toContain(String(income._id))
+    expect(currentIds).toContain(String(expense._id))
+    expect(currentIds).not.toContain(String(historical._id))
+
+    const historicalRows = await FinanceService.listTransactions(organizationId, { startDate: '2024-06-15', endDate: '2024-06-15' }, { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' })
+    expect(historicalRows.data.map((row: any) => String(row._id))).toContain(String(historical._id))
+  })
+
+  it('removes current billing information without changing historical invoice, payment or accounting snapshots', async () => {
+    await FinanceService.updateBillingProfile(organizationId, actor, {
+      legalName: 'Phase Five Holdings Ltd', email: 'billing@phase5.test', phone: '+8801999999999',
+      address: 'Historic Billing Address, Dhaka', taxId: 'VAT-PHASE5-001',
+    })
+    const invoice = await FinanceService.createInvoice(organizationId, actor, invoicePayload('sent'))
+    await FinanceService.recordInvoicePayment(organizationId, actor, String(invoice._id), {
+      amount: 10000, paidAt: new Date(), paymentMethod: 'bank', reference: 'BILLING-SNAPSHOT-PAYMENT',
+    })
+    const before: any = await FinanceInvoice.findById(invoice._id).lean()
+    const paymentTransactionBefore: any = await FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', sourceId: invoice._id }).lean()
+
+    const billing = await FinanceService.removeBillingProfile(organizationId, actor, 'Phase 5 regression removal')
+    expect(billing.profile).toBeNull()
+
+    const after: any = await FinanceInvoice.findById(invoice._id).lean()
+    const paymentTransactionAfter: any = await FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', sourceId: invoice._id }).lean()
+    expect(after.issuerSnapshot).toEqual(before.issuerSnapshot)
+    expect(after.issuerSnapshot.legalName).toBe('Phase Five Holdings Ltd')
+    expect(after.issuerSnapshot.address).toBe('Historic Billing Address, Dhaka')
+    expect(after.issuerSnapshot.taxId).toBe('VAT-PHASE5-001')
+    expect(after.payments).toEqual(before.payments)
+    expect(String(paymentTransactionAfter?._id)).toBe(String(paymentTransactionBefore?._id))
+    expect(paymentTransactionAfter?.accountingJournalId || null).toEqual(paymentTransactionBefore?.accountingJournalId || null)
+  })
+
 })

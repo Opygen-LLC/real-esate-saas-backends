@@ -1,9 +1,23 @@
 import { z } from 'zod'
 import { bangladeshPhoneSchema, optionalEmailSchema } from '../../helpers/inputValidation'
 import { LEAD_STATUS_VALUES, normalizeLeadStatus } from './leadStatus.contract'
+import { CONSTRUCTION_STAGES, CONSTRUCTION_TYPES, DESIGN_REQUIREMENTS, INQUIRY_PROJECT_TYPES, INQUIRY_PURPOSES } from '../../shared/inquiryPurpose.contract'
 
 const leadStatusSchema = z.preprocess((value: unknown) => normalizeLeadStatus(value) ?? value, z.enum(LEAD_STATUS_VALUES))
 const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid user reference')
+
+const inquiryProjectDetailsSchema = z.object({
+  projectType: z.enum(INQUIRY_PROJECT_TYPES).optional(),
+  landSize: z.string().trim().max(120).optional(),
+  numberOfFloors: z.coerce.number().int().min(1).max(200).optional(),
+  approximateBuiltUpArea: z.string().trim().max(120).optional(),
+  designRequirement: z.enum(DESIGN_REQUIREMENTS).optional(),
+  constructionType: z.enum(CONSTRUCTION_TYPES).optional(),
+  constructionStage: z.enum(CONSTRUCTION_STAGES).optional(),
+  expectedStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected start date must use YYYY-MM-DD').optional(),
+  budgetRange: z.string().trim().max(120).optional(),
+  location: z.string().trim().max(300).optional(),
+}).strict().optional()
 
 const attribution = z.object({
   utmSource: z.string().trim().max(120).optional(),
@@ -27,6 +41,8 @@ const leadFields = {
   locationPreference: z.string().trim().max(300).optional(),
   propertyType: z.string().trim().max(100).optional(),
   bedrooms: z.number().nonnegative().max(50).optional(),
+  inquiryPurpose: z.enum(INQUIRY_PURPOSES).optional(),
+  projectDetails: inquiryProjectDetailsSchema,
   leadStatus: leadStatusSchema.optional(),
   assignedAgent: objectIdSchema.optional(),
   followUpDate: z.string().datetime().optional(),
@@ -61,10 +77,22 @@ const publicCaptureZodSchema = z.object({
     budgetMax: leadFields.budgetMax,
     propertyType: leadFields.propertyType,
     locationPreference: leadFields.locationPreference,
+    inquiryPurpose: leadFields.inquiryPurpose,
+    projectDetails: inquiryProjectDetailsSchema,
     privacyConsent: z.literal(true, { errorMap: () => ({ message: 'Privacy consent is required' }) }),
     policyVersion: z.string().trim().min(1, 'Privacy policy version is required').max(80),
     attribution,
-  }).strict(),
+  }).strict().superRefine((value, ctx) => {
+    if (value.inquiryPurpose === 'BUILDING_DESIGN' && value.projectDetails?.constructionType) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['projectDetails', 'constructionType'], message: 'Construction type is not used for Building Design inquiries' })
+    }
+    if (value.inquiryPurpose === 'CONSTRUCTION' && value.projectDetails?.designRequirement) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['projectDetails', 'designRequirement'], message: 'Design requirement is not used for Construction inquiries' })
+    }
+    if (value.projectDetails && !['BUILDING_DESIGN', 'CONSTRUCTION'].includes(String(value.inquiryPurpose || ''))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['projectDetails'], message: 'Project details are only accepted for Building Design or Construction inquiries' })
+    }
+  }),
 })
 
 const { leadStatus: _leadStatus, assignedAgent: _assignedAgent, followUpDate: _followUpDate, nextFollowUp: _nextFollowUp, lostReason: _lostReason, notes: _notes, ...genericEditableLeadFields } = leadFields

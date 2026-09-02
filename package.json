@@ -33,6 +33,7 @@
     "migrate:registration-continuation": "ts-node --transpile-only src/app/db/migrateRegistrationContinuationToken.ts",
     "test:smtp": "node scripts/verify-smtp.mjs",
     "audit:finance": "ts-node --transpile-only src/app/db/auditFinancePhase1.ts",
+    "audit:phase5-real-estate": "ts-node --transpile-only src/app/db/auditPhase5RealEstateIntegration.ts",
     "migrate:finance": "ts-node --transpile-only src/app/db/migrateFinance.ts",
     "migrate:advanced-accounting-phase1": "ts-node --transpile-only src/app/db/migrateAdvancedAccountingPhase1.ts",
     "migrate:phase-0-contracts": "ts-node --transpile-only src/app/db/migratePhase0Contracts.ts",
@@ -188,7 +189,11 @@
     "test:finance-phase3:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/financePhase3Integrity.integration.test.ts",
     "verify:finance-phase3-production": "ts-node --transpile-only src/app/db/verifyFinancePhase3Production.ts",
     "gate:finance-phase3": "pnpm typecheck && pnpm typecheck:test && pnpm test:finance-phase2 && pnpm test:finance-phase3:contract && pnpm build",
-    "gate:finance-phase3:staging": "pnpm gate:finance-phase3 && pnpm test:finance-phase3:integration && pnpm audit:finance -- --fail-on-findings && pnpm reconcile:finance-phase2 -- --fail-on-findings && pnpm verify:finance-phase3-production -- --fail-on-findings && pnpm test:smtp"
+    "gate:finance-phase3:staging": "pnpm gate:finance-phase3 && pnpm test:finance-phase3:integration && pnpm audit:finance -- --fail-on-findings && pnpm reconcile:finance-phase2 -- --fail-on-findings && pnpm verify:finance-phase3-production -- --fail-on-findings && pnpm test:smtp",
+    "verify:phase5-real-estate": "node scripts/verifyPhase5RealEstateIntegration.mjs",
+    "test:phase5-real-estate:unit": "vitest run src/tests/unit/propertyAdvancedPricing.unit.test.ts src/tests/unit/phase5OwnershipSeparation.contract.test.ts",
+    "test:phase5-real-estate:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase5FinanceBilling.integration.test.ts src/tests/integration/phase2PublicForms.integration.test.ts",
+    "gate:phase5-real-estate": "pnpm format:check && pnpm verify:phase5-real-estate && pnpm test:phase5-real-estate:unit && pnpm test:phase5-real-estate:integration"
   },
   "keywords": [
     "real-estate",

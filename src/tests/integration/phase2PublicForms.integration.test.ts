@@ -264,4 +264,35 @@ suite('phase 2 public forms and settings contracts', () => {
     expect(wrongBranding.response.status).toBe(400)
     expect(wrongBranding.body?.fieldErrors?.city?.[0]).toBeTruthy()
   })
+  it.each([
+    ['BUILDING_DESIGN', '+8801512345601', { projectType: 'APARTMENT_BUILDING', landSize: '5 Katha', numberOfFloors: 8, approximateBuiltUpArea: '18000 sqft', designRequirement: 'COMPLETE_BUILDING_DESIGN', expectedStartDate: '2026-11-01', budgetRange: 'BDT 2-3 Crore', location: 'Bashundhara, Dhaka' }],
+    ['CONSTRUCTION', '+8801512345602', { projectType: 'COMMERCIAL_BUILDING', landSize: '8 Katha', numberOfFloors: 12, approximateBuiltUpArea: '42000 sqft', constructionType: 'TURNKEY_CONSTRUCTION', constructionStage: 'PLANNING', expectedStartDate: '2026-12-01', budgetRange: 'BDT 8-10 Crore', location: 'Gulshan, Dhaka' }],
+  ])('preserves %s purpose and project details from public submission through CRM lead creation', async (inquiryPurpose, phone, projectDetails) => {
+    const publicResult = await request('/api/v1/lead/public-capture', {
+      method: 'POST',
+      body: JSON.stringify({
+        organizationId, submissionContext: 'CONTACT', name: `${inquiryPurpose} Prospect`, phone,
+        email: `${String(inquiryPurpose).toLowerCase()}@phase5.test`, inquiryPurpose, projectDetails,
+        message: 'Phase 5 project inquiry', privacyConsent: true, policyVersion: 'phase2-policy-v1',
+        attribution: { landingPage: '/contact' },
+      }),
+    })
+    expect(publicResult.response.status).toBe(201)
+    const submissionId = publicResult.body?.data?.submission?.submissionId
+    const submission = await WebsiteSubmission.findById(submissionId).lean()
+    expect(submission?.inquiryPurpose).toBe(inquiryPurpose)
+    expect(submission?.projectDetails).toMatchObject(projectDetails)
+
+    const token = jwtHelpers.createToken({ _id: owner._id.toString(), phoneNumber: owner.phoneNumber, email: owner.email, userRole: owner.userRole, organizationId }, config.jwt.secret, config.jwt.expires_in)
+    const move = await request(`/api/v1/website-submissions/${submissionId}/move-to-crm`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: '{}' })
+    expect(move.response.status).toBe(200)
+    const lead = await Lead.findById(move.body?.data?.leadId).lean()
+    expect(lead?.inquiryPurpose).toBe(inquiryPurpose)
+    expect(lead?.projectDetails).toMatchObject(projectDetails)
+
+    const readSubmission = await WebsiteSubmission.findById(submissionId).lean()
+    expect(readSubmission?.inquiryPurpose).toBe(inquiryPurpose)
+    expect(readSubmission?.crmTransferStatus).toBe('COMPLETED')
+  })
+
 })

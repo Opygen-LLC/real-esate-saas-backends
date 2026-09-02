@@ -44,6 +44,57 @@ describe('advanced property pricing and private investment data', () => {
     expect(totalPriced.price).toBe(25_000_000)
   })
 
+  it.each([
+    { name: 'Land TOTAL', propertyType: 'LandPlot', listingType: 'ForSale', area: 5, areaUnit: 'katha', mode: 'TOTAL', askingPrice: 60_000_000, expected: 60_000_000 },
+    { name: 'Land PER_KATHA', propertyType: 'LandPlot', listingType: 'ForSale', area: 5, areaUnit: 'katha', mode: 'PER_KATHA', unitRate: 12_000_000, expected: 60_000_000 },
+    { name: 'Land PER_SQFT', propertyType: 'LandPlot', listingType: 'ForSale', area: 5, areaUnit: 'katha', mode: 'PER_SQFT', unitRate: 1_000, expected: 3_600_000 },
+    { name: 'Land PER_DECIMAL', propertyType: 'LandPlot', listingType: 'ForSale', area: 5, areaUnit: 'katha', mode: 'PER_DECIMAL', unitRate: 1_000_000 },
+    { name: 'Land PER_BIGHA', propertyType: 'LandPlot', listingType: 'ForSale', area: 5, areaUnit: 'katha', mode: 'PER_BIGHA', unitRate: 100_000_000, expected: 25_000_000 },
+    { name: 'Apartment TOTAL', propertyType: 'Apartment', listingType: 'ForSale', area: 2_000, areaUnit: 'sqft', mode: 'TOTAL', askingPrice: 30_000_000, expected: 30_000_000 },
+    { name: 'Apartment PER_SQFT', propertyType: 'Apartment', listingType: 'ForSale', area: 2_000, areaUnit: 'sqft', mode: 'PER_SQFT', unitRate: 15_000, expected: 30_000_000 },
+    { name: 'Office PER_SQFT', propertyType: 'Office', listingType: 'ForSale', area: 2_000, areaUnit: 'sqft', mode: 'PER_SQFT', unitRate: 10_000, expected: 20_000_000 },
+    { name: 'Office MONTHLY', propertyType: 'Office', listingType: 'ForRent', area: 2_000, areaUnit: 'sqft', mode: 'MONTHLY', askingPrice: 150_000, expected: 150_000 },
+    { name: 'Rental MONTHLY', propertyType: 'RentalSublet', listingType: 'ForRent', area: 1_500, areaUnit: 'sqft', mode: 'MONTHLY', askingPrice: 80_000, expected: 80_000 },
+  ] as const)('normalizes $name pricing server-side and mirrors legacy price', async (testCase) => {
+    const pricing: any = {
+      mode: testCase.mode,
+      ...(testCase.unitRate !== undefined ? { unitRate: testCase.unitRate } : {}),
+      ...(testCase.askingPrice !== undefined ? { askingPrice: testCase.askingPrice } : {}),
+    }
+    const normalized: any = await normalizePropertyFinancials('org-1', {
+      propertyType: testCase.propertyType,
+      listingType: testCase.listingType,
+      area: testCase.area,
+      areaUnit: testCase.areaUnit,
+      pricing,
+    } as any, undefined, conversion)
+
+    const expected = testCase.expected ?? Number((testCase.unitRate! * convertAreaValue(testCase.area, testCase.areaUnit, 'decimal', conversion)).toFixed(2))
+    expect(normalized.pricing.mode).toBe(testCase.mode)
+    expect(normalized.pricing.askingPrice).toBeCloseTo(expected, 2)
+    expect(normalized.price).toBeCloseTo(expected, 2)
+  })
+
+  it('exposes Apartment floor but keeps Hotel area private when public area visibility is disabled', () => {
+    const apartment: any = toPublicProperty({
+      _id: 'apartment-1', organizationId: 'org-1', title: 'Apartment', slug: 'apartment',
+      propertyType: 'Apartment', listingType: 'ForSale', status: 'Available', price: 30_000_000,
+      floorNumber: 6, hiddenPublicFields: [], images: [], amenities: [], features: [],
+    } as any)
+    expect(apartment.floorNumber).toBe(6)
+
+    const hotel: any = toPublicProperty({
+      _id: 'hotel-2', organizationId: 'org-1', title: 'Private Area Hotel', slug: 'private-area-hotel',
+      propertyType: 'HotelResort', listingType: 'ForSale', status: 'Available', price: 100_000_000,
+      totalRooms: 120, starRating: 5, landArea: 2.5, landAreaUnit: 'acre', builtUpArea: 80_000, builtUpAreaUnit: 'sqft',
+      hiddenPublicFields: ['area'], images: [], amenities: [], features: [],
+    } as any)
+    expect(hotel.totalRooms).toBe(120)
+    expect(hotel.starRating).toBe(5)
+    expect(hotel).not.toHaveProperty('landArea')
+    expect(hotel).not.toHaveProperty('builtUpArea')
+  })
+
   it('calculates the requested payment-plan example server-side', async () => {
     const normalized: any = await normalizePropertyFinancials('org-1', {
       propertyType: 'Apartment', listingType: 'ForSale', price: 100_000_000,

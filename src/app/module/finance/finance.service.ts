@@ -35,6 +35,8 @@ import { emitProductionEvent } from '../../../shared/productionEvents'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { FinanceGlIntegrationService } from './financeGlIntegration.service'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
+import { FinanceBillingProfile } from './financeBillingProfile.model'
+import type { IFinanceBillingProfile, IFinanceIssuerSnapshot } from './financeBillingProfile.interface'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -431,6 +433,81 @@ const resolveInvoiceProperty = async (organizationId: string, value: unknown) =>
   return property
 }
 
+
+const organizationIssuerSnapshot = (organization: any): IFinanceIssuerSnapshot => ({
+  legalName: String(organization?.agencyName || 'Real Estate Agency').trim(),
+  email: String(organization?.email || '').trim(),
+  phone: String(organization?.phone || '').trim(),
+  address: [organization?.address, organization?.city, organization?.state, organization?.country].filter(Boolean).join(', '),
+  taxId: String(organization?.licenseNumber || '').trim(),
+})
+
+const currentIssuerSnapshot = async (organizationId: string): Promise<IFinanceIssuerSnapshot> => {
+  const [profile, organization]: any[] = await Promise.all([
+    FinanceBillingProfile.findOne({ organizationId }).lean(),
+    Organization.findOne({ organizationId }).select('agencyName email phone address city state country licenseNumber').lean(),
+  ])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (!profile) return organizationIssuerSnapshot(organization)
+  return {
+    legalName: String(profile.legalName || organization.agencyName || 'Real Estate Agency').trim(),
+    email: String(profile.email || '').trim(),
+    phone: String(profile.phone || '').trim(),
+    address: String(profile.address || '').trim(),
+    taxId: String(profile.taxId || '').trim(),
+  }
+}
+
+const freezeLegacyInvoiceIssuerSnapshots = async (organizationId: string, snapshot: IFinanceIssuerSnapshot) => {
+  await FinanceInvoice.updateMany(
+    { organizationId, $or: [{ issuerSnapshot: { $exists: false } }, { 'issuerSnapshot.legalName': { $exists: false } }, { 'issuerSnapshot.legalName': '' }] },
+    { $set: { issuerSnapshot: snapshot } },
+  )
+}
+
+const getBillingProfile = async (organizationId: string) => {
+  const [profile, organization]: any[] = await Promise.all([
+    FinanceBillingProfile.findOne({ organizationId }).lean(),
+    Organization.findOne({ organizationId }).select('agencyName email phone address city state country licenseNumber').lean(),
+  ])
+  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  return {
+    profile,
+    fallback: organizationIssuerSnapshot(organization),
+    effective: profile ? {
+      legalName: profile.legalName,
+      email: profile.email || '',
+      phone: profile.phone || '',
+      address: profile.address || '',
+      taxId: profile.taxId || '',
+    } : organizationIssuerSnapshot(organization),
+  }
+}
+
+const updateBillingProfile = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceBillingProfile>) => {
+  const previousSnapshot = await currentIssuerSnapshot(organizationId)
+  await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot)
+  const legalName = String(payload.legalName || '').trim()
+  if (!legalName) throw financeFieldError('legalName', 'Billing name is required')
+  const profile: any = await FinanceBillingProfile.findOneAndUpdate(
+    { organizationId },
+    { $set: { legalName, email: String(payload.email || '').trim(), phone: String(payload.phone || '').trim(), address: String(payload.address || '').trim(), taxId: String(payload.taxId || '').trim(), updatedBy: actorObjectId(actor.id) }, $setOnInsert: { organizationId, createdBy: actorObjectId(actor.id) } },
+    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+  ).lean()
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.updated', entityType: 'financeBillingProfile', entityId: String(profile._id), reason: 'Billing information updated', requestId: actor.requestId, ip: actor.ip, metadata: { historicalInvoiceSnapshotsPreserved: true } })
+  emitProductionEvent('finance_billing_profile_updated', { organizationId })
+  return getBillingProfile(organizationId)
+}
+
+const removeBillingProfile = async (organizationId: string, actor: FinanceActorContext, reason = 'Billing information removed') => {
+  const previousSnapshot = await currentIssuerSnapshot(organizationId)
+  await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot)
+  const removed: any = await FinanceBillingProfile.findOneAndDelete({ organizationId }).lean()
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.removed', entityType: 'financeBillingProfile', entityId: removed?._id ? String(removed._id) : organizationId, reason, requestId: actor.requestId, ip: actor.ip, metadata: { existed: Boolean(removed), historicalInvoiceSnapshotsPreserved: true } })
+  emitProductionEvent('finance_billing_profile_removed', { organizationId })
+  return getBillingProfile(organizationId)
+}
+
 const propertyAuditMetadata = (property: any) => property ? {
   propertyId: String(property._id),
   propertyTitle: property.title || '',
@@ -443,6 +520,7 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
   const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
+  const issuerSnapshot = await currentIssuerSnapshot(organizationId)
   if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
 
   const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
@@ -451,6 +529,7 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
     const rows = await FinanceInvoice.create([{
       ...payload,
       ...amounts,
+      issuerSnapshot,
       propertyId: property?._id,
       leadId: cleanOptionalId(payload.leadId),
       dueDate,
@@ -718,7 +797,13 @@ const renderInvoiceDocument = async (organizationId: string, actor: FinanceActor
     Organization.findOne({ organizationId }).select('organizationId agencyName email phone address city state country primaryColor logo invoiceLogo').lean(),
   ])
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
-  const pdf = await renderInvoicePdf(invoice, organization)
+  let issuerSnapshot = invoice.issuerSnapshot
+  if (!issuerSnapshot?.legalName) {
+    issuerSnapshot = await currentIssuerSnapshot(organizationId)
+    await FinanceInvoice.updateOne({ _id: id, organizationId }, { $set: { issuerSnapshot } })
+    invoice.issuerSnapshot = issuerSnapshot
+  }
+  const pdf = await renderInvoicePdf(invoice, { ...organization, invoiceIssuerSnapshot: issuerSnapshot })
   await invoiceAudit(organizationId, actor, 'finance.invoice.pdf_downloaded', id, 'Invoice PDF downloaded', { invoiceNumber: invoice.invoiceNumber, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId._id || invoice.propertyId) : null, propertyReference: invoice.propertyId?.slug || '' })
   return { pdf, filename: `${invoice.invoiceNumber}.pdf` }
 }
@@ -1143,4 +1228,5 @@ export const FinanceService = {
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,
   getOverview, getReports, exportTransactionsCsv,
+  getBillingProfile, updateBillingProfile, removeBillingProfile,
 }

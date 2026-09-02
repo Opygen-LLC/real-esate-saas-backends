@@ -1,4 +1,5 @@
 import type mongoose from 'mongoose'
+import type { InquiryProjectDetails, InquiryPurpose } from '../../shared/inquiryPurpose.contract'
 
 export const WEBSITE_SUBMISSION_TYPES = [
   'CONTACT',
@@ -42,6 +43,8 @@ export interface IWebsiteSubmission {
   budgetMax?: number
   propertyType?: string
   locationPreference?: string
+  inquiryPurpose?: InquiryPurpose
+  projectDetails?: InquiryProjectDetails
   sourcePage?: string
   pageUrl?: string
   linkedEntityType?: WebsiteSubmissionLinkedEntityType
@@ -69,6 +72,7 @@ export type WebsiteSubmissionFilter = {
   searchTerm?: string
   submissionType?: WebsiteSubmissionType
   status?: WebsiteSubmissionStatus
+  inquiryPurpose?: InquiryPurpose
   propertyId?: string
   sourcePage?: string
   submittedFrom?: string

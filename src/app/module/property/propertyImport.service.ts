@@ -7,12 +7,20 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import {
+  APPROVAL_AUTHORITIES,
   AREA_UNITS,
+  HOTEL_OPERATING_STATUSES,
   LISTING_TYPES,
+  PROPERTY_FACINGS,
+  PROPERTY_PRICING_MODES,
   PROPERTY_STATUSES,
   PROPERTY_TYPES,
+  type ApprovalAuthority,
   type AreaUnit,
+  type HotelOperatingStatus,
   type ListingType,
+  type PropertyFacing,
+  type PropertyPricingMode,
   type PropertyStatus,
   type PropertyType,
 } from './property.constants'
@@ -46,6 +54,19 @@ type ImportColumn =
   | 'furnished'
   | 'isFeatured'
   | 'description'
+  | 'pricingMode'
+  | 'unitRate'
+  | 'floorNumber'
+  | 'roadWidthFeet'
+  | 'facing'
+  | 'approvalAuthority'
+  | 'totalRooms'
+  | 'starRating'
+  | 'hotelOperatingStatus'
+  | 'landArea'
+  | 'landAreaUnit'
+  | 'securityDeposit'
+  | 'availableFrom'
 
 type NormalizedImportRow = {
   title: string
@@ -66,6 +87,17 @@ type NormalizedImportRow = {
   furnished?: boolean
   isFeatured?: boolean
   description?: string
+  pricing?: { mode: PropertyPricingMode; unitRate?: number; askingPrice: number; negotiable: boolean }
+  floorNumber?: number
+  roadWidthFeet?: number
+  facing?: PropertyFacing
+  regulatory?: { approvalAuthority?: ApprovalAuthority }
+  totalRooms?: number
+  starRating?: number
+  hotelOperatingStatus?: HotelOperatingStatus
+  landArea?: number
+  landAreaUnit?: AreaUnit
+  rentalTerms?: { securityDeposit?: number; availableFrom?: Date }
   bangladeshAddress?: { postalCode?: string }
 }
 
@@ -124,6 +156,19 @@ const FIELD_ALIASES: Record<ImportColumn, string[]> = {
   furnished: ['furnished', 'isfurnished'],
   isFeatured: ['featured', 'isfeatured'],
   description: ['description', 'details'],
+  pricingMode: ['pricingmode', 'pricemode'],
+  unitRate: ['unitrate', 'priceperunit', 'rate'],
+  floorNumber: ['floornumber', 'floor'],
+  roadWidthFeet: ['roadwidthfeet', 'roadwidth'],
+  facing: ['facing'],
+  approvalAuthority: ['approvalauthority', 'approval'],
+  totalRooms: ['totalrooms', 'rooms'],
+  starRating: ['starrating', 'stars'],
+  hotelOperatingStatus: ['hoteloperatingstatus', 'operatingstatus'],
+  landArea: ['landarea'],
+  landAreaUnit: ['landareaunit'],
+  securityDeposit: ['securitydeposit', 'deposit'],
+  availableFrom: ['availablefrom', 'availability'],
 }
 
 const SYSTEM_MANAGED_HEADERS = new Set([
@@ -139,6 +184,10 @@ for (const [field, aliases] of Object.entries(FIELD_ALIASES) as Array<[ImportCol
 const propertyTypeByToken = new Map<string, PropertyType>(PROPERTY_TYPES.map((value) => [normalizeToken(value), value]))
 const listingTypeByToken = new Map<string, ListingType>(LISTING_TYPES.map((value) => [normalizeToken(value), value]))
 const statusByToken = new Map<string, PropertyStatus>(PROPERTY_STATUSES.map((value) => [normalizeToken(value), value]))
+const pricingModeByToken = new Map<string, PropertyPricingMode>(PROPERTY_PRICING_MODES.map((value) => [normalizeToken(value), value]))
+const facingByToken = new Map<string, PropertyFacing>(PROPERTY_FACINGS.map((value) => [normalizeToken(value), value]))
+const approvalAuthorityByToken = new Map<string, ApprovalAuthority>(APPROVAL_AUTHORITIES.map((value) => [normalizeToken(value), value]))
+const hotelStatusByToken = new Map<string, HotelOperatingStatus>(HOTEL_OPERATING_STATUSES.map((value) => [normalizeToken(value), value]))
 const areaUnitByToken = new Map<string, AreaUnit>(AREA_UNITS.map((value) => [normalizeToken(value), value]))
 areaUnitByToken.set('sqft', 'sqft')
 areaUnitByToken.set('squarefeet', 'sqft')
@@ -298,6 +347,79 @@ const validateRow = (
   if (!areaUnit) errors.push(`areaUnit must be one of: ${AREA_UNITS.join(', ')}`)
   else normalized.areaUnit = areaUnit
 
+  const pricingModeRaw = textAt(values, columns, 'pricingMode')
+  if (pricingModeRaw) {
+    const pricingMode = pricingModeByToken.get(normalizeToken(pricingModeRaw))
+    if (!pricingMode) errors.push(`pricingMode must be one of: ${PROPERTY_PRICING_MODES.join(', ')}`)
+    else if (normalized.price !== undefined) {
+      const unitRate = parseNumber(rawAt(values, columns, 'unitRate'), 'unitRate', { positive: true })
+      if (unitRate.error) errors.push(unitRate.error)
+      else if (pricingMode !== 'TOTAL' && unitRate.value === undefined) errors.push('unitRate is required when pricingMode is not TOTAL')
+      else normalized.pricing = { mode: pricingMode, ...(unitRate.value !== undefined ? { unitRate: unitRate.value } : {}), askingPrice: normalized.price, negotiable: false }
+    }
+  }
+
+  const floorNumber = parseNumber(rawAt(values, columns, 'floorNumber'), 'floorNumber', { integer: true })
+  if (floorNumber.error) errors.push(floorNumber.error)
+  else if (floorNumber.value !== undefined) normalized.floorNumber = floorNumber.value
+
+  const roadWidth = parseNumber(rawAt(values, columns, 'roadWidthFeet'), 'roadWidthFeet')
+  if (roadWidth.error) errors.push(roadWidth.error)
+  else if (roadWidth.value !== undefined) normalized.roadWidthFeet = roadWidth.value
+
+  const facingRaw = textAt(values, columns, 'facing')
+  if (facingRaw) {
+    const facing = facingByToken.get(normalizeToken(facingRaw))
+    if (!facing) errors.push(`facing must be one of: ${PROPERTY_FACINGS.join(', ')}`)
+    else normalized.facing = facing
+  }
+
+  const approvalRaw = textAt(values, columns, 'approvalAuthority')
+  if (approvalRaw) {
+    const approvalAuthority = approvalAuthorityByToken.get(normalizeToken(approvalRaw))
+    if (!approvalAuthority) errors.push(`approvalAuthority must be one of: ${APPROVAL_AUTHORITIES.join(', ')}`)
+    else normalized.regulatory = { approvalAuthority }
+  }
+
+  const totalRooms = parseNumber(rawAt(values, columns, 'totalRooms'), 'totalRooms', { integer: true })
+  if (totalRooms.error) errors.push(totalRooms.error)
+  else if (totalRooms.value !== undefined) normalized.totalRooms = totalRooms.value
+
+  const starRating = parseNumber(rawAt(values, columns, 'starRating'), 'starRating', { integer: true })
+  if (starRating.error) errors.push(starRating.error)
+  else if (starRating.value !== undefined) {
+    if (starRating.value < 1 || starRating.value > 5) errors.push('starRating must be between 1 and 5')
+    else normalized.starRating = starRating.value
+  }
+
+  const hotelStatusRaw = textAt(values, columns, 'hotelOperatingStatus')
+  if (hotelStatusRaw) {
+    const hotelStatus = hotelStatusByToken.get(normalizeToken(hotelStatusRaw))
+    if (!hotelStatus) errors.push(`hotelOperatingStatus must be one of: ${HOTEL_OPERATING_STATUSES.join(', ')}`)
+    else normalized.hotelOperatingStatus = hotelStatus
+  }
+
+  const landArea = parseNumber(rawAt(values, columns, 'landArea'), 'landArea')
+  if (landArea.error) errors.push(landArea.error)
+  else if (landArea.value !== undefined) normalized.landArea = landArea.value
+  const landAreaUnitRaw = textAt(values, columns, 'landAreaUnit')
+  if (landAreaUnitRaw) {
+    const landAreaUnit = areaUnitByToken.get(normalizeToken(landAreaUnitRaw))
+    if (!landAreaUnit) errors.push(`landAreaUnit must be one of: ${AREA_UNITS.join(', ')}`)
+    else normalized.landAreaUnit = landAreaUnit
+  }
+
+  const securityDeposit = parseNumber(rawAt(values, columns, 'securityDeposit'), 'securityDeposit')
+  if (securityDeposit.error) errors.push(securityDeposit.error)
+  const availableFromRaw = textAt(values, columns, 'availableFrom')
+  let availableFrom: Date | undefined
+  if (availableFromRaw) {
+    const parsed = new Date(availableFromRaw)
+    if (Number.isNaN(parsed.getTime())) errors.push('availableFrom must be a valid date')
+    else availableFrom = parsed
+  }
+  if (securityDeposit.value !== undefined || availableFrom) normalized.rentalTerms = { ...(securityDeposit.value !== undefined ? { securityDeposit: securityDeposit.value } : {}), ...(availableFrom ? { availableFrom } : {}) }
+
   const furnished = parseBoolean(rawAt(values, columns, 'furnished'), 'furnished')
   if (furnished.error) errors.push(furnished.error)
   else if (furnished.value !== undefined) normalized.furnished = furnished.value
@@ -453,9 +575,19 @@ const confirm = async (organizationId: string, actor: ImportActor, importSession
 }
 
 const csvTemplate = (): string => {
-  const headers = ['title', 'propertyType', 'listingType', 'status', 'price', 'currency', 'postalCode', 'city', 'state', 'address', 'bedrooms', 'bathrooms', 'area', 'areaUnit', 'agent', 'furnished', 'isFeatured', 'description']
-  const sample = ['Sample Apartment', 'Apartment', 'ForSale', 'Draft', '12500000', 'BDT', '1212', 'Dhaka', 'Dhaka', 'Gulshan Avenue', '3', '3', '1850', 'sqft', 'agent@example.com', 'Yes', 'No', 'Optional property description']
-  return [headers.map(csvCell).join(','), sample.map(csvCell).join(',')].join('\r\n')
+  const headers = [
+    'title', 'propertyType', 'listingType', 'status', 'price', 'currency', 'postalCode', 'city', 'state', 'address',
+    'bedrooms', 'bathrooms', 'area', 'areaUnit', 'pricingMode', 'unitRate', 'floorNumber', 'roadWidthFeet', 'facing',
+    'approvalAuthority', 'totalRooms', 'starRating', 'hotelOperatingStatus', 'landArea', 'landAreaUnit', 'securityDeposit',
+    'availableFrom', 'agent', 'furnished', 'isFeatured', 'description',
+  ]
+  const samples = [
+    ['Sample Apartment', 'Apartment', 'ForSale', 'Draft', '27750000', 'BDT', '1212', 'Dhaka', 'Dhaka', 'Gulshan Avenue', '3', '3', '1850', 'sqft', 'PER_SQFT', '15000', '6', '', '', '', '', '', '', '', '', '', '', 'agent@example.com', 'Yes', 'No', 'Price is calculated server-side from area and unit rate.'],
+    ['Sample Land', 'LandPlot', 'ForSale', 'Draft', '60000000', 'BDT', '1229', 'Dhaka', 'Dhaka', 'Bashundhara', '', '', '5', 'katha', 'PER_KATHA', '12000000', '', '40', 'South', 'RAJUK', '', '', '', '', '', '', '', 'agent@example.com', '', 'No', 'Land example with Katha pricing.'],
+    ['Sample Hotel', 'HotelResort', 'ForSale', 'Draft', '500000000', 'BDT', '4700', 'Cox’s Bazar', 'Chattogram', 'Marine Drive', '', '', '', 'sqft', 'TOTAL', '', '', '', '', '', '120', '5', 'Operational', '2.5', 'acre', '', '', 'agent@example.com', '', 'No', 'Hotel example.'],
+    ['Sample Rental', 'RentalSublet', 'ForRent', 'Draft', '80000', 'BDT', '1213', 'Dhaka', 'Dhaka', 'Banani', '3', '3', '2100', 'sqft', 'MONTHLY', '80000', '6', '', '', '', '', '', '', '', '', '160000', '2026-10-01', 'agent@example.com', 'Yes', 'No', 'Rental example.'],
+  ]
+  return [headers.map(csvCell).join(','), ...samples.map((sample) => sample.map(csvCell).join(','))].join('\r\n')
 }
 
 const xlsxTemplate = async (): Promise<Buffer> => {
@@ -463,19 +595,22 @@ const xlsxTemplate = async (): Promise<Buffer> => {
   workbook.creator = 'Opygen Estate'
   workbook.company = 'Opygen Estate'
   const sheet = workbook.addWorksheet('Properties')
-  sheet.columns = [
+  const columns: Array<[string, number]> = [
     ['title', 28], ['propertyType', 18], ['listingType', 16], ['status', 16], ['price', 16], ['currency', 12], ['postalCode', 12], ['city', 18], ['state', 18], ['address', 32],
-    ['bedrooms', 12], ['bathrooms', 12], ['area', 14], ['areaUnit', 12], ['agent', 28], ['furnished', 12], ['isFeatured', 12], ['description', 45],
-  ].map(([header, width]) => ({ header: String(header), key: String(header), width: Number(width) }))
+    ['bedrooms', 12], ['bathrooms', 12], ['area', 14], ['areaUnit', 12], ['pricingMode', 16], ['unitRate', 16], ['floorNumber', 12], ['roadWidthFeet', 14], ['facing', 14], ['approvalAuthority', 18],
+    ['totalRooms', 12], ['starRating', 12], ['hotelOperatingStatus', 20], ['landArea', 14], ['landAreaUnit', 14], ['securityDeposit', 18], ['availableFrom', 16],
+    ['agent', 28], ['furnished', 12], ['isFeatured', 12], ['description', 45],
+  ]
+  sheet.columns = columns.map(([header, width]) => ({ header, key: header, width }))
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
   sheet.getRow(1).font = { bold: true }
-  sheet.addRow({
-    title: 'Sample Apartment', propertyType: 'Apartment', listingType: 'ForSale', status: 'Draft', price: 12500000, currency: 'BDT', postalCode: '1212', city: 'Dhaka', state: 'Dhaka', address: 'Gulshan Avenue', bedrooms: 3, bathrooms: 3, area: 1850, areaUnit: 'sqft', agent: 'agent@example.com', furnished: 'Yes', isFeatured: 'No', description: 'Optional property description',
-  })
+  const sampleRows = csvTemplate().split('\r\n').slice(1).map((line) => line.split(',').map((value) => value.replace(/^"|"$/g, '').replace(/""/g, '"')))
+  const headers = columns.map(([header]) => header)
+  for (const values of sampleRows) sheet.addRow(Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])))
 
   const instructions = workbook.addWorksheet('Instructions')
   instructions.columns = [
-    { header: 'Column', key: 'column', width: 20 },
+    { header: 'Column', key: 'column', width: 24 },
     { header: 'Required', key: 'required', width: 12 },
     { header: 'Rules', key: 'rules', width: 100 },
   ]
@@ -485,14 +620,15 @@ const xlsxTemplate = async (): Promise<Buffer> => {
     ['propertyType', 'Yes', `Allowed: ${PROPERTY_TYPES.join(', ')}.`],
     ['listingType', 'Yes', `Allowed: ${LISTING_TYPES.join(', ')}.`],
     ['status', 'No', `Allowed: ${PROPERTY_STATUSES.join(', ')}. Blank defaults to Draft. Users without publish permission import as Draft.`],
-    ['price', 'Yes', 'Positive number, maximum 1,000,000,000,000.'],
-    ['currency', 'No', 'BDT only. Blank defaults to BDT.'],
+    ['price', 'Yes', 'Final asking price in BDT. For unit pricing it must match the server-calculated total.'],
+    ['pricingMode/unitRate', 'No', `Pricing modes: ${PROPERTY_PRICING_MODES.join(', ')}. unitRate is required for non-TOTAL modes.`],
+    ['area/areaUnit', 'No', `Area units: ${AREA_UNITS.join(', ')}. Land unit pricing uses the canonical server conversion engine.`],
+    ['floorNumber', 'No', 'Whole non-negative floor number for supported property types.'],
+    ['roadWidthFeet/facing/approvalAuthority', 'No', `Land details. Facing: ${PROPERTY_FACINGS.join(', ')}. Approval: ${APPROVAL_AUTHORITIES.join(', ')}.`],
+    ['totalRooms/starRating/hotelOperatingStatus', 'No', `Hotel fields. Star rating 1–5. Status: ${HOTEL_OPERATING_STATUSES.join(', ')}.`],
+    ['landArea/landAreaUnit', 'No', 'Hotel/resort land size and unit.'],
+    ['securityDeposit/availableFrom', 'No', 'Rental fields. availableFrom accepts an ISO/date-compatible value.'],
     ['postalCode', 'No', 'Exactly four Bangladesh postal-code digits.'],
-    ['city/state/address', 'No', 'Location text. City/state maximum 100 characters; address maximum 500.'],
-    ['bedrooms', 'No', 'Whole number from 0 to 100.'],
-    ['bathrooms', 'No', 'Number from 0 to 100.'],
-    ['area', 'No', 'Non-negative number.'],
-    ['areaUnit', 'No', `Allowed: ${AREA_UNITS.join(', ')}. Blank defaults to sqft.`],
     ['agent', 'No', 'Active agency owner/admin/agent by exact email, user ID, or unique exact name. Cross-agency IDs are rejected.'],
     ['furnished/isFeatured', 'No', 'Yes/No, True/False, or 1/0.'],
     ['description', 'No', 'Optional description, maximum 20,000 characters.'],

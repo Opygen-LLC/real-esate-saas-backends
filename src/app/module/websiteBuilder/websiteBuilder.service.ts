@@ -941,10 +941,41 @@ const getPropertyShareCard = async (identifier: string, propertyId: string) => {
     name: property.title,
     url,
     image: property.images?.map((image: any) => image.url).filter(Boolean) || [],
+    additionalProperty: [
+      { '@type': 'PropertyValue', name: 'Property type', value: property.propertyType },
+      { '@type': 'PropertyValue', name: 'Listing type', value: property.listingType },
+    ],
+  }
+  const addStructuredProperty = (name: string, value: unknown, unitText?: string) => {
+    if (value === undefined || value === null || value === '') return
+    structuredData.additionalProperty.push({ '@type': 'PropertyValue', name, value, ...(unitText ? { unitText } : {}) })
   }
   if (property.description) structuredData.description = String(property.description).replace(/<[^>]+>/g, '').slice(0, 500)
-  if (property.price !== undefined) structuredData.offers = { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' }
-  if (property.area !== undefined) structuredData.floorSize = { '@type': 'QuantitativeValue', value: property.area, unitText: property.areaUnit || 'sqft' }
+  if (property.price !== undefined) {
+    structuredData.offers = { '@type': 'Offer', price: property.price, priceCurrency: property.currency || 'BDT' }
+    if (property.pricing?.mode && property.pricing.mode !== 'TOTAL') {
+      addStructuredProperty('Pricing mode', property.pricing.mode)
+      addStructuredProperty('Unit rate', property.pricing.unitRate, property.currency || 'BDT')
+    }
+  }
+  if (property.propertyType === 'LandPlot') {
+    addStructuredProperty('Land area', property.area, property.areaUnit || 'sqft')
+    addStructuredProperty('Road width', property.roadWidthFeet, 'ft')
+    addStructuredProperty('Facing', property.facing)
+    addStructuredProperty('Approval authority', property.regulatory?.approvalAuthority)
+  } else if (property.propertyType === 'HotelResort') {
+    addStructuredProperty('Total rooms', property.totalRooms)
+    addStructuredProperty('Star rating', property.starRating)
+    addStructuredProperty('Operating status', property.hotelOperatingStatus)
+    addStructuredProperty('Land area', property.landArea, property.landAreaUnit)
+    if (property.builtUpArea !== undefined) structuredData.floorSize = { '@type': 'QuantitativeValue', value: property.builtUpArea, unitText: property.builtUpAreaUnit || 'sqft' }
+  } else {
+    if (property.area !== undefined) structuredData.floorSize = { '@type': 'QuantitativeValue', value: property.area, unitText: property.areaUnit || 'sqft' }
+    if (property.bedrooms !== undefined) structuredData.numberOfBedrooms = property.bedrooms
+    if (property.bathrooms !== undefined) structuredData.numberOfBathroomsTotal = property.bathrooms
+    addStructuredProperty('Floor', property.floorNumber)
+  }
+  if (!structuredData.additionalProperty.length) delete structuredData.additionalProperty
   if (property.address || property.city || property.state || property.country) {
     structuredData.address = {
       '@type': 'PostalAddress',

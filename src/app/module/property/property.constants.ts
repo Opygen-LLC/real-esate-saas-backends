@@ -57,6 +57,7 @@ export const PUBLIC_PROPERTY_FIELDS = [
   'map',
   'bedrooms',
   'bathrooms',
+  'floor',
   'area',
   'landShare',
   'yearBuilt',
