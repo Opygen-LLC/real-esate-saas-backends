@@ -122,6 +122,7 @@ const defaultAccountDefinitions: Array<{
   { code: '2400', name: 'Tax Payable', type: 'LIABILITY', parentCode: '2000', systemKey: 'OUTPUT_TAX', allowManualPosting: true },
   { code: '2410', name: 'Withholding Tax Payable', type: 'LIABILITY', parentCode: '2000', systemKey: 'WITHHOLDING_TAX', allowManualPosting: true },
   { code: '2500', name: 'Loans Payable', type: 'LIABILITY', parentCode: '2000', systemKey: 'LOANS_PAYABLE', allowManualPosting: true },
+  { code: '2530', name: 'Property Investor Funds Payable', type: 'LIABILITY', parentCode: '2000', systemKey: 'PROPERTY_INVESTOR_FUNDS_PAYABLE', allowManualPosting: true },
 
   { code: '3000', name: 'Equity', type: 'EQUITY', systemKey: 'EQUITY_ROOT', allowManualPosting: false },
   { code: '3100', name: 'Share Capital', type: 'EQUITY', parentCode: '3000', systemKey: 'SHARE_CAPITAL', allowManualPosting: true },

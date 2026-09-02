@@ -38,6 +38,45 @@ const accountFromRef = async (organizationId: string, accountRef: unknown, expec
   return account
 }
 
+const actorObjectId = (actor: AccountingActor) => {
+  const value = String(actor.id || '')
+  if (!mongoose.isValidObjectId(value)) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid authenticated user')
+  return new mongoose.Types.ObjectId(value)
+}
+
+const ensurePostingAccount = async (
+  organizationId: string,
+  actor: AccountingActor,
+  definition: { code: string; name: string; type: 'LIABILITY' | 'EXPENSE' | 'EQUITY'; systemKey: string; parentSystemKey: 'LIABILITIES_ROOT' | 'EXPENSES_ROOT' | 'EQUITY_ROOT' },
+  session?: ClientSession,
+) => {
+  const existing = await withSession(FinanceAccount.findOne({ organizationId, systemKey: definition.systemKey, status: 'ACTIVE', type: definition.type }), session).lean()
+  if (existing) return existing
+  const parent = await withSession(FinanceAccount.findOne({ organizationId, systemKey: definition.parentSystemKey, status: 'ACTIVE' }), session).lean()
+  if (!parent) throw new ApiError(httpStatus.CONFLICT, `${definition.name} cannot be provisioned until accounting is initialized`, '', FINANCE_ERROR_CODES.notInitialized)
+  const settings = await getSettings(organizationId, session)
+  let code = definition.code
+  for (let offset = 0; offset < 90; offset += 1) {
+    const candidate = String(Number(definition.code) + offset).padStart(definition.code.length, '0')
+    const occupied = await withSession(FinanceAccount.exists({ organizationId, code: candidate }), session)
+    if (!occupied) { code = candidate; break }
+    if (offset === 89) throw new ApiError(httpStatus.CONFLICT, `No available account code for ${definition.name}`)
+  }
+  try {
+    const rows = await FinanceAccount.create([{
+      organizationId, code, name: definition.name, type: definition.type, parentAccountId: parent._id,
+      normalBalance: definition.type === 'EXPENSE' ? 'DEBIT' : 'CREDIT', currency: settings.baseCurrency || LEGACY_FINANCE_CURRENCY,
+      systemKey: definition.systemKey, isSystem: true, allowManualPosting: true, status: 'ACTIVE', createdBy: actorObjectId(actor),
+    }], session ? { session } : undefined)
+    return rows[0].toObject()
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      const concurrent = await withSession(FinanceAccount.findOne({ organizationId, systemKey: definition.systemKey, status: 'ACTIVE', type: definition.type }), session).lean()
+      if (concurrent) return concurrent
+    }
+    throw error
+  }
+}
 
 const bankGlAccount = async (organizationId: string, bankAccountId: unknown, fallbackAccountRef: unknown, session?: ClientSession) => {
   if (!bankAccountId) return accountFromRef(organizationId, fallbackAccountRef, 'ASSET', 'Default bank account', session)
@@ -186,6 +225,52 @@ const postCommissionPayout = async (organizationId: string, actor: AccountingAct
   }, session)
 }
 
+const postPropertyInvestorMovement = async (
+  organizationId: string,
+  actor: AccountingActor,
+  transaction: any,
+  kind: 'CONTRIBUTION' | 'CAPITAL_RETURN' | 'PROFIT_DISTRIBUTION',
+  session?: ClientSession,
+) => {
+  if (transaction.status !== 'paid' || Number(transaction.amount || 0) <= 0) return null
+  const settings = await getSettings(organizationId, session)
+  const bank = await bankGlAccount(organizationId, transaction.bankAccountId, settings.defaultAccounts?.bank, session)
+  const amountMinor = minor(transaction.amount)
+  const dimensions = { propertyId: propertyDimension(transaction.propertyId) }
+  if (kind === 'PROFIT_DISTRIBUTION') {
+    // A distribution is an appropriation of earned profit, not a new operating expense.
+    // Debit retained earnings so Money/P&L reports are not distorted by investor payouts.
+    const retained = await ensurePostingAccount(organizationId, actor, { code: '3300', name: 'Retained Earnings', type: 'EQUITY', systemKey: 'RETAINED_EARNINGS', parentSystemKey: 'EQUITY_ROOT' }, session)
+    return postAutomaticJournal(organizationId, actor, {
+      sourceType: 'PROPERTY_INVESTOR_PROFIT_DISTRIBUTION', sourceId: String(transaction.sourceId || transaction._id), currency: transaction.currency || LEGACY_FINANCE_CURRENCY,
+      postingDate: new Date(transaction.transactionDate), description: transaction.description || 'Property investor profit distribution', reference: transaction.reference || '',
+      lines: [
+        { accountId: String(retained._id), debitMinor: amountMinor, description: transaction.description, ...dimensions },
+        { accountId: String(bank._id), creditMinor: amountMinor, description: transaction.description, ...dimensions },
+      ],
+    }, session)
+  }
+  const payable = await ensurePostingAccount(organizationId, actor, { code: '2530', name: 'Property Investor Funds Payable', type: 'LIABILITY', systemKey: 'PROPERTY_INVESTOR_FUNDS_PAYABLE', parentSystemKey: 'LIABILITIES_ROOT' }, session)
+  if (kind === 'CONTRIBUTION') {
+    return postAutomaticJournal(organizationId, actor, {
+      sourceType: 'PROPERTY_INVESTOR_CONTRIBUTION', sourceId: String(transaction.sourceId || transaction._id), currency: transaction.currency || LEGACY_FINANCE_CURRENCY,
+      postingDate: new Date(transaction.transactionDate), description: transaction.description || 'Property investor contribution', reference: transaction.reference || '',
+      lines: [
+        { accountId: String(bank._id), debitMinor: amountMinor, description: transaction.description, ...dimensions },
+        { accountId: String(payable._id), creditMinor: amountMinor, description: transaction.description, ...dimensions },
+      ],
+    }, session)
+  }
+  return postAutomaticJournal(organizationId, actor, {
+    sourceType: 'PROPERTY_INVESTOR_CAPITAL_RETURN', sourceId: String(transaction.sourceId || transaction._id), currency: transaction.currency || LEGACY_FINANCE_CURRENCY,
+    postingDate: new Date(transaction.transactionDate), description: transaction.description || 'Property investor capital return', reference: transaction.reference || '',
+    lines: [
+      { accountId: String(payable._id), debitMinor: amountMinor, description: transaction.description, ...dimensions },
+      { accountId: String(bank._id), creditMinor: amountMinor, description: transaction.description, ...dimensions },
+    ],
+  }, session)
+}
+
 export const FinanceGlIntegrationService = {
   isAutomaticPostingReady,
   postManualTransaction,
@@ -193,5 +278,6 @@ export const FinanceGlIntegrationService = {
   postInvoicePayment,
   postCommissionAccrual,
   postCommissionPayout,
+  postPropertyInvestorMovement,
   reverseLinkedJournal,
 }

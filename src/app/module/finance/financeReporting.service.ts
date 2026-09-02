@@ -157,7 +157,7 @@ const balanceSheet = async (organizationId: string, query: Record<string, unknow
 }
 
 const CASH_TYPES = new Set(['CHECKING', 'SAVINGS', 'PETTY_CASH', 'CLIENT_MONEY', 'MOBILE_WALLET'])
-const financingSource = (sourceType: string) => /EQUITY|CAPITAL|DIVIDEND|SHAREHOLDER_LOAN|COMPANY_LOAN|LOAN_RECEIPT|LOAN_PAYMENT/.test(sourceType)
+const financingSource = (sourceType: string) => /EQUITY|CAPITAL|DIVIDEND|SHAREHOLDER_LOAN|COMPANY_LOAN|LOAN_RECEIPT|LOAN_PAYMENT|PROPERTY_INVESTOR/.test(sourceType)
 const investingSource = (sourceType: string) => /ASSET_PURCHASE|ASSET_SALE|INVESTMENT|PROPERTY_PURCHASE|PROPERTY_SALE|FIXED_ASSET/.test(sourceType)
 const cashFlow = async (organizationId: string, query: Record<string, unknown> = {}) => {
   const settings = await ensureInitialized(organizationId)

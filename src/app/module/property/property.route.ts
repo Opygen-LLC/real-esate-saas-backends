@@ -6,6 +6,8 @@ import { PropertyController } from './property.controller'
 import { PropertyValidation } from './property.validation'
 import { propertyImportUpload } from './propertyImport.middleware'
 import { propertyImageUpload } from './propertyMedia.middleware'
+import { PropertyOwnershipController } from './propertyOwnership.controller'
+import { PropertyOwnershipValidation } from './propertyOwnership.validation'
 
 const router = express.Router()
 
@@ -42,6 +44,21 @@ router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.wri
 
 router.get('/', authMiddlewares.requirePermission('properties.read'), PropertyController.getAllProperties)
 router.post('/', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.createPropertyZodSchema), PropertyController.createProperty)
+
+// Property ownership and investor accounting are intentionally separate from company shareholders.
+router.get('/:id/ownership', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyOwnershipValidation.propertyId), PropertyOwnershipController.getOwnership)
+router.patch('/:id/ownership', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.profile), PropertyOwnershipController.updateProfile)
+router.post('/:id/ownership/owners', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.createOwner), PropertyOwnershipController.createOwner)
+router.patch('/:id/ownership/owners/:ownerId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.updateOwner), PropertyOwnershipController.updateOwner)
+router.delete('/:id/ownership/owners/:ownerId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.deleteOwner), PropertyOwnershipController.deleteOwner)
+router.post('/:id/ownership/investors', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.createInvestor), PropertyOwnershipController.createInvestor)
+router.patch('/:id/ownership/investors/:investorId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyOwnershipValidation.updateInvestor), PropertyOwnershipController.updateInvestor)
+router.post('/:id/ownership/investors/:investorId/contributions', authMiddlewares.requirePermission('properties.write'), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(PropertyOwnershipValidation.createInvestment), PropertyOwnershipController.createInvestment)
+router.post('/:id/ownership/investors/:investorId/distributions', authMiddlewares.requirePermission('properties.write'), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(PropertyOwnershipValidation.createDistribution), PropertyOwnershipController.createDistribution)
+router.post('/:id/ownership/investors/:investorId/contributions/:investmentId/reverse', authMiddlewares.requirePermission('properties.write'), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(PropertyOwnershipValidation.reverseInvestment), PropertyOwnershipController.reverseInvestment)
+router.post('/:id/ownership/investors/:investorId/distributions/:distributionId/reverse', authMiddlewares.requirePermission('properties.write'), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(PropertyOwnershipValidation.reverseDistribution), PropertyOwnershipController.reverseDistribution)
+router.get('/:id/activity', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyOwnershipValidation.activity), PropertyOwnershipController.getActivity)
+
 router.get('/:id', authMiddlewares.requirePermission('properties.read'), PropertyController.getPropertyById)
 router.patch('/:id', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.updatePropertyZodSchema), PropertyController.updateProperty)
 router.patch('/:id/status', authMiddlewares.requirePermission('properties.publish'), validateRequest(PropertyValidation.updateStatusZodSchema), PropertyController.updatePropertyStatus)

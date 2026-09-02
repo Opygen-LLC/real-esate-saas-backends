@@ -16,6 +16,7 @@ import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, defaultListingTypeForPropertyType, isListingTypeAllowedForPropertyType, type ListingType, type PropertyStatus, type PropertyType } from './property.constants'
 import { propertyTypeUnsetDocument, sanitizePropertyTypePayload } from './propertyTypePolicy'
+import { PropertyOwnershipService } from './propertyOwnership.service'
 import { normalizePropertyFinancials, propertyFinancialFieldsToUnset } from './propertyPricing.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
@@ -601,8 +602,12 @@ const reorderPropertyImages = async (organizationId: string, id: string, images:
 }
 
 const deleteProperty = async (organizationId: string, id: string): Promise<IProperty | null> => {
+  if (await PropertyOwnershipService.hasFinancialHistory(organizationId, id)) {
+    throw new ApiError(httpStatus.CONFLICT, 'This property has investor financial history and cannot be permanently deleted. Preserve the listing for auditability or remove it from public inventory instead.', '', 'PROPERTY_INVESTOR_HISTORY_PROTECTED')
+  }
   const result = await Property.findOneAndDelete({ _id: id, organizationId })
   if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Property not found')
+  await PropertyOwnershipService.cleanupNonFinancialRecords(organizationId, id)
   await persistPropertyEvent({
     organizationId, aggregateType: 'property', aggregateId: id, eventType: 'property.deleted', propertyId: id,
     payload: { status: result.status, publicVisible: isPublicPropertyStatus(result.status) },

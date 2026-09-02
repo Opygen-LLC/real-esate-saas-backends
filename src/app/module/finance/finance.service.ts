@@ -294,7 +294,7 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
 const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
   const transaction: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
   if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked invoice and commission transactions cannot be deleted directly', '', 'FINANCE_TRANSACTION_LINKED_PROTECTED')
+  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions cannot be deleted directly; reverse or remove them from their source workflow', '', 'FINANCE_TRANSACTION_LINKED_PROTECTED')
   if (transaction.status !== 'voided') throw new ApiError(httpStatus.CONFLICT, 'Void this manual transaction before deleting it', '', 'FINANCE_TRANSACTION_VOID_REQUIRED')
   transaction.deletedAt = new Date()
   transaction.deletedBy = actorObjectId(actor.id)
@@ -1044,14 +1044,14 @@ const archiveBudget = async (organizationId: string, actor: FinanceActorContext,
 }
 
 const aggregateCategory = async (organizationId: string, type: 'income' | 'expense', startDate?: Date, endDate?: Date) => FinanceTransaction.aggregate([
-  { $match: { organizationId, deletedAt: null, type, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
+  { $match: { organizationId, deletedAt: null, type, status: 'paid', affectsProfit: { $ne: false }, ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
   { $group: { _id: '$category', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
   { $sort: { amount: -1 } },
   { $limit: 20 },
 ]).then((rows) => rows.map((row) => ({ category: row._id || 'Uncategorized', amount: row.amount, count: row.count })))
 
 const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?: Date) => FinanceTransaction.aggregate([
-  { $match: { organizationId, deletedAt: null, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
+  { $match: { organizationId, deletedAt: null, status: 'paid', affectsProfit: { $ne: false }, ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) } },
   { $group: { _id: { year: { $year: { date: '$transactionDate', timezone: 'Asia/Dhaka' } }, month: { $month: { date: '$transactionDate', timezone: 'Asia/Dhaka' } }, type: '$type' }, amount: { $sum: '$amount' } } },
   { $sort: { '_id.year': 1, '_id.month': 1 } },
 ]).then((rows) => {
@@ -1066,7 +1066,7 @@ const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?
 
 const getSummary = async (organizationId: string, startDate?: Date, endDate?: Date) => {
   await refreshOverdueInvoices(organizationId)
-  const transactionMatch: any = { organizationId, deletedAt: null, status: 'paid', ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
+  const transactionMatch: any = { organizationId, deletedAt: null, status: 'paid', affectsProfit: { $ne: false }, ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
   const [totals, invoiceTotals, commissionTotals, activeBudgetCount] = await Promise.all([
     FinanceTransaction.aggregate([{ $match: transactionMatch }, { $group: { _id: '$type', amount: { $sum: '$amount' } } }]),
     FinanceInvoice.aggregate([{ $match: { organizationId, archivedAt: null, status: { $nin: ['cancelled', 'draft'] } } }, { $group: { _id: null, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, overdue: { $sum: { $cond: [{ $eq: ['$status', 'overdue'] }, { $subtract: ['$total', '$paidAmount'] }, 0] } } } }]),
