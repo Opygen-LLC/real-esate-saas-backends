@@ -277,10 +277,43 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
     const existing: any = await querySession(FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }), session)
     if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
     if (existing.status === 'voided') return existing
-    if (existing.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions must be reversed from their source record')
     if (accountingReady && existing.accountingJournalId) {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accountingJournalId, reason, new Date(), session)
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accountingJournalId, reason, new Date(), session).catch(() => undefined)
     }
+
+    if (existing.sourceType === 'invoice_payment' && existing.sourceId) {
+      const invQuery: any = FinanceInvoice.findOne({ _id: existing.sourceId, organizationId })
+      if (session) invQuery.session(session)
+      const invoice: any = await invQuery
+      if (invoice) {
+        invoice.payments = (invoice.payments || []).filter((p: any) => String(p.transactionId) !== String(existing._id))
+        const totalPaid = (invoice.payments || []).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
+        invoice.paidAmount = Math.max(0, totalPaid)
+        if (invoice.status !== 'cancelled' && invoice.status !== 'draft') {
+          if (invoice.paidAmount <= 0) {
+            invoice.status = (invoice.dueDate && new Date(invoice.dueDate) < new Date()) ? 'overdue' : 'sent'
+          } else if (invoice.paidAmount < Number(invoice.total || 0)) {
+            invoice.status = 'partial'
+          } else {
+            invoice.status = 'paid'
+          }
+        }
+        invoice.updatedBy = actorObjectId(actorId)
+        await invoice.save(session ? { session } : undefined)
+      }
+    } else if (existing.sourceType === 'commission_payout' && existing.sourceId) {
+      const comQuery: any = FinanceCommission.findOne({ _id: existing.sourceId, organizationId })
+      if (session) comQuery.session(session)
+      const commission: any = await comQuery
+      if (commission) {
+        if (commission.status === 'paid') commission.status = 'approved'
+        commission.paidAt = null
+        commission.payoutTransactionId = null
+        commission.updatedBy = actorObjectId(actorId)
+        await commission.save(session ? { session } : undefined)
+      }
+    }
+
     existing.status = 'voided'
     existing.voidedAt = new Date()
     existing.voidedBy = actorObjectId(actorId)
@@ -294,20 +327,67 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
 }
 
 const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
-  const transaction: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
-  if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-  if (transaction.sourceType !== 'manual') throw new ApiError(httpStatus.CONFLICT, 'Linked transactions cannot be deleted directly; reverse or remove them from their source workflow', '', 'FINANCE_TRANSACTION_LINKED_PROTECTED')
-  if (transaction.status !== 'voided') throw new ApiError(httpStatus.CONFLICT, 'Void this manual transaction before deleting it', '', 'FINANCE_TRANSACTION_VOID_REQUIRED')
-  transaction.deletedAt = new Date()
-  transaction.deletedBy = actorObjectId(actor.id)
-  transaction.deleteReason = reason.trim()
-  transaction.updatedBy = actorObjectId(actor.id)
-  await transaction.save()
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const txQuery: any = FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
+    if (session) txQuery.session(session)
+    const transaction: any = await txQuery
+    if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
+
+    if (accountingReady && transaction.accountingJournalId && transaction.status !== 'voided') {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), transaction.accountingJournalId, reason, new Date(), session).catch(() => undefined)
+    }
+
+    if (transaction.sourceType === 'invoice_payment' && transaction.sourceId) {
+      const invQuery: any = FinanceInvoice.findOne({ _id: transaction.sourceId, organizationId })
+      if (session) invQuery.session(session)
+      const invoice: any = await invQuery
+      if (invoice) {
+        invoice.payments = (invoice.payments || []).filter((p: any) => String(p.transactionId) !== String(transaction._id))
+        const totalPaid = (invoice.payments || []).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
+        invoice.paidAmount = Math.max(0, totalPaid)
+        if (invoice.status !== 'cancelled' && invoice.status !== 'draft') {
+          if (invoice.paidAmount <= 0) {
+            invoice.status = (invoice.dueDate && new Date(invoice.dueDate) < new Date()) ? 'overdue' : 'sent'
+          } else if (invoice.paidAmount < Number(invoice.total || 0)) {
+            invoice.status = 'partial'
+          } else {
+            invoice.status = 'paid'
+          }
+        }
+        invoice.updatedBy = actorObjectId(actor.id)
+        await invoice.save(session ? { session } : undefined)
+      }
+    } else if (transaction.sourceType === 'commission_payout' && transaction.sourceId) {
+      const comQuery: any = FinanceCommission.findOne({ _id: transaction.sourceId, organizationId })
+      if (session) comQuery.session(session)
+      const commission: any = await comQuery
+      if (commission) {
+        if (commission.status === 'paid') commission.status = 'approved'
+        commission.paidAt = null
+        commission.payoutTransactionId = null
+        commission.updatedBy = actorObjectId(actor.id)
+        await commission.save(session ? { session } : undefined)
+      }
+    }
+
+    const now = new Date()
+    transaction.status = 'voided'
+    transaction.voidedAt = transaction.voidedAt || now
+    transaction.voidedBy = transaction.voidedBy || actorObjectId(actor.id)
+    transaction.voidReason = transaction.voidReason || reason
+    transaction.deletedAt = now
+    transaction.deletedBy = actorObjectId(actor.id)
+    transaction.deleteReason = reason.trim()
+    transaction.updatedBy = actorObjectId(actor.id)
+    await transaction.save(session ? { session } : undefined)
+    return transaction
+  })
+
   await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_transaction', id, 'finance.transaction.deleted', `Transaction removed from Money: ${transaction.description}`),
-    financeDestructiveAudit(organizationId, actor, 'finance.transaction.deleted', 'financeTransaction', id, transaction.deleteReason || reason, { sourceType: transaction.sourceType, status: transaction.status, amount: transaction.amount, type: transaction.type }),
+    emitFinanceEvent(organizationId, actor.id, 'finance_transaction', id, 'finance.transaction.deleted', `Transaction removed from Money: ${result.description}`),
+    financeDestructiveAudit(organizationId, actor, 'finance.transaction.deleted', 'financeTransaction', id, result.deleteReason || reason, { sourceType: result.sourceType, status: result.status, amount: result.amount, type: result.type }),
   ])
-  return { _id: transaction._id, deletedAt: transaction.deletedAt }
+  return { _id: result._id, deletedAt: result.deletedAt }
 }
 
 const calculateInvoiceAmounts = (organizationId: string, lineItems: IFinanceInvoiceLineItem[], discount = 0) => {
@@ -397,10 +477,36 @@ const calculateCommissionAmounts = (payload: Partial<IFinanceCommission>, existi
 const refreshOverdueInvoices = async (organizationId: string) => {
   await FinanceInvoice.updateMany({
     organizationId,
+    archivedAt: null,
     status: { $in: ['sent', 'partial'] },
     dueDate: { $lt: new Date() },
     $expr: { $lt: ['$paidAmount', '$total'] },
   }, { $set: { status: 'overdue' } })
+}
+
+const syncArchivedInvoiceTransactions = async (organizationId: string) => {
+  const archivedInvoices = await FinanceInvoice.find({ organizationId, archivedAt: { $ne: null } }).select('_id invoiceNumber payments').lean()
+  if (!archivedInvoices.length) return
+  const archivedIds = archivedInvoices.map((inv: any) => inv._id)
+  const paymentTxIds = archivedInvoices.flatMap((inv: any) => (inv.payments || []).map((p: any) => p.transactionId).filter(Boolean))
+  await FinanceTransaction.updateMany(
+    {
+      organizationId,
+      deletedAt: null,
+      $or: [
+        { sourceType: 'invoice_payment', sourceId: { $in: archivedIds } },
+        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
+      ],
+    },
+    {
+      $set: {
+        deletedAt: new Date(),
+        status: 'voided',
+        voidedAt: new Date(),
+        deleteReason: 'Cleaned up transaction linked to archived invoice',
+      },
+    }
+  )
 }
 
 const INVOICE_PROPERTY_SELECT = 'title slug address city state status listingType price currency bangladeshAddress'
@@ -673,9 +779,57 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
     if (row.status === 'cancelled') return row
     if (row.status === 'draft') throw new ApiError(httpStatus.CONFLICT, 'Draft invoices should be archived instead of voided')
     if (Number(row.paidAmount || 0) > 0 || ['partial', 'paid'].includes(row.status)) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be voided')
+
     if (accountingReady && row.revenueJournalId) {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), row.revenueJournalId, reason, new Date(), session)
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), row.revenueJournalId, reason, new Date(), session).catch(() => undefined)
     }
+
+    const paymentTxIds = (row.payments || []).map((p: any) => p.transactionId).filter(Boolean)
+    const paymentJournalIds = (row.payments || []).map((p: any) => p.journalEntryId).filter(Boolean)
+
+    if (accountingReady) {
+      for (const journalId of paymentJournalIds) {
+        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), journalId, `Invoice ${row.invoiceNumber} payment reversed: ${reason}`, new Date(), session).catch(() => undefined)
+      }
+    }
+
+    const linkedTxFilter: any = {
+      organizationId,
+      deletedAt: null,
+      $or: [
+        { sourceType: 'invoice_payment', sourceId: row._id },
+        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
+      ],
+    }
+    const linkedTxQuery: any = FinanceTransaction.find(linkedTxFilter)
+    if (session) linkedTxQuery.session(session)
+    const linkedTransactions: any[] = await linkedTxQuery
+
+    if (accountingReady) {
+      for (const tx of linkedTransactions) {
+        if (tx.accountingJournalId && !paymentJournalIds.some((jId: any) => String(jId) === String(tx.accountingJournalId))) {
+          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, `Invoice ${row.invoiceNumber} transaction reversed: ${reason}`, new Date(), session).catch(() => undefined)
+        }
+      }
+    }
+
+    if (linkedTransactions.length > 0) {
+      const now = new Date()
+      await FinanceTransaction.updateMany(
+        linkedTxFilter,
+        {
+          $set: {
+            status: 'voided',
+            voidedAt: now,
+            voidedBy: actorObjectId(actor.id),
+            voidReason: `Invoice ${row.invoiceNumber} voided: ${reason}`,
+            updatedBy: actorObjectId(actor.id),
+          },
+        },
+        session ? { session } : undefined
+      )
+    }
+
     row.status = 'cancelled'
     row.cancelledAt = new Date()
     row.cancelledBy = actorObjectId(actor.id)
@@ -691,22 +845,80 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
   return invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId }), organizationId).lean()
 }
 
-const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Draft removed by agency') => {
-  const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-  const removableStatus = invoice.status === 'draft' || invoice.status === 'cancelled'
-  if (Number(invoice.paidAmount || 0) > 0 || invoice.payments?.length) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be archived', '', 'FINANCE_INVOICE_PAYMENT_PROTECTED')
-  if (!removableStatus) throw new ApiError(httpStatus.CONFLICT, 'Only unpaid draft or voided invoices can be archived', '', 'FINANCE_INVOICE_REMOVE_NOT_ALLOWED')
-  invoice.archivedAt = new Date()
-  invoice.archivedBy = actorObjectId(actor.id)
-  invoice.archiveReason = reason
-  invoice.updatedBy = actorObjectId(actor.id)
-  await invoice.save()
+const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Invoice removed by agency') => {
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const invoiceQuery: any = FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
+    if (session) invoiceQuery.session(session)
+    const invoice: any = await invoiceQuery
+    if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+
+    if (accountingReady && invoice.revenueJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), invoice.revenueJournalId, `Invoice ${invoice.invoiceNumber} deleted: ${reason}`, new Date(), session).catch(() => undefined)
+    }
+
+    const paymentTxIds = (invoice.payments || []).map((p: any) => p.transactionId).filter(Boolean)
+    const paymentJournalIds = (invoice.payments || []).map((p: any) => p.journalEntryId).filter(Boolean)
+
+    if (accountingReady) {
+      for (const journalId of paymentJournalIds) {
+        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), journalId, `Invoice ${invoice.invoiceNumber} payment removed: ${reason}`, new Date(), session).catch(() => undefined)
+      }
+    }
+
+    const linkedTxFilter: any = {
+      organizationId,
+      deletedAt: null,
+      $or: [
+        { sourceType: 'invoice_payment', sourceId: invoice._id },
+        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
+      ],
+    }
+    const linkedTxQuery: any = FinanceTransaction.find(linkedTxFilter)
+    if (session) linkedTxQuery.session(session)
+    const linkedTransactions: any[] = await linkedTxQuery
+
+    if (accountingReady) {
+      for (const tx of linkedTransactions) {
+        if (tx.accountingJournalId && !paymentJournalIds.some((jId: any) => String(jId) === String(tx.accountingJournalId))) {
+          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, `Transaction reversed on invoice deletion: ${reason}`, new Date(), session).catch(() => undefined)
+        }
+      }
+    }
+
+    if (linkedTransactions.length > 0) {
+      const now = new Date()
+      await FinanceTransaction.updateMany(
+        linkedTxFilter,
+        {
+          $set: {
+            deletedAt: now,
+            deletedBy: actorObjectId(actor.id),
+            deleteReason: `Invoice ${invoice.invoiceNumber} deleted: ${reason}`,
+            status: 'voided',
+            voidedAt: now,
+            voidedBy: actorObjectId(actor.id),
+            voidReason: `Invoice ${invoice.invoiceNumber} deleted: ${reason}`,
+            updatedBy: actorObjectId(actor.id),
+          },
+        },
+        session ? { session } : undefined
+      )
+    }
+
+    invoice.archivedAt = new Date()
+    invoice.archivedBy = actorObjectId(actor.id)
+    invoice.archiveReason = reason
+    invoice.status = 'cancelled'
+    invoice.updatedBy = actorObjectId(actor.id)
+    await invoice.save(session ? { session } : undefined)
+    return invoice
+  })
+
   await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Invoice ${invoice.invoiceNumber} archived`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
+    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Invoice ${result.invoiceNumber} archived: ${reason}`),
+    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: result.invoiceNumber, total: result.total, paidAmount: result.paidAmount, propertyId: result.propertyId ? String(result.propertyId) : null }),
   ])
-  return { _id: invoice._id, invoiceNumber: invoice.invoiceNumber, archivedAt: invoice.archivedAt }
+  return { _id: result._id, invoiceNumber: result.invoiceNumber, archivedAt: result.archivedAt }
 }
 
 const recordInvoicePayment = async (organizationId: string, actor: FinanceActorContext, id: string, payload: any) => {
@@ -931,21 +1143,74 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
   return FinanceCommission.findOne({ _id: id, organizationId }).populate(userRefPopulate('agentId', 'name email', { organizationId }))
 }
 
-const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Cancelled commission removed by agency owner') => {
-  const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
-  if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-  if (commission.status === 'paid' || commission.paidAt || commission.payoutTransactionId) throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be deleted', '', 'FINANCE_COMMISSION_PAYMENT_PROTECTED')
-  if (commission.status !== 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancel this commission before deleting it', '', 'FINANCE_COMMISSION_CANCEL_REQUIRED')
-  commission.archivedAt = new Date()
-  commission.archivedBy = actorObjectId(actor.id)
-  commission.archiveReason = reason.trim()
-  commission.updatedBy = actorObjectId(actor.id)
-  await commission.save()
+const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Commission removed by agency owner') => {
+  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const commissionQuery: any = FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
+    if (session) commissionQuery.session(session)
+    const commission: any = await commissionQuery
+    if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
+
+    if (accountingReady) {
+      if (commission.accrualJournalId) {
+        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), commission.accrualJournalId, reason, new Date(), session).catch(() => undefined)
+      }
+      if (commission.payoutJournalId) {
+        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), commission.payoutJournalId, reason, new Date(), session).catch(() => undefined)
+      }
+    }
+
+    const payoutFilter: any = {
+      organizationId,
+      deletedAt: null,
+      $or: [
+        { sourceType: 'commission_payout', sourceId: commission._id },
+        ...(commission.payoutTransactionId ? [{ _id: commission.payoutTransactionId }] : []),
+      ],
+    }
+    const payoutTxQuery: any = FinanceTransaction.find(payoutFilter)
+    if (session) payoutTxQuery.session(session)
+    const payoutTransactions: any[] = await payoutTxQuery
+    if (accountingReady) {
+      for (const tx of payoutTransactions) {
+        if (tx.accountingJournalId && String(tx.accountingJournalId) !== String(commission.payoutJournalId)) {
+          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, reason, new Date(), session).catch(() => undefined)
+        }
+      }
+    }
+    if (payoutTransactions.length > 0) {
+      const now = new Date()
+      await FinanceTransaction.updateMany(
+        payoutFilter,
+        {
+          $set: {
+            deletedAt: now,
+            deletedBy: actorObjectId(actor.id),
+            deleteReason: `Commission ${commission.commissionNumber} archived: ${reason}`,
+            status: 'voided',
+            voidedAt: now,
+            voidedBy: actorObjectId(actor.id),
+            voidReason: `Commission ${commission.commissionNumber} archived: ${reason}`,
+            updatedBy: actorObjectId(actor.id),
+          },
+        },
+        session ? { session } : undefined
+      )
+    }
+
+    commission.archivedAt = new Date()
+    commission.archivedBy = actorObjectId(actor.id)
+    commission.archiveReason = reason.trim()
+    commission.status = 'cancelled'
+    commission.updatedBy = actorObjectId(actor.id)
+    await commission.save(session ? { session } : undefined)
+    return commission
+  })
+
   await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_commission', id, 'finance.commission.archived', `Commission ${commission.commissionNumber} archived`),
-    financeDestructiveAudit(organizationId, actor, 'finance.commission.archived', 'financeCommission', id, commission.archiveReason || reason, { commissionNumber: commission.commissionNumber, status: commission.status, agentShare: commission.agentShare }),
+    emitFinanceEvent(organizationId, actor.id, 'finance_commission', id, 'finance.commission.archived', `Commission ${result.commissionNumber} archived`),
+    financeDestructiveAudit(organizationId, actor, 'finance.commission.archived', 'financeCommission', id, result.archiveReason || reason, { commissionNumber: result.commissionNumber, status: result.status, agentShare: result.agentShare }),
   ])
-  return { _id: commission._id, commissionNumber: commission.commissionNumber, archivedAt: commission.archivedAt }
+  return { _id: result._id, commissionNumber: result.commissionNumber, archivedAt: result.archivedAt }
 }
 
 const payCommission = async (organizationId: string, actorId: string, id: string, payload: any) => {
@@ -1151,11 +1416,14 @@ const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?
 
 const getSummary = async (organizationId: string, startDate?: Date, endDate?: Date) => {
   await refreshOverdueInvoices(organizationId)
+  await syncArchivedInvoiceTransactions(organizationId)
   const transactionMatch: any = { organizationId, deletedAt: null, status: 'paid', affectsProfit: { $ne: false }, ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
+  const invoiceMatch: any = { organizationId, archivedAt: null, status: { $nin: ['cancelled', 'draft'] }, ...(startDate || endDate ? { issueDate: dateCondition(startDate, endDate) } : {}) }
+  const commissionMatch: any = { organizationId, archivedAt: null, status: { $in: ['pending', 'approved'] }, ...(startDate || endDate ? { createdAt: dateCondition(startDate, endDate) } : {}) }
   const [totals, invoiceTotals, commissionTotals, activeBudgetCount] = await Promise.all([
     FinanceTransaction.aggregate([{ $match: transactionMatch }, { $group: { _id: '$type', amount: { $sum: '$amount' } } }]),
-    FinanceInvoice.aggregate([{ $match: { organizationId, archivedAt: null, status: { $nin: ['cancelled', 'draft'] } } }, { $group: { _id: null, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, overdue: { $sum: { $cond: [{ $eq: ['$status', 'overdue'] }, { $subtract: ['$total', '$paidAmount'] }, 0] } } } }]),
-    FinanceCommission.aggregate([{ $match: { organizationId, archivedAt: null, status: { $in: ['pending', 'approved'] } } }, { $group: { _id: null, payable: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' } } }]),
+    FinanceInvoice.aggregate([{ $match: invoiceMatch }, { $group: { _id: null, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' }, overdue: { $sum: { $cond: [{ $eq: ['$status', 'overdue'] }, { $subtract: ['$total', '$paidAmount'] }, 0] } } } }]),
+    FinanceCommission.aggregate([{ $match: commissionMatch }, { $group: { _id: null, payable: { $sum: '$agentShare' }, companyShare: { $sum: '$companyShare' } } }]),
     FinanceBudget.countDocuments({ organizationId, status: 'active', startDate: { $lte: new Date() }, endDate: { $gte: new Date() } }),
   ])
   const income = Number(totals.find((row) => row._id === 'income')?.amount || 0), expense = Number(totals.find((row) => row._id === 'expense')?.amount || 0)

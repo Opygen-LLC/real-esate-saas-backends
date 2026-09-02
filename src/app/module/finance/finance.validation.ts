@@ -80,10 +80,14 @@ const createInvoice = z.object({ body: z.object({
   if (value.dueDate && new Date(value.dueDate) < new Date(value.issueDate)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dueDate'], message: 'Due date cannot be before the issue date' })
   }
-  const subtotalMinor = invoiceSubtotalMinor(value.lineItems)
-  const discountMinor = moneyToMinorUnits(Number(value.discount || 0), 'discount')
-  if (discountMinor > subtotalMinor) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed subtotal' })
+  try {
+    const subtotalMinor = invoiceSubtotalMinor(value.lineItems)
+    const discountMinor = moneyToMinorUnits(Number(value.discount || 0), 'discount')
+    if (discountMinor > subtotalMinor) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discount'], message: 'Discount cannot exceed subtotal' })
+    }
+  } catch {
+    // Handled by field-level finite validation
   }
 }) })
 

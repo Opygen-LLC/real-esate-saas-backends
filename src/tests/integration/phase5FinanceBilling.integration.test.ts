@@ -111,8 +111,6 @@ suite('phase 5 finance billing lifecycle', () => {
       discount: 500,
     })).rejects.toMatchObject({ statusCode: 409 })
     await expect(FinanceService.voidInvoice(organizationId, actor, String(sent._id), 'Attempt after payment')).rejects.toMatchObject({ statusCode: 409 })
-    await expect(FinanceService.archiveDraftInvoice(organizationId, actor, String(sent._id))).rejects.toMatchObject({ statusCode: 409 })
-
     const metadataOnly = await FinanceService.updateInvoice(organizationId, actor, String(sent._id), {
       clientEmail: 'updated-client@phase5.test',
       notes: 'Metadata correction only',
@@ -123,6 +121,11 @@ suite('phase 5 finance billing lifecycle', () => {
 
     const paymentAudit = await AuditEvent.findOne({ organizationId, entityId: String(sent._id), action: 'finance.invoice.payment_recorded' }).lean()
     expect(paymentAudit?.metadata?.reference).toBe('BANK-PHASE5-001')
+
+    const deleted = await FinanceService.archiveDraftInvoice(organizationId, actor, String(sent._id), 'Cleanup paid invoice')
+    expect(deleted.archivedAt).toBeTruthy()
+    expect((await FinanceInvoice.findById(sent._id).lean())?.archivedAt).toBeTruthy()
+    expect((await FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', sourceId: sent._id }).lean())?.deletedAt).toBeTruthy()
   })
   it('links only same-organization properties and carries property context into payments and audit history', async () => {
     const ownProperty = await Property.create({
