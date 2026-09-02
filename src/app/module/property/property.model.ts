@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_SPEC_FIELDS, PROPERTY_STATUSES, PROPERTY_TYPE_CONFIG, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, defaultAreaUnitForPropertyType, type AreaUnit, type PropertyType } from './property.constants'
 
 const propertyMediaLinkSchema = new Schema(
   {
@@ -93,6 +93,7 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       type: Number,
       min: 0,
     },
+    balconies: { type: Number, min: 0, max: 100 },
     area: {
       type: Number,
       min: 0,
@@ -144,7 +145,14 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       mouza: { type: String, default: '' }, postalCode: { type: String, default: '' }, landmark: { type: String, default: '' },
     },
     facing: { type: String, enum: PROPERTY_FACINGS },
-    roadWidthFeet: { type: Number, min: 0 }, landShare: { type: String, default: '' },
+    roadWidthFeet: { type: Number, min: 0 },
+    roadType: { type: String, enum: LAND_ROAD_TYPES },
+    roadFrontageFeet: { type: Number, min: 0, max: 100000 },
+    cornerPlot: { type: Boolean, default: false },
+    plotNumber: { type: String, default: '', trim: true, maxlength: 100 },
+    dagNumber: { type: String, default: '', trim: true, maxlength: 100 },
+    ownershipType: { type: String, enum: LAND_OWNERSHIP_TYPES },
+    landShare: { type: String, default: '' },
     utilities: {
       electricity: { type: Boolean, default: false }, gas: { type: Boolean, default: false },
       water: { type: Boolean, default: false }, sewerage: { type: Boolean, default: false }, internet: { type: Boolean, default: false },
@@ -155,8 +163,29 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       mutationStatus: { type: String, enum: MUTATION_STATUSES, default: 'not_applicable' },
       khatianNumber: { type: String, default: '' }, holdingTaxPaidThrough: { type: String, default: '' },
     },
-    developerName: { type: String, default: '' }, handoverDate: { type: Date }, serviceCharge: { type: Number, min: 0 },
+    developerName: { type: String, default: '', maxlength: 160 },
+    buildingName: { type: String, default: '', maxlength: 160 },
+    liftAvailable: { type: Boolean, default: false },
+    generatorAvailable: { type: Boolean, default: false },
+    handoverDate: { type: Date },
+    serviceCharge: { type: Number, min: 0 },
     loadingAccess: { type: String, default: '', maxlength: 300 },
+    hotelName: { type: String, default: '', trim: true, maxlength: 180 },
+    hotelType: { type: String, enum: HOTEL_TYPES },
+    starRating: { type: Number, min: 1, max: 5 },
+    hotelOperatingStatus: { type: String, enum: HOTEL_OPERATING_STATUSES },
+    yearEstablished: { type: Number, min: 1800, max: 2200 },
+    lastRenovationYear: { type: Number, min: 1800, max: 2200 },
+    totalRooms: { type: Number, min: 0, max: 100000 },
+    operationalRooms: { type: Number, min: 0, max: 100000 },
+    suites: { type: Number, min: 0, max: 100000 },
+    villas: { type: Number, min: 0, max: 100000 },
+    cottages: { type: Number, min: 0, max: 100000 },
+    totalBeds: { type: Number, min: 0, max: 1000000 },
+    landArea: { type: Number, min: 0, max: 1_000_000_000 },
+    landAreaUnit: { type: String, enum: AREA_UNITS },
+    builtUpArea: { type: Number, min: 0, max: 1_000_000_000 },
+    builtUpAreaUnit: { type: String, enum: AREA_UNITS, default: 'sqft' },
     latitude: {
       type: Number,
     },
@@ -245,6 +274,25 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
     },
   }
 )
+
+
+propertySchema.pre('validate', function sanitizeTypeSpecificDefaults() {
+  const propertyType = this.propertyType as PropertyType | undefined
+  const config = propertyType ? PROPERTY_TYPE_CONFIG[propertyType] : undefined
+  if (!config) return
+
+  const allowed = new Set<string>(config.fields)
+  for (const field of PROPERTY_SPEC_FIELDS) {
+    if (!allowed.has(field)) this.set(field, undefined)
+  }
+
+  if (allowed.has('areaUnit')) {
+    const areaUnit = this.areaUnit as AreaUnit | undefined
+    if (!areaUnit || !(config.areaUnits as readonly string[]).includes(areaUnit)) {
+      this.set('areaUnit', defaultAreaUnitForPropertyType(propertyType))
+    }
+  }
+})
 
 propertySchema.index({ organizationId: 1, slug: 1 }, { unique: true })
 propertySchema.index({ organizationId: 1, status: 1, price: 1 })

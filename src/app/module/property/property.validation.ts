@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, PROPERTY_TYPE_FIELDS, type PropertyType } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, PROPERTY_TYPE_CONFIG, isListingTypeAllowedForPropertyType, type ListingType, type PropertyType } from './property.constants'
 import { sanitizePropertyTypePayload } from './propertyTypePolicy'
 import { normalizeBangladeshDigits } from './property.normalization'
 
@@ -74,7 +74,7 @@ const fields = {
   price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000),
   isDiscount: z.boolean().optional(), discountedPrice: z.number().positive('Discounted price must be greater than zero').max(1_000_000_000_000).optional(),
   currency: z.literal('BDT').default('BDT'),
-  bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(),
+  bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(), balconies: z.number().int().nonnegative().max(100).optional(),
   area: z.number().nonnegative().max(1_000_000_000).optional(), areaUnit: z.enum(AREA_UNITS).optional(),
   floorNumber: z.number().int().nonnegative().max(300).optional(), totalFloors: z.number().int().positive().max(300).optional(),
   yearBuilt: z.number().int().min(1800).max(2200).optional(), parking: z.number().int().nonnegative().max(1000).optional(), furnished: z.boolean().optional(),
@@ -84,14 +84,41 @@ const fields = {
   zipCode: postalCode.optional(),
   bangladeshAddress: address.optional(), latitude: z.number().min(20).max(27).optional(), longitude: z.number().min(88).max(93).optional(), mapUrl: z.union([z.literal(''), googleMapsUrl]).optional(),
   facing: z.enum(PROPERTY_FACINGS).optional(),
-  roadWidthFeet: z.number().nonnegative().max(1000).optional(), landShare: z.string().max(100).optional(),
+  roadWidthFeet: z.number().nonnegative().max(1000).optional(),
+  roadType: z.enum(LAND_ROAD_TYPES).optional(),
+  roadFrontageFeet: z.number().nonnegative().max(100000).optional(),
+  cornerPlot: z.boolean().optional(),
+  plotNumber: z.string().trim().max(100).optional(),
+  dagNumber: z.string().trim().max(100).optional(),
+  ownershipType: z.enum(LAND_OWNERSHIP_TYPES).optional(),
+  landShare: z.string().max(100).optional(),
   utilities: z.object({ electricity: z.boolean().optional(), gas: z.boolean().optional(), water: z.boolean().optional(),
     sewerage: z.boolean().optional(), internet: z.boolean().optional() }).strict().optional(),
   regulatory: z.object({ approvalAuthority: z.enum(APPROVAL_AUTHORITIES).optional(),
     approvalNumber: z.string().max(100).optional(), mutationStatus: z.enum(MUTATION_STATUSES).optional(),
     khatianNumber: z.string().max(100).optional(), holdingTaxPaidThrough: z.string().max(30).optional() }).strict().optional(),
-  developerName: z.string().max(160).optional(), handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
+  developerName: z.string().max(160).optional(),
+  buildingName: z.string().trim().max(160).optional(),
+  liftAvailable: z.boolean().optional(),
+  generatorAvailable: z.boolean().optional(),
+  handoverDate: z.coerce.date().optional(), serviceCharge: z.number().nonnegative().max(100_000_000).optional(),
   loadingAccess: z.string().trim().max(300).optional(),
+  hotelName: z.string().trim().max(180).optional(),
+  hotelType: z.enum(HOTEL_TYPES).optional(),
+  starRating: z.number().int().min(1).max(5).optional(),
+  hotelOperatingStatus: z.enum(HOTEL_OPERATING_STATUSES).optional(),
+  yearEstablished: z.number().int().min(1800).max(2200).optional(),
+  lastRenovationYear: z.number().int().min(1800).max(2200).optional(),
+  totalRooms: z.number().int().nonnegative().max(100000).optional(),
+  operationalRooms: z.number().int().nonnegative().max(100000).optional(),
+  suites: z.number().int().nonnegative().max(100000).optional(),
+  villas: z.number().int().nonnegative().max(100000).optional(),
+  cottages: z.number().int().nonnegative().max(100000).optional(),
+  totalBeds: z.number().int().nonnegative().max(1000000).optional(),
+  landArea: z.number().nonnegative().max(1_000_000_000).optional(),
+  landAreaUnit: z.enum(AREA_UNITS).optional(),
+  builtUpArea: z.number().nonnegative().max(1_000_000_000).optional(),
+  builtUpAreaUnit: z.enum(AREA_UNITS).optional(),
   images: propertyImages.optional(), mediaLinks: mediaLinks.optional(),
   amenities: z.array(z.string().max(100)).max(100).optional(), features: z.array(z.string().max(100)).max(100).optional(),
   hiddenPublicFields: z.array(z.enum(PUBLIC_PROPERTY_FIELDS)).max(PUBLIC_PROPERTY_FIELDS.length).refine((items) => new Set(items).size === items.length, 'Hidden public fields must be unique').optional(),
@@ -123,9 +150,20 @@ const validateTypeSpecificFields = (value: PropertyInput, ctx: z.RefinementCtx) 
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['floorNumber'], message: 'Floor cannot be higher than total floors' })
   }
   if (value.propertyType && value.areaUnit) {
-    const config = PROPERTY_TYPE_FIELDS[value.propertyType as PropertyType]
+    const config = PROPERTY_TYPE_CONFIG[value.propertyType as PropertyType]
     if (config && !(config.areaUnits as readonly string[]).includes(value.areaUnit)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['areaUnit'], message: `${value.areaUnit} is not valid for ${value.propertyType}` })
+    }
+  }
+  if (value.propertyType && value.listingType && !isListingTypeAllowedForPropertyType(value.propertyType as PropertyType, value.listingType as ListingType)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['listingType'], message: `${value.listingType} is not valid for ${value.propertyType}` })
+  }
+  if (value.propertyType === 'HotelResort') {
+    if (typeof value.operationalRooms === 'number' && typeof value.totalRooms === 'number' && value.operationalRooms > value.totalRooms) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['operationalRooms'], message: 'Operational rooms cannot exceed total rooms' })
+    }
+    if (typeof value.lastRenovationYear === 'number' && typeof value.yearEstablished === 'number' && value.lastRenovationYear < value.yearEstablished) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lastRenovationYear'], message: 'Last renovation year cannot be earlier than year established' })
     }
   }
 }

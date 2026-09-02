@@ -1,5 +1,5 @@
 import mongoose, { Model } from 'mongoose'
-import type { ApprovalAuthority, AreaUnit, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType, PublicPropertyField } from './property.constants'
+import type { ApprovalAuthority, AreaUnit, HotelOperatingStatus, HotelType, LandOwnershipType, LandRoadType, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType, PublicPropertyField } from './property.constants'
 
 export type IPropertyTypeEnum = PropertyType
 export type IListingType = ListingType
@@ -56,8 +56,9 @@ export interface IProperty {
   currency: 'BDT'
   bedrooms?: number
   bathrooms?: number
+  balconies?: number
   area?: number
-  areaUnit: IAreaUnit
+  areaUnit?: IAreaUnit
   floorNumber?: number
   totalFloors?: number
   yearBuilt?: number
@@ -73,13 +74,38 @@ export interface IProperty {
   bangladeshAddress?: IBangladeshAddress
   facing?: PropertyFacing
   roadWidthFeet?: number
+  roadType?: LandRoadType
+  roadFrontageFeet?: number
+  cornerPlot?: boolean
+  plotNumber?: string
+  dagNumber?: string
+  ownershipType?: LandOwnershipType
   landShare?: string
   utilities?: IUtilityStatus
   regulatory?: IRegulatoryDetails
   developerName?: string
+  buildingName?: string
+  liftAvailable?: boolean
+  generatorAvailable?: boolean
   handoverDate?: Date
   serviceCharge?: number
   loadingAccess?: string
+  hotelName?: string
+  hotelType?: HotelType
+  starRating?: number
+  hotelOperatingStatus?: HotelOperatingStatus
+  yearEstablished?: number
+  lastRenovationYear?: number
+  totalRooms?: number
+  operationalRooms?: number
+  suites?: number
+  villas?: number
+  cottages?: number
+  totalBeds?: number
+  landArea?: number
+  landAreaUnit?: AreaUnit
+  builtUpArea?: number
+  builtUpAreaUnit?: AreaUnit
   latitude?: number
   longitude?: number
   mapUrl?: string

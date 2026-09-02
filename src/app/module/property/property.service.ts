@@ -14,7 +14,7 @@ import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { normalizePropertyMediaLinks } from './propertyMedia.service'
 import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
-import { PUBLIC_PROPERTY_STATUSES, type PropertyStatus, type PropertyType } from './property.constants'
+import { PUBLIC_PROPERTY_STATUSES, defaultListingTypeForPropertyType, isListingTypeAllowedForPropertyType, type ListingType, type PropertyStatus, type PropertyType } from './property.constants'
 import { propertyTypeUnsetDocument, sanitizePropertyTypePayload } from './propertyTypePolicy'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
@@ -106,6 +106,11 @@ const createProperty = async (
   options: PropertyCreateOptions = {},
 ): Promise<IProperty> => {
   if (!payload.title) throw new ApiError(httpStatus.BAD_REQUEST, 'Property title is required')
+  if (!payload.propertyType) throw new ApiError(httpStatus.BAD_REQUEST, 'Property type is required')
+  if (!payload.listingType) throw new ApiError(httpStatus.BAD_REQUEST, 'Listing type is required')
+  if (!isListingTypeAllowedForPropertyType(payload.propertyType as PropertyType, payload.listingType as ListingType)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, `${payload.listingType} is not valid for ${payload.propertyType}`)
+  }
 
   const slug = await generateSlug(organizationId, payload.title, options.session)
   const postalNormalized = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
@@ -443,6 +448,14 @@ const updateProperty = async (
   const clearDiscountPrice = payload.isDiscount === false
   payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
   const effectiveType = (payload.propertyType || existing.propertyType) as PropertyType
+  const effectiveListingType = (payload.listingType || existing.listingType) as ListingType
+  if (!isListingTypeAllowedForPropertyType(effectiveType, effectiveListingType)) {
+    if (payload.listingType !== undefined) {
+      throw new ApiError(httpStatus.BAD_REQUEST, `${payload.listingType} is not valid for ${effectiveType}`)
+    }
+    // A type-only update must never leave an impossible type/listing pair.
+    payload.listingType = defaultListingTypeForPropertyType(effectiveType)
+  }
   payload = sanitizePropertyTypePayload(payload as Record<string, any>, effectiveType) as Partial<IProperty>
   payload = normalizeDiscount(payload, existing, Boolean(actor?.canPublish))
 
