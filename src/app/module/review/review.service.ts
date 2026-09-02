@@ -19,7 +19,7 @@ const createInvitation = async (organizationId: string, createdBy: string, prope
     organizationId, propertyId, tokenHash: hashToken(token), createdBy,
     expiresAt: new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000),
   })
-  const url = `${config.client_url.replace(/\/$/, '')}/review/${encodeURIComponent(token)}`
+  const url = `${config.public_site_origin.replace(/\/$/, '')}/review/${encodeURIComponent(token)}`
   return { _id: invitation._id, property, status: invitation.status, expiresAt: invitation.expiresAt, url }
 }
 

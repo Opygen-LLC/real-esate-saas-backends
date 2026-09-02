@@ -50,14 +50,16 @@ const requiredInProduction = (name: string, minimum = 1): string => {
 }
 
 const publicApiUrl = normalizeApiOrigin(process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`)
-const defaultPublicSiteOrigin = isProduction ? 'https://realestate.opygen.com' : 'http://localhost:3000'
+const canonicalPlatformOrigin = 'https://realestate.opygen.com'
+const defaultPublicSiteOrigin = isProduction ? canonicalPlatformOrigin : 'http://localhost:3000'
 const configuredPublicSiteOrigin = (process.env.PUBLIC_SITE_ORIGIN || process.env.CLIENT_URL || defaultPublicSiteOrigin).replace(/\/$/, '')
 const publicSiteOrigin = (() => {
   try {
     const parsed = new URL(configuredPublicSiteOrigin)
     const isIpv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsed.hostname)
-    // Invitation/review links must always point to the browser app, never a raw API/server IP.
-    if (isProduction && isIpv4 && !process.env.PUBLIC_SITE_ORIGIN) return defaultPublicSiteOrigin
+    // Customer-facing links must never use a public VM/API IP, even when a legacy
+    // deployment accidentally sets CLIENT_URL or PUBLIC_SITE_ORIGIN to that IP.
+    if (isIpv4 && !isPrivateNetworkHost(parsed.hostname)) return canonicalPlatformOrigin
     return configuredPublicSiteOrigin
   } catch {
     return configuredPublicSiteOrigin
