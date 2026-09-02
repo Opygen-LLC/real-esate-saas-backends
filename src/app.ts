@@ -99,7 +99,7 @@ app.get("/", (_req: Request, res: Response) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Welcome to the Real Estate SaaS 2 Sep 5:30PM",
+    message: "Welcome to the Opygen Real Estate API 3 Sep 12:20AM",
     data: {
       status: "operational",
       version: "1.0.0",
