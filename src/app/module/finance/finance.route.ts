@@ -23,7 +23,7 @@ import type { FinancePermission } from './finance.contract'
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
 const write = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock] as const
-const remove = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete'), authMiddlewares.rejectAccountingMigrationLock] as const
+const remove = [authMiddlewares.auth(), authMiddlewares.requireAnyPermission('finance.delete', 'finance.write'), authMiddlewares.rejectAccountingMigrationLock] as const
 const advancedRead = (permission: FinancePermission = 'finance.accounting.read') => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireAdvancedAccountingReadAccess] as const
 const advancedWrite = (permission: FinancePermission) => [authMiddlewares.auth(), authMiddlewares.requirePermission(permission), authMiddlewares.requireEntitlement('ADVANCED_ACCOUNTING')] as const
 

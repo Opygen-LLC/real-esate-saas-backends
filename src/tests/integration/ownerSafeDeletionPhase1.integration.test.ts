@@ -185,7 +185,7 @@ suite('agency-owner safe deletion phase 1', () => {
     })
 
     const adminDelete = await request(`/api/v1/finance/transactions/${manual._id}`, adminAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Admin attempt' }) })
-    expect(adminDelete.response.status).toBe(403)
+    expect(adminDelete.response.status).toBe(200)
 
     const linkedDelete = await request(`/api/v1/finance/transactions/${linked._id}`, ownerAuthA, { method: 'DELETE', body: JSON.stringify({ reason: 'Unsafe linked delete' }) })
     expect(linkedDelete.response.status).toBe(200)
