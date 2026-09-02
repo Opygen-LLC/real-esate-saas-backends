@@ -16,6 +16,7 @@ import { userRefPopulate } from '../user/userProfile.service'
 import { normalizePropertyPostalCode } from './property.normalization'
 import { PUBLIC_PROPERTY_STATUSES, defaultListingTypeForPropertyType, isListingTypeAllowedForPropertyType, type ListingType, type PropertyStatus, type PropertyType } from './property.constants'
 import { propertyTypeUnsetDocument, sanitizePropertyTypePayload } from './propertyTypePolicy'
+import { normalizePropertyFinancials, propertyFinancialFieldsToUnset } from './propertyPricing.service'
 import { buildCrmCsv, buildCrmXlsx, type CrmExportColumn, type CrmExportRow } from '../crm/crmExport.service'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -26,6 +27,16 @@ import { logger } from '../../../shared/logger'
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
 type PropertyUpdateOptions = { session?: ClientSession | null; emitEvent?: boolean }
+
+const getAreaConversionSettings = async (organizationId: string, session?: ClientSession | null) => {
+  const query = Organization.findOne({ organizationId }).select('areaConversion').lean()
+  if (session) query.session(session)
+  const organization: any = await query
+  return {
+    kathaSqft: Number(organization?.areaConversion?.kathaSqft || 720),
+    bighaKatha: Number(organization?.areaConversion?.bighaKatha || 20),
+  }
+}
 
 const isPublicPropertyStatus = (status?: string): status is PropertyStatus =>
   Boolean(status && (PUBLIC_PROPERTY_STATUSES as readonly string[]).includes(status))
@@ -115,7 +126,9 @@ const createProperty = async (
   const slug = await generateSlug(organizationId, payload.title, options.session)
   const postalNormalized = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
   const typedPayload = sanitizePropertyTypePayload(postalNormalized as Record<string, any>, payload.propertyType as PropertyType) as Partial<IProperty>
-  const normalizedPayload = normalizeDiscount(typedPayload, undefined, Boolean(actor?.canPublish))
+  const conversion = await getAreaConversionSettings(organizationId, options.session)
+  const financialPayload = await normalizePropertyFinancials(organizationId, typedPayload, undefined, conversion)
+  const normalizedPayload = normalizeDiscount(financialPayload, undefined, Boolean(actor?.canPublish))
   const status: IProperty['status'] = actor?.canPublish ? (normalizedPayload.status || 'Draft') : 'Draft'
   const mediaLinks = normalizePropertyMediaLinks(normalizedPayload.mediaLinks)
   if (normalizedPayload.agentId) {
@@ -448,15 +461,18 @@ const updateProperty = async (
   const clearDiscountPrice = payload.isDiscount === false
   payload = normalizePropertyPostalCode(payload as Partial<IProperty> & { zipCode?: string })
   const effectiveType = (payload.propertyType || existing.propertyType) as PropertyType
-  const effectiveListingType = (payload.listingType || existing.listingType) as ListingType
+  let effectiveListingType = (payload.listingType || existing.listingType) as ListingType
   if (!isListingTypeAllowedForPropertyType(effectiveType, effectiveListingType)) {
     if (payload.listingType !== undefined) {
       throw new ApiError(httpStatus.BAD_REQUEST, `${payload.listingType} is not valid for ${effectiveType}`)
     }
     // A type-only update must never leave an impossible type/listing pair.
     payload.listingType = defaultListingTypeForPropertyType(effectiveType)
+    effectiveListingType = payload.listingType
   }
   payload = sanitizePropertyTypePayload(payload as Record<string, any>, effectiveType) as Partial<IProperty>
+  const conversion = await getAreaConversionSettings(organizationId, options.session)
+  payload = await normalizePropertyFinancials(organizationId, payload, existing, conversion)
   payload = normalizeDiscount(payload, existing, Boolean(actor?.canPublish))
 
   if (payload.status !== undefined && payload.status !== existing.status && !actor?.canPublish) {
@@ -475,6 +491,7 @@ const updateProperty = async (
 
   const setDocument = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined))
   const unsetDocument: Record<string, 1> = propertyTypeUnsetDocument(effectiveType)
+  for (const field of propertyFinancialFieldsToUnset(effectiveType, effectiveListingType)) unsetDocument[field] = 1
   if (clearDiscountPrice) unsetDocument.discountedPrice = 1
   // Never unset a field that this update explicitly sets.
   for (const key of Object.keys(setDocument)) delete unsetDocument[key]

@@ -6,6 +6,7 @@ import {
 } from 'bangladesh-location-data'
 import { divisions_bn, districts_bn, upazilas_bn, unions_bn } from 'bangladesh-location-data/bangla'
 import ApiError from '../../../errors/ApiError'
+import { areaSummary, convertArea, type AreaConversionUnit } from './areaConversion'
 
 type Locale = 'en' | 'bn'
 type Level = 'division' | 'district' | 'upazila' | 'area'
@@ -46,26 +47,10 @@ const getLocations = (level: Level, parentId?: string, locale: Locale = 'en', se
     .filter((item) => !query || `${item.name} ${item.alternateName}`.toLocaleLowerCase().includes(query))
 }
 
-export type AreaUnit = 'sqft' | 'decimal' | 'shotok' | 'katha' | 'bigha' | 'acre'
-const defaultSqft: Record<AreaUnit, number> = {
-  sqft: 1,
-  decimal: 435.6,
-  shotok: 435.6,
-  katha: 720,
-  bigha: 14400,
-  acre: 43560,
-}
+export type AreaUnit = AreaConversionUnit
 
-const convertArea = (value: number, from: AreaUnit, to: AreaUnit, kathaSqft = 720, bighaKatha = 20) => {
-  if (!Number.isFinite(value) || value < 0) throw new ApiError(400, 'Area must be a non-negative number')
-  if (kathaSqft < 1 || bighaKatha < 1) throw new ApiError(400, 'Regional conversion settings are invalid')
-  const factors = { ...defaultSqft, katha: kathaSqft, bigha: kathaSqft * bighaKatha }
-  return {
-    value: Number(((value * factors[from]) / factors[to]).toFixed(6)),
-    from,
-    to,
-    conversion: { kathaSqft, bighaKatha, configurable: true },
-  }
+export const LocalizationService = {
+  getLocations,
+  convertArea: (value: number, from: AreaUnit, to: AreaUnit, kathaSqft = 720, bighaKatha = 20) => convertArea(value, from, to, { kathaSqft, bighaKatha }),
+  areaSummary: (value: number, from: AreaUnit, kathaSqft = 720, bighaKatha = 20) => areaSummary(value, from, { kathaSqft, bighaKatha }),
 }
-
-export const LocalizationService = { getLocations, convertArea }

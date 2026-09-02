@@ -60,6 +60,27 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
   if (!hidden.has('price')) {
     result.price = property.price
     result.currency = property.currency || 'BDT'
+    if (property.pricing) {
+      result.pricing = {
+        mode: property.pricing.mode,
+        ...(property.pricing.unitRate !== undefined ? { unitRate: property.pricing.unitRate } : {}),
+        askingPrice: property.pricing.askingPrice,
+        negotiable: Boolean(property.pricing.negotiable),
+      }
+    }
+    if (property.rentalTerms) result.rentalTerms = property.rentalTerms
+    if (property.paymentPlan) result.paymentPlan = property.paymentPlan
+    if (property.financingCalculator?.enabled && property.financingCalculator?.showPublic) {
+      result.financingCalculator = {
+        enabled: true,
+        downPaymentPercent: property.financingCalculator.downPaymentPercent,
+        interestRatePercent: property.financingCalculator.interestRatePercent,
+        loanTenureYears: property.financingCalculator.loanTenureYears,
+        loanAmount: property.financingCalculator.loanAmount,
+        estimatedMonthlyEmi: property.financingCalculator.estimatedMonthlyEmi,
+        showPublic: true,
+      }
+    }
     if (!hidden.has('discount')) {
       if (property.isDiscount !== undefined) result.isDiscount = property.isDiscount
       if (property.discountedPrice !== undefined) result.discountedPrice = property.discountedPrice
@@ -100,6 +121,25 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
     result.area = property.area
     result.areaUnit = property.areaUnit
   }
+  if (property.propertyType === 'HotelResort') {
+    for (const key of [
+      'hotelName', 'hotelType', 'starRating', 'hotelOperatingStatus', 'yearEstablished', 'lastRenovationYear',
+      'totalRooms', 'operationalRooms', 'suites', 'villas', 'cottages', 'totalBeds', 'landArea', 'landAreaUnit',
+      'builtUpArea', 'builtUpAreaUnit',
+    ]) {
+      if (property[key] !== undefined && property[key] !== null && property[key] !== '') result[key] = property[key]
+    }
+    if (property.hotelInvestment && Array.isArray(property.hotelInvestment.publicFields)) {
+      const publicInvestment: Record<string, unknown> = {}
+      for (const key of property.hotelInvestment.publicFields) {
+        if (property.hotelInvestment[key] !== undefined && property.hotelInvestment[key] !== null) {
+          publicInvestment[key] = property.hotelInvestment[key]
+        }
+      }
+      if (Object.keys(publicInvestment).length) result.hotelInvestment = publicInvestment
+    }
+  }
+
   if (!hidden.has('utilities') && property.utilities) result.utilities = property.utilities
   if (!hidden.has('regulatory') && property.regulatory) result.regulatory = property.regulatory
   if (!hidden.has('amenities') && Array.isArray(property.amenities)) result.amenities = property.amenities

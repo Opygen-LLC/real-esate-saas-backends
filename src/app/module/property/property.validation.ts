@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, PROPERTY_TYPE_CONFIG, isListingTypeAllowedForPropertyType, type ListingType, type PropertyType } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_INVESTMENT_FIELDS, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, INSTALLMENT_FREQUENCIES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_DOCUMENT_TYPES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_PAYMENT_TYPES, PROPERTY_PRICING_MODES, PROPERTY_STATUSES, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, PROPERTY_TYPE_CONFIG, allowedDocumentTypesForProperty, isListingTypeAllowedForPropertyType, isPricingModeAllowedForProperty, type ListingType, type PropertyType } from './property.constants'
 import { sanitizePropertyTypePayload } from './propertyTypePolicy'
 import { normalizeBangladeshDigits } from './property.normalization'
 
@@ -68,10 +68,69 @@ const mediaLinks = z.array(mediaLink).max(10).superRefine((items, ctx) => {
   }
 })
 
+const propertyPricing = z.object({
+  mode: z.enum(PROPERTY_PRICING_MODES),
+  unitRate: z.number().positive().max(1_000_000_000_000).optional(),
+  askingPrice: z.number().positive().max(1_000_000_000_000),
+  negotiable: z.boolean().optional(),
+}).strict()
+
+const rentalTerms = z.object({
+  securityDeposit: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  advanceMonths: z.number().int().nonnegative().max(120).optional(),
+  minimumLeaseMonths: z.number().int().nonnegative().max(600).optional(),
+  availableFrom: z.coerce.date().optional(),
+  utilityIncluded: z.boolean().optional(),
+}).strict()
+
+const paymentPlan = z.object({
+  type: z.enum(PROPERTY_PAYMENT_TYPES),
+  bookingAmount: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  downPaymentAmount: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  downPaymentPercent: z.number().nonnegative().max(100).optional(),
+  installmentCount: z.number().int().positive().max(600).optional(),
+  installmentFrequency: z.enum(INSTALLMENT_FREQUENCIES).optional(),
+  handoverPayment: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  registrationPayment: z.number().nonnegative().max(1_000_000_000_000).optional(),
+}).strict()
+
+const financingCalculator = z.object({
+  enabled: z.boolean().optional(),
+  downPaymentPercent: z.number().nonnegative().max(100).optional(),
+  interestRatePercent: z.number().nonnegative().max(100).optional(),
+  loanTenureYears: z.number().positive().max(50).optional(),
+  showPublic: z.boolean().optional(),
+}).strict()
+
+const hotelInvestment = z.object({
+  averageOccupancyPercent: z.number().nonnegative().max(100).optional(),
+  averageDailyRate: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  annualRevenue: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  operatingExpenses: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  netOperatingIncome: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  ebitda: z.number().nonnegative().max(1_000_000_000_000).optional(),
+  publicFields: z.array(z.enum(HOTEL_INVESTMENT_FIELDS)).max(HOTEL_INVESTMENT_FIELDS.length).refine((items) => new Set(items).size === items.length, 'Public hotel investment fields must be unique').optional(),
+}).strict()
+
+const propertyDocument = z.object({
+  assetId: z.string().regex(/^[0-9a-fA-F]{24}$/),
+  category: z.enum(PROPERTY_DOCUMENT_TYPES),
+  originalName: z.string().trim().min(1).max(255),
+  mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+  size: z.number().int().nonnegative().max(20 * 1024 * 1024),
+  visibility: z.literal('private').optional(),
+}).strict()
+
 const fields = {
   title: z.string().trim().min(3).max(180), description: z.string().max(20000).optional(),
   propertyType: z.enum(PROPERTY_TYPES), listingType: z.enum(LISTING_TYPES), status: z.enum(PROPERTY_STATUSES).optional(),
-  price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000),
+  price: z.number().positive('Listing price must be greater than zero').max(1_000_000_000_000).optional(),
+  pricing: propertyPricing.optional(),
+  rentalTerms: rentalTerms.optional(),
+  paymentPlan: paymentPlan.optional(),
+  financingCalculator: financingCalculator.optional(),
+  hotelInvestment: hotelInvestment.optional(),
+  documents: z.array(propertyDocument).max(20).optional(),
   isDiscount: z.boolean().optional(), discountedPrice: z.number().positive('Discounted price must be greater than zero').max(1_000_000_000_000).optional(),
   currency: z.literal('BDT').default('BDT'),
   bedrooms: z.number().int().nonnegative().max(100).optional(), bathrooms: z.number().nonnegative().max(100).optional(), balconies: z.number().int().nonnegative().max(100).optional(),
@@ -137,7 +196,8 @@ const canonicalizePostalCode = (value: PropertyInput): PropertyInput => {
 }
 
 const validateDiscount = (value: PropertyInput, ctx: z.RefinementCtx) => {
-  if (value.discountedPrice !== undefined && value.price !== undefined && value.discountedPrice >= value.price) {
+  const askingPrice = value.pricing?.askingPrice ?? value.price
+  if (value.discountedPrice !== undefined && askingPrice !== undefined && value.discountedPrice >= askingPrice) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discountedPrice'], message: 'Discounted price must be lower than the listing price' })
   }
   if (value.isDiscount === true && value.discountedPrice === undefined) {
@@ -158,6 +218,16 @@ const validateTypeSpecificFields = (value: PropertyInput, ctx: z.RefinementCtx) 
   if (value.propertyType && value.listingType && !isListingTypeAllowedForPropertyType(value.propertyType as PropertyType, value.listingType as ListingType)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['listingType'], message: `${value.listingType} is not valid for ${value.propertyType}` })
   }
+  if (value.propertyType && value.listingType && value.pricing?.mode && !isPricingModeAllowedForProperty(value.propertyType as PropertyType, value.listingType as ListingType, value.pricing.mode)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pricing', 'mode'], message: `${value.pricing.mode} pricing is not valid for ${value.propertyType} ${value.listingType}` })
+  }
+  if (value.propertyType && Array.isArray(value.documents)) {
+    const allowed = new Set(allowedDocumentTypesForProperty(value.propertyType as PropertyType))
+    if (value.documents.some((document: any) => !allowed.has(document.category))) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['documents'], message: `One or more document categories are not valid for ${value.propertyType}` })
+  }
+  if (value.listingType && value.listingType !== 'ForSale' && value.paymentPlan) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['paymentPlan'], message: 'Payment plans are available only for sale listings' })
+  if (value.listingType && value.listingType !== 'ForSale' && value.financingCalculator?.enabled) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['financingCalculator'], message: 'Financing calculator is available only for sale listings' })
+  if (value.propertyType && value.propertyType !== 'HotelResort' && value.hotelInvestment) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['hotelInvestment'], message: 'Hotel investment metrics are available only for Hotel & Resort listings' })
   if (value.propertyType === 'HotelResort') {
     if (typeof value.operationalRooms === 'number' && typeof value.totalRooms === 'number' && value.operationalRooms > value.totalRooms) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['operationalRooms'], message: 'Operational rooms cannot exceed total rooms' })
@@ -171,8 +241,9 @@ const validateTypeSpecificFields = (value: PropertyInput, ctx: z.RefinementCtx) 
 const createBody = z.object({ ...fields, propertyDraftSessionId: z.string().uuid().optional() }).strict().superRefine((value, ctx) => {
   validateDiscount(value, ctx)
   validateTypeSpecificFields(value, ctx)
-  if (value.images?.some((item) => item.assetId) && !value.propertyDraftSessionId) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['propertyDraftSessionId'], message: 'Property draft upload session is required for uploaded images' })
+  if (value.price === undefined && value.pricing === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['price'], message: 'Listing price or pricing details are required' })
+  if ((value.images?.some((item) => item.assetId) || value.documents?.length) && !value.propertyDraftSessionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['propertyDraftSessionId'], message: 'Property draft upload session is required for uploaded images or documents' })
   }
 }).transform((value) => {
   const canonical = canonicalizePostalCode(value)
@@ -190,6 +261,10 @@ const updateBody = z.object({ ...optionalFields, propertyDraftSessionId: z.strin
   .transform(canonicalizePostalCode)
 
 export const PropertyValidation = {
+  presignDocumentZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid(), category: z.enum(PROPERTY_DOCUMENT_TYPES), originalName: z.string().trim().min(1).max(255), mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']), size: z.number().int().positive().max(20 * 1024 * 1024) }).strict() }),
+  completeDocumentZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }), body: z.object({ uploadSessionId: z.string().uuid() }).strict() }),
+  documentAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
+  deleteDraftDocumentZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
   presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),

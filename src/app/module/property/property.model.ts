@@ -1,6 +1,6 @@
-import { Schema, model } from 'mongoose'
+import { Schema, model, type HydratedDocument } from 'mongoose'
 import { IProperty, PropertyModel } from './property.interface'
-import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_SPEC_FIELDS, PROPERTY_STATUSES, PROPERTY_TYPE_CONFIG, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, defaultAreaUnitForPropertyType, type AreaUnit, type PropertyType } from './property.constants'
+import { AREA_UNITS, APPROVAL_AUTHORITIES, HOTEL_INVESTMENT_FIELDS, HOTEL_OPERATING_STATUSES, HOTEL_TYPES, INSTALLMENT_FREQUENCIES, LAND_OWNERSHIP_TYPES, LAND_ROAD_TYPES, LISTING_TYPES, MUTATION_STATUSES, PROPERTY_COUNTRIES, PROPERTY_CURRENCIES, PROPERTY_DOCUMENT_TYPES, PROPERTY_FACINGS, PROPERTY_MEDIA_PROVIDERS, PROPERTY_MEDIA_TYPES, PROPERTY_PAYMENT_TYPES, PROPERTY_PRICING_MODES, PROPERTY_SPEC_FIELDS, PROPERTY_STATUSES, PROPERTY_TYPE_CONFIG, PROPERTY_TYPES, PUBLIC_PROPERTY_FIELDS, defaultAreaUnitForPropertyType, type AreaUnit, type PropertyType } from './property.constants'
 
 const propertyMediaLinkSchema = new Schema(
   {
@@ -26,6 +26,68 @@ const propertyImageSchema = new Schema(
   },
   { _id: true }
 )
+
+
+const propertyPricingSchema = new Schema({
+  mode: { type: String, enum: PROPERTY_PRICING_MODES, required: true },
+  unitRate: { type: Number, min: 0.01 },
+  askingPrice: { type: Number, required: true, min: 0.01 },
+  negotiable: { type: Boolean, default: false },
+}, { _id: false })
+
+const rentalTermsSchema = new Schema({
+  securityDeposit: { type: Number, min: 0 },
+  advanceMonths: { type: Number, min: 0, max: 120 },
+  minimumLeaseMonths: { type: Number, min: 0, max: 600 },
+  availableFrom: { type: Date },
+  utilityIncluded: { type: Boolean, default: false },
+}, { _id: false })
+
+const propertyPaymentPlanSchema = new Schema({
+  type: { type: String, enum: PROPERTY_PAYMENT_TYPES, required: true },
+  bookingAmount: { type: Number, min: 0 },
+  downPaymentAmount: { type: Number, min: 0 },
+  downPaymentPercent: { type: Number, min: 0, max: 100 },
+  installmentCount: { type: Number, min: 1, max: 600 },
+  installmentFrequency: { type: String, enum: INSTALLMENT_FREQUENCIES },
+  handoverPayment: { type: Number, min: 0 },
+  registrationPayment: { type: Number, min: 0 },
+  remainingAmount: { type: Number, min: 0 },
+  installmentAmount: { type: Number, min: 0 },
+}, { _id: false })
+
+const financingCalculatorSchema = new Schema({
+  enabled: { type: Boolean, default: false },
+  downPaymentPercent: { type: Number, min: 0, max: 100 },
+  interestRatePercent: { type: Number, min: 0, max: 100 },
+  loanTenureYears: { type: Number, min: 1, max: 50 },
+  showPublic: { type: Boolean, default: false },
+  loanAmount: { type: Number, min: 0 },
+  estimatedMonthlyEmi: { type: Number, min: 0 },
+}, { _id: false })
+
+const hotelInvestmentSchema = new Schema({
+  averageOccupancyPercent: { type: Number, min: 0, max: 100 },
+  averageDailyRate: { type: Number, min: 0 },
+  annualRevenue: { type: Number, min: 0 },
+  operatingExpenses: { type: Number, min: 0 },
+  netOperatingIncome: { type: Number, min: 0 },
+  ebitda: { type: Number, min: 0 },
+  publicFields: { type: [String], enum: HOTEL_INVESTMENT_FIELDS, default: [] },
+  pricePerRoom: { type: Number, min: 0 },
+  grossYieldPercent: { type: Number, min: 0 },
+  netYieldPercent: { type: Number, min: 0 },
+  capRatePercent: { type: Number, min: 0 },
+}, { _id: false })
+
+const propertyDocumentSchema = new Schema({
+  assetId: { type: Schema.Types.ObjectId, ref: 'PropertyDocumentAsset', required: true },
+  category: { type: String, enum: PROPERTY_DOCUMENT_TYPES, required: true },
+  originalName: { type: String, required: true, trim: true, maxlength: 255 },
+  mimeType: { type: String, required: true },
+  size: { type: Number, required: true, min: 0 },
+  visibility: { type: String, enum: ['private'], default: 'private' },
+}, { _id: false })
 
 const propertySchema = new Schema<IProperty, PropertyModel>(
   {
@@ -72,6 +134,12 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
       required: true,
       min: 0.01,
     },
+    pricing: { type: propertyPricingSchema },
+    rentalTerms: { type: rentalTermsSchema },
+    paymentPlan: { type: propertyPaymentPlanSchema },
+    financingCalculator: { type: financingCalculatorSchema },
+    hotelInvestment: { type: hotelInvestmentSchema },
+    documents: { type: [propertyDocumentSchema], default: [], validate: { validator: (items: unknown[]) => items.length <= 20, message: 'A property can have up to 20 private documents' } },
     isDiscount: {
       type: Boolean,
       default: false,
@@ -276,10 +344,10 @@ const propertySchema = new Schema<IProperty, PropertyModel>(
 )
 
 
-propertySchema.pre('validate', function sanitizeTypeSpecificDefaults() {
+propertySchema.pre('validate', function sanitizeTypeSpecificDefaults(this: HydratedDocument<IProperty>) {
   const propertyType = this.propertyType as PropertyType | undefined
-  const config = propertyType ? PROPERTY_TYPE_CONFIG[propertyType] : undefined
-  if (!config) return
+  if (!propertyType) return
+  const config = PROPERTY_TYPE_CONFIG[propertyType]
 
   const allowed = new Set<string>(config.fields)
   for (const field of PROPERTY_SPEC_FIELDS) {

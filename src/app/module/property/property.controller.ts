@@ -14,6 +14,7 @@ import config from '../../../config'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { logger } from '../../../shared/logger'
 import { Organization } from '../organization/organization.model'
+import { PropertyDocumentService } from './propertyDocument.service'
 
 
 const propertyActor = (req: Request) => ({
@@ -103,9 +104,17 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
     // Treat the persistent draft-session id as an idempotency key: if its
     // assets are already claimed by one property, return that property instead
     // of creating a duplicate or failing the user's retry with a 409.
-    const existingDraft = await WebsiteBuilderService.getPropertyDraftSession(organizationId, propertyDraftSessionId)
-    if (existingDraft.claimedPropertyId) {
-      result = await PropertyService.getPropertyById(organizationId, existingDraft.claimedPropertyId)
+    const [existingDraft, documentDraft] = await Promise.all([
+      WebsiteBuilderService.getPropertyDraftSession(organizationId, propertyDraftSessionId),
+      PropertyDocumentService.getDraftSession(organizationId, propertyDraftSessionId),
+    ])
+    const claimedPropertyIds = [existingDraft.claimedPropertyId, documentDraft.claimedPropertyId].filter(Boolean) as string[]
+    if (new Set(claimedPropertyIds).size > 1) {
+      throw new ApiError(httpStatus.CONFLICT, 'Property draft media and documents are already claimed by different properties')
+    }
+    const claimedPropertyId = claimedPropertyIds[0]
+    if (claimedPropertyId) {
+      result = await PropertyService.getPropertyById(organizationId, claimedPropertyId)
       sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -125,8 +134,10 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
       }
       await EntitlementService.assertPropertyCapacity(organizationId, { additionalCommitments: 1, session: session || undefined })
       await WebsiteBuilderService.validatePropertyDraftAssets(organizationId, propertyDraftSessionId, propertyPayload.images || [], session)
+      await PropertyDocumentService.validateDraftDocuments(organizationId, propertyDraftSessionId, propertyPayload.documents || [], propertyPayload.propertyType, session)
       result = await PropertyService.createProperty(organizationId, propertyPayload, actor, { session, emitEvent: false })
       await WebsiteBuilderService.claimPropertyDraftAssets(organizationId, propertyDraftSessionId, result._id.toString(), propertyPayload.images || [], session)
+      await PropertyDocumentService.claimDraftDocuments(organizationId, propertyDraftSessionId, result._id.toString(), propertyPayload.documents || [], session)
     }
     try {
       if (session) await session.withTransaction(execute)
@@ -135,8 +146,13 @@ const createProperty = catchAsync(async (req: Request, res: Response) => {
       if (session) await session.endSession()
     }
     emitCreatedAfterCommit(organizationId, result, req.requestId)
-    void WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId).catch((error) => {
-      logger.warn('[property-media] post-create draft cleanup deferred to worker', { organizationId, propertyId: result?._id?.toString(), error })
+    void Promise.allSettled([
+      WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId),
+      PropertyDocumentService.cleanupDraftSession(organizationId, propertyDraftSessionId),
+    ]).then((outcomes) => {
+      if (outcomes.some((outcome) => outcome.status === 'rejected')) {
+        logger.warn('[property-assets] post-create draft cleanup deferred to worker', { organizationId, propertyId: result?._id?.toString() })
+      }
     })
   } else {
     result = await EntitlementService.withPropertyQuotaGuard(organizationId, async (session) => {
@@ -177,6 +193,26 @@ const completePropertyImage = catchAsync(async (req: Request, res: Response) => 
   const data = await WebsiteBuilderService.completeAsset(requireTenant(req), req.body, req.user?._id)
   sendResponse(res, { statusCode: httpStatus.ACCEPTED, success: true, message: 'Property image uploaded and queued for verification', data })
 })
+const presignPropertyDocument = catchAsync(async (req: Request, res: Response) => {
+  const data = await PropertyDocumentService.presign(requireTenant(req), req.body, String(req.user?._id || req.user?.id || ''))
+  sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Private property document upload prepared', data })
+})
+
+const completePropertyDocument = catchAsync(async (req: Request, res: Response) => {
+  const data = await PropertyDocumentService.complete(requireTenant(req), req.params.assetId, req.body.uploadSessionId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Private property document uploaded securely', data })
+})
+
+const deletePropertyDraftDocument = catchAsync(async (req: Request, res: Response) => {
+  const data = await PropertyDocumentService.deleteDraftDocument(requireTenant(req), req.params.sessionId, req.params.assetId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: data.deleted ? 'Draft property document deleted' : 'Draft property document already removed', data })
+})
+
+const downloadPropertyDocument = catchAsync(async (req: Request, res: Response) => {
+  const data = await PropertyDocumentService.download(requireTenant(req), req.params.assetId)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Private property document download prepared', data })
+})
+
 const getPropertyImageAsset = catchAsync(async (req: Request, res: Response) => {
   const data = await WebsiteBuilderService.getAssetById(requireTenant(req), req.params.assetId)
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property image status fetched', data })
@@ -204,8 +240,12 @@ const touchPropertyDraftSession = catchAsync(async (req: Request, res: Response)
 })
 
 const cleanupPropertyDraftSession = catchAsync(async (req: Request, res: Response) => {
-  const data = await WebsiteBuilderService.cleanupPropertyDraftSession(requireTenant(req), req.params.sessionId)
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft media cleaned up', data })
+  const organizationId = requireTenant(req)
+  const [media, documents] = await Promise.all([
+    WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, req.params.sessionId),
+    PropertyDocumentService.cleanupDraftSession(organizationId, req.params.sessionId),
+  ])
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Property draft assets cleaned up', data: { media, documents } })
 })
 
 const getAllProperties = catchAsync(async (req: Request, res: Response) => {
@@ -324,17 +364,25 @@ const updateProperty = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
   const { propertyDraftSessionId, ...propertyPayload } = req.body
   const actor = propertyActor(req)
+  const previous: any = await PropertyService.getPropertyById(organizationId, id)
+  const effectivePropertyType = propertyPayload.propertyType || previous.propertyType
+
+  // A type change cannot keep private documents that are invalid for the new type.
+  if (propertyPayload.propertyType && propertyPayload.propertyType !== previous.propertyType && propertyPayload.documents === undefined) {
+    propertyPayload.documents = []
+  }
 
   let result: any
   if (propertyDraftSessionId) {
-    const previous: any = await PropertyService.getPropertyById(organizationId, id)
     const canTransact = await mongoSupportsTransactions()
-    if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property media claiming requires MongoDB transactions in production')
+    if (config.isProduction && !canTransact) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Atomic property asset claiming requires MongoDB transactions in production')
     const session = canTransact ? await mongoose.startSession() : null
     const execute = async () => {
       await WebsiteBuilderService.validatePropertyDraftAssets(organizationId, propertyDraftSessionId, propertyPayload.images || [], session, id)
+      await PropertyDocumentService.validateDraftDocuments(organizationId, propertyDraftSessionId, propertyPayload.documents ?? previous.documents ?? [], effectivePropertyType, session, id)
       result = await PropertyService.updateProperty(organizationId, id, propertyPayload, actor, { session, emitEvent: false })
       await WebsiteBuilderService.claimPropertyDraftAssets(organizationId, propertyDraftSessionId, id, propertyPayload.images || [], session)
+      await PropertyDocumentService.claimDraftDocuments(organizationId, propertyDraftSessionId, id, propertyPayload.documents ?? previous.documents ?? [], session)
     }
     try {
       if (session) await session.withTransaction(execute)
@@ -349,12 +397,32 @@ const updateProperty = catchAsync(async (req: Request, res: Response) => {
         String(previous?.status || result.status),
         Object.keys(propertyPayload),
       )
+      void PropertyDocumentService.removeUnreferencedClaimedAssets(
+        organizationId,
+        id,
+        (result.documents || []).map((document: any) => String(document.assetId)),
+      ).catch((error) => logger.warn('[property-documents] post-update cleanup failed', { organizationId, propertyId: id, error }))
     }
-    void WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId).catch((error) => {
-      logger.warn('[property-media] post-update draft cleanup deferred to worker', { organizationId, propertyId: id, error })
+    void Promise.allSettled([
+      WebsiteBuilderService.cleanupPropertyDraftSession(organizationId, propertyDraftSessionId),
+      PropertyDocumentService.cleanupDraftSession(organizationId, propertyDraftSessionId),
+    ]).then((outcomes) => {
+      if (outcomes.some((outcome) => outcome.status === 'rejected')) {
+        logger.warn('[property-assets] post-update draft cleanup deferred to worker', { organizationId, propertyId: id })
+      }
     })
   } else {
+    if (propertyPayload.documents !== undefined) {
+      await PropertyDocumentService.validateClaimedDocuments(organizationId, id, propertyPayload.documents, effectivePropertyType)
+    }
     result = await PropertyService.updateProperty(organizationId, id, propertyPayload, actor)
+    if (result) {
+      void PropertyDocumentService.removeUnreferencedClaimedAssets(
+        organizationId,
+        id,
+        (result.documents || []).map((document: any) => String(document.assetId)),
+      ).catch((error) => logger.warn('[property-documents] post-update cleanup failed', { organizationId, propertyId: id, error }))
+    }
   }
 
   sendResponse(res, {
@@ -419,6 +487,8 @@ const deleteProperty = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await PropertyService.deleteProperty(organizationId, id)
+  void PropertyDocumentService.removeUnreferencedClaimedAssets(organizationId, id, [])
+    .catch((error) => logger.warn('[property-documents] post-delete cleanup failed', { organizationId, propertyId: id, error }))
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -434,6 +504,10 @@ export const PropertyController = {
   presignPropertyImage,
   uploadPropertyImage,
   completePropertyImage,
+  presignPropertyDocument,
+  completePropertyDocument,
+  deletePropertyDraftDocument,
+  downloadPropertyDocument,
   getPropertyImageAsset,
   deletePropertyDraftAsset,
   getPropertyDraftSession,

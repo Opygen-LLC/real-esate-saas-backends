@@ -1,5 +1,5 @@
 import mongoose, { Model } from 'mongoose'
-import type { ApprovalAuthority, AreaUnit, HotelOperatingStatus, HotelType, LandOwnershipType, LandRoadType, ListingType, MutationStatus, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyStatus, PropertyType, PublicPropertyField } from './property.constants'
+import type { ApprovalAuthority, AreaUnit, HotelInvestmentField, HotelOperatingStatus, HotelType, InstallmentFrequency, LandOwnershipType, LandRoadType, ListingType, MutationStatus, PropertyDocumentType, PropertyFacing, PropertyMediaProvider, PropertyMediaType, PropertyPaymentType, PropertyPricingMode, PropertyStatus, PropertyType, PublicPropertyField } from './property.constants'
 
 export type IPropertyTypeEnum = PropertyType
 export type IListingType = ListingType
@@ -19,6 +19,67 @@ export interface IRegulatoryDetails {
   approvalAuthority?: ApprovalAuthority
   approvalNumber?: string; mutationStatus?: MutationStatus
   khatianNumber?: string; holdingTaxPaidThrough?: string
+}
+
+export interface IPropertyPricing {
+  mode: PropertyPricingMode
+  unitRate?: number
+  askingPrice: number
+  negotiable?: boolean
+}
+
+export interface IRentalTerms {
+  securityDeposit?: number
+  advanceMonths?: number
+  minimumLeaseMonths?: number
+  availableFrom?: Date
+  utilityIncluded?: boolean
+}
+
+export interface IPropertyPaymentPlan {
+  type: PropertyPaymentType
+  bookingAmount?: number
+  downPaymentAmount?: number
+  downPaymentPercent?: number
+  installmentCount?: number
+  installmentFrequency?: InstallmentFrequency
+  handoverPayment?: number
+  registrationPayment?: number
+  remainingAmount?: number
+  installmentAmount?: number
+}
+
+export interface IFinancingCalculator {
+  enabled?: boolean
+  downPaymentPercent?: number
+  interestRatePercent?: number
+  loanTenureYears?: number
+  showPublic?: boolean
+  loanAmount?: number
+  estimatedMonthlyEmi?: number
+}
+
+export interface IHotelInvestment {
+  averageOccupancyPercent?: number
+  averageDailyRate?: number
+  annualRevenue?: number
+  operatingExpenses?: number
+  netOperatingIncome?: number
+  ebitda?: number
+  publicFields?: HotelInvestmentField[]
+  pricePerRoom?: number
+  grossYieldPercent?: number
+  netYieldPercent?: number
+  capRatePercent?: number
+}
+
+export interface IPropertyDocument {
+  assetId: mongoose.Types.ObjectId | string
+  category: PropertyDocumentType
+  originalName: string
+  mimeType: string
+  size: number
+  visibility?: 'private'
 }
 
 export interface IPropertyImage {
@@ -51,6 +112,12 @@ export interface IProperty {
   listingType: IListingType
   status: IPropertyStatus
   price: number
+  pricing?: IPropertyPricing
+  rentalTerms?: IRentalTerms
+  paymentPlan?: IPropertyPaymentPlan
+  financingCalculator?: IFinancingCalculator
+  hotelInvestment?: IHotelInvestment
+  documents?: IPropertyDocument[]
   isDiscount?: boolean
   discountedPrice?: number
   currency: 'BDT'

@@ -10,6 +10,14 @@ const locations = catchAsync(async (req: Request, res: Response) => {
     data: LocalizationService.getLocations(level as any, parentId, locale as any, search) })
 })
 
+
+const getAreaSummary = catchAsync(async (req: Request, res: Response) => {
+  const q = req.query as Record<string, string>
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Area conversion summary generated',
+    data: LocalizationService.areaSummary(Number(q.value), q.from as any,
+      q.kathaSqft ? Number(q.kathaSqft) : undefined, q.bighaKatha ? Number(q.bighaKatha) : undefined) })
+})
+
 const convertArea = catchAsync(async (req: Request, res: Response) => {
   const q = req.query as Record<string, string>
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Area converted',
@@ -17,4 +25,4 @@ const convertArea = catchAsync(async (req: Request, res: Response) => {
       q.kathaSqft ? Number(q.kathaSqft) : undefined, q.bighaKatha ? Number(q.bighaKatha) : undefined) })
 })
 
-export const LocalizationController = { locations, convertArea }
+export const LocalizationController = { locations, convertArea, getAreaSummary }

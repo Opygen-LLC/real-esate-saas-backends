@@ -23,6 +23,12 @@ router.post('/import/confirm', authMiddlewares.requirePermission('properties.wri
 router.get('/export/csv', authMiddlewares.requirePermission('properties.read'), PropertyController.exportCsv)
 router.get('/export/xlsx', authMiddlewares.requirePermission('properties.read'), PropertyController.exportXlsx)
 
+// Private property documents use signed object-storage URLs and are never exposed through public property DTOs.
+router.post('/documents/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignDocumentZodSchema), PropertyController.presignPropertyDocument)
+router.post('/documents/:assetId/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeDocumentZodSchema), PropertyController.completePropertyDocument)
+router.get('/documents/:assetId/download', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyValidation.documentAssetZodSchema), PropertyController.downloadPropertyDocument)
+router.delete('/documents/session/:sessionId/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.deleteDraftDocumentZodSchema), PropertyController.deletePropertyDraftDocument)
+
 // Property media uses property permissions while reusing the hardened storage pipeline.
 router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
 router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, propertyImageUpload, PropertyController.uploadPropertyImage)

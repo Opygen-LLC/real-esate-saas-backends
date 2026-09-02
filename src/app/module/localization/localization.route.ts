@@ -5,5 +5,6 @@ import { LocalizationValidation } from './localization.validation'
 
 const router = express.Router()
 router.get('/locations', validateRequest(LocalizationValidation.locations), LocalizationController.locations)
+router.get('/area-summary', validateRequest(LocalizationValidation.summary), LocalizationController.getAreaSummary)
 router.get('/area-convert', validateRequest(LocalizationValidation.convert), LocalizationController.convertArea)
 export const LocalizationRoute = router

@@ -12,7 +12,7 @@ export const PROPERTY_TYPES = [
 ] as const
 
 export const LISTING_TYPES = ['ForSale', 'ForRent', 'ForLease'] as const
-export const PROPERTY_PRICING_MODES = ['TOTAL', 'PER_SQFT', 'PER_KATHA', 'PER_DECIMAL', 'PER_BIGHA', 'MONTHLY', 'YEARLY'] as const
+export const PROPERTY_PRICING_MODES = ['TOTAL', 'PER_SQFT', 'PER_KATHA', 'PER_DECIMAL', 'PER_BIGHA', 'PER_ACRE', 'MONTHLY', 'YEARLY'] as const
 export const PROPERTY_STATUSES = ['Draft', 'Available', 'Reserved', 'UnderOffer', 'Sold', 'Rented', 'OffMarket', 'ComingSoon'] as const
 export const PUBLIC_PROPERTY_STATUSES = ['Available', 'UnderOffer'] as const
 export const VIEWING_REQUESTABLE_PROPERTY_STATUSES = ['Available', 'UnderOffer'] as const
@@ -29,6 +29,24 @@ export const LAND_ROAD_TYPES = ['Paved', 'Asphalt', 'Concrete', 'Brick', 'Unpave
 export const LAND_OWNERSHIP_TYPES = ['SingleOwner', 'MultipleOwners', 'Freehold', 'Leasehold'] as const
 export const HOTEL_TYPES = ['Hotel', 'Resort', 'BoutiqueHotel', 'BusinessHotel', 'BeachResort', 'EcoResort', 'LuxuryResort', 'GuestHouse'] as const
 export const HOTEL_OPERATING_STATUSES = ['Operational', 'UnderRenovation', 'TemporarilyClosed', 'UnderConstruction', 'NonOperational'] as const
+export const PROPERTY_PAYMENT_TYPES = ['FULL_PAYMENT', 'INSTALLMENT', 'BANK_FINANCING'] as const
+export const INSTALLMENT_FREQUENCIES = ['MONTHLY', 'QUARTERLY', 'BIANNUAL', 'ANNUAL', 'CUSTOM'] as const
+export const HOTEL_FACILITIES = [
+  'Restaurant', 'Swimming Pool', 'Conference Hall', 'Banquet Hall', 'Spa', 'Gym', 'Rooftop', 'Bar', 'Garden', 'Kids Zone',
+  'Private Beach', 'Parking', 'Generator', 'Lift', 'Wi-Fi', 'CCTV', '24/7 Security', 'Room Service', 'Laundry', 'Business Center',
+] as const
+export const HOTEL_INVESTMENT_FIELDS = [
+  'averageOccupancyPercent', 'averageDailyRate', 'annualRevenue', 'operatingExpenses', 'netOperatingIncome', 'ebitda',
+  'pricePerRoom', 'grossYieldPercent', 'netYieldPercent', 'capRatePercent',
+] as const
+export const PROPERTY_DOCUMENT_TYPES = [
+  'Deed', 'Mutation', 'Khatian', 'TaxReceipt', 'Survey', 'MouzaMap', 'Approval', 'PowerOfAttorney',
+  'TradeLicense', 'FireCertificate', 'EnvironmentalCertificate', 'HotelLicense', 'FinancialStatements',
+] as const
+export const PROPERTY_DOCUMENT_TYPES_BY_PROPERTY = {
+  LandPlot: ['Deed', 'Mutation', 'Khatian', 'TaxReceipt', 'Survey', 'MouzaMap', 'Approval', 'PowerOfAttorney'],
+  HotelResort: ['TradeLicense', 'FireCertificate', 'EnvironmentalCertificate', 'HotelLicense', 'FinancialStatements'],
+} as const
 
 export const PUBLIC_PROPERTY_FIELDS = [
   'price',
@@ -73,6 +91,10 @@ export type LandRoadType = (typeof LAND_ROAD_TYPES)[number]
 export type LandOwnershipType = (typeof LAND_OWNERSHIP_TYPES)[number]
 export type HotelType = (typeof HOTEL_TYPES)[number]
 export type HotelOperatingStatus = (typeof HOTEL_OPERATING_STATUSES)[number]
+export type PropertyPaymentType = (typeof PROPERTY_PAYMENT_TYPES)[number]
+export type InstallmentFrequency = (typeof INSTALLMENT_FREQUENCIES)[number]
+export type HotelInvestmentField = (typeof HOTEL_INVESTMENT_FIELDS)[number]
+export type PropertyDocumentType = (typeof PROPERTY_DOCUMENT_TYPES)[number]
 
 /**
  * Canonical property-spec contract shared conceptually with the frontend.
@@ -149,7 +171,7 @@ export const PROPERTY_TYPE_CONFIG: Readonly<Record<PropertyType, PropertyTypeCon
     requiredFields: [],
     areaUnits: ['sqft'],
     listingTypes: ['ForSale', 'ForRent'],
-    pricingModes: ['TOTAL', 'PER_SQFT'],
+    pricingModes: ['TOTAL', 'PER_SQFT', 'MONTHLY'],
     wizardSteps: ['Basic Information', 'Location', 'Photos & Media', 'Apartment Details', 'Pricing & Payment', 'Review'],
   },
   ReadyFlat: {
@@ -157,7 +179,7 @@ export const PROPERTY_TYPE_CONFIG: Readonly<Record<PropertyType, PropertyTypeCon
     requiredFields: [],
     areaUnits: ['sqft'],
     listingTypes: ['ForSale', 'ForRent'],
-    pricingModes: ['TOTAL', 'PER_SQFT'],
+    pricingModes: ['TOTAL', 'PER_SQFT', 'MONTHLY'],
     wizardSteps: ['Basic Information', 'Location', 'Photos & Media', 'Ready Flat Details', 'Pricing & Payment', 'Review'],
   },
   UnderConstruction: {
@@ -173,7 +195,7 @@ export const PROPERTY_TYPE_CONFIG: Readonly<Record<PropertyType, PropertyTypeCon
     requiredFields: [],
     areaUnits: ['decimal', 'shotok', 'katha', 'bigha', 'acre', 'sqft'],
     listingTypes: ['ForSale', 'ForLease'],
-    pricingModes: ['TOTAL', 'PER_KATHA', 'PER_SQFT', 'PER_DECIMAL', 'PER_BIGHA'],
+    pricingModes: ['TOTAL', 'PER_KATHA', 'PER_SQFT', 'PER_DECIMAL', 'PER_BIGHA', 'PER_ACRE'],
     wizardSteps: ['Land Information', 'Location', 'Photos & Documents', 'Land & Ownership', 'Pricing', 'Review'],
   },
   Commercial: {
@@ -243,3 +265,26 @@ export const defaultListingTypeForPropertyType = (propertyType: PropertyType): L
 
 export const isListingTypeAllowedForPropertyType = (propertyType: PropertyType, listingType: ListingType): boolean =>
   PROPERTY_TYPE_CONFIG[propertyType].listingTypes.includes(listingType)
+
+const SALE_PRICING_MODES = new Set<PropertyPricingMode>(['TOTAL', 'PER_SQFT', 'PER_KATHA', 'PER_DECIMAL', 'PER_BIGHA', 'PER_ACRE'])
+const RENT_PRICING_MODES = new Set<PropertyPricingMode>(['MONTHLY', 'PER_SQFT'])
+const LEASE_PRICING_MODES = new Set<PropertyPricingMode>(['YEARLY', 'MONTHLY', 'TOTAL', 'PER_SQFT', 'PER_KATHA', 'PER_DECIMAL', 'PER_BIGHA', 'PER_ACRE'])
+
+export const allowedPricingModesForProperty = (propertyType: PropertyType, listingType: ListingType): readonly PropertyPricingMode[] => {
+  const allowedByListing = listingType === 'ForSale' ? SALE_PRICING_MODES : listingType === 'ForRent' ? RENT_PRICING_MODES : LEASE_PRICING_MODES
+  return PROPERTY_TYPE_CONFIG[propertyType].pricingModes.filter((mode) => allowedByListing.has(mode))
+}
+
+export const defaultPricingModeForProperty = (propertyType: PropertyType, listingType: ListingType): PropertyPricingMode => {
+  const allowed = allowedPricingModesForProperty(propertyType, listingType)
+  if (listingType === 'ForRent' && allowed.includes('MONTHLY')) return 'MONTHLY'
+  if (listingType === 'ForLease' && allowed.includes('YEARLY')) return 'YEARLY'
+  return allowed[0] || 'TOTAL'
+}
+
+export const isPricingModeAllowedForProperty = (propertyType: PropertyType, listingType: ListingType, mode: PropertyPricingMode): boolean =>
+  allowedPricingModesForProperty(propertyType, listingType).includes(mode)
+
+export const allowedDocumentTypesForProperty = (propertyType: PropertyType): readonly PropertyDocumentType[] =>
+  propertyType === 'LandPlot' ? PROPERTY_DOCUMENT_TYPES_BY_PROPERTY.LandPlot : propertyType === 'HotelResort' ? PROPERTY_DOCUMENT_TYPES_BY_PROPERTY.HotelResort : []
+
