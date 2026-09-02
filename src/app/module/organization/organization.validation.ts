@@ -74,6 +74,9 @@ const websiteContent = z.object({
     agentsEyebrow: shortText(120), agentsTitle: shortText(160), agentsSubtitle: shortText(400), consultationEyebrow: shortText(120),
     consultationTitle: shortText(180), consultationSubtitle: shortText(500), consultationButtonText: shortText(80),
     showFeaturedProperties: z.boolean(), showWhyChooseUs: z.boolean(), showAgents: z.boolean(), showConsultation: z.boolean(),
+    heroCardBadge: shortText(120).optional(), heroCardTagline: shortText(120).optional(), heroCardTitle: shortText(200).optional(),
+    heroCardSpecs: shortText(120).optional(), heroCardButtonText: shortText(80).optional(), heroCardLink: z.string().trim().max(500).optional(),
+    showHeroCard: z.boolean().optional(),
   }).strict().optional(),
   about: z.object({
     eyebrow: shortText(120), title: shortText(200), intro: shortText(900), image: optionalUrl, storyTitle: shortText(180), storyBody: shortText(1500),
