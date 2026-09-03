@@ -115,6 +115,34 @@ export type WebsiteComponentAnimations = {
   }
 }
 
+
+export const WEBSITE_DESIGN_ACTIONS = [
+  'SET_COMPONENT',
+  'RESET_COMPONENT',
+  'RESET_ALL_COMPONENTS',
+  'SET_ANIMATION',
+  'RESET_ANIMATION',
+  'RESET_ALL_ANIMATIONS',
+  'SET_ANIMATIONS_ENABLED',
+  'APPLY_TEMPLATE',
+  'APPLY_DESIGN',
+] as const
+export type WebsiteDesignActionName = (typeof WEBSITE_DESIGN_ACTIONS)[number]
+
+type WebsiteDesignActionRevision = { expectedPublicationRevision?: number }
+
+export type WebsiteDesignAction = WebsiteDesignActionRevision & (
+  | { action: 'SET_COMPONENT'; slot: WebsiteComponentSlot; componentId: string }
+  | { action: 'RESET_COMPONENT'; slot: WebsiteComponentSlot }
+  | { action: 'RESET_ALL_COMPONENTS' }
+  | { action: 'SET_ANIMATION'; slot: WebsiteComponentSlot; animation: ComponentAnimationSettings }
+  | { action: 'RESET_ANIMATION'; slot: WebsiteComponentSlot }
+  | { action: 'RESET_ALL_ANIMATIONS' }
+  | { action: 'SET_ANIMATIONS_ENABLED'; enabled: boolean }
+  | { action: 'APPLY_TEMPLATE'; templateId: WebsiteTemplateId; resetComponents?: boolean; keepAnimations?: boolean }
+  | { action: 'APPLY_DESIGN'; design: WebsiteDesignContract; templateId?: WebsiteTemplateId }
+)
+
 export const WEBSITE_DESIGN_SCHEMA_VERSION = 1 as const
 export type WebsiteDesignContract = {
   schemaVersion: typeof WEBSITE_DESIGN_SCHEMA_VERSION

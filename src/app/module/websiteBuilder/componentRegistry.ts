@@ -93,8 +93,14 @@ const assertOverrides = async (organizationId: string, overrides?: WebsiteCompon
 export const ComponentRegistry = {
   list: (): WebsiteComponentDefinition[] => registry.map((definition) => ({ ...definition })),
   get,
+  find: (id: string): WebsiteComponentDefinition | undefined => registryById.get(id),
   assertComponentForSlot,
   assertOverrides,
   isPremium: (id: string): boolean => registryById.get(id)?.tier === 'PREMIUM',
   supportsSlot: (id: string, slot: WebsiteComponentSlot): boolean => registryById.get(id)?.slot === slot,
+  isEffectiveForAccess: (id: string, premiumTemplates: boolean): boolean => {
+    const definition = registryById.get(id)
+    if (!definition || definition.status !== 'ACTIVE') return false
+    return definition.entitlement !== 'premiumTemplates' || premiumTemplates
+  },
 }

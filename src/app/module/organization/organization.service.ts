@@ -15,10 +15,10 @@ import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
-import { ComponentRegistry } from '../websiteBuilder/componentRegistry'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { WebsitePublicationService } from '../websiteBuilder/websitePublication.service'
 import { WebsiteArchitectureService } from '../websiteBuilder/websiteArchitecture.service'
+import { WebsiteDesignService } from '../websiteBuilder/websiteDesign.service'
 import type { WebsiteRenderMode } from '../websiteBuilder/websiteArchitecture.contract'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
@@ -95,19 +95,6 @@ const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?:
     if (value !== undefined) target[`websiteSettings.${key}`] = key === 'heroImage' && value ? assertSafeUrl(String(value)) : value
   }
   if (settings.sectionStyles !== undefined) target['websiteSettings.sectionStyles'] = WebsiteArchitectureService.serializeSectionStylesForStorage(settings.sectionStyles)
-  const websiteDesign = (settings as any).websiteDesign
-  if (websiteDesign !== undefined) {
-    target['websiteSettings.websiteDesign.schemaVersion'] = 1
-    if (websiteDesign.componentOverrides !== undefined) {
-      target['websiteSettings.websiteDesign.componentOverrides'] = WebsiteArchitectureService.canonicalizeComponentOverrides(websiteDesign.componentOverrides)
-    }
-    if (websiteDesign.componentAnimations !== undefined) {
-      target['websiteSettings.websiteDesign.componentAnimations'] = WebsiteArchitectureService.canonicalizeComponentAnimations(websiteDesign.componentAnimations)
-    }
-    if (websiteDesign.animationsEnabled !== undefined) {
-      target['websiteSettings.websiteDesign.animationsEnabled'] = websiteDesign.animationsEnabled !== false
-    }
-  }
   if (settings.footer?.showSocialLinks !== undefined) target['websiteSettings.footer.showSocialLinks'] = settings.footer.showSocialLinks
   const visibility = settings.footer?.socialVisibility
   if (visibility) {
@@ -298,6 +285,11 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
   const { entitlementRestrictions, updatedAt, domain_Verify, ...publicOrg } = org
   const effectiveTemplateId = entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1')
   const websiteSettings = canonicalWebsiteSettings(org.websiteSettings)
+  if (websiteSettings.renderMode !== 'builder') {
+    websiteSettings.websiteDesign = WebsiteDesignService.resolveEffectiveDesignForAccess(websiteSettings.websiteDesign, {
+      premiumTemplates: !Boolean(entitlementRestrictions?.premiumTemplates),
+    })
+  }
   const result: PublicOrganizationWebsite = {
     ...publicOrg,
     socialLinks: canonicalSocialLinks(org.socialLinks),
@@ -333,20 +325,17 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
 }
 
 const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
-  if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
-  if (payload.websiteSettings?.websiteDesign?.componentOverrides) {
-    await ComponentRegistry.assertOverrides(organizationId, payload.websiteSettings.websiteDesign.componentOverrides)
+  if (payload.templateId || payload.websiteSettings?.websiteDesign !== undefined) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Use the controlled /organization/website/design API for template, component, and animation changes')
   }
   const currentWebsite = await Organization.findOne({ organizationId }).select('templateId websiteSettings.renderMode').lean()
   if (!currentWebsite) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const requestedRenderMode = payload.websiteSettings?.renderMode
   const renderMode: WebsiteRenderMode = requestedRenderMode === 'builder' || requestedRenderMode === 'template'
     ? requestedRenderMode
-    : payload.templateId
-      ? 'template'
-      : currentWebsite.websiteSettings?.renderMode === 'builder'
-        ? 'builder'
-        : 'template'
+    : currentWebsite.websiteSettings?.renderMode === 'builder'
+      ? 'builder'
+      : 'template'
 
   const updateData: Record<string, unknown> = definedEntries({
     primaryColor: payload.primaryColor,
@@ -355,14 +344,12 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
     metaDescription: payload.metaDescription ? sanitizeRichText(payload.metaDescription) : payload.metaDescription,
     logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
     defaultLanguage: payload.defaultLanguage,
-    templateId: payload.templateId,
     font: payload.font,
   })
 
   const unsetData: Record<string, ''> = {}
   appendSocialLinkUpdates(updateData, payload.socialLinks, unsetData)
   appendWebsiteSettingUpdates(updateData, payload.websiteSettings)
-  if (payload.templateId) updateData['websiteSettings.renderMode'] = 'template'
 
   const publication = await WebsitePublicationService.commitPublicationState({
     organizationId,
@@ -379,14 +366,6 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
     eventType: renderMode === 'builder' ? 'website.settings_published' : 'website.template_published',
   })
   await DomainEventService.emit({ organizationId, aggregateType: 'organization', aggregateId: result._id.toString(), eventType: 'organization.website_updated', payload: { fields: Object.keys(updateData), publicationRevision: publication.publicationRevision } })
-  if (payload.templateId && String(currentWebsite?.templateId || 'template-1') !== String(payload.templateId)) {
-    emitProductionEvent('website_template_changed', {
-      organizationId,
-      fromTemplateId: String(currentWebsite?.templateId || 'template-1'),
-      toTemplateId: String(payload.templateId),
-      cacheInvalidated: true,
-    })
-  }
   return result
 }
 

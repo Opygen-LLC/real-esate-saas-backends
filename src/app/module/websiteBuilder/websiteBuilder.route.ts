@@ -5,6 +5,10 @@ import { WebsiteBuilderController } from './websiteBuilder.controller'
 import { WebsiteBuilderValidation } from './websiteBuilder.validation'
 
 const router = express.Router()
+
+router.get('/design-registry', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.getDesignRegistry)
+router.get('/design', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.getDesignState)
+router.patch('/design', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteBuilderValidation.designActionSchema), WebsiteBuilderController.applyDesignAction)
 router.get('/templates', WebsiteBuilderController.getTemplates)
 router.get('/components', WebsiteBuilderController.getComponents)
 router.get('/animations', WebsiteBuilderController.getAnimations)

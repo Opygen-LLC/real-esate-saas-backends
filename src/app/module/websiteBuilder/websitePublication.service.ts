@@ -12,6 +12,7 @@ type CommitPublicationInput = {
   set?: Record<string, unknown>
   unset?: Record<string, ''>
   session?: ClientSession | null
+  expectedPublicationRevision?: number
 }
 
 type AfterPublicationInput = {
@@ -23,12 +24,18 @@ type AfterPublicationInput = {
   builderVersion?: number
   publicationRevision?: number
   eventType?: string
+  payload?: Record<string, unknown>
 }
 
-const commitPublicationState = async ({ organizationId, renderMode, set = {}, unset = {}, session }: CommitPublicationInput) => {
+const commitPublicationState = async ({ organizationId, renderMode, set = {}, unset = {}, session, expectedPublicationRevision }: CommitPublicationInput) => {
   const lastPublishedAt = new Date()
+  const revisionFilter = expectedPublicationRevision === undefined
+    ? {}
+    : expectedPublicationRevision === 0
+      ? { $or: [{ 'websiteSettings.publicationRevision': 0 }, { 'websiteSettings.publicationRevision': { $exists: false } }] }
+      : { 'websiteSettings.publicationRevision': expectedPublicationRevision }
   const organization = await Organization.findOneAndUpdate(
-    { organizationId },
+    { organizationId, ...revisionFilter },
     {
       $set: {
         ...set,
@@ -42,7 +49,13 @@ const commitPublicationState = async ({ organizationId, renderMode, set = {}, un
     { new: true, ...(session ? { session } : {}) },
   )
 
-  if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  if (!organization) {
+    if (expectedPublicationRevision !== undefined) {
+      const exists = await Organization.exists({ organizationId })
+      if (exists) throw new ApiError(httpStatus.CONFLICT, 'Website design changed in another session. Refresh and try again.')
+    }
+    throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
+  }
   return {
     organization,
     publicationRevision: Number(organization.websiteSettings?.publicationRevision || 0),
@@ -59,6 +72,7 @@ const afterPublication = async ({
   builderVersion,
   publicationRevision,
   eventType = 'website.published',
+  payload = {},
 }: AfterPublicationInput) => {
   const identifiers = await CacheInvalidationService.invalidateTenant(organizationId)
   await DomainEventService.emit({
@@ -74,6 +88,7 @@ const afterPublication = async ({
       publicationRevision,
       cacheInvalidated: true,
       tenantIdentifiers: identifiers,
+      ...payload,
     },
   })
   return identifiers

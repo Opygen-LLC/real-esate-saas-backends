@@ -25,6 +25,7 @@ import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.vali
 import { TemplateRegistry } from './templateRegistry'
 import { ComponentRegistry } from './componentRegistry'
 import { AnimationRegistry } from './animationRegistry'
+import { WebsiteDesignService } from './websiteDesign.service'
 import { WebsiteCache } from './websiteCache'
 import { WebsitePublicationService } from './websitePublication.service'
 import { ObjectStorageService } from './objectStorage.service'
@@ -998,4 +999,4 @@ const getPropertyShareCard = async (identifier: string, propertyId: string) => {
 }
 
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, getPropertyDraftSession, touchPropertyDraftSession, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list, listComponents: ComponentRegistry.list, listAnimations: AnimationRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, getPropertyDraftSession, touchPropertyDraftSession, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list, listComponents: ComponentRegistry.list, listAnimations: AnimationRegistry.list, getDesignRegistry: WebsiteDesignService.getDesignRegistry, getDesignState: WebsiteDesignService.getDesignState, applyDesignAction: WebsiteDesignService.applyDesignAction }

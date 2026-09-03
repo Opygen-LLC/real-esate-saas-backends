@@ -2,21 +2,23 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const service = fs.readFileSync(path.join(process.cwd(), 'src/app/module/organization/organization.service.ts'), 'utf8')
+const designService = fs.readFileSync(path.join(process.cwd(), 'src/app/module/websiteBuilder/websiteDesign.service.ts'), 'utf8')
+const organizationService = fs.readFileSync(path.join(process.cwd(), 'src/app/module/organization/organization.service.ts'), 'utf8')
 
 describe('Phase 5 Website Studio persistence semantics', () => {
-  it('updates component overrides, animations and global animation state independently', () => {
-    expect(service).toContain("if (websiteDesign.componentOverrides !== undefined)")
-    expect(service).toContain("target['websiteSettings.websiteDesign.componentOverrides']")
-    expect(service).toContain("if (websiteDesign.componentAnimations !== undefined)")
-    expect(service).toContain("target['websiteSettings.websiteDesign.componentAnimations']")
-    expect(service).toContain("if (websiteDesign.animationsEnabled !== undefined)")
-    expect(service).toContain("target['websiteSettings.websiteDesign.animationsEnabled']")
+  it('keeps component and animation reset behavior independent inside the controlled design service', () => {
+    expect(designService).toContain("case 'RESET_ALL_COMPONENTS':")
+    expect(designService).toContain('design.componentOverrides = {}')
+    expect(designService).toContain("case 'RESET_ALL_ANIMATIONS':")
+    expect(designService).toContain('design.componentAnimations = {}')
+    expect(designService).toContain("case 'SET_ANIMATIONS_ENABLED':")
+    expect(designService).toContain('design.animationsEnabled = action.enabled')
   })
 
-  it('applies template and design changes through one publication commit', () => {
-    expect(service).toContain("if (payload.templateId) updateData['websiteSettings.renderMode'] = 'template'")
-    expect(service).toContain('WebsitePublicationService.commitPublicationState({')
-    expect(service).toContain('appendWebsiteSettingUpdates(updateData, payload.websiteSettings)')
+  it('routes template plus design mutations through one publication commit and blocks legacy bypasses', () => {
+    expect(designService).toContain("case 'APPLY_DESIGN':")
+    expect(designService).toContain("'websiteSettings.websiteDesign': next.design")
+    expect(designService).toContain('WebsitePublicationService.commitPublicationState({')
+    expect(organizationService).toContain('Use controlled /organization/website/design API')
   })
 })

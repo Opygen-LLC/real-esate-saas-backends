@@ -6,6 +6,16 @@ import { requireTenant } from '../../middlewares/auth'
 import { WebsiteBuilderService } from './websiteBuilder.service'
 
 const ok = (res: Response, message: string, data: any, statusCode: number = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
+
+const getDesignRegistry = catchAsync(async (req, res) => ok(res, 'Website design registry fetched', await WebsiteBuilderService.getDesignRegistry(requireTenant(req))))
+const getDesignState = catchAsync(async (req, res) => ok(res, 'Website design state fetched', await WebsiteBuilderService.getDesignState(requireTenant(req))))
+const applyDesignAction = catchAsync(async (req, res) => ok(res, 'Website design updated and published', await WebsiteBuilderService.applyDesignAction(requireTenant(req), req.body, {
+  actorId: String(req.user?._id || req.user?.userId || ''),
+  actorRole: req.user?.userRole || 'agency_owner',
+  requestId: req.requestId,
+  ip: req.ip,
+})))
+
 const getTemplates = catchAsync(async (_req, res) => ok(res, 'Template registry fetched', WebsiteBuilderService.listTemplates()))
 const getComponents = catchAsync(async (_req, res) => ok(res, 'Component registry fetched', WebsiteBuilderService.listComponents()))
 const getAnimations = catchAsync(async (_req, res) => ok(res, 'Animation registry fetched', WebsiteBuilderService.listAnimations()))
@@ -28,4 +38,4 @@ const sitemap = catchAsync(async (req, res) => { const data = await WebsiteBuild
 const robots = catchAsync(async (req, res) => res.type('text/plain').send(await WebsiteBuilderService.getRobots(req.params.identifier)))
 const propertyShareCard = catchAsync(async (req, res) => ok(res, 'Property share metadata fetched', await WebsiteBuilderService.getPropertyShareCard(req.params.identifier, req.params.propertyId)))
 const escapeXml = (value: string) => value.replace(/[<>&'\"]/g, (char) => ({ '<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;' }[char] || char))
-export const WebsiteBuilderController = { getTemplates, getComponents, getAnimations, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, importAssetUrl, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }
+export const WebsiteBuilderController = { getDesignRegistry, getDesignState, applyDesignAction, getTemplates, getComponents, getAnimations, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, importAssetUrl, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }
