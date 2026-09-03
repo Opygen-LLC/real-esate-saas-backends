@@ -8,6 +8,7 @@ import { WebsiteBuilderService } from './websiteBuilder.service'
 const ok = (res: Response, message: string, data: any, statusCode: number = httpStatus.OK) => sendResponse(res, { statusCode, success: true, message, data })
 const getTemplates = catchAsync(async (_req, res) => ok(res, 'Template registry fetched', WebsiteBuilderService.listTemplates()))
 const getComponents = catchAsync(async (_req, res) => ok(res, 'Component registry fetched', WebsiteBuilderService.listComponents()))
+const getAnimations = catchAsync(async (_req, res) => ok(res, 'Animation registry fetched', WebsiteBuilderService.listAnimations()))
 const getAllPages = catchAsync(async (req, res) => ok(res, 'Tenant website pages fetched successfully', await WebsiteBuilderService.getAllPages(requireTenant(req))))
 const getPageById = catchAsync(async (req, res) => ok(res, 'Website page fetched successfully', await WebsiteBuilderService.getPageById(requireTenant(req), req.params.id)))
 const saveDraft = catchAsync(async (req, res) => ok(res, 'Draft saved successfully', await WebsiteBuilderService.saveDraft(requireTenant(req), req.params.id, req.body.document, req.user?.userId)))
@@ -27,4 +28,4 @@ const sitemap = catchAsync(async (req, res) => { const data = await WebsiteBuild
 const robots = catchAsync(async (req, res) => res.type('text/plain').send(await WebsiteBuilderService.getRobots(req.params.identifier)))
 const propertyShareCard = catchAsync(async (req, res) => ok(res, 'Property share metadata fetched', await WebsiteBuilderService.getPropertyShareCard(req.params.identifier, req.params.propertyId)))
 const escapeXml = (value: string) => value.replace(/[<>&'\"]/g, (char) => ({ '<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;' }[char] || char))
-export const WebsiteBuilderController = { getTemplates, getComponents, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, importAssetUrl, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }
+export const WebsiteBuilderController = { getTemplates, getComponents, getAnimations, getAllPages, getPageById, saveDraft, publishPage, schedulePublish, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, importAssetUrl, completeAsset, listAssets, deleteAsset, getPublicPage, sitemap, robots, propertyShareCard }

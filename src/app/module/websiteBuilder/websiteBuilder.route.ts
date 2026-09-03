@@ -7,6 +7,7 @@ import { WebsiteBuilderValidation } from './websiteBuilder.validation'
 const router = express.Router()
 router.get('/templates', WebsiteBuilderController.getTemplates)
 router.get('/components', WebsiteBuilderController.getComponents)
+router.get('/animations', WebsiteBuilderController.getAnimations)
 router.get('/public-site/:identifier/sitemap.xml', WebsiteBuilderController.sitemap)
 router.get('/public-site/:identifier/robots.txt', WebsiteBuilderController.robots)
 router.get('/public-site/:identifier/share-card/:propertyId', WebsiteBuilderController.propertyShareCard)

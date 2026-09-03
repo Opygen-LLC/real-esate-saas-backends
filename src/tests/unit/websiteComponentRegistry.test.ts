@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ComponentRegistry } from '../../app/module/websiteBuilder/componentRegistry'
 import { EntitlementService } from '../../app/module/entitlement/entitlement.service'
+import { WEBSITE_ANIMATION_PRESETS } from '../../app/module/websiteBuilder/websiteArchitecture.contract'
 
 vi.mock('../../app/module/entitlement/entitlement.service', () => ({
   EntitlementService: { assertFeature: vi.fn(async () => undefined) },
@@ -17,6 +18,13 @@ describe('Website Component Registry', () => {
     expect(definitions.find((item) => item.id === 'reviews.three-cards.v1')?.slot).toBe('home.reviews')
     expect(definitions.find((item) => item.id === 'agents.portrait-cards.v1')?.slot).toBe('home.agents')
     expect(definitions.find((item) => item.id === 'consultation.split-lead-form.v1')?.slot).toBe('home.consultation')
+  })
+
+
+  it('allows the curated Phase 4 animation set on every independent component design', () => {
+    for (const definition of ComponentRegistry.list()) {
+      expect(definition.supportedAnimations).toEqual([...WEBSITE_ANIMATION_PRESETS])
+    }
   })
 
   it('rejects unknown components', () => {
