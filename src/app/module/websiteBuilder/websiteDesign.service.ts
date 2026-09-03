@@ -368,7 +368,7 @@ const applyDesignAction = async (organizationId: string, action: WebsiteDesignAc
   if (!audits.length && beforeTemplateId === next.templateId) return getDesignState(organizationId)
 
   const expectedPublicationRevision = currentPublicationRevision
-  let publication: Awaited<ReturnType<typeof WebsitePublicationService.commitPublicationState>> | null = null
+  let publication: any = null
 
   const persist = async (session?: ClientSession) => {
     publication = await WebsitePublicationService.commitPublicationState({
