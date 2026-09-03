@@ -77,13 +77,12 @@ const websiteComponentOverrides = z.object({
     footer: websiteComponentId.optional(),
   }).strict().optional(),
   home: z.object({
-    hero: websiteComponentId.optional(),
-    featuredProperties: websiteComponentId.optional(),
-    whyChooseUs: websiteComponentId.optional(),
-    reviews: websiteComponentId.optional(),
-    agents: websiteComponentId.optional(),
-    consultation: websiteComponentId.optional(),
+    hero: websiteComponentId.optional(), featuredProperties: websiteComponentId.optional(), whyChooseUs: websiteComponentId.optional(), reviews: websiteComponentId.optional(), agents: websiteComponentId.optional(), consultation: websiteComponentId.optional(),
   }).strict().optional(),
+  about: z.object({ hero: websiteComponentId.optional(), story: websiteComponentId.optional(), values: websiteComponentId.optional(), stats: websiteComponentId.optional(), cta: websiteComponentId.optional() }).strict().optional(),
+  properties: z.object({ hero: websiteComponentId.optional(), listing: websiteComponentId.optional(), filters: websiteComponentId.optional(), card: websiteComponentId.optional(), pagination: websiteComponentId.optional() }).strict().optional(),
+  agents: z.object({ hero: websiteComponentId.optional(), listing: websiteComponentId.optional(), card: websiteComponentId.optional(), cta: websiteComponentId.optional() }).strict().optional(),
+  contact: z.object({ hero: websiteComponentId.optional(), office: websiteComponentId.optional(), form: websiteComponentId.optional(), map: websiteComponentId.optional() }).strict().optional(),
 }).strict()
 const websiteAnimationSettings = z.object({
   enabled: z.boolean(),
@@ -99,13 +98,12 @@ const websiteComponentAnimations = z.object({
     footer: websiteAnimationSettings.optional(),
   }).strict().optional(),
   home: z.object({
-    hero: websiteAnimationSettings.optional(),
-    featuredProperties: websiteAnimationSettings.optional(),
-    whyChooseUs: websiteAnimationSettings.optional(),
-    reviews: websiteAnimationSettings.optional(),
-    agents: websiteAnimationSettings.optional(),
-    consultation: websiteAnimationSettings.optional(),
+    hero: websiteAnimationSettings.optional(), featuredProperties: websiteAnimationSettings.optional(), whyChooseUs: websiteAnimationSettings.optional(), reviews: websiteAnimationSettings.optional(), agents: websiteAnimationSettings.optional(), consultation: websiteAnimationSettings.optional(),
   }).strict().optional(),
+  about: z.object({ hero: websiteAnimationSettings.optional(), story: websiteAnimationSettings.optional(), values: websiteAnimationSettings.optional(), stats: websiteAnimationSettings.optional(), cta: websiteAnimationSettings.optional() }).strict().optional(),
+  properties: z.object({ hero: websiteAnimationSettings.optional(), listing: websiteAnimationSettings.optional(), filters: websiteAnimationSettings.optional(), card: websiteAnimationSettings.optional(), pagination: websiteAnimationSettings.optional() }).strict().optional(),
+  agents: z.object({ hero: websiteAnimationSettings.optional(), listing: websiteAnimationSettings.optional(), card: websiteAnimationSettings.optional(), cta: websiteAnimationSettings.optional() }).strict().optional(),
+  contact: z.object({ hero: websiteAnimationSettings.optional(), office: websiteAnimationSettings.optional(), form: websiteAnimationSettings.optional(), map: websiteAnimationSettings.optional() }).strict().optional(),
 }).strict()
 const websiteDesign = z.object({
   schemaVersion: z.literal(WEBSITE_DESIGN_SCHEMA_VERSION).optional(),

@@ -58,6 +58,11 @@ export const WEBSITE_STAGGER_CAPABLE_SLOTS = [
   'home.featuredProperties',
   'home.agents',
   'home.reviews',
+  'about.values',
+  'properties.listing',
+  'properties.card',
+  'agents.listing',
+  'agents.card',
 ] as const satisfies readonly WebsiteComponentSlot[]
 
 export const AnimationRegistry = {

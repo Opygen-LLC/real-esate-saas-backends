@@ -31,7 +31,14 @@ export type WebsiteDesignActor = {
 type WebsiteDesignAccess = { premiumTemplates: boolean }
 type WebsiteDesignAudit = Pick<AuditInput, 'action' | 'metadata'>
 
-const SLOT_METADATA: Record<WebsiteComponentSlot, { label: string; group: 'GLOBAL' | 'HOME'; category: WebsiteComponentCategory }> = {
+const SLOT_METADATA: Record<
+  WebsiteComponentSlot,
+  {
+    label: string
+    group: 'GLOBAL' | 'HOME' | 'ABOUT' | 'PROPERTIES' | 'AGENTS' | 'CONTACT'
+    category: WebsiteComponentCategory
+  }
+> = {
   'shared.header': { label: 'Header', group: 'GLOBAL', category: 'header' },
   'shared.footer': { label: 'Footer', group: 'GLOBAL', category: 'footer' },
   'home.hero': { label: 'Hero', group: 'HOME', category: 'hero' },
@@ -40,7 +47,26 @@ const SLOT_METADATA: Record<WebsiteComponentSlot, { label: string; group: 'GLOBA
   'home.reviews': { label: 'Reviews', group: 'HOME', category: 'reviews' },
   'home.agents': { label: 'Agents', group: 'HOME', category: 'agents' },
   'home.consultation': { label: 'Consultation / CTA', group: 'HOME', category: 'consultation' },
+  'about.hero': { label: 'About Hero', group: 'ABOUT', category: 'about-hero' },
+  'about.story': { label: 'Story', group: 'ABOUT', category: 'about-story' },
+  'about.values': { label: 'Values', group: 'ABOUT', category: 'about-values' },
+  'about.stats': { label: 'Statistics', group: 'ABOUT', category: 'about-stats' },
+  'about.cta': { label: 'About CTA', group: 'ABOUT', category: 'about-cta' },
+  'properties.hero': { label: 'Properties Hero', group: 'PROPERTIES', category: 'properties-hero' },
+  'properties.listing': { label: 'Property Catalog', group: 'PROPERTIES', category: 'properties-listing' },
+  'properties.filters': { label: 'Search / Filters', group: 'PROPERTIES', category: 'properties-filters' },
+  'properties.card': { label: 'Property Card', group: 'PROPERTIES', category: 'properties-card' },
+  'properties.pagination': { label: 'Pagination / Load More', group: 'PROPERTIES', category: 'properties-pagination' },
+  'agents.hero': { label: 'Agents Hero', group: 'AGENTS', category: 'agents-hero' },
+  'agents.listing': { label: 'Agent Directory', group: 'AGENTS', category: 'agents-listing' },
+  'agents.card': { label: 'Agent Card', group: 'AGENTS', category: 'agents-card' },
+  'agents.cta': { label: 'Agent CTA', group: 'AGENTS', category: 'agents-cta' },
+  'contact.hero': { label: 'Contact Hero', group: 'CONTACT', category: 'contact-hero' },
+  'contact.office': { label: 'Office & Location', group: 'CONTACT', category: 'contact-office' },
+  'contact.form': { label: 'Contact Form', group: 'CONTACT', category: 'contact-form' },
+  'contact.map': { label: 'Map / Location', group: 'CONTACT', category: 'contact-map' },
 }
+
 
 const readSlot = <T>(container: unknown, slot: WebsiteComponentSlot): T | undefined => {
   if (!container || typeof container !== 'object' || Array.isArray(container)) return undefined

@@ -20,22 +20,24 @@ export const WEBSITE_SECTION_KEYS = [
   'about.cta',
   'properties.hero',
   'properties.listing',
+  'properties.filters',
+  'properties.card',
+  'properties.pagination',
   'agents.hero',
   'agents.listing',
+  'agents.card',
+  'agents.cta',
   'contact.hero',
   'contact.office',
   'contact.form',
+  'contact.map',
 ] as const
 
 export type WebsiteSectionKey = (typeof WEBSITE_SECTION_KEYS)[number]
 export type WebsiteSectionStyle = { backgroundColor?: string; textColor?: string }
 export type WebsiteSectionStyles = Partial<Record<WebsiteSectionKey, WebsiteSectionStyle>>
 
-/**
- * Slots supported by the composable-template foundation in Phase 1.
- * Keep this allow-list narrower than WEBSITE_SECTION_KEYS until a slot has a
- * stable component contract. This prevents clients from inventing slot names.
- */
+/** Stable composable-template slots supported by the public runtime. */
 export const WEBSITE_COMPONENT_SLOTS = [
   'shared.header',
   'shared.footer',
@@ -45,6 +47,24 @@ export const WEBSITE_COMPONENT_SLOTS = [
   'home.reviews',
   'home.agents',
   'home.consultation',
+  'about.hero',
+  'about.story',
+  'about.values',
+  'about.stats',
+  'about.cta',
+  'properties.hero',
+  'properties.listing',
+  'properties.filters',
+  'properties.card',
+  'properties.pagination',
+  'agents.hero',
+  'agents.listing',
+  'agents.card',
+  'agents.cta',
+  'contact.hero',
+  'contact.office',
+  'contact.form',
+  'contact.map',
 ] as const
 
 export type WebsiteComponentSlot = (typeof WEBSITE_COMPONENT_SLOTS)[number]
@@ -86,33 +106,21 @@ export type ComponentAnimationSettings = {
 }
 
 export type WebsiteComponentOverrides = {
-  shared?: {
-    header?: string
-    footer?: string
-  }
-  home?: {
-    hero?: string
-    featuredProperties?: string
-    whyChooseUs?: string
-    reviews?: string
-    agents?: string
-    consultation?: string
-  }
+  shared?: { header?: string; footer?: string }
+  home?: { hero?: string; featuredProperties?: string; whyChooseUs?: string; reviews?: string; agents?: string; consultation?: string }
+  about?: { hero?: string; story?: string; values?: string; stats?: string; cta?: string }
+  properties?: { hero?: string; listing?: string; filters?: string; card?: string; pagination?: string }
+  agents?: { hero?: string; listing?: string; card?: string; cta?: string }
+  contact?: { hero?: string; office?: string; form?: string; map?: string }
 }
 
 export type WebsiteComponentAnimations = {
-  shared?: {
-    header?: ComponentAnimationSettings
-    footer?: ComponentAnimationSettings
-  }
-  home?: {
-    hero?: ComponentAnimationSettings
-    featuredProperties?: ComponentAnimationSettings
-    whyChooseUs?: ComponentAnimationSettings
-    reviews?: ComponentAnimationSettings
-    agents?: ComponentAnimationSettings
-    consultation?: ComponentAnimationSettings
-  }
+  shared?: { header?: ComponentAnimationSettings; footer?: ComponentAnimationSettings }
+  home?: { hero?: ComponentAnimationSettings; featuredProperties?: ComponentAnimationSettings; whyChooseUs?: ComponentAnimationSettings; reviews?: ComponentAnimationSettings; agents?: ComponentAnimationSettings; consultation?: ComponentAnimationSettings }
+  about?: { hero?: ComponentAnimationSettings; story?: ComponentAnimationSettings; values?: ComponentAnimationSettings; stats?: ComponentAnimationSettings; cta?: ComponentAnimationSettings }
+  properties?: { hero?: ComponentAnimationSettings; listing?: ComponentAnimationSettings; filters?: ComponentAnimationSettings; card?: ComponentAnimationSettings; pagination?: ComponentAnimationSettings }
+  agents?: { hero?: ComponentAnimationSettings; listing?: ComponentAnimationSettings; card?: ComponentAnimationSettings; cta?: ComponentAnimationSettings }
+  contact?: { hero?: ComponentAnimationSettings; office?: ComponentAnimationSettings; form?: ComponentAnimationSettings; map?: ComponentAnimationSettings }
 }
 
 

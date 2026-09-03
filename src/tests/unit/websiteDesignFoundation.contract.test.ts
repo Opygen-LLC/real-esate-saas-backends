@@ -16,8 +16,8 @@ const fadeUp = {
 }
 
 describe('website design Phase 1 foundation', () => {
-  it('defines only the initial composable slots and does not change render modes', () => {
-    expect(WEBSITE_COMPONENT_SLOTS).toEqual([
+  it('preserves the initial composable slots while allowing later page expansion and does not change render modes', () => {
+    expect(WEBSITE_COMPONENT_SLOTS).toEqual(expect.arrayContaining([
       'shared.header',
       'shared.footer',
       'home.hero',
@@ -26,7 +26,7 @@ describe('website design Phase 1 foundation', () => {
       'home.reviews',
       'home.agents',
       'home.consultation',
-    ])
+    ]))
 
     const template = WebsiteArchitectureService.toCanonicalWebsiteContract({ organizationId: 'org_1', templateId: 'template-3' })
     const builder = WebsiteArchitectureService.toCanonicalWebsiteContract({ organizationId: 'org_1', templateId: 'template-3', websiteSettings: { renderMode: 'builder' } })

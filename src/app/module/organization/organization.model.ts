@@ -40,6 +40,10 @@ const componentOverridesSchema = new Schema(
       agents: componentIdField(),
       consultation: componentIdField(),
     },
+    about: { hero: componentIdField(), story: componentIdField(), values: componentIdField(), stats: componentIdField(), cta: componentIdField() },
+    properties: { hero: componentIdField(), listing: componentIdField(), filters: componentIdField(), card: componentIdField(), pagination: componentIdField() },
+    agents: { hero: componentIdField(), listing: componentIdField(), card: componentIdField(), cta: componentIdField() },
+    contact: { hero: componentIdField(), office: componentIdField(), form: componentIdField(), map: componentIdField() },
   },
   { _id: false },
 )
@@ -58,6 +62,12 @@ const componentAnimationsSchema = new Schema(
       agents: { type: componentAnimationSettingsSchema, default: undefined },
       consultation: { type: componentAnimationSettingsSchema, default: undefined },
     },
+    about: {
+      hero: { type: componentAnimationSettingsSchema, default: undefined }, story: { type: componentAnimationSettingsSchema, default: undefined }, values: { type: componentAnimationSettingsSchema, default: undefined }, stats: { type: componentAnimationSettingsSchema, default: undefined }, cta: { type: componentAnimationSettingsSchema, default: undefined },
+    },
+    properties: { hero: { type: componentAnimationSettingsSchema, default: undefined }, listing: { type: componentAnimationSettingsSchema, default: undefined }, filters: { type: componentAnimationSettingsSchema, default: undefined }, card: { type: componentAnimationSettingsSchema, default: undefined }, pagination: { type: componentAnimationSettingsSchema, default: undefined } },
+    agents: { hero: { type: componentAnimationSettingsSchema, default: undefined }, listing: { type: componentAnimationSettingsSchema, default: undefined }, card: { type: componentAnimationSettingsSchema, default: undefined }, cta: { type: componentAnimationSettingsSchema, default: undefined } },
+    contact: { hero: { type: componentAnimationSettingsSchema, default: undefined }, office: { type: componentAnimationSettingsSchema, default: undefined }, form: { type: componentAnimationSettingsSchema, default: undefined }, map: { type: componentAnimationSettingsSchema, default: undefined } },
   },
   { _id: false },
 )
