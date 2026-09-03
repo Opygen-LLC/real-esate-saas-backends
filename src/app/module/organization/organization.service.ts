@@ -15,6 +15,7 @@ import { SubdomainAlias } from '../domain/subdomainAlias.model'
 import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { TemplateRegistry } from '../websiteBuilder/templateRegistry'
+import { ComponentRegistry } from '../websiteBuilder/componentRegistry'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { WebsitePublicationService } from '../websiteBuilder/websitePublication.service'
 import { WebsiteArchitectureService } from '../websiteBuilder/websiteArchitecture.service'
@@ -333,6 +334,9 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
 
 const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
   if (payload.templateId) await TemplateRegistry.assertEntitlement(organizationId, { template: { id: payload.templateId } })
+  if (payload.websiteSettings?.websiteDesign?.componentOverrides) {
+    await ComponentRegistry.assertOverrides(organizationId, payload.websiteSettings.websiteDesign.componentOverrides)
+  }
   const currentWebsite = await Organization.findOne({ organizationId }).select('templateId websiteSettings.renderMode').lean()
   if (!currentWebsite) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const requestedRenderMode = payload.websiteSettings?.renderMode

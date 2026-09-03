@@ -23,6 +23,7 @@ import { WebsitePreviewToken } from './websitePreviewToken.model'
 import { WebsiteUploadIntent } from './websiteUploadIntent.model'
 import { WebsiteBuilderValidation, checkGuardrails } from './websiteBuilder.validation'
 import { TemplateRegistry } from './templateRegistry'
+import { ComponentRegistry } from './componentRegistry'
 import { WebsiteCache } from './websiteCache'
 import { WebsitePublicationService } from './websitePublication.service'
 import { ObjectStorageService } from './objectStorage.service'
@@ -996,4 +997,4 @@ const getPropertyShareCard = async (identifier: string, propertyId: string) => {
 }
 
 
-export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, getPropertyDraftSession, touchPropertyDraftSession, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list }
+export const WebsiteBuilderService = { getAllPages, getPageById, saveDraft, publishPage, schedulePublish, processScheduledPublishes, listRevisions, restoreRevision, createPreviewToken, getPreview, presignAsset, uploadAssetBuffer, completeAsset, importAssetFromUrl, listAssets, getAssetById, deleteAsset, validatePropertyDraftAssets, claimPropertyDraftAssets, deletePropertyDraftAsset, getPropertyDraftSession, touchPropertyDraftSession, cleanupPropertyDraftSession, cleanupAbandonedPropertyDraftAssets, cleanupOrphanAssets, getPublicPage, getSitemap, getRobots, getPropertyShareCard, listTemplates: TemplateRegistry.list, listComponents: ComponentRegistry.list }
