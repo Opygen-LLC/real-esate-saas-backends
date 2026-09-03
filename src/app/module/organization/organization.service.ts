@@ -75,6 +75,7 @@ const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null)
   ...(settings || {}),
   renderMode: settings?.renderMode || 'template',
   sectionStyles: WebsiteArchitectureService.canonicalizeSectionStyles((settings as any)?.sectionStyles),
+  websiteDesign: WebsiteArchitectureService.canonicalizeWebsiteDesign((settings as any)?.websiteDesign),
   footer: {
     showSocialLinks: settings?.footer?.showSocialLinks ?? true,
     socialVisibility: {
@@ -93,6 +94,19 @@ const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?:
     if (value !== undefined) target[`websiteSettings.${key}`] = key === 'heroImage' && value ? assertSafeUrl(String(value)) : value
   }
   if (settings.sectionStyles !== undefined) target['websiteSettings.sectionStyles'] = WebsiteArchitectureService.serializeSectionStylesForStorage(settings.sectionStyles)
+  const websiteDesign = (settings as any).websiteDesign
+  if (websiteDesign !== undefined) {
+    target['websiteSettings.websiteDesign.schemaVersion'] = 1
+    if (websiteDesign.componentOverrides !== undefined) {
+      target['websiteSettings.websiteDesign.componentOverrides'] = WebsiteArchitectureService.canonicalizeComponentOverrides(websiteDesign.componentOverrides)
+    }
+    if (websiteDesign.componentAnimations !== undefined) {
+      target['websiteSettings.websiteDesign.componentAnimations'] = WebsiteArchitectureService.canonicalizeComponentAnimations(websiteDesign.componentAnimations)
+    }
+    if (websiteDesign.animationsEnabled !== undefined) {
+      target['websiteSettings.websiteDesign.animationsEnabled'] = websiteDesign.animationsEnabled !== false
+    }
+  }
   if (settings.footer?.showSocialLinks !== undefined) target['websiteSettings.footer.showSocialLinks'] = settings.footer.showSocialLinks
   const visibility = settings.footer?.socialVisibility
   if (visibility) {

@@ -1,7 +1,22 @@
 import { WEBSITE_TEMPLATE_IDS, type WebsiteTemplateId } from './websiteTemplate.constants'
 import {
+  WEBSITE_ANIMATION_DELAYS,
+  WEBSITE_ANIMATION_DURATIONS,
+  WEBSITE_ANIMATION_PRESETS,
+  WEBSITE_ANIMATION_TRIGGERS,
+  WEBSITE_COMPONENT_SLOTS,
+  WEBSITE_DESIGN_SCHEMA_VERSION,
   WEBSITE_SECTION_KEYS,
+  type AnimationDelay,
+  type AnimationDuration,
+  type AnimationPreset,
+  type AnimationTrigger,
   type CanonicalWebsiteContract,
+  type ComponentAnimationSettings,
+  type WebsiteComponentAnimations,
+  type WebsiteComponentOverrides,
+  type WebsiteComponentSlot,
+  type WebsiteDesignContract,
   type WebsiteRenderMode,
   type WebsiteSectionKey,
   type WebsiteSectionStyle,
@@ -9,8 +24,14 @@ import {
 } from './websiteArchitecture.contract'
 
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/
+const COMPONENT_ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+\.v[1-9]\d*$/
 const sectionKeySet = new Set<string>(WEBSITE_SECTION_KEYS)
+const componentSlotSet = new Set<string>(WEBSITE_COMPONENT_SLOTS)
 const templateIdSet = new Set<string>(WEBSITE_TEMPLATE_IDS)
+const animationPresetSet = new Set<string>(WEBSITE_ANIMATION_PRESETS)
+const animationDurationSet = new Set<string>(WEBSITE_ANIMATION_DURATIONS)
+const animationDelaySet = new Set<number>(WEBSITE_ANIMATION_DELAYS)
+const animationTriggerSet = new Set<string>(WEBSITE_ANIMATION_TRIGGERS)
 
 const canonicalSectionStyle = (value: unknown): WebsiteSectionStyle | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -53,6 +74,82 @@ const serializeSectionStylesForStorage = (styles?: WebsiteSectionStyles): Record
   return stored
 }
 
+const readSlotValue = (value: unknown, slot: WebsiteComponentSlot): unknown => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  // Be tolerant when reading: support both the canonical nested Mongo shape and
+  // a flattened dotted-key shape so old caches/manual data cannot break reads.
+  if (Object.prototype.hasOwnProperty.call(input, slot)) return input[slot]
+  const [group, section] = slot.split('.', 2)
+  const groupValue = input[group]
+  if (!groupValue || typeof groupValue !== 'object' || Array.isArray(groupValue)) return undefined
+  return (groupValue as Record<string, unknown>)[section]
+}
+
+const assignSlotValue = <T>(target: Record<string, Record<string, T>>, slot: WebsiteComponentSlot, value: T) => {
+  const [group, section] = slot.split('.', 2)
+  target[group] ||= {}
+  target[group][section] = value
+}
+
+const canonicalComponentId = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length <= 120 && COMPONENT_ID.test(trimmed) ? trimmed : undefined
+}
+
+const canonicalizeComponentOverrides = (value: unknown): WebsiteComponentOverrides => {
+  const stored: Record<string, Record<string, string>> = {}
+  for (const slot of WEBSITE_COMPONENT_SLOTS) {
+    const componentId = canonicalComponentId(readSlotValue(value, slot))
+    if (componentId) assignSlotValue(stored, slot, componentId)
+  }
+  return stored as WebsiteComponentOverrides
+}
+
+const canonicalAnimationSettings = (value: unknown): ComponentAnimationSettings | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const preset = typeof input.preset === 'string' && animationPresetSet.has(input.preset) ? input.preset as AnimationPreset : 'none'
+  const duration = typeof input.duration === 'string' && animationDurationSet.has(input.duration) ? input.duration as AnimationDuration : 'normal'
+  const numericDelay = typeof input.delay === 'number' ? input.delay : Number.NaN
+  const delay = animationDelaySet.has(numericDelay) ? numericDelay as AnimationDelay : 0
+  const trigger = typeof input.trigger === 'string' && animationTriggerSet.has(input.trigger) ? input.trigger as AnimationTrigger : 'viewport'
+  return {
+    enabled: input.enabled !== false,
+    preset,
+    duration,
+    delay,
+    trigger,
+    replay: input.replay === true,
+  }
+}
+
+const canonicalizeComponentAnimations = (value: unknown): WebsiteComponentAnimations => {
+  const stored: Record<string, Record<string, ComponentAnimationSettings>> = {}
+  for (const slot of WEBSITE_COMPONENT_SLOTS) {
+    const animation = canonicalAnimationSettings(readSlotValue(value, slot))
+    if (animation) assignSlotValue(stored, slot, animation)
+  }
+  return stored as WebsiteComponentAnimations
+}
+
+const canonicalizeWebsiteDesign = (value: unknown): WebsiteDesignContract => {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  return {
+    schemaVersion: WEBSITE_DESIGN_SCHEMA_VERSION,
+    componentOverrides: canonicalizeComponentOverrides(input.componentOverrides),
+    componentAnimations: canonicalizeComponentAnimations(input.componentAnimations),
+    // Missing design data belongs to legacy sites and must preserve the Phase 1
+    // default: animations are globally enabled but no section animation exists.
+    animationsEnabled: input.animationsEnabled !== false,
+  }
+}
+
+const serializeWebsiteDesignForStorage = (value: unknown): WebsiteDesignContract => canonicalizeWebsiteDesign(value)
+
+const isWebsiteComponentSlot = (value: string): value is WebsiteComponentSlot => componentSlotSet.has(value)
+
 type CanonicalWebsiteSource = {
   organizationId?: unknown
   websiteStatus?: unknown
@@ -72,6 +169,7 @@ type CanonicalWebsiteSource = {
     publicationRevision?: unknown
     lastPublishedAt?: unknown
     sectionStyles?: unknown
+    websiteDesign?: unknown
   } | null
 }
 
@@ -125,6 +223,7 @@ const toCanonicalWebsiteContract = (source: CanonicalWebsiteSource, options: Can
       lastPublishedAt: lastPublishedAt || null,
     },
     sectionStyles: canonicalizeSectionStyles(settings.sectionStyles),
+    design: canonicalizeWebsiteDesign(settings.websiteDesign),
     visibility: { public: options.public ?? status === 'published' },
   }
 }
@@ -132,5 +231,10 @@ const toCanonicalWebsiteContract = (source: CanonicalWebsiteSource, options: Can
 export const WebsiteArchitectureService = {
   canonicalizeSectionStyles,
   serializeSectionStylesForStorage,
+  canonicalizeComponentOverrides,
+  canonicalizeComponentAnimations,
+  canonicalizeWebsiteDesign,
+  serializeWebsiteDesignForStorage,
+  isWebsiteComponentSlot,
   toCanonicalWebsiteContract,
 }

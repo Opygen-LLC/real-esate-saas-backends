@@ -2,7 +2,13 @@ import { z } from 'zod'
 import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
 import { ONBOARDING_TOTAL_STEPS } from './onboarding.constants'
-import { WEBSITE_SECTION_KEYS } from './organizationWebsite.contract'
+import {
+  WEBSITE_ANIMATION_DURATIONS,
+  WEBSITE_ANIMATION_PRESETS,
+  WEBSITE_ANIMATION_TRIGGERS,
+  WEBSITE_DESIGN_SCHEMA_VERSION,
+  WEBSITE_SECTION_KEYS,
+} from './organizationWebsite.contract'
 
 const optionalUrl = z.union([z.literal(''), z.string().url().max(2048)])
 const secureUrl = z.union([z.literal(''), z.string().trim().max(2048).superRefine((value, ctx) => {
@@ -61,6 +67,52 @@ const websiteSectionStyle = z.object({
   textColor: hexColor.optional(),
 }).strict()
 const websiteSectionStyles = z.record(z.enum(WEBSITE_SECTION_KEYS), websiteSectionStyle)
+const websiteComponentId = z.string().trim().min(1).max(120).regex(
+  /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+\.v[1-9]\d*$/,
+  'Use a versioned component ID such as hero.split-luxury.v1',
+)
+const websiteComponentOverrides = z.object({
+  shared: z.object({
+    header: websiteComponentId.optional(),
+    footer: websiteComponentId.optional(),
+  }).strict().optional(),
+  home: z.object({
+    hero: websiteComponentId.optional(),
+    featuredProperties: websiteComponentId.optional(),
+    whyChooseUs: websiteComponentId.optional(),
+    reviews: websiteComponentId.optional(),
+    agents: websiteComponentId.optional(),
+    consultation: websiteComponentId.optional(),
+  }).strict().optional(),
+}).strict()
+const websiteAnimationSettings = z.object({
+  enabled: z.boolean(),
+  preset: z.enum(WEBSITE_ANIMATION_PRESETS),
+  duration: z.enum(WEBSITE_ANIMATION_DURATIONS),
+  delay: z.union([z.literal(0), z.literal(100), z.literal(200), z.literal(300), z.literal(500)]),
+  trigger: z.enum(WEBSITE_ANIMATION_TRIGGERS),
+  replay: z.boolean(),
+}).strict()
+const websiteComponentAnimations = z.object({
+  shared: z.object({
+    header: websiteAnimationSettings.optional(),
+    footer: websiteAnimationSettings.optional(),
+  }).strict().optional(),
+  home: z.object({
+    hero: websiteAnimationSettings.optional(),
+    featuredProperties: websiteAnimationSettings.optional(),
+    whyChooseUs: websiteAnimationSettings.optional(),
+    reviews: websiteAnimationSettings.optional(),
+    agents: websiteAnimationSettings.optional(),
+    consultation: websiteAnimationSettings.optional(),
+  }).strict().optional(),
+}).strict()
+const websiteDesign = z.object({
+  schemaVersion: z.literal(WEBSITE_DESIGN_SCHEMA_VERSION).optional(),
+  componentOverrides: websiteComponentOverrides.optional(),
+  componentAnimations: websiteComponentAnimations.optional(),
+  animationsEnabled: z.boolean().optional(),
+}).strict()
 const websiteContent = z.object({
   navigation: z.object({
     tagline: shortText(120), homeLabel: shortText(40), propertiesLabel: shortText(40), agentsLabel: shortText(40),
@@ -102,6 +154,7 @@ const websiteSettings = z.object({
   renderMode: z.enum(['template', 'builder']).optional(),
   content: websiteContent.optional(),
   sectionStyles: websiteSectionStyles.optional(),
+  websiteDesign: websiteDesign.optional(),
   footer: z.object({
     showSocialLinks: z.boolean().optional(),
     socialVisibility: z.object({

@@ -1,7 +1,28 @@
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
-import type { CanonicalWebsiteContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
-export { WEBSITE_SECTION_KEYS } from '../websiteBuilder/websiteArchitecture.contract'
-export type { WebsiteSectionKey, WebsiteSectionStyle, WebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
+import type { CanonicalWebsiteContract, WebsiteDesignContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
+export {
+  WEBSITE_ANIMATION_DELAYS,
+  WEBSITE_ANIMATION_DURATIONS,
+  WEBSITE_ANIMATION_PRESETS,
+  WEBSITE_ANIMATION_TRIGGERS,
+  WEBSITE_COMPONENT_SLOTS,
+  WEBSITE_DESIGN_SCHEMA_VERSION,
+  WEBSITE_SECTION_KEYS,
+} from '../websiteBuilder/websiteArchitecture.contract'
+export type {
+  AnimationDelay,
+  AnimationDuration,
+  AnimationPreset,
+  AnimationTrigger,
+  ComponentAnimationSettings,
+  WebsiteComponentAnimations,
+  WebsiteComponentOverrides,
+  WebsiteComponentSlot,
+  WebsiteDesignContract,
+  WebsiteSectionKey,
+  WebsiteSectionStyle,
+  WebsiteSectionStyles,
+} from '../websiteBuilder/websiteArchitecture.contract'
 
 export type OrganizationSocialLinks = {
   facebook?: string
@@ -37,6 +58,7 @@ export type OrganizationWebsiteSettings = {
   renderMode?: WebsiteRenderMode
   content?: Record<string, unknown>
   sectionStyles?: CanonicalWebsiteSectionStyles
+  websiteDesign?: WebsiteDesignContract
   footer?: WebsiteFooterSettings
   publicationRevision?: number
   lastPublishedAt?: Date | string | null

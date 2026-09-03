@@ -1,8 +1,76 @@
 import mongoose, { Schema, model } from 'mongoose'
 import { IOrganization, OrganizationModel } from './organization.interface'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
+import {
+  WEBSITE_ANIMATION_DELAYS,
+  WEBSITE_ANIMATION_DURATIONS,
+  WEBSITE_ANIMATION_PRESETS,
+  WEBSITE_ANIMATION_TRIGGERS,
+  WEBSITE_DESIGN_SCHEMA_VERSION,
+} from '../websiteBuilder/websiteArchitecture.contract'
 import { ONBOARDING_TOTAL_STEPS, ONBOARDING_VERSION } from './onboarding.constants'
 import { PAID_PLAN_ID_PATTERN } from '../subscriptionPlan/planIdentity'
+
+const WEBSITE_COMPONENT_ID_PATTERN = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+\.v[1-9]\d*$/
+const componentIdField = () => ({ type: String, trim: true, maxlength: 120, match: WEBSITE_COMPONENT_ID_PATTERN, default: undefined })
+
+const componentAnimationSettingsSchema = new Schema(
+  {
+    enabled: { type: Boolean, required: true },
+    preset: { type: String, enum: [...WEBSITE_ANIMATION_PRESETS], required: true },
+    duration: { type: String, enum: [...WEBSITE_ANIMATION_DURATIONS], required: true },
+    delay: { type: Number, enum: [...WEBSITE_ANIMATION_DELAYS], required: true },
+    trigger: { type: String, enum: [...WEBSITE_ANIMATION_TRIGGERS], required: true },
+    replay: { type: Boolean, required: true },
+  },
+  { _id: false },
+)
+
+const componentOverridesSchema = new Schema(
+  {
+    shared: {
+      header: componentIdField(),
+      footer: componentIdField(),
+    },
+    home: {
+      hero: componentIdField(),
+      featuredProperties: componentIdField(),
+      whyChooseUs: componentIdField(),
+      reviews: componentIdField(),
+      agents: componentIdField(),
+      consultation: componentIdField(),
+    },
+  },
+  { _id: false },
+)
+
+const componentAnimationsSchema = new Schema(
+  {
+    shared: {
+      header: { type: componentAnimationSettingsSchema, default: undefined },
+      footer: { type: componentAnimationSettingsSchema, default: undefined },
+    },
+    home: {
+      hero: { type: componentAnimationSettingsSchema, default: undefined },
+      featuredProperties: { type: componentAnimationSettingsSchema, default: undefined },
+      whyChooseUs: { type: componentAnimationSettingsSchema, default: undefined },
+      reviews: { type: componentAnimationSettingsSchema, default: undefined },
+      agents: { type: componentAnimationSettingsSchema, default: undefined },
+      consultation: { type: componentAnimationSettingsSchema, default: undefined },
+    },
+  },
+  { _id: false },
+)
+
+const websiteDesignSchema = new Schema(
+  {
+    schemaVersion: { type: Number, enum: [WEBSITE_DESIGN_SCHEMA_VERSION], default: WEBSITE_DESIGN_SCHEMA_VERSION, required: true },
+    componentOverrides: { type: componentOverridesSchema, default: () => ({}) },
+    componentAnimations: { type: componentAnimationsSchema, default: () => ({}) },
+    animationsEnabled: { type: Boolean, default: true, required: true },
+  },
+  { _id: false },
+)
 
 const organizationSchema = new Schema<IOrganization, OrganizationModel>(
   {
@@ -211,6 +279,15 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       content: { type: Schema.Types.Mixed, default: {} },
       // Stored as a nested Mongo-safe object and flattened to dotted stable section IDs at the API boundary.
       sectionStyles: { type: Schema.Types.Mixed, default: {} },
+      websiteDesign: {
+        type: websiteDesignSchema,
+        default: () => ({
+          schemaVersion: WEBSITE_DESIGN_SCHEMA_VERSION,
+          componentOverrides: {},
+          componentAnimations: {},
+          animationsEnabled: true,
+        }),
+      },
       footer: {
         showSocialLinks: { type: Boolean, default: true },
         socialVisibility: {
