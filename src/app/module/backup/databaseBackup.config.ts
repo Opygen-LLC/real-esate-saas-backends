@@ -70,8 +70,10 @@ const validateDatabaseName = (name: string, label: string): string => {
 
 const validatePrefix = (value: string): string => {
   const normalized = value.trim()
-  if (!/^[A-Za-z0-9_-]{1,38}$/.test(normalized)) {
-    throw new Error('BACKUP_DATABASE_PREFIX must contain only letters, numbers, underscore or hyphen and be at most 38 characters')
+  // Atlas enforces a 38-byte limit on database names. The timestamp suffix is 18 bytes (_YYYY_MM_DD_HHMMSS).
+  // Thus prefix must be <= 20 chars to guarantee the total database name never exceeds 38 bytes.
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(normalized)) {
+    throw new Error('BACKUP_DATABASE_PREFIX must contain only letters, numbers, underscore or hyphen and be at most 20 characters to comply with MongoDB Atlas 38-byte database name limit')
   }
   return normalized
 }
@@ -112,7 +114,7 @@ export const loadDatabaseBackupConfig = (): DatabaseBackupConfig => {
     process.env.BACKUP_SOURCE_DATABASE_NAME?.trim() || parseDatabaseNameFromMongoUri(sourceDatabaseUrl),
     'BACKUP_SOURCE_DATABASE_NAME',
   )
-  const backupDatabasePrefix = validatePrefix(process.env.BACKUP_DATABASE_PREFIX || 'real_estate_saas_backup')
+  const backupDatabasePrefix = validatePrefix(process.env.BACKUP_DATABASE_PREFIX || 're_backup')
   const manifestDatabaseName = validateDatabaseName(
     process.env.BACKUP_MANIFEST_DATABASE_NAME || `${backupDatabasePrefix}_control`,
     'BACKUP_MANIFEST_DATABASE_NAME',

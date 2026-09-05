@@ -56,9 +56,19 @@ const localTimestampParts = (date: Date, timeZone: string): Record<string, strin
   return Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
 }
 
+// Max MongoDB Atlas database name length is 38 bytes
+const ATLAS_MAX_DB_NAME_BYTES = 38
+
 const buildBackupDatabaseName = (prefix: string, date: Date, timeZone: string): string => {
   const p = localTimestampParts(date, timeZone)
-  return `${prefix}_${p.year}_${p.month}_${p.day}_${p.hour}${p.minute}${p.second}`
+  const timestampSuffix = `_${p.year}_${p.month}_${p.day}_${p.hour}${p.minute}${p.second}`
+  const candidate = `${prefix}${timestampSuffix}`
+  if (Buffer.byteLength(candidate, 'utf8') <= ATLAS_MAX_DB_NAME_BYTES) {
+    return candidate
+  }
+  // Enforce Atlas hard 38-byte limit by truncating prefix if oversized
+  const maxPrefixLen = Math.max(1, ATLAS_MAX_DB_NAME_BYTES - timestampSuffix.length)
+  return `${prefix.slice(0, maxPrefixLen)}${timestampSuffix}`
 }
 
 const runWithConcurrency = async <T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> => {
@@ -156,6 +166,7 @@ const streamDumpToRestore = async (
     `--config=${backupConfigFile}`,
     '--archive',
     '--gzip',
+    `--nsInclude=${sourceDatabaseName}.*`,
     `--nsFrom=${sourceDatabaseName}.*`,
     `--nsTo=${backupDatabase}.*`,
     '--drop',
@@ -324,6 +335,7 @@ const inspectDatabase = async (
   }
 }
 
+// Evaluated against config.gcsProtectionMode mapped from BACKUP_GCS_PROTECTION_MODE
 const inspectGcsProtection = async (config: DatabaseBackupConfig): Promise<GcsProtectionResult> => {
   if (config.gcsProtectionMode === 'off') {
     return { checked: false, protected: false, mode: 'off', message: 'GCS disaster-recovery protection check is disabled.' }
@@ -548,7 +560,7 @@ const persistPrimaryStatusSafely = async (work: () => Promise<void>, runId: stri
 }
 
 const dropPartialBackupDatabase = async (config: DatabaseBackupConfig, databaseName: string): Promise<void> => {
-  if (!databaseName.startsWith(`${config.backupDatabasePrefix}_`)) return
+  if (!databaseName.startsWith(`${config.backupDatabasePrefix}_`) && !databaseName.startsWith('re_backup_') && !databaseName.startsWith('real_estate_saas_backup_')) return
   const connection = await mongoose.createConnection(config.backupDatabaseUrl, {
     dbName: databaseName,
     maxPoolSize: 1,
@@ -592,7 +604,9 @@ export const DatabaseBackupService = {
       toolConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'real-estate-db-backup-'))
       await fs.chmod(toolConfigDir, 0o700)
       sourceConfigFile = await secureToolConfig(toolConfigDir, 'source', config.sourceDatabaseUrl)
-      backupConfigFile = await secureToolConfig(toolConfigDir, 'backup', config.backupDatabaseUrl)
+      // Strip default database from backup URI so mongorestore does not restrict namespaces
+      const clusterBackupUri = config.backupDatabaseUrl.replace(/\/[^/?]+(\?|$)/, '/$1')
+      backupConfigFile = await secureToolConfig(toolConfigDir, 'backup', clusterBackupUri)
       manifest.mongoDumpVersion = await toolVersion('mongodump', config.processTimeoutMs)
       manifest.mongoRestoreVersion = await toolVersion('mongorestore', config.processTimeoutMs)
       manifest.gcsProtection = await inspectGcsProtection(config)
@@ -623,6 +637,8 @@ export const DatabaseBackupService = {
       )
       manifest.archiveBytes = transfer.archiveBytes
       manifest.archiveSha256 = transfer.archiveSha256
+      manifest.dumpStderr = transfer.dumpStderr
+      manifest.restoreStderr = transfer.restoreStderr
 
       manifest.sourceCollectionsAfter = await inspectDatabase(
         config.sourceDatabaseUrl,

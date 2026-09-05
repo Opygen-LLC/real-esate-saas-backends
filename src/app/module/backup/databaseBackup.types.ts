@@ -52,6 +52,8 @@ export type DatabaseBackupManifest = {
   archiveRetained?: boolean
   archiveBytes?: number
   archiveSha256?: string
+  dumpStderr?: string
+  restoreStderr?: string
   mongoDumpVersion?: string
   mongoRestoreVersion?: string
   sourceCollectionsBefore?: BackupCollectionInventory[]
