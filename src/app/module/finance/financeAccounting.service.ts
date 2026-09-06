@@ -4,6 +4,7 @@ import ApiError from '../../../errors/ApiError'
 import config from '../../../config'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
+import { escapeRegex } from '../../helpers/searchQuery'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
@@ -738,6 +739,40 @@ const listJournals = async (organizationId: string, query: Record<string, unknow
   if (query.status) filter.status = String(query.status).toUpperCase()
   if (query.sourceType) filter.sourceType = String(query.sourceType).toUpperCase()
   if (query.startDate || query.endDate) filter.postingDate = { ...(query.startDate ? { $gte: asDate(query.startDate, 'start date') } : {}), ...(query.endDate ? { $lte: asInclusiveEndDate(query.endDate, 'end date') } : {}) }
+
+  const searchTerm = String(query.searchTerm || query.search || '').trim()
+  if (searchTerm) {
+    const escaped = escapeRegex(searchTerm)
+    const regex = { $regex: escaped, $options: 'i' }
+
+    const matchingAccounts = await FinanceAccount.find(
+      { organizationId, $or: [{ code: regex }, { name: regex }] },
+      { _id: 1 }
+    ).lean()
+    const matchingAccountIds = matchingAccounts.map((a: any) => a._id)
+
+    const lineConditions: any[] = [{ description: regex }]
+    if (matchingAccountIds.length) {
+      lineConditions.push({ accountId: { $in: matchingAccountIds } })
+    }
+    const matchingLines = await FinanceJournalLine.find(
+      { organizationId, $or: lineConditions },
+      { journalEntryId: 1 }
+    ).distinct('journalEntryId')
+
+    const searchConditions: any[] = [
+      { journalNumber: regex },
+      { description: regex },
+      { reference: regex },
+      { sourceType: regex },
+    ]
+    if (matchingLines.length) {
+      searchConditions.push({ _id: { $in: matchingLines } })
+    }
+
+    filter.$or = searchConditions
+  }
+
   const page = Math.max(1, Number(query.page || 1))
   const limit = Math.min(100, Math.max(1, Number(query.limit || 25)))
   const [data, total] = await Promise.all([
