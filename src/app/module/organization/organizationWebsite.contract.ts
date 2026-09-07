@@ -1,3 +1,4 @@
+import type { StudioMedia, StudioLayout } from '../../../contracts/websiteCatalog/studio'
 import type { WebsiteContentPatch } from '../../../contracts/websiteCatalog/content'
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
 import type { CanonicalWebsiteContract, WebsiteDesignContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
@@ -59,6 +60,8 @@ export type OrganizationWebsiteSettings = {
   renderMode?: WebsiteRenderMode
   content?: WebsiteContentPatch
   contentSchemaVersion?: number
+  layout?: StudioLayout
+  media?: StudioMedia
   sectionStyles?: CanonicalWebsiteSectionStyles
   websiteDesign?: WebsiteDesignContract
   footer?: WebsiteFooterSettings

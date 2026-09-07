@@ -50,7 +50,7 @@ const addressDetails = z.object({
   area: z.string().max(100).optional(), road: z.string().max(100).optional(), block: z.string().max(50).optional(), sector: z.string().max(50).optional(),
   mouza: z.string().max(100).optional(), postalCode: z.union([z.literal(''), z.string().regex(/^\d{4}$/)]).optional(), landmark: z.string().max(200).optional(),
 }).strict()
-const socialLinks = z.object({
+export const websiteSocialLinksSchema = z.object({
   facebook: platformUrl('Facebook', ['facebook.com']).optional(),
   instagram: platformUrl('Instagram', ['instagram.com']).optional(),
   twitter: platformUrl('X', ['x.com', 'twitter.com']).optional(),
@@ -104,7 +104,7 @@ const websiteComponentAnimations = z.object({
   agents: z.object({ hero: websiteAnimationSettings.optional(), listing: websiteAnimationSettings.optional(), card: websiteAnimationSettings.optional(), cta: websiteAnimationSettings.optional() }).strict().optional(),
   contact: z.object({ hero: websiteAnimationSettings.optional(), office: websiteAnimationSettings.optional(), form: websiteAnimationSettings.optional(), map: websiteAnimationSettings.optional() }).strict().optional(),
 }).strict()
-const websiteDesign = z.object({
+export const websiteDesignSchema = z.object({
   schemaVersion: z.literal(WEBSITE_DESIGN_SCHEMA_VERSION).optional(),
   componentOverrides: websiteComponentOverrides.optional(),
   componentAnimations: websiteComponentAnimations.optional(),
@@ -115,7 +115,7 @@ const websiteContent = z.unknown().superRefine((value, context) => {
     context.addIssue({ code: z.ZodIssueCode.custom, path: issue.path.split('.').filter(Boolean), message: issue.message })
   }
 }).transform((value) => value as WebsiteContentPatch)
-const websiteSettings = z.object({
+export const websiteSettingsSchema = z.object({
   heroTitle: z.string().max(160).optional(),
   heroSubtitle: z.string().max(400).optional(),
   heroImage: optionalUrl.optional(),
@@ -126,7 +126,7 @@ const websiteSettings = z.object({
   renderMode: z.enum(['template', 'builder']).optional(),
   content: websiteContent.optional(),
   sectionStyles: websiteSectionStyles.optional(),
-  websiteDesign: websiteDesign.optional(),
+  websiteDesign: websiteDesignSchema.optional(),
   footer: z.object({
     showSocialLinks: z.boolean().optional(),
     socialVisibility: z.object({
@@ -147,7 +147,7 @@ export const OrganizationValidation = {
     state: z.string().max(100).optional(), country: z.literal('Bangladesh').optional(), zipCode: z.union([z.literal(''), z.string().regex(/^\d{4}$/)]).optional(),
     defaultLanguage: z.enum(['en', 'bn']).optional(), addressDetails: addressDetails.optional(),
     areaConversion: z.object({ kathaSqft: z.number().positive().max(10000), bighaKatha: z.number().positive().max(100) }).strict().optional(),
-    serviceAreas: z.array(z.union([z.string().max(100), z.record(z.unknown())])).max(100).optional(), socialLinks: socialLinks.optional(),
+    serviceAreas: z.array(z.union([z.string().max(100), z.record(z.unknown())])).max(100).optional(), socialLinks: websiteSocialLinksSchema.optional(),
     teamSettings: z.object({ defaultRole: z.enum(['agent', 'staff', 'agency_admin']).optional(), agentsCanViewAllLeads: z.boolean().optional(),
       leaderboardVisible: z.boolean().optional(), autoAssignLeads: z.boolean().optional() }).strict().optional(),
   }).strict() }),
@@ -169,7 +169,7 @@ export const OrganizationValidation = {
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), metaTitle: z.string().max(120).optional(),
     metaDescription: z.string().max(300).optional(), logo: optionalUrl.optional(), defaultLanguage: z.enum(['en', 'bn']).optional(),
-    socialLinks: socialLinks.optional(), websiteSettings: websiteSettings.optional(),
+    socialLinks: websiteSocialLinksSchema.optional(), websiteSettings: websiteSettingsSchema.optional(),
   }).strict() }),
 
   onboarding: z.object({ body: z.object({
@@ -179,7 +179,7 @@ export const OrganizationValidation = {
     defaultLanguage: z.enum(['en', 'bn']).optional(), addressDetails: addressDetails.optional(), serviceAreas: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
     logo: optionalUrl.optional(), primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(),
-    websiteSettings: onboardingWebsiteSettings.optional(), socialLinks: socialLinks.optional(),
+    websiteSettings: onboardingWebsiteSettings.optional(), socialLinks: websiteSocialLinksSchema.optional(),
   }).strict() }),
 
   platformUpdate: z.object({ body: z.object({ reason: z.string().trim().min(10).max(500),

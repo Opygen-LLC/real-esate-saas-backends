@@ -1,3 +1,4 @@
+import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { randomUUID } from 'crypto'
 import type { ClientSession } from 'mongoose'
 import config from '../../../config'
@@ -145,6 +146,12 @@ const deliver = async (job: any) => {
   }
   if (job.type === 'domain_verify') {
     await DomainService.verifyById(job.organizationId, job.entityId)
+    return
+  }
+  if (job.type === 'website_asset_delete') {
+    const keys = job.payload?.keys
+    if (!Array.isArray(keys) || keys.length > 32 || keys.some((key) => typeof key !== 'string' || !key.startsWith(`tenants/${job.organizationId}/`))) throw new Error('Invalid tenant asset cleanup payload')
+    for (const key of keys) await ObjectStorageService.remove(key)
     return
   }
   if (job.type === 'asset_finalize') {

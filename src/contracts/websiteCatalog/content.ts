@@ -1,6 +1,7 @@
 // Authoritative marketing content contract. Generated into the frontend.
 import type { ContractIssue } from './query'
 
+export type WebsiteGalleryImage = { image: string; alt: string; title: string; subtitle: string; tag: string; focalX?: number; focalY?: number; fit?: 'cover' | 'contain'; decorative?: boolean }
 export type WebsiteFeature = { title: string; description: string }
 export type WebsiteStat = { label: string; value: string; caption: string }
 
@@ -21,6 +22,7 @@ export type WebsiteContent = {
     heroTitle: string
     heroSubtitle: string
     heroImage: string
+    heroGallery?: WebsiteGalleryImage[]
     trustItems: string[]
     featuredEyebrow: string
     featuredTitle: string
@@ -190,7 +192,7 @@ export const DEFAULT_WEBSITE_CONTENT: WebsiteContent = {
 export const WEBSITE_CONTENT_SCHEMA_VERSION = 2 as const
 export type WebsiteContentPatch = { [K in keyof WebsiteContent]?: Partial<WebsiteContent[K]> }
 export type ContentFieldDefinition = {
-  kind: 'text' | 'image' | 'link' | 'boolean' | 'texts' | 'features' | 'stats' | 'propertyId' | 'propertyIds'
+  kind: 'text' | 'image' | 'link' | 'boolean' | 'texts' | 'features' | 'stats' | 'propertyId' | 'propertyIds' | 'images'
   maxLength?: number
   maxItems?: number
   source: 'marketing' | 'property-reference'
@@ -209,7 +211,7 @@ export const WEBSITE_CONTENT_FIELDS: Record<keyof WebsiteContent, Record<string,
     contactLabel: text(40), headerCtaLabel: text(60), footerDescription: text(600), footerTrustText: text(180),
   },
   home: {
-    eyebrow: text(160), heroTitle: text(200), heroSubtitle: text(600), heroImage: image,
+    eyebrow: text(160), heroTitle: text(200), heroSubtitle: text(600), heroImage: image, heroGallery: { kind: 'images', maxItems: 8, source: 'marketing' },
     trustItems: { kind: 'texts', maxLength: 140, maxItems: 3, source: 'marketing' },
     featuredEyebrow: text(120), featuredTitle: text(160), featuredSubtitle: text(400),
     whyEyebrow: text(120), whyTitle: text(180), whySubtitle: text(400),
@@ -277,6 +279,21 @@ export const validateWebsiteContentPatch = (input: unknown): ContractIssue[] => 
         case 'texts':
           if (!Array.isArray(value) || value.length > (definition.maxItems || 3) || value.some((item) => typeof item !== 'string' || item.length > (definition.maxLength || 140))) issue(path, 'Invalid text collection')
           break
+        case 'images': {
+          if (!Array.isArray(value) || value.length > (definition.maxItems || 8)) { issue(path, 'Expected at most eight gallery images'); break }
+          value.forEach((item, index) => {
+            if (!record(item)) { issue(`${path}.${index}`, 'Expected an image item'); return }
+            const limits = { image: 2000, alt: 300, title: 200, subtitle: 600, tag: 160 }
+            const allowed = [...Object.keys(limits), 'focalX', 'focalY', 'fit', 'decorative']
+            for (const key of Object.keys(item)) if (!allowed.includes(key)) issue(`${path}.${index}.${key}`, 'Unsupported gallery field')
+            for (const [key, maximum] of Object.entries(limits)) if (typeof item[key] !== 'string' || (item[key] as string).length > maximum) issue(`${path}.${index}.${key}`, `Expected text of at most ${maximum} characters`)
+            if (typeof item.image === 'string' && !isSafeContentUrl(item.image, 'image')) issue(`${path}.${index}.image`, 'Use a safe image URL')
+            for (const key of ['focalX', 'focalY']) if (item[key] !== undefined && (typeof item[key] !== 'number' || !Number.isFinite(item[key]) || (item[key] as number) < 0 || (item[key] as number) > 100)) issue(`${path}.${index}.${key}`, 'Focal point must be between 0 and 100')
+            if (item.fit !== undefined && item.fit !== 'cover' && item.fit !== 'contain') issue(`${path}.${index}.fit`, 'Invalid image fit')
+            if (item.decorative !== undefined && typeof item.decorative !== 'boolean') issue(`${path}.${index}.decorative`, 'Expected true or false')
+          })
+          break
+        }
         case 'features': case 'stats': {
           if (!Array.isArray(value) || value.length > (definition.maxItems || 4)) { issue(path, `Expected at most ${definition.maxItems} items`); break }
           const fields = WEBSITE_COLLECTION_ITEM_FIELDS[definition.kind]

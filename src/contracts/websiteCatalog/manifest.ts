@@ -422,6 +422,7 @@ const sharedPageFields = Object.entries(WEBSITE_CONTENT_FIELDS).flatMap(([page, 
 const fieldsFor = (id: WebsiteTemplateId): string[] => [
   ...sharedPageFields, ...baseHomeFields.map((field) => `home.${field}`),
   ...(id === 'template-1' ? ['home.trustItems'] : []),
+  ...(id === 'template-2' ? ['home.heroGallery'] : []),
   ...(['template-5', 'template-7'].includes(id) ? ['heroCardBadge', 'heroCardTagline', 'heroCardTitle', 'heroCardSpecs', 'heroCardButtonText', 'heroCardLink', 'showHeroCard', 'heroPropertyId'].map((field) => `home.${field}`) : []),
   ...(['template-8', 'template-9', 'template-10'].includes(id) ? ['heroButtonText', 'heroButtonLink', 'secondaryButtonText', 'secondaryButtonLink'].map((field) => `home.${field}`) : []),
 ]
@@ -429,7 +430,7 @@ export const WEBSITE_TEMPLATE_MANIFESTS: readonly WebsiteTemplateManifest[] = me
   ...item, manifestVersion: WEBSITE_MANIFEST_VERSION, contentSchemaVersion: WEBSITE_CONTENT_SCHEMA_VERSION,
   supportedPages: PUBLIC_WEBSITE_PAGES, contentFields: fieldsFor(item.id), imageSlots: ['home.heroImage', 'about.image'],
   editableSections: ['shared.header', 'shared.footer', 'home.hero', ...(item.id === 'template-1' ? ['home.trustPoints'] : []), 'home.reviews', ...Object.keys(HOME_SECTION_VISIBILITY), 'about.hero', 'about.story', 'about.values', 'about.stats', 'about.cta', 'properties.hero', 'properties.listing', 'agents.hero', 'agents.listing', 'contact.hero', 'contact.office', 'contact.form'],
-  designControls: ['primaryColor', 'secondaryColor', 'font', 'sectionStyles', 'componentOverrides', 'componentAnimations'],
+  designControls: ['primaryColor', 'secondaryColor', 'font', 'sectionStyles', 'componentOverrides', 'componentAnimations', 'imageAlt', 'imageFocalPoint', 'imageFit', 'sectionVisibility', 'sectionOrder'],
   defaultContent: {},
 }))
 export const getWebsiteTemplateManifest = (id?: string | null): WebsiteTemplateManifest => WEBSITE_TEMPLATE_MANIFESTS.find((item) => item.id === id) || WEBSITE_TEMPLATE_MANIFESTS[0]

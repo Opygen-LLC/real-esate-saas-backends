@@ -5,6 +5,7 @@ const websiteAssetSchema = new Schema<IWebsiteAsset, WebsiteAssetModel>({
   organizationId: { type: String, required: true, index: true },
   key: { type: String, required: true },
   url: { type: String, required: true },
+  provenance: { type: new Schema({ provider: { type: String, enum: ['Unsplash', 'remote'], required: true }, source: String, imageUrl: String, photographer: String, photoId: String, license: String, importedAt: Date }, { _id: false }), default: undefined },
   originalName: { type: String, default: '' },
   mimeType: { type: String, default: 'image/jpeg' },
   width: Number,

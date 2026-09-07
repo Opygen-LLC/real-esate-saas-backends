@@ -1,3 +1,4 @@
+import { normalizeStudioMedia, normalizeStudioLayout } from '../../../contracts/websiteCatalog/studio'
 import { mergeAndMigrateContent, assertContentPropertyReferences } from '../websiteBuilder/websiteContent.service'
 import type { WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
 import { randomUUID } from 'crypto'
@@ -77,6 +78,8 @@ const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) =>
 const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null): OrganizationWebsiteSettings => ({
   ...(settings || {}),
   renderMode: settings?.renderMode || 'template',
+  media: normalizeStudioMedia(settings?.media),
+  layout: normalizeStudioLayout(settings?.layout),
   sectionStyles: WebsiteArchitectureService.canonicalizeSectionStyles((settings as any)?.sectionStyles),
   websiteDesign: WebsiteArchitectureService.canonicalizeWebsiteDesign((settings as any)?.websiteDesign),
   footer: {
@@ -89,6 +92,47 @@ const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null)
     },
   },
 })
+
+
+/** Single safe projection used by live websites and authenticated revision previews. */
+export const serializePublicWebsite = (org: any, stats: { totalProperties: number; totalAgents: number }): PublicOrganizationWebsite => {
+  // Keep entitlement/runtime bookkeeping available for response shaping without
+  // exposing those internal fields through either public organization endpoint.
+  const { entitlementRestrictions, updatedAt, domain_Verify } = org
+  const publicKeys = 'organizationId agencyName agencyType licenseNumber email phone address city state country zipCode defaultLanguage addressDetails areaConversion serviceAreas logo favicon primaryColor secondaryColor metaTitle metaDescription sub_domain domain templateId font socialLinks websiteSettings websiteStatus'.split(' ')
+  const publicOrg = Object.fromEntries(publicKeys.filter((key) => org[key] !== undefined).map((key) => [key, org[key]]))
+  const effectiveTemplateId = entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1')
+  const websiteSettings = canonicalWebsiteSettings(org.websiteSettings)
+  if (websiteSettings.renderMode !== 'builder') {
+    websiteSettings.websiteDesign = WebsiteDesignService.resolveEffectiveDesignForAccess(websiteSettings.websiteDesign, {
+      premiumTemplates: !Boolean(entitlementRestrictions?.premiumTemplates),
+    })
+  }
+  const result: PublicOrganizationWebsite = {
+    ...publicOrg,
+    organizationId: String(org.organizationId), agencyName: String(org.agencyName || ''), agencyType: String(org.agencyType || 'general'), email: String(org.email || ''), phone: String(org.phone || ''),
+    socialLinks: canonicalSocialLinks(org.socialLinks),
+    defaultLanguage: org.defaultLanguage || 'en',
+    metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
+    metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
+    templateId: effectiveTemplateId,
+    configuredTemplateId: org.templateId || 'template-1',
+    font: org.font || 'Inter',
+    primaryColor: org.primaryColor || '#1877F2',
+    secondaryColor: org.secondaryColor || '#0f172a',
+    websiteSettings,
+    website: WebsiteArchitectureService.toCanonicalWebsiteContract({ ...org, websiteSettings }, {
+      renderMode: websiteSettings.renderMode === 'builder' ? 'builder' : 'template',
+      templateId: effectiveTemplateId,
+      customDomain: entitlementRestrictions?.customDomain ? '' : String(org.domain || ''),
+      customDomainVerified: Boolean(domain_Verify) && !entitlementRestrictions?.customDomain,
+      public: true,
+    }),
+    brandingVersion: updatedAt ? new Date(updatedAt).toISOString() : '',
+    stats,
+  }
+  return result
+}
 
 const appendWebsiteSettingUpdates = (target: Record<string, unknown>, settings?: OrganizationWebsiteSettings | null) => {
   if (!settings) return
@@ -282,38 +326,8 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
     Property.countDocuments({ organizationId: org.organizationId, status: 'Available', quotaLocked: { $ne: true } }),
     User.countDocuments({ organizationId: org.organizationId, userRole: { $in: ['agent', 'agency_admin', 'agency_owner', 'admin'] } }),
   ]), 2)
-  // Keep entitlement/runtime bookkeeping available for response shaping without
-  // exposing those internal fields through either public organization endpoint.
-  const { entitlementRestrictions, updatedAt, domain_Verify, ...publicOrg } = org
-  const effectiveTemplateId = entitlementRestrictions?.premiumTemplates && TemplateRegistry.isPremium(String(org.templateId || '')) ? 'template-1' : (org.templateId || 'template-1')
-  const websiteSettings = canonicalWebsiteSettings(org.websiteSettings)
-  if (websiteSettings.renderMode !== 'builder') {
-    websiteSettings.websiteDesign = WebsiteDesignService.resolveEffectiveDesignForAccess(websiteSettings.websiteDesign, {
-      premiumTemplates: !Boolean(entitlementRestrictions?.premiumTemplates),
-    })
-  }
-  const result: PublicOrganizationWebsite = {
-    ...publicOrg,
-    socialLinks: canonicalSocialLinks(org.socialLinks),
-    defaultLanguage: org.defaultLanguage || 'en',
-    metaTitle: org.metaTitle || `${org.agencyName} | Real Estate in Bangladesh`,
-    metaDescription: org.metaDescription || `Browse verified real estate properties with ${org.agencyName}.`,
-    templateId: effectiveTemplateId,
-    configuredTemplateId: org.templateId || 'template-1',
-    font: org.font || 'Inter',
-    primaryColor: org.primaryColor || '#1877F2',
-    secondaryColor: org.secondaryColor || '#0f172a',
-    websiteSettings,
-    website: WebsiteArchitectureService.toCanonicalWebsiteContract({ ...org, websiteSettings }, {
-      renderMode: websiteSettings.renderMode === 'builder' ? 'builder' : 'template',
-      templateId: effectiveTemplateId,
-      customDomain: entitlementRestrictions?.customDomain ? '' : String(org.domain || ''),
-      customDomainVerified: Boolean(domain_Verify) && !entitlementRestrictions?.customDomain,
-      public: true,
-    }),
-    brandingVersion: updatedAt ? new Date(updatedAt).toISOString() : '',
-    stats: { totalProperties, totalAgents },
-  }
+  const result = serializePublicWebsite(org, { totalProperties, totalAgents })
+  const { entitlementRestrictions } = org
   const identifiers = [
     cacheKey,
     org.organizationId,

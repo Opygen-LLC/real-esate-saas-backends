@@ -2,13 +2,21 @@
   "version": 1,
   "authoritativeSource": "backend/src/contracts/websiteCatalog",
   "files": {
+    "architecture.ts": {
+      "sourceSha256": "d730939c9fd7664021921d082295286bb9b6228e33c4666bf2bcca21b057e874",
+      "generatedSha256": "0ce46916473cc34b27ef0df8738e56242cdde74e3730174059fd7e1d46e854ca"
+    },
     "content.ts": {
-      "sourceSha256": "539db338e016772b9f53e24fa1355ceb00962b129bd3e5ccacb06c7ef32a294d",
-      "generatedSha256": "9eb1a5c44b320bbe4ddec5f60c79a70bf23969cc496fad7d90e7ae062a1c0dd1"
+      "sourceSha256": "4dfacf2574c7bfba8fa2f370f67f3ed5f805169cda67e3bb857ed28efe83b0fd",
+      "generatedSha256": "0fa119d725a2ebf54f228694289710f244bf87cd61146a103c3e81a8da508fe5"
     },
     "manifest.ts": {
-      "sourceSha256": "96e28a596fc43b0dd8e59ab52fdf03f503dc26a5b39aafa90bc19bbdbef9e327",
-      "generatedSha256": "0489558ddc82fb3451063e3a2b9cbca224fe31fe40645f94a3618597e039cd01"
+      "sourceSha256": "37750357aaee92350bbf2e8893c8a52356c6ef7c15d5a64fc4a50472d64c65a0",
+      "generatedSha256": "32464f3382711f792c95dd393dc11f5632762c022405b6756d5433b7e754b72d"
+    },
+    "photos.ts": {
+      "sourceSha256": "3263a978061ee72872450cb9efdc0350448d5c57924935ec7d255f3987a6e1c8",
+      "generatedSha256": "ef3e6512ff482b5d3f9c487d313b40f3507e2c6ff102acb60b1dd13b2a9cdc52"
     },
     "property.ts": {
       "sourceSha256": "d548ff321880d2633a09adcb589dc93a273f1a8206a60b985cfae2606b20dcce",
@@ -21,6 +29,10 @@
     "query.ts": {
       "sourceSha256": "5f20c88bca96e45e963464e24f1a511bc20fc4a252735cddf524c6fd8c1da6b0",
       "generatedSha256": "dda2b765c5f5d2f6f7041ae495fd4f6f5f0a6182ebe64a488d640c48b4aef4ad"
+    },
+    "studio.ts": {
+      "sourceSha256": "87c49cfb3b789e1aba0a257042e7fe2c72035b23d1fe958e0ffdd24bcaf65e39",
+      "generatedSha256": "c582d44d9823b2cc6fe93eaece543c13a871e1554d230dead96a7a8a1f7a79ed"
     },
     "values.ts": {
       "sourceSha256": "b102d3aa41d417e9e9d7b30579b23a9f6467cfc8a79e5c4a5e50a4f3d5295eca",

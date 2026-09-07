@@ -1,0 +1,190 @@
+import type { WebsiteTemplateId } from './manifest'
+
+export const WEBSITE_RENDER_MODES = ['template', 'builder'] as const
+export type WebsiteRenderMode = (typeof WEBSITE_RENDER_MODES)[number]
+
+export const WEBSITE_SECTION_KEYS = [
+  'shared.header',
+  'shared.footer',
+  'home.hero',
+  'home.trustPoints',
+  'home.featuredProperties',
+  'home.whyChooseUs',
+  'home.reviews',
+  'home.agents',
+  'home.consultation',
+  'about.hero',
+  'about.story',
+  'about.values',
+  'about.stats',
+  'about.cta',
+  'properties.hero',
+  'properties.listing',
+  'properties.filters',
+  'properties.card',
+  'properties.pagination',
+  'agents.hero',
+  'agents.listing',
+  'agents.card',
+  'agents.cta',
+  'contact.hero',
+  'contact.office',
+  'contact.form',
+  'contact.map',
+] as const
+
+export type WebsiteSectionKey = (typeof WEBSITE_SECTION_KEYS)[number]
+export type WebsiteSectionStyle = { backgroundColor?: string; textColor?: string }
+export type WebsiteSectionStyles = Partial<Record<WebsiteSectionKey, WebsiteSectionStyle>>
+
+/** Stable composable-template slots supported by the public runtime. */
+export const WEBSITE_COMPONENT_SLOTS = [
+  'shared.header',
+  'shared.footer',
+  'home.hero',
+  'home.featuredProperties',
+  'home.whyChooseUs',
+  'home.reviews',
+  'home.agents',
+  'home.consultation',
+  'about.hero',
+  'about.story',
+  'about.values',
+  'about.stats',
+  'about.cta',
+  'properties.hero',
+  'properties.listing',
+  'properties.filters',
+  'properties.card',
+  'properties.pagination',
+  'agents.hero',
+  'agents.listing',
+  'agents.card',
+  'agents.cta',
+  'contact.hero',
+  'contact.office',
+  'contact.form',
+  'contact.map',
+] as const
+
+export type WebsiteComponentSlot = (typeof WEBSITE_COMPONENT_SLOTS)[number]
+
+export const WEBSITE_ANIMATION_PRESETS = [
+  'none',
+  'fade-in',
+  'fade-up',
+  'fade-down',
+  'fade-left',
+  'fade-right',
+  'slide-up',
+  'slide-down',
+  'slide-left',
+  'slide-right',
+  'zoom-in',
+  'zoom-out',
+  'blur-in',
+  'reveal-up',
+] as const
+export type AnimationPreset = (typeof WEBSITE_ANIMATION_PRESETS)[number]
+
+export const WEBSITE_ANIMATION_DURATIONS = ['fast', 'normal', 'slow'] as const
+export type AnimationDuration = (typeof WEBSITE_ANIMATION_DURATIONS)[number]
+
+export const WEBSITE_ANIMATION_DELAYS = [0, 100, 200, 300, 500] as const
+export type AnimationDelay = (typeof WEBSITE_ANIMATION_DELAYS)[number]
+
+export const WEBSITE_ANIMATION_TRIGGERS = ['page-load', 'viewport'] as const
+export type AnimationTrigger = (typeof WEBSITE_ANIMATION_TRIGGERS)[number]
+
+export type ComponentAnimationSettings = {
+  enabled: boolean
+  preset: AnimationPreset
+  duration: AnimationDuration
+  delay: AnimationDelay
+  trigger: AnimationTrigger
+  replay: boolean
+}
+
+export type WebsiteComponentOverrides = {
+  shared?: { header?: string; footer?: string }
+  home?: { hero?: string; featuredProperties?: string; whyChooseUs?: string; reviews?: string; agents?: string; consultation?: string }
+  about?: { hero?: string; story?: string; values?: string; stats?: string; cta?: string }
+  properties?: { hero?: string; listing?: string; filters?: string; card?: string; pagination?: string }
+  agents?: { hero?: string; listing?: string; card?: string; cta?: string }
+  contact?: { hero?: string; office?: string; form?: string; map?: string }
+}
+
+export type WebsiteComponentAnimations = {
+  shared?: { header?: ComponentAnimationSettings; footer?: ComponentAnimationSettings }
+  home?: { hero?: ComponentAnimationSettings; featuredProperties?: ComponentAnimationSettings; whyChooseUs?: ComponentAnimationSettings; reviews?: ComponentAnimationSettings; agents?: ComponentAnimationSettings; consultation?: ComponentAnimationSettings }
+  about?: { hero?: ComponentAnimationSettings; story?: ComponentAnimationSettings; values?: ComponentAnimationSettings; stats?: ComponentAnimationSettings; cta?: ComponentAnimationSettings }
+  properties?: { hero?: ComponentAnimationSettings; listing?: ComponentAnimationSettings; filters?: ComponentAnimationSettings; card?: ComponentAnimationSettings; pagination?: ComponentAnimationSettings }
+  agents?: { hero?: ComponentAnimationSettings; listing?: ComponentAnimationSettings; card?: ComponentAnimationSettings; cta?: ComponentAnimationSettings }
+  contact?: { hero?: ComponentAnimationSettings; office?: ComponentAnimationSettings; form?: ComponentAnimationSettings; map?: ComponentAnimationSettings }
+}
+
+
+export const WEBSITE_DESIGN_ACTIONS = [
+  'SET_COMPONENT',
+  'RESET_COMPONENT',
+  'RESET_ALL_COMPONENTS',
+  'SET_ANIMATION',
+  'RESET_ANIMATION',
+  'RESET_ALL_ANIMATIONS',
+  'SET_ANIMATIONS_ENABLED',
+  'APPLY_TEMPLATE',
+  'APPLY_DESIGN',
+] as const
+export type WebsiteDesignActionName = (typeof WEBSITE_DESIGN_ACTIONS)[number]
+
+type WebsiteDesignActionRevision = { expectedPublicationRevision?: number }
+
+export type WebsiteDesignAction = WebsiteDesignActionRevision & (
+  | { action: 'SET_COMPONENT'; slot: WebsiteComponentSlot; componentId: string }
+  | { action: 'RESET_COMPONENT'; slot: WebsiteComponentSlot }
+  | { action: 'RESET_ALL_COMPONENTS' }
+  | { action: 'SET_ANIMATION'; slot: WebsiteComponentSlot; animation: ComponentAnimationSettings }
+  | { action: 'RESET_ANIMATION'; slot: WebsiteComponentSlot }
+  | { action: 'RESET_ALL_ANIMATIONS' }
+  | { action: 'SET_ANIMATIONS_ENABLED'; enabled: boolean }
+  | { action: 'APPLY_TEMPLATE'; templateId: WebsiteTemplateId; resetComponents?: boolean; keepAnimations?: boolean }
+  | { action: 'APPLY_DESIGN'; design: WebsiteDesignContract; templateId?: WebsiteTemplateId }
+)
+
+export const WEBSITE_DESIGN_SCHEMA_VERSION = 1 as const
+export type WebsiteDesignContract = {
+  schemaVersion: typeof WEBSITE_DESIGN_SCHEMA_VERSION
+  componentOverrides: WebsiteComponentOverrides
+  componentAnimations: WebsiteComponentAnimations
+  animationsEnabled: boolean
+}
+
+import type { WebsiteTemplateCapabilities, WebsitePublicationContract } from '../../../contracts/websiteCatalog/manifest'
+export type { WebsiteTemplateCapabilities, WebsiteTemplateSectionCapability, WebsitePublicationContract, WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
+
+export type CanonicalWebsiteContract = {
+  schemaVersion: 1
+  organizationId: string
+  renderMode: WebsiteRenderMode
+  templateId: WebsiteTemplateId
+  branding: {
+    logo?: string
+    favicon?: string
+    primaryColor?: string
+    secondaryColor?: string
+    font?: string
+  }
+  seo: {
+    title?: string
+    description?: string
+  }
+  domain: {
+    subdomain?: string
+    customDomain?: string
+    customDomainVerified?: boolean
+  }
+  publishing: WebsitePublicationContract
+  sectionStyles: WebsiteSectionStyles
+  design: WebsiteDesignContract
+  visibility: { public: boolean }
+}

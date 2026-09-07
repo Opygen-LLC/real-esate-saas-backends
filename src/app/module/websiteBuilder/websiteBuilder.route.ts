@@ -1,3 +1,5 @@
+import { WebsiteStudioController } from './websiteStudio.controller'
+import { WebsiteStudioValidation } from './websiteStudio.validation'
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
@@ -5,6 +7,18 @@ import { WebsiteBuilderController } from './websiteBuilder.controller'
 import { WebsiteBuilderValidation } from './websiteBuilder.validation'
 
 const router = express.Router()
+
+// All Studio reads and writes are tenant-scoped and require the same explicit permission.
+router.get('/studio', authMiddlewares.requirePermission('website.write'), WebsiteStudioController.state)
+router.put('/studio/draft', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.save), WebsiteStudioController.save)
+router.post('/studio/publish', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.publish), WebsiteStudioController.publish)
+router.post('/studio/restore', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.restore), WebsiteStudioController.restore)
+router.post('/studio/reset', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.reset), WebsiteStudioController.reset)
+router.get('/studio/history', authMiddlewares.requirePermission('website.write'), WebsiteStudioController.history)
+router.get('/studio/preview', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.preview), WebsiteStudioController.preview)
+router.get('/studio/assets', authMiddlewares.requirePermission('website.write'), validateRequest(WebsiteStudioValidation.assets), WebsiteStudioController.assets)
+router.get('/assets/:id/usage', authMiddlewares.requirePermission('website.write'), WebsiteStudioController.assetUsage)
+
 
 router.get('/design-registry', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.getDesignRegistry)
 router.get('/design', authMiddlewares.requirePermission('website.write'), WebsiteBuilderController.getDesignState)

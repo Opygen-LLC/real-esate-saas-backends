@@ -1,3 +1,7 @@
+import { STUDIO_DEFAULT_PHOTOS } from '../../../contracts/websiteCatalog/photos'
+import { WebsiteAssetUsageService } from './websiteAssetUsage.service'
+import { requiredTransaction } from '../../db/requiredTransaction'
+import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
@@ -471,12 +475,19 @@ const uploadAssetBuffer = async (
 
 const importAssetFromUrl = async (organizationId: string, payload: { url: string; altText?: string }, userId?: string, options: AssetLifecycleOptions = {}) => {
   const remote = await readRemoteImage(payload.url)
-  return uploadAssetBuffer(
+  const asset = await uploadAssetBuffer(
     organizationId,
     { buffer: remote.buffer, mimetype: remote.mimeType, originalname: remote.filename } as Express.Multer.File,
     userId,
     { ...options, altText: payload.altText || options.altText },
   )
+  const photo = STUDIO_DEFAULT_PHOTOS.find((item) => item.url === payload.url)
+  const provenance = photo
+    ? { provider: 'Unsplash', source: photo.source, imageUrl: photo.url, photographer: photo.photographer, photoId: photo.id, license: photo.license, importedAt: new Date() }
+    : { provider: 'remote', source: payload.url, imageUrl: payload.url, importedAt: new Date() }
+  // Provenance is assigned by the server, never trusted from client-supplied license claims.
+  await WebsiteAsset.updateOne({ organizationId, _id: asset._id }, { $set: { provenance } })
+  return asset
 }
 
 
@@ -745,7 +756,7 @@ const cleanupAbandonedPropertyDraftAssets = async (limit = 100) => {
   return { sessions: sessions.size, checked: candidates.length, deleted, reconciled, bytesReleased, incompleteUploadsDeleted, skippedActive, cutoff }
 }
 
-const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId }).sort({ createdAt: -1 }).limit(200).lean()
+const listAssets = async (organizationId: string) => WebsiteAsset.find({ organizationId, context: { $nin: ['property', 'property-draft'] } }).sort({ createdAt: -1, _id: -1 }).limit(200).lean()
 const getAssetById = async (organizationId: string, assetId: string) => {
   const asset: any = await WebsiteAsset.findOne({ _id: assetId, organizationId }).lean()
   if (!asset) throw new ApiError(404, 'Asset not found')
@@ -754,27 +765,20 @@ const getAssetById = async (organizationId: string, assetId: string) => {
   }
   return asset
 }
-const assetIsReferenced = async (organizationId: string, asset: any) => {
-  const needles = [asset.key, asset.url, ...(asset.variants || []).flatMap((variant: any) => [variant.key, variant.url])].filter(Boolean).map(String)
-  const [pages, properties] = await Promise.all([
-    WebsitePage.find({ organizationId }).select('draftDocument publishedDocument').lean(),
-    Property.find({ organizationId }).select('images mediaLinks').lean(),
-  ])
-  const referencesAsset = (value: unknown) => {
-    const serialized = JSON.stringify(value)
-    return needles.some((needle) => serialized.includes(needle))
-  }
-  return pages.some(referencesAsset) || properties.some(referencesAsset)
-}
-const deleteAsset = async (organizationId: string, assetId: string, allowReferenced = false) => {
-  const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId })
-  if (!asset) throw new ApiError(404, 'Asset not found or unauthorized')
-  if (!allowReferenced && await assetIsReferenced(organizationId, asset)) throw new ApiError(409, 'Asset is still used by a draft or published page')
-  await OperationsQueueService.cancel(organizationId, 'asset_finalize', assetId)
-  await Promise.allSettled([ObjectStorageService.remove(asset.key), ...(asset.variants || []).map((v) => ObjectStorageService.remove(v.key))])
-  await asset.deleteOne()
-  await decrementStorageUsage(organizationId, Math.max(0, asset.size || 0))
-  return { id: assetId }
+const assetIsReferenced = async (organizationId: string, asset: any) => (await WebsiteAssetUsageService.usageForAsset(organizationId, asset, undefined, true)).length > 0
+const deleteAsset = async (organizationId: string, assetId: string, _allowReferenced = false) => {
+  if (!Types.ObjectId.isValid(assetId)) throw new ApiError(400, 'Invalid asset identifier')
+  return requiredTransaction(async (session) => {
+    const asset = await WebsiteAsset.findOne({ _id: assetId, organizationId }).session(session)
+    if (!asset) throw new ApiError(404, 'Asset not found or unauthorized')
+    if ((await WebsiteAssetUsageService.usageForAsset(organizationId, asset, session, true)).length) throw new ApiError(409, 'Image is used by a live website, draft, property, or retained revision')
+    await OperationsQueueService.cancel(organizationId, 'asset_finalize', assetId, { session })
+    await OperationsJob.create([{ organizationId, type: 'website_asset_delete', entityId: assetId, runAt: new Date(), payload: { keys: [asset.key, ...(asset.variants || []).map((variant) => variant.key)] }, maxAttempts: 10 }], { session })
+    await WebsiteAsset.deleteOne({ organizationId, _id: assetId }, { session })
+    // Accounting is committed once; object cleanup is idempotent and retried by the worker.
+    await Organization.collection.updateOne({ organizationId }, [{ $set: { storageUsedBytes: { $max: [0, { $subtract: [{ $ifNull: ['$storageUsedBytes', 0] }, Math.max(0, asset.size || 0)] }] } } }], { session })
+    return { id: assetId }
+  })
 }
 
 const cleanupOrphanAssets = async (limit = 100) => {

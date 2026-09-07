@@ -207,7 +207,11 @@
     "test:phase2-catalog:integration": "node scripts/require-env.mjs PHASE2_TEST_DATABASE_URL && vitest run src/tests/integration/phase2CatalogContract.integration.test.ts",
     "profile:phase2-catalog": "ts-node --transpile-only src/app/db/profilePhase2Catalog.ts",
     "migrate:phase2-website-content": "ts-node --transpile-only src/app/db/migratePhase2WebsiteContent.ts",
-    "gate:phase2-catalog": "pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase2-catalog:integration"
+    "gate:phase2-catalog": "pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase2-catalog:integration",
+    "test:phase3-studio": "node --test tests/phase3-studio/*.test.cjs",
+    "migrate:phase3-studio": "ts-node --transpile-only src/app/db/migratePhase3WebsiteStudio.ts",
+    "test:phase3-studio:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase3StudioLifecycle.integration.test.ts",
+    "gate:phase3-studio": "pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase3-studio && pnpm test:phase3-studio:integration"
   },
   "keywords": [
     "real-estate",

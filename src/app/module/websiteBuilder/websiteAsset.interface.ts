@@ -15,6 +15,7 @@ export interface IWebsiteAsset {
   organizationId: string
   key: string
   url: string
+  provenance?: { provider: 'Unsplash' | 'remote'; source: string; imageUrl: string; photographer?: string; photoId?: string; license?: string; importedAt: Date }
   originalName?: string
   mimeType: string
   width?: number

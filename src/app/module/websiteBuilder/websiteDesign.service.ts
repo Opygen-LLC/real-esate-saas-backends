@@ -436,6 +436,7 @@ const applyDesignAction = async (organizationId: string, action: WebsiteDesignAc
 
 export const WebsiteDesignService = {
   getDesignRegistry,
+  validateDraftDesign: assertDesignDelta,
   getDesignState,
   applyDesignAction,
   resolveEffectiveDesignForAccess: (value: unknown, access: WebsiteDesignAccess): WebsiteDesignContract => effectiveDesignForAccess(cloneDesign(value), access).design,
