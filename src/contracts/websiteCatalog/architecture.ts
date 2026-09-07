@@ -159,8 +159,8 @@ export type WebsiteDesignContract = {
   animationsEnabled: boolean
 }
 
-import type { WebsiteTemplateCapabilities, WebsitePublicationContract } from '../../../contracts/websiteCatalog/manifest'
-export type { WebsiteTemplateCapabilities, WebsiteTemplateSectionCapability, WebsitePublicationContract, WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
+import type { WebsiteTemplateCapabilities, WebsitePublicationContract } from './manifest'
+export type { WebsiteTemplateCapabilities, WebsiteTemplateSectionCapability, WebsitePublicationContract, WebsiteRevisionInput } from './manifest'
 
 export type CanonicalWebsiteContract = {
   schemaVersion: 1

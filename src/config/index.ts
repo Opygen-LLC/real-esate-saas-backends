@@ -308,6 +308,7 @@ export default {
   cookie_secure: cookieSecure,
   cookie_same_site: cookieSameSite,
   database_string: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
+  database_url: process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/real-estate-saas',
   mongo: {
     max_pool_size: Math.max(1, Number(process.env.MONGO_MAX_POOL_SIZE || 10)),
     min_pool_size: Math.max(0, Number(process.env.MONGO_MIN_POOL_SIZE || 1)),

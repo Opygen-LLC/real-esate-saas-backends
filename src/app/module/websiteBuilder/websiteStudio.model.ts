@@ -21,7 +21,7 @@ const schema = new Schema<IWebsiteStudio>({
   basePublicationRevision: { type: Number, required: true, min: 0 },
   publishedDraftRevision: { type: Number, default: null },
   snapshot: { type: Schema.Types.Mixed, required: true },
-  builderPages: { type: [Schema.Types.Mixed], default: [] },
+  builderPages: { type: [Schema.Types.Mixed] as any, default: [] },
   updatedBy: String,
 }, { timestamps: true, minimize: false })
 export const WebsiteStudio = model<IWebsiteStudio>('WebsiteStudio', schema)
@@ -39,7 +39,7 @@ const revisionSchema = new Schema<IWebsiteStudioRevision>({
   organizationId: { type: String, required: true },
   revision: { type: Number, required: true, min: 0 },
   snapshot: { type: Schema.Types.Mixed, required: true },
-  builderPages: { type: [Schema.Types.Mixed], default: [] },
+  builderPages: { type: [Schema.Types.Mixed] as any, default: [] },
   publishedAt: { type: Date, required: true },
   createdBy: String,
   message: { type: String, maxlength: 300, default: 'Website published' },
