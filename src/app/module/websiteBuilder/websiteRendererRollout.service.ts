@@ -17,13 +17,18 @@ const rolloutMode = (): WebsiteRendererRolloutMode => {
 const initialRendererVersion = (): WebsiteRendererVersion =>
   rolloutMode() === 'new-sites' ? CURRENT_WEBSITE_RENDERER_VERSION : LEGACY_WEBSITE_RENDERER_VERSION
 
-const rolloutOrganizations = (): Set<string> => new Set(
-  String(process.env.WEBSITE_RENDERER_ROLLOUT_ORGANIZATIONS || '')
+const rolloutOrganizations = (): Set<string> => {
+  const parts = String(process.env.WEBSITE_RENDERER_ROLLOUT_ORGANIZATIONS || '')
     .split(',')
     .map((value) => value.trim())
-    .filter((value) => /^[A-Za-z0-9_-]{3,120}$/.test(value))
-    .slice(0, 500),
-)
+    .filter(Boolean)
+  if (parts.includes('*')) return new Set()
+  return new Set(
+    parts
+      .filter((value) => /^[A-Za-z0-9_-]{3,120}$/.test(value))
+      .slice(0, 500),
+  )
+}
 
 const canAdoptCurrentRenderer = (organizationId?: string): boolean => {
   if (rolloutMode() === 'disabled') return false
