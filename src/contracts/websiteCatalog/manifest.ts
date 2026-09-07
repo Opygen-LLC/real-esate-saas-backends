@@ -124,7 +124,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "Structured multi-agent brokerage presentation.",
+    "description": "Quiet corporate premium for established brokerages: precise search, disciplined listing presentation and a strong advisory-team hierarchy.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -161,7 +161,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "Bold project-led layout for developers and urban agencies.",
+    "description": "Architectural editorial for developers: warm stone surfaces, project-led storytelling and clear inventory presentation.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -198,7 +198,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "free",
     "entitlement": "included",
-    "description": "Clean Scandinavian architectural layout with high whitespace, mortgage estimator and verified badges.",
+    "description": "True Nordic minimalism with warm whites, generous space, fine separators and uncomplicated property presentation.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -235,7 +235,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "High-tech dark cyber-luxury with live market ticker, glass cards and financial grid mode.",
+    "description": "Quiet dark luxury for metropolitan portfolios: charcoal and warm ivory, restrained bronze accents and private-advisory presentation.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -272,7 +272,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "free",
     "entitlement": "included",
-    "description": "Warm organic modern editorial for peaceful waterfront, garden and botanical living.",
+    "description": "Warm residential lifestyle design with cream and sage surfaces, natural-light imagery and neighborhood-led storytelling.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -309,7 +309,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "Premium editorial system with expressive typography, asymmetric property grids, restrained surfaces and magazine-style storytelling across every public page.",
+    "description": "Property-magazine presentation with expressive typography, asymmetric compositions and curated listing stories across every public page.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -346,7 +346,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "Image-first luxury property experience with immersive galleries, floating navigation, calm neutral surfaces and premium inquiry journeys.",
+    "description": "Photographic portfolio luxury with large galleries, low visual clutter, compact navigation and an accessible inquiry path.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -383,7 +383,7 @@ const metadata = [
     "supportedSchemaVersion": 2,
     "tier": "premium",
     "entitlement": "premiumTemplates",
-    "description": "Swiss-grid brokerage system with sharp hierarchy, disciplined spacing, structured listing data and a professional commercial-real-estate tone.",
+    "description": "Swiss-grid realty system with disciplined hierarchy, restrained color and clear property facts across desktop and mobile.",
     "capabilities": {
       "advancedBuilder": true,
       "hero": {
@@ -422,9 +422,9 @@ const sharedPageFields = Object.entries(WEBSITE_CONTENT_FIELDS).flatMap(([page, 
 const fieldsFor = (id: WebsiteTemplateId): string[] => [
   ...sharedPageFields, ...baseHomeFields.map((field) => `home.${field}`),
   ...(id === 'template-1' ? ['home.trustItems'] : []),
-  ...(id === 'template-2' ? ['home.heroGallery'] : []),
+  ...(['template-2', 'template-9'].includes(id) ? ['home.heroGallery'] : []),
   ...(['template-5', 'template-7'].includes(id) ? ['heroCardBadge', 'heroCardTagline', 'heroCardTitle', 'heroCardSpecs', 'heroCardButtonText', 'heroCardLink', 'showHeroCard', 'heroPropertyId'].map((field) => `home.${field}`) : []),
-  ...(['template-8', 'template-9', 'template-10'].includes(id) ? ['heroButtonText', 'heroButtonLink', 'secondaryButtonText', 'secondaryButtonLink'].map((field) => `home.${field}`) : []),
+  ...(['template-3', 'template-4', 'template-5', 'template-6', 'template-7', 'template-8', 'template-9', 'template-10'].includes(id) ? ['heroButtonText', 'heroButtonLink', 'secondaryButtonText', 'secondaryButtonLink'].map((field) => `home.${field}`) : []),
 ]
 export const WEBSITE_TEMPLATE_MANIFESTS: readonly WebsiteTemplateManifest[] = metadata.map((item) => ({
   ...item, manifestVersion: WEBSITE_MANIFEST_VERSION, contentSchemaVersion: WEBSITE_CONTENT_SCHEMA_VERSION,
