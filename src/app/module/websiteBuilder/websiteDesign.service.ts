@@ -1,3 +1,4 @@
+import { mergeAndMigrateContent } from './websiteContent.service'
 import mongoose, { type ClientSession } from 'mongoose'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
@@ -350,7 +351,7 @@ const applyActionToDesign = async (
 
 const applyDesignAction = async (organizationId: string, action: WebsiteDesignAction, actor: WebsiteDesignActor = {}) => {
   const current: any = await Organization.findOne({ organizationId })
-    .select('_id organizationId templateId websiteSettings.renderMode websiteSettings.websiteDesign websiteSettings.publicationRevision')
+    .select('_id organizationId templateId websiteSettings')
     .lean()
   if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const renderMode = current.websiteSettings?.renderMode === 'builder' ? 'builder' : 'template'
@@ -365,9 +366,13 @@ const applyDesignAction = async (organizationId: string, action: WebsiteDesignAc
   const beforeDesign = cloneDesign(current.websiteSettings?.websiteDesign)
   const next = await applyActionToDesign(organizationId, action, beforeTemplateId, beforeDesign)
   const audits = auditForAction(action, beforeTemplateId, next.templateId, beforeDesign, next.design)
-  if (!audits.length && beforeTemplateId === next.templateId) return getDesignState(organizationId)
+  if (!audits.length && beforeTemplateId === next.templateId && action.action !== 'APPLY_TEMPLATE') return getDesignState(organizationId)
 
   const expectedPublicationRevision = currentPublicationRevision
+  // Applying a theme fills only absent values; saved blanks, toggles and arrays survive.
+  const contentMigration = action.action === 'APPLY_TEMPLATE' || next.templateId !== beforeTemplateId
+    ? mergeAndMigrateContent(current.websiteSettings, undefined, next.templateId)
+    : undefined
   let publication: any = null
 
   const persist = async (session?: ClientSession) => {
@@ -377,6 +382,7 @@ const applyDesignAction = async (organizationId: string, action: WebsiteDesignAc
       set: {
         templateId: next.templateId,
         'websiteSettings.websiteDesign': next.design,
+        ...(contentMigration ? { 'websiteSettings.content': contentMigration.content, 'websiteSettings.contentSchemaVersion': contentMigration.contentSchemaVersion } : {}),
       },
       session,
       expectedPublicationRevision,

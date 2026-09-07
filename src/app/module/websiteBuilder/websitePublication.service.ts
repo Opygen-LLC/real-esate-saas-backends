@@ -1,3 +1,4 @@
+import { isPublicationRevision } from '../../../contracts/websiteCatalog/manifest'
 import type { ClientSession } from 'mongoose'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
@@ -28,6 +29,7 @@ type AfterPublicationInput = {
 }
 
 const commitPublicationState = async ({ organizationId, renderMode, set = {}, unset = {}, session, expectedPublicationRevision }: CommitPublicationInput) => {
+  if (expectedPublicationRevision !== undefined && !isPublicationRevision(expectedPublicationRevision)) throw new ApiError(400, 'Invalid publication revision')
   const lastPublishedAt = new Date()
   const revisionFilter = expectedPublicationRevision === undefined
     ? {}

@@ -1,3 +1,4 @@
+import type { WebsiteContentPatch } from '../../../contracts/websiteCatalog/content'
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
 import type { CanonicalWebsiteContract, WebsiteDesignContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
 export {
@@ -56,7 +57,8 @@ export type OrganizationWebsiteSettings = {
   enableLeadForm?: boolean
   enableWhatsAppChat?: boolean
   renderMode?: WebsiteRenderMode
-  content?: Record<string, unknown>
+  content?: WebsiteContentPatch
+  contentSchemaVersion?: number
   sectionStyles?: CanonicalWebsiteSectionStyles
   websiteDesign?: WebsiteDesignContract
   footer?: WebsiteFooterSettings

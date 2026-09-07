@@ -306,47 +306,16 @@ const getAllProperties = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getPublicPropertySelection = catchAsync(async (req: Request, res: Response) => {
+  const data = await PropertyService.getPublicPropertySelection(req.params.organizationId, req.query.ids)
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Public property selection retrieved', data })
+})
+
 const getPublicProperties = catchAsync(async (req: Request, res: Response) => {
   const { organizationId } = req.params
-  const filters = pick(req.query, [
-    'searchTerm',
-    'propertyType',
-    'listingType',
-    'city',
-    'state',
-    'divisionId',
-    'districtId',
-    'upazilaId',
-    'status',
-    'minPrice',
-    'maxPrice',
-    'bedrooms',
-    'bathrooms',
-    'minArea',
-    'maxArea',
-    'areaUnit',
-    'minFloor',
-    'maxFloor',
-    'pricingMode',
-    'minUnitRate',
-    'maxUnitRate',
-    'minRoadWidthFeet',
-    'facing',
-    'approvalAuthority',
-    'minRooms',
-    'starRating',
-    'hotelOperatingStatus',
-    'minLandArea',
-    'maxLandArea',
-    'landAreaUnit',
-    'minSecurityDeposit',
-    'availableBy',
-    'isFeatured',
-  ])
-  filters.organizationId = organizationId
-
-  const paginationOptions = pick(req.query, ['page', 'limit', 'sortBy', 'sortOrder', 'cursor'])
-  const result = await PropertyService.getPublicProperties(organizationId, filters, paginationOptions)
+  // Pass the raw scalar/array values to the shared strict validator. Picking here
+  // used to discard legacy aliases before the backend could normalize them.
+  const result = await PropertyService.getPublicProperties(organizationId, req.query as Record<string, any>, {})
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -554,6 +523,7 @@ export const PropertyController = {
   cleanupPropertyDraftSession,
   getAllProperties,
   getPublicProperties,
+  getPublicPropertySelection,
   getPublicPropertyDetail,
   getPropertyById,
   getPublicPropertyBySlug,

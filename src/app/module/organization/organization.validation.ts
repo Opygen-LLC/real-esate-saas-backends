@@ -1,3 +1,4 @@
+import { validateWebsiteContentPatch, type WebsiteContentPatch } from '../../../contracts/websiteCatalog/content'
 import { z } from 'zod'
 import { bangladeshPhoneSchema, emailSchema } from '../../helpers/inputValidation'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
@@ -59,8 +60,6 @@ const socialLinks = z.object({
   whatsapp: z.union([z.literal(''), z.string().max(40)]).optional(),
 }).strict()
 const shortText = (max = 200) => z.string().trim().max(max)
-const websiteFeature = z.object({ title: shortText(120), description: shortText(500) }).strict()
-const websiteStat = z.object({ label: shortText(80), value: shortText(40), caption: shortText(160) }).strict()
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Enter a valid 6-digit hex color')
 const websiteSectionStyle = z.object({
   backgroundColor: hexColor.optional(),
@@ -111,36 +110,11 @@ const websiteDesign = z.object({
   componentAnimations: websiteComponentAnimations.optional(),
   animationsEnabled: z.boolean().optional(),
 }).strict()
-const websiteContent = z.object({
-  navigation: z.object({
-    tagline: shortText(120), homeLabel: shortText(40), propertiesLabel: shortText(40), agentsLabel: shortText(40),
-    aboutLabel: shortText(40), contactLabel: shortText(40), headerCtaLabel: shortText(60),
-    footerDescription: shortText(600), footerTrustText: shortText(180),
-  }).strict().optional(),
-  home: z.object({
-    eyebrow: shortText(160), heroTitle: shortText(200), heroSubtitle: shortText(600), heroImage: optionalUrl,
-    trustItems: z.array(shortText(140)).max(3), featuredEyebrow: shortText(120), featuredTitle: shortText(160), featuredSubtitle: shortText(400),
-    whyEyebrow: shortText(120), whyTitle: shortText(180), whySubtitle: shortText(400), features: z.array(websiteFeature).max(4),
-    agentsEyebrow: shortText(120), agentsTitle: shortText(160), agentsSubtitle: shortText(400), consultationEyebrow: shortText(120),
-    consultationTitle: shortText(180), consultationSubtitle: shortText(500), consultationButtonText: shortText(80),
-    showFeaturedProperties: z.boolean(), showWhyChooseUs: z.boolean(), showAgents: z.boolean(), showConsultation: z.boolean(),
-    heroCardBadge: shortText(120).optional(), heroCardTagline: shortText(120).optional(), heroCardTitle: shortText(200).optional(),
-    heroCardSpecs: shortText(120).optional(), heroCardButtonText: shortText(80).optional(), heroCardLink: z.string().trim().max(500).optional(),
-    showHeroCard: z.boolean().optional(),
-  }).strict().optional(),
-  about: z.object({
-    eyebrow: shortText(120), title: shortText(200), intro: shortText(900), image: optionalUrl, storyTitle: shortText(180), storyBody: shortText(1500),
-    values: z.array(websiteFeature).max(3), stats: z.array(websiteStat).max(4), ctaEyebrow: shortText(120), ctaTitle: shortText(200),
-    ctaText: shortText(700), ctaButtonText: shortText(80), showStats: z.boolean(),
-  }).strict().optional(),
-  properties: z.object({ eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500) }).strict().optional(),
-  agents: z.object({ eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500) }).strict().optional(),
-  contact: z.object({
-    eyebrow: shortText(120), title: shortText(180), subtitle: shortText(500), officeTitle: shortText(120), hoursTitle: shortText(120),
-    weekdaysHours: shortText(80), fridayHours: shortText(80), whatsappHours: shortText(100), formTitle: shortText(120),
-    formSubtitle: shortText(400), submitButtonText: shortText(80),
-  }).strict().optional(),
-}).strict()
+const websiteContent = z.unknown().superRefine((value, context) => {
+  for (const issue of validateWebsiteContentPatch(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: issue.path.split('.').filter(Boolean), message: issue.message })
+  }
+}).transform((value) => value as WebsiteContentPatch)
 const websiteSettings = z.object({
   heroTitle: z.string().max(160).optional(),
   heroSubtitle: z.string().max(400).optional(),
@@ -179,6 +153,7 @@ export const OrganizationValidation = {
   }).strict() }),
 
   branding: z.object({ body: z.object({
+    expectedPublicationRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), metaTitle: z.string().trim().max(120).optional(),
     metaDescription: z.string().trim().max(300).optional(), logo: optionalUrl.optional(), favicon: optionalUrl.optional(),
@@ -189,6 +164,7 @@ export const OrganizationValidation = {
   }).strict() }),
 
   website: z.object({ body: z.object({
+    expectedPublicationRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
     templateId: z.enum(WEBSITE_TEMPLATE_IDS).optional(),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     font: z.enum(['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display']).optional(), metaTitle: z.string().max(120).optional(),

@@ -31,6 +31,7 @@ export type IGenericResponse<T> = {
     nextCursor?: string
     hasMore?: boolean
     paginationMode?: 'page' | 'cursor'
+    contractVersion?: number
   }
   data: T
 }

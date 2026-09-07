@@ -287,6 +287,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       publicationRevision: { type: Number, min: 0, default: 0 },
       lastPublishedAt: { type: Date, default: null },
       content: { type: Schema.Types.Mixed, default: {} },
+      contentSchemaVersion: { type: Number, min: 0, default: 0 },
       // Stored as a nested Mongo-safe object and flattened to dotted stable section IDs at the API boundary.
       sectionStyles: { type: Schema.Types.Mixed, default: {} },
       websiteDesign: {

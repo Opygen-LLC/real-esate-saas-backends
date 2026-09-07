@@ -14,6 +14,7 @@ const router = express.Router()
 // Public endpoints (no authentication required)
 router.get('/public-detail/:id', PropertyController.getPublicPropertyDetail)
 router.get('/public/:organizationId', PropertyController.getPublicProperties)
+router.get('/public/:organizationId/selection', PropertyController.getPublicPropertySelection)
 router.get('/public/:organizationId/slug/:slug', PropertyController.getPublicPropertyBySlug)
 
 // Authenticated import/export. Import is always preview -> confirm; there is no

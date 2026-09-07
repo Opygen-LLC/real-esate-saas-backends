@@ -159,23 +159,8 @@ export type WebsiteDesignContract = {
   animationsEnabled: boolean
 }
 
-export type WebsiteTemplateSectionCapability = { supported: boolean; label: string; required?: boolean }
-export type WebsiteTemplateCapabilities = {
-  hero: { backgroundImage: boolean; eyebrow: boolean; title: boolean; subtitle: boolean }
-  sections: {
-    featuredProperties: WebsiteTemplateSectionCapability
-    whyChooseUs: WebsiteTemplateSectionCapability
-    agents: WebsiteTemplateSectionCapability
-    consultation: WebsiteTemplateSectionCapability
-  }
-  advancedBuilder: boolean
-}
-
-export type WebsitePublicationContract = {
-  status: 'provisioned' | 'published' | 'suspended'
-  revision: number
-  lastPublishedAt?: string | null
-}
+import type { WebsiteTemplateCapabilities, WebsitePublicationContract } from '../../../contracts/websiteCatalog/manifest'
+export type { WebsiteTemplateCapabilities, WebsiteTemplateSectionCapability, WebsitePublicationContract, WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
 
 export type CanonicalWebsiteContract = {
   schemaVersion: 1

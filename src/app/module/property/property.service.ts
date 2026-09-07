@@ -1,5 +1,5 @@
 import httpStatus from 'http-status'
-import type { ClientSession } from 'mongoose'
+import { Types, type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
@@ -24,6 +24,9 @@ import { EntitlementService } from '../entitlement/entitlement.service'
 import { toPublicProperties, toPublicProperty, type PublicPropertyDto } from './publicProperty.serializer'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { logger } from '../../../shared/logger'
+import { buildCatalogPlan, requiresCatalogComputation } from './propertyCatalog.pipeline'
+import { parsePublicPropertyQuery, CATALOG_CONTRACT_VERSION } from '../../../contracts/websiteCatalog/query'
+import { PUBLIC_FILTER_VISIBILITY, parsePublicPropertySelection } from '../../../contracts/websiteCatalog/publicProperty'
 
 type PropertyActor = { id?: string; role?: string; canPublish?: boolean }
 type PropertyCreateOptions = { session?: ClientSession | null; emitEvent?: boolean }
@@ -170,7 +173,7 @@ const safePropertySort = (sortBy?: string, sortOrder?: string | number): { sortB
   sortOrder: sortOrder === 'asc' || sortOrder === 1 ? 'asc' : 'desc',
 })
 
-const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Record<string, unknown>> => {
+const buildPropertyWhereCondition = async (filters: IPropertyFilter, publicView = false): Promise<Record<string, unknown>> => {
   const {
     searchTerm, organizationId, propertyType, listingType, status, city, state, divisionId, districtId, upazilaId,
     minPrice, maxPrice, bedrooms, bathrooms, minArea, maxArea, areaUnit, minFloor, maxFloor,
@@ -181,7 +184,10 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
 
   const andConditions: Array<Record<string, unknown>> = []
 
-  if (organizationId) {
+  if (organizationId && publicView) {
+    // Public requests use the canonical tenant ID, never a cross-tenant alias OR.
+    andConditions.push({ organizationId })
+  } else if (organizationId) {
     const org = await Organization.findOne({
       $or: [
         { organizationId },
@@ -199,13 +205,21 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
 
   if (searchTerm) {
     const raw = String(searchTerm).trim()
-    const search = safeRegexPattern(raw)
-    const prefix = { $regex: `^${search}`, $options: 'i' }
-    andConditions.push({ $or: [
-      { title: prefix }, { slug: raw.toLowerCase() }, { address: prefix }, { city: prefix }, { state: prefix },
-      { 'bangladeshAddress.area': prefix }, { 'bangladeshAddress.upazila': prefix }, { 'bangladeshAddress.mouza': prefix },
-      { 'bangladeshAddress.postalCode': prefix }, { hotelName: prefix }, { buildingName: prefix }, { developerName: prefix },
-    ] })
+    const publicField = (name: string, condition: Record<string, unknown>) => publicView
+      ? { $and: [{ hiddenPublicFields: { $ne: name } }, condition] }
+      : condition
+    // Free-text location and legacy styles can occupy different fields (e.g. "Gulshan Penthouse").
+    const words = publicView ? raw.split(/\s+/).filter(Boolean) : [raw]
+    for (const word of words) {
+      const expression = { $regex: `${publicView ? '' : '^'}${safeRegexPattern(word)}`, $options: 'i' }
+      andConditions.push({ $or: [
+        { title: expression }, { slug: word.toLowerCase() },
+        publicField('address', { address: expression }), publicField('location', { city: expression }), publicField('location', { state: expression }),
+        publicField('location', { 'bangladeshAddress.area': expression }), publicField('location', { 'bangladeshAddress.upazila': expression }),
+        publicField('address', { 'bangladeshAddress.mouza': expression }), publicField('address', { 'bangladeshAddress.postalCode': expression }),
+        { hotelName: expression }, ...(publicView ? [] : [{ buildingName: expression }, { developerName: expression }]),
+      ] })
+    }
   }
 
   if (propertyType) andConditions.push({ propertyType })
@@ -220,16 +234,22 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   if (divisionId) andConditions.push({ 'bangladeshAddress.divisionId': divisionId })
   if (districtId) andConditions.push({ 'bangladeshAddress.districtId': districtId })
   if (upazilaId) andConditions.push({ 'bangladeshAddress.upazilaId': upazilaId })
-  if (agentId) andConditions.push({ agentId })
+  if (agentId) {
+    if (!Types.ObjectId.isValid(agentId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid property agent identifier')
+    andConditions.push({ agentId: new Types.ObjectId(agentId) })
+  }
+  if (publicView) {
+    for (const [key, field] of Object.entries(PUBLIC_FILTER_VISIBILITY)) {
+      const value = filters[key as keyof IPropertyFilter]
+      if (value !== undefined && value !== null && value !== '') andConditions.push({ hiddenPublicFields: { $ne: field } })
+    }
+  }
   if (quotaLocked === false || quotaLocked === 'false') andConditions.push({ quotaLocked: { $ne: true } })
   if (quotaLocked === true || quotaLocked === 'true') andConditions.push({ quotaLocked: true })
 
   const ranges: Array<[unknown, unknown, string, string]> = [
-    [minPrice, maxPrice, 'price', 'Price'],
-    [minArea, maxArea, 'area', 'Area'],
     [minFloor, maxFloor, 'floorNumber', 'Floor'],
     [minUnitRate, maxUnitRate, 'pricing.unitRate', 'Unit rate'],
-    [minLandArea, maxLandArea, 'landArea', 'Land area'],
   ]
   for (const [minRaw, maxRaw, field, label] of ranges) {
     const minValue = numericFilter(minRaw as any, `Minimum ${label.toLowerCase()}`)
@@ -253,8 +273,7 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   if (ratingValue !== undefined) andConditions.push({ starRating: { $gte: ratingValue } })
   if (depositValue !== undefined) andConditions.push({ 'rentalTerms.securityDeposit': { $gte: depositValue } })
 
-  if (areaUnit) andConditions.push({ areaUnit })
-  if (landAreaUnit) andConditions.push({ landAreaUnit })
+  // Area units qualify range inputs; comparisons use square-foot normalization.
   if (pricingMode) andConditions.push({ 'pricing.mode': pricingMode })
   if (facing) andConditions.push({ facing })
   if (approvalAuthority) andConditions.push({ 'regulatory.approvalAuthority': approvalAuthority })
@@ -262,7 +281,9 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
   if (availableBy) {
     const availableDate = new Date(String(availableBy))
     if (Number.isNaN(availableDate.getTime())) throw new ApiError(httpStatus.BAD_REQUEST, 'Available by must be a valid date')
-    availableDate.setHours(23, 59, 59, 999)
+    // Public date-only inputs use the agency timezone (Bangladesh), independent of server timezone.
+    const end = new Date(`${String(availableBy).slice(0, 10)}T23:59:59.999+06:00`)
+    availableDate.setTime(end.getTime())
     andConditions.push({ 'rentalTerms.availableFrom': { $lte: availableDate } })
   }
   if (furnished !== undefined && furnished !== '') andConditions.push({ furnished: furnished === 'true' || furnished === true })
@@ -274,6 +295,7 @@ const buildPropertyWhereCondition = async (filters: IPropertyFilter): Promise<Re
 const getAllProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
+  options: { publicView?: boolean } = {},
 ): Promise<IGenericResponse<IProperty[]>> => {
   const organizationId = String(filters.organizationId || '')
   const profile = createQueryProfile('/api/v1/property', organizationId)
@@ -283,24 +305,36 @@ const getAllProperties = async (
     throw new ApiError(httpStatus.BAD_REQUEST, 'Property cursor pagination requires sortBy=createdAt&sortOrder=desc')
   }
   const cursor = prepareCursorPagination(paginationOptions, { sortField: 'createdAt', sortOrder: 'desc', parseValue: parseDateCursorValue })
-  const baseWhere = await buildPropertyWhereCondition(filters)
+  const baseWhere = await buildPropertyWhereCondition(filters, Boolean(options.publicView))
   const whereCondition = cursor.range ? { $and: [baseWhere, cursor.range] } : baseWhere
-  const safeSort = cursor.cursorMode ? { sortBy: 'createdAt', sortOrder: 'desc' as const } : safePropertySort(cursor.sortBy, cursor.sortOrder)
+  const safeSort = cursor.cursorMode ? { sortBy: 'createdAt', sortOrder: 'desc' as const } : requestedSort
 
-  const [result, total] = await profile.db(() => Promise.all([
-    Property.find(whereCondition)
-      .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', organizationId ? { organizationId } : undefined))
-      .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
-      .skip(cursor.querySkip)
-      .limit(cursor.queryLimit)
-      .lean(),
-    Property.countDocuments(baseWhere),
-  ]), 2)
+  let result: any[]
+  let total: number
+  const populate = userRefPopulate('agentId', 'name email phoneNumber userRole', organizationId ? { organizationId } : undefined)
+  if (requiresCatalogComputation(filters, safeSort.sortBy)) {
+    const conversion = await getAreaConversionSettings(organizationId)
+    const plan = buildCatalogPlan({ baseWhere, filters, ...safeSort, skip: cursor.querySkip, limit: cursor.queryLimit,
+      cursorRange: cursor.range, publicView: options.publicView, conversion })
+    const [rows, counts] = await profile.db(() => Promise.all([
+      Property.aggregate(plan.data).allowDiskUse(true).option({ maxTimeMS: 10_000 }),
+      Property.aggregate<{ total: number }>(plan.count).allowDiskUse(true).option({ maxTimeMS: 10_000 }),
+    ]), 2)
+    result = await Property.populate(rows, { ...populate, options: { lean: true } }) as any[]
+    total = counts[0]?.total || 0
+  } else {
+    ;[result, total] = await profile.db(() => Promise.all([
+      Property.find(whereCondition).populate(populate)
+        .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
+        .skip(cursor.querySkip).limit(cursor.queryLimit).maxTimeMS(10_000).lean(),
+      Property.countDocuments(baseWhere).maxTimeMS(10_000),
+    ]), 2)
+  }
   const page = finalizeCursorPage(result as any[], cursor.limit, 'createdAt', cursor.cursorMode)
   profile.finish(page.rows.length, { paginationMode: cursor.cursorMode ? 'cursor' : 'page' })
 
   return {
-    meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: page.hasMore, paginationMode: cursor.cursorMode ? 'cursor' : 'page' },
+    meta: { page: cursor.page, limit: cursor.limit, total, nextCursor: page.nextCursor, hasMore: cursor.cursorMode ? page.hasMore : cursor.page * cursor.limit < total, paginationMode: cursor.cursorMode ? 'cursor' : 'page' },
     data: page.rows as IProperty[],
   }
 }
@@ -346,15 +380,12 @@ const getPropertyExportRows = async (
   sortOptions: Pick<IPaginationOptions, 'sortBy' | 'sortOrder'>,
 ): Promise<CrmExportRow[]> => {
   const where = await buildPropertyWhereCondition({ ...filters, organizationId })
-  const total = await Property.countDocuments(where)
-  if (total > MAX_PROPERTY_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_PROPERTY_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
   const safeSort = safePropertySort(sortOptions.sortBy, sortOptions.sortOrder)
-  const properties: any[] = await Property.find(where)
-    .populate(userRefPopulate('agentId', 'name email userRole', { organizationId }))
-    .sort({ [safeSort.sortBy]: safeSort.sortOrder, _id: safeSort.sortOrder })
-    .limit(MAX_PROPERTY_EXPORT_ROWS)
-    .select('title propertyType listingType status price pricing rentalTerms currency bangladeshAddress city state address bedrooms bathrooms area areaUnit floorNumber roadWidthFeet facing regulatory totalRooms starRating hotelOperatingStatus landArea landAreaUnit agentId furnished isFeatured createdAt updatedAt')
-    .lean()
+  const plan = buildCatalogPlan({ baseWhere: where, filters, ...safeSort, skip: 0, limit: MAX_PROPERTY_EXPORT_ROWS + 1,
+    conversion: await getAreaConversionSettings(organizationId) })
+  const rows = await Property.aggregate(plan.data).allowDiskUse(true).option({ maxTimeMS: 30_000 })
+  if (rows.length > MAX_PROPERTY_EXPORT_ROWS) throw new ApiError(413, `Export contains more than ${MAX_PROPERTY_EXPORT_ROWS.toLocaleString()} rows. Narrow the filters and retry.`)
+  const properties: any[] = await Property.populate(rows, { ...userRefPopulate('agentId', 'name email userRole', { organizationId }), options: { lean: true } }) as any[]
 
   return properties.map((property: any) => ({
     title: property.title,
@@ -403,12 +434,31 @@ const getPublicProperties = async (
   filters: IPropertyFilter,
   paginationOptions: IPaginationOptions,
 ): Promise<IGenericResponse<PublicPropertyDto[]>> => {
+  const parsed = parsePublicPropertyQuery({ ...filters, ...paginationOptions })
+  if (parsed.issues.length) throw new ApiError(httpStatus.BAD_REQUEST, parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; '), '', 'INVALID_PUBLIC_PROPERTY_QUERY')
   await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  const { page, limit, sortBy, sortOrder, cursor, ...queryFilters } = parsed.query
   const result = await getAllProperties(
-    { ...filters, organizationId, status: [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
-    paginationOptions,
+    { ...queryFilters, organizationId, status: queryFilters.status || [...PUBLIC_PROPERTY_STATUSES], quotaLocked: false },
+    { page, limit, sortBy, sortOrder, cursor },
+    { publicView: true },
   )
-  return { ...result, data: toPublicProperties(result.data as any[]) }
+  return { ...result, meta: { ...result.meta, contractVersion: CATALOG_CONTRACT_VERSION }, data: toPublicProperties(result.data as any[]) }
+
+}
+
+/** Resolve curated IDs to current tenant-owned public records, preserving owner selection order. */
+const getPublicPropertySelection = async (organizationId: string, rawIds: unknown): Promise<PublicPropertyDto[]> => {
+  let ids: string[]
+  try { ids = parsePublicPropertySelection(rawIds) }
+  catch (error) { throw new ApiError(400, error instanceof Error ? error.message : 'Invalid property selection') }
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  if (!ids.length) return []
+  const records = await Property.find({ organizationId, _id: { $in: ids }, status: { $in: [...PUBLIC_PROPERTY_STATUSES] }, quotaLocked: { $ne: true } })
+    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
+    .maxTimeMS(10_000).lean()
+  const byId = new Map(toPublicProperties(records).map((record) => [record._id, record]))
+  return ids.flatMap((id) => { const property = byId.get(id); return property ? [property] : [] })
 }
 
 const getPropertyById = async (organizationId: string, id: string): Promise<IProperty | null> => {
@@ -648,6 +698,7 @@ export const PropertyService = {
   createProperty,
   getAllProperties,
   getPublicProperties,
+  getPublicPropertySelection,
   getPropertyById,
   getPropertyBySlug,
   getPublicPropertyDetail,

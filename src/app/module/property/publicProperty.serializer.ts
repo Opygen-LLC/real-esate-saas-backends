@@ -1,10 +1,7 @@
-import type { IProperty, IPropertyImage, IPropertyMediaLink } from './property.interface'
-import type { PublicPropertyField } from './property.constants'
-
-export type PublicPropertyDto = Omit<Partial<IProperty>, 'agentId'> & {
-  _id?: unknown
-  agentId?: Record<string, unknown>
-}
+import { HOTEL_INVESTMENT_FIELDS, type PublicPropertyField } from './property.constants'
+import type { PublicPropertyDto } from '../../../contracts/websiteCatalog/publicProperty'
+import { effectivePropertyPrice, propertyPricePeriod } from '../../../contracts/websiteCatalog/values'
+export type { PublicPropertyDto } from '../../../contracts/websiteCatalog/publicProperty'
 
 const toPlain = (value: any): Record<string, any> => {
   if (!value) return {}
@@ -12,9 +9,25 @@ const toPlain = (value: any): Record<string, any> => {
   return { ...value }
 }
 
+const pick = (source: any, fields: readonly string[]): Record<string, unknown> => {
+  const value = toPlain(source)
+  return Object.fromEntries(fields.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]))
+}
+
+/** Match the actual JSON wire format even in server rendering and tests. */
+const toWire = (value: any): any => {
+  if (value instanceof Date) return value.toISOString()
+  if (value && typeof value.toHexString === 'function') return value.toHexString()
+  if (Array.isArray(value)) return value.map(toWire)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toWire(item)]))
+  return value
+}
+
 const safeAgent = (value: any): Record<string, unknown> | undefined => {
   if (!value || typeof value !== 'object') return undefined
-  const agent = toPlain(value)
+  const source = toPlain(value)
+  const profile = toPlain(source.agentProfile)
+  const agent = { ...profile, ...source }
   const result: Record<string, unknown> = {}
   for (const key of ['_id', 'name', 'email', 'phoneNumber', 'profileImgURL', 'licenseNumber', 'bio', 'userRole']) {
     if (agent[key] !== undefined && agent[key] !== null && agent[key] !== '') result[key] = agent[key]
@@ -52,8 +65,12 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
     if (property[key] !== undefined && property[key] !== null) result[key] = property[key]
   }
 
-  if (Array.isArray(property.images)) result.images = property.images as IPropertyImage[]
-  if (Array.isArray(property.mediaLinks)) result.mediaLinks = property.mediaLinks as IPropertyMediaLink[]
+  if (Array.isArray(property.images)) result.images = property.images.map((image: any) => pick(image, ['_id', 'assetId', 'url', 'caption', 'alt', 'isFeatured', 'order']))
+  if (Array.isArray(property.mediaLinks)) result.mediaLinks = property.mediaLinks.map((media: any) => pick(media, ['id', 'url', 'provider', 'type', 'title', 'isHero', 'embedUrl']))
+
+  result.effectivePrice = effectivePropertyPrice(property)
+  result.priceStatus = result.effectivePrice === null ? 'on_request' : 'available'
+  result.pricePeriod = propertyPricePeriod(property)
 
   if (!hidden.has('description') && property.description) result.description = property.description
 
@@ -68,8 +85,8 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
         negotiable: Boolean(property.pricing.negotiable),
       }
     }
-    if (property.rentalTerms) result.rentalTerms = property.rentalTerms
-    if (property.paymentPlan) result.paymentPlan = property.paymentPlan
+    if (property.rentalTerms) result.rentalTerms = pick(property.rentalTerms, ['securityDeposit', 'advanceMonths', 'minimumLeaseMonths', 'availableFrom', 'utilityIncluded'])
+    if (property.paymentPlan) result.paymentPlan = pick(property.paymentPlan, ['type', 'bookingAmount', 'downPaymentAmount', 'downPaymentPercent', 'installmentCount', 'installmentFrequency', 'handoverPayment', 'registrationPayment', 'remainingAmount', 'installmentAmount'])
     if (property.financingCalculator?.enabled && property.financingCalculator?.showPublic) {
       result.financingCalculator = {
         enabled: true,
@@ -136,7 +153,7 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
     }
     if (property.hotelInvestment && Array.isArray(property.hotelInvestment.publicFields)) {
       const publicInvestment: Record<string, unknown> = {}
-      for (const key of property.hotelInvestment.publicFields) {
+      for (const key of property.hotelInvestment.publicFields.filter((field: unknown) => (HOTEL_INVESTMENT_FIELDS as readonly unknown[]).includes(field))) {
         if (property.hotelInvestment[key] !== undefined && property.hotelInvestment[key] !== null) {
           publicInvestment[key] = property.hotelInvestment[key]
         }
@@ -145,8 +162,8 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
     }
   }
 
-  if (!hidden.has('utilities') && property.utilities) result.utilities = property.utilities
-  if (!hidden.has('regulatory') && property.regulatory) result.regulatory = property.regulatory
+  if (!hidden.has('utilities') && property.utilities) result.utilities = pick(property.utilities, ['electricity', 'gas', 'water', 'sewerage', 'internet'])
+  if (!hidden.has('regulatory') && property.regulatory) result.regulatory = pick(property.regulatory, ['approvalAuthority', 'approvalNumber', 'mutationStatus', 'khatianNumber', 'holdingTaxPaidThrough'])
   if (!hidden.has('amenities') && Array.isArray(property.amenities)) result.amenities = property.amenities
   if (!hidden.has('features') && Array.isArray(property.features)) result.features = property.features
   if (!hidden.has('agent')) {
@@ -154,7 +171,7 @@ export const toPublicProperty = (input: any): PublicPropertyDto => {
     if (agent) result.agentId = agent
   }
 
-  return result as PublicPropertyDto
+  return toWire(result) as PublicPropertyDto
 }
 
 export const toPublicProperties = (items: any[]): PublicPropertyDto[] => items.map(toPublicProperty)

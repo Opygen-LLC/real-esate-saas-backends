@@ -1,0 +1,259 @@
+{
+  "phase": 2,
+  "repository": "backend",
+  "patchType": "added-and-changed-files-only",
+  "releaseStatus": "BLOCKED_NOT_PRODUCTION_CERTIFIED",
+  "baseline": {
+    "localGitCommit": "c1f139e1c1f2935696ace658d5eaa819935d63ab",
+    "originalArchive": {
+      "filename": "real-esate-saas-backends-main.zip",
+      "sha256": "ed3d1ec2e09b1776e9ec8db86df53ca382536a9422d84dcb93ac40f733b287f4"
+    },
+    "phase1Patch": {
+      "filename": "backend-phase1-updated-files.zip",
+      "sha256": "4842f58614153dc34aaeeaaee7be45a888eb3991f54a3c18c59f2d0b63fade5a"
+    }
+  },
+  "deletions": [],
+  "files": [
+    {
+      "path": "PHASE2-README.md",
+      "status": "added",
+      "bytes": 10586,
+      "sha256": "4800a130fe8033e87671e83f8ddfa6cc3a155e6cdd7e528b4d0bddce57f67079",
+      "previousSha256": null
+    },
+    {
+      "path": "package.json",
+      "status": "modified",
+      "bytes": 26852,
+      "sha256": "49ba899dbfad05a0c09aa885547cfd551e4c0141e41ab36d44ca1fcb2b8fde01",
+      "previousSha256": "80347b90323c2acee535ab447b6479d6d6cf38afd8e16125da7a468ddf1c3081"
+    },
+    {
+      "path": "scripts/sync-website-catalog-contracts.mjs",
+      "status": "added",
+      "bytes": 1944,
+      "sha256": "680bf642640d6635031fd8ee4e6e07aba4732696d48919f6e35ecfae67698a7d",
+      "previousSha256": null
+    },
+    {
+      "path": "src/app/db/migratePhase2WebsiteContent.ts",
+      "status": "added",
+      "bytes": 3931,
+      "sha256": "6463d8c0bdbb81fa836ab7943f6b80eb98db04c381531ed56cf19040b9139a41",
+      "previousSha256": null
+    },
+    {
+      "path": "src/app/db/profilePhase2Catalog.ts",
+      "status": "added",
+      "bytes": 3767,
+      "sha256": "09a35c484e77548d5971d73459e8cb8677844db861d403d2ac8594f564523449",
+      "previousSha256": null
+    },
+    {
+      "path": "src/app/module/localization/areaConversion.ts",
+      "status": "modified",
+      "bytes": 1645,
+      "sha256": "01bc6072c26a1e1c0546b39f8f3dcce43fff78b72d9c283307ce4d4612a58f86",
+      "previousSha256": "b766cd3ef9328407fd0b64028641f99419dbd57ee0d130fa6388bb6b14235d21"
+    },
+    {
+      "path": "src/app/module/organization/organization.model.ts",
+      "status": "modified",
+      "bytes": 16534,
+      "sha256": "b228f903e286943a15543977162abcb652ee5836646de2d9ec461d4cedd07a17",
+      "previousSha256": "413503d743c02429a56202dc3e8252685c7a3b25bfff383689de4c985993aa10"
+    },
+    {
+      "path": "src/app/module/organization/organization.service.ts",
+      "status": "modified",
+      "bytes": 29435,
+      "sha256": "e68ddfcd1e5bf9a4261bdc67a34b620379df3e8e83437ac93d9526842b8d68d3",
+      "previousSha256": "20f94fc08a0960523a5194c4791567e1a4aa25b0ebf0b93e9049bc0da1c54a8b"
+    },
+    {
+      "path": "src/app/module/organization/organization.validation.ts",
+      "status": "modified",
+      "bytes": 12699,
+      "sha256": "62bf60d186fc1435b29a58b750ba5b3d08e68cf321de2b75578cf5e87542568e",
+      "previousSha256": "c52012709a6054002ccac8f2848d9ab5eac20e5b7b9e91342b7f007ccb2450fa"
+    },
+    {
+      "path": "src/app/module/organization/organizationWebsite.contract.ts",
+      "status": "modified",
+      "bytes": 3050,
+      "sha256": "26c95c10a2353b525ccea54930a16ef4318fba6b687c6089faccd0a3740e372a",
+      "previousSha256": "fb206af58f9c4e73f8ddda3c12547608f6588352fb5455b5860e5768e82354dc"
+    },
+    {
+      "path": "src/app/module/property/property.constants.ts",
+      "status": "modified",
+      "bytes": 145,
+      "sha256": "2eea01e6e15d1642c7d204ea78bd3692eff49b9b4af68cc0198c6e422a640d45",
+      "previousSha256": "f712a257682302762167cf4450459c3f169acebbf483c5f9dedc7f9580008e26"
+    },
+    {
+      "path": "src/app/module/property/property.controller.ts",
+      "status": "modified",
+      "bytes": 24766,
+      "sha256": "0f9745598837c9f0c64611671e9d97c7fdfed20d5334e775623be493771d8d7c",
+      "previousSha256": "0c4047d14c123612397ce1575a4fb5d534e492907c7eddac9be12b146a7874c9"
+    },
+    {
+      "path": "src/app/module/property/property.route.ts",
+      "status": "modified",
+      "bytes": 9130,
+      "sha256": "1c587a8a83d955542be0dbcad200e52305acc983a95d5c98864114beba2ef4d5",
+      "previousSha256": "978d459e3dc8005dd5397ca025f9a8ea402846b9501164c2c887186d57957267"
+    },
+    {
+      "path": "src/app/module/property/property.service.ts",
+      "status": "modified",
+      "bytes": 38361,
+      "sha256": "0354398c3db356a1c15074d2f1b2ac0cac7f07d76c7da49d4ce81f439547caa5",
+      "previousSha256": "673ef6b4006471f4f4d921d40e33644a2c9cb4deb217ca46e541d239275521bf"
+    },
+    {
+      "path": "src/app/module/property/propertyCatalog.pipeline.ts",
+      "status": "added",
+      "bytes": 5525,
+      "sha256": "abe1eb9ded74ac8f4b97c30a6751ef218bccee017319ee669eec31369bfe6a2e",
+      "previousSha256": null
+    },
+    {
+      "path": "src/app/module/property/publicProperty.serializer.ts",
+      "status": "modified",
+      "bytes": 9181,
+      "sha256": "d58331ef3283ca9319fb1ec577fe4f763ee45c3e18a8e289ee553a2d30f4d87f",
+      "previousSha256": "97e9ed316750a7ad4dc22f75258dbf45e4b621a790dbf94b81934e6a7abf5647"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/templateRegistry.ts",
+      "status": "modified",
+      "bytes": 4350,
+      "sha256": "0632c72569a825aab86c0bd4dafad7395f525ed703b60084b5bb4c9f9fd79a06",
+      "previousSha256": "0a8fd00f16b0b0f48707ebf60acbd5d7202b3478616daed2886b0e04c17ebe85"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteArchitecture.contract.ts",
+      "status": "modified",
+      "bytes": 6677,
+      "sha256": "ddc3df4e0a1cef6b54af9d0e090b22d0f40e7af064d19ced41ec611df19cc841",
+      "previousSha256": "4705d1c9d6252fc15a59d105a0ffb73444d3379d83f5d0cd132d4b1f00aca542"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteContent.service.ts",
+      "status": "added",
+      "bytes": 2388,
+      "sha256": "a67cab5bbf7f9a974809780b02369ff74456b4401f1abc0951a33284aeb5cdb3",
+      "previousSha256": null
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteDesign.service.ts",
+      "status": "modified",
+      "bytes": 21288,
+      "sha256": "b0e2a3959bff1066a384cdc245f500c1d75e1923806491449a8736e64ad660c8",
+      "previousSha256": "49387dd66dcf5c5d7788ee9c242fe08fea45b80d18ba880c138e6503fb517ac0"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websitePublication.service.ts",
+      "status": "modified",
+      "bytes": 3456,
+      "sha256": "04363773c6efa3ef65a49fba23fbb37563da6be72ac345e3d7a37563bc5fabc9",
+      "previousSha256": "4b0551aedf3e2411252ad6865d522fde90e1e22a5233293f5f07492bf2b93590"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteTemplate.constants.ts",
+      "status": "modified",
+      "bytes": 166,
+      "sha256": "d92607719f0461dff1939d82f8155da47561f122ae72e28436c99c0a20a7a8b9",
+      "previousSha256": "8f79b096c8b521b7e39207f83e3af0df7a5686cb6ced86ddd58e75c6c6c37fef"
+    },
+    {
+      "path": "src/contracts/websiteCatalog/content.ts",
+      "status": "added",
+      "bytes": 18985,
+      "sha256": "539db338e016772b9f53e24fa1355ceb00962b129bd3e5ccacb06c7ef32a294d",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/contract-manifest.json",
+      "status": "added",
+      "bytes": 1361,
+      "sha256": "bd2947eac1554e23b1c009c2eea76e845125dfaa17c5621847612e8403020939",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/manifest.ts",
+      "status": "added",
+      "bytes": 14677,
+      "sha256": "96e28a596fc43b0dd8e59ab52fdf03f503dc26a5b39aafa90bc19bbdbef9e327",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/property.ts",
+      "status": "added",
+      "bytes": 14978,
+      "sha256": "d548ff321880d2633a09adcb589dc93a273f1a8206a60b985cfae2606b20dcce",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/publicProperty.ts",
+      "status": "added",
+      "bytes": 5128,
+      "sha256": "62e074af1a0511808855a8de437df817b16b527cdf6fe0fcae7cf23acbb4735f",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/query.ts",
+      "status": "added",
+      "bytes": 10465,
+      "sha256": "5f20c88bca96e45e963464e24f1a511bc20fc4a252735cddf524c6fd8c1da6b0",
+      "previousSha256": null
+    },
+    {
+      "path": "src/contracts/websiteCatalog/values.ts",
+      "status": "added",
+      "bytes": 6754,
+      "sha256": "b102d3aa41d417e9e9d7b30579b23a9f6467cfc8a79e5c4a5e50a4f3d5295eca",
+      "previousSha256": null
+    },
+    {
+      "path": "src/interfaces/common.ts",
+      "status": "modified",
+      "bytes": 848,
+      "sha256": "750a04309d94c1e3c65ce0f149f7a56e1c73bff0a7a832b87cf3eff66c442b92",
+      "previousSha256": "b0b725c0f5e7f712dd69b1e56ae0fb2a79829711207ef660244b28725aafb7aa"
+    },
+    {
+      "path": "src/tests/integration/phase2CatalogContract.integration.test.ts",
+      "status": "added",
+      "bytes": 4145,
+      "sha256": "667db4f652141aceaaae69807f07080ec122b7e56471e2cf5b4a389ad380b829",
+      "previousSha256": null
+    },
+    {
+      "path": "tests/phase2/content-service.test.cjs",
+      "status": "added",
+      "bytes": 3106,
+      "sha256": "190f5fcf13f683134314033f37e79061c198a19c47179623a73ceba76e3f0151",
+      "previousSha256": null
+    },
+    {
+      "path": "tests/phase2/contracts.test.cjs",
+      "status": "added",
+      "bytes": 9564,
+      "sha256": "d5c9429457825a72e08bf6796c39f7db049c2cf5a43dd3eef338a14d4e240608",
+      "previousSha256": null
+    },
+    {
+      "path": "tests/phase2/load-typescript.cjs",
+      "status": "added",
+      "bytes": 2120,
+      "sha256": "f7698e5ce717455d49c5830f84f9aa189098d4fb57c1a67bd099cb9cdf0e1598",
+      "previousSha256": null
+    }
+  ],
+  "manifestSelfHash": "Excluded to avoid recursion; ZIP SHA-256 is recorded in packaging verification."
+}

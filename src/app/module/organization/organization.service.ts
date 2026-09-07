@@ -1,3 +1,5 @@
+import { mergeAndMigrateContent, assertContentPropertyReferences } from '../websiteBuilder/websiteContent.service'
+import type { WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
 import { randomUUID } from 'crypto'
 import { performance } from 'perf_hooks'
 import httpStatus from 'http-status'
@@ -324,11 +326,11 @@ const getPublicSiteInfo = async (identifier: string): Promise<PublicOrganization
   return result
 }
 
-const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization | null> => {
+const updateWebsiteSettings = async (organizationId: string, payload: Partial<IOrganization> & WebsiteRevisionInput): Promise<IOrganization | null> => {
   if (payload.templateId || payload.websiteSettings?.websiteDesign !== undefined) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Use the controlled /organization/website/design API for template, component, and animation changes')
   }
-  const currentWebsite = await Organization.findOne({ organizationId }).select('templateId websiteSettings.renderMode').lean()
+  const currentWebsite = await Organization.findOne({ organizationId }).select('templateId websiteSettings').lean()
   if (!currentWebsite) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const requestedRenderMode = payload.websiteSettings?.renderMode
   const renderMode: WebsiteRenderMode = requestedRenderMode === 'builder' || requestedRenderMode === 'template'
@@ -350,10 +352,18 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
   const unsetData: Record<string, ''> = {}
   appendSocialLinkUpdates(updateData, payload.socialLinks, unsetData)
   appendWebsiteSettingUpdates(updateData, payload.websiteSettings)
+  if (payload.websiteSettings?.content !== undefined) {
+    await assertContentPropertyReferences(organizationId, payload.websiteSettings.content, currentWebsite.websiteSettings?.content)
+    const migrated = mergeAndMigrateContent(currentWebsite.websiteSettings, payload.websiteSettings.content, currentWebsite.templateId || 'template-1')
+    updateData['websiteSettings.content'] = migrated.content
+    updateData['websiteSettings.contentSchemaVersion'] = migrated.contentSchemaVersion
+  }
+
 
   const publication = await WebsitePublicationService.commitPublicationState({
     organizationId,
     renderMode,
+    expectedPublicationRevision: payload.expectedPublicationRevision ?? Number(currentWebsite.websiteSettings?.publicationRevision || 0),
     set: updateData,
     unset: unsetData,
   })
@@ -370,7 +380,7 @@ const updateWebsiteSettings = async (organizationId: string, payload: Partial<IO
 }
 
 
-const updateBrandingSettings = async (organizationId: string, payload: Partial<IOrganization>): Promise<IOrganization> => {
+const updateBrandingSettings = async (organizationId: string, payload: Partial<IOrganization> & WebsiteRevisionInput): Promise<IOrganization> => {
   const updateData: Record<string, unknown> = definedEntries({
     primaryColor: payload.primaryColor,
     secondaryColor: payload.secondaryColor,
@@ -380,10 +390,10 @@ const updateBrandingSettings = async (organizationId: string, payload: Partial<I
     logo: payload.logo ? assertSafeUrl(payload.logo) : payload.logo,
     favicon: payload.favicon ? assertSafeUrl(payload.favicon) : payload.favicon,
   })
-  const current = await Organization.findOne({ organizationId }).select('websiteSettings.renderMode').lean()
+  const current = await Organization.findOne({ organizationId }).select('websiteSettings.renderMode websiteSettings.publicationRevision').lean()
   if (!current) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   const renderMode: WebsiteRenderMode = current.websiteSettings?.renderMode === 'builder' ? 'builder' : 'template'
-  const publication = await WebsitePublicationService.commitPublicationState({ organizationId, renderMode, set: updateData })
+  const publication = await WebsitePublicationService.commitPublicationState({ organizationId, renderMode, set: updateData, expectedPublicationRevision: payload.expectedPublicationRevision ?? Number(current.websiteSettings?.publicationRevision || 0) })
   const result = publication.organization
   const tenantIdentifiers = await WebsitePublicationService.afterPublication({
     organizationId,
