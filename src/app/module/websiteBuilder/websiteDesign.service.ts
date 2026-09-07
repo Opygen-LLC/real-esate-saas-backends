@@ -9,6 +9,7 @@ import { Organization } from '../organization/organization.model'
 import { AnimationRegistry } from './animationRegistry'
 import { ComponentRegistry, type WebsiteComponentCategory } from './componentRegistry'
 import { TemplateRegistry } from './templateRegistry'
+import { WebsiteRendererRolloutService } from './websiteRendererRollout.service'
 import {
   WEBSITE_COMPONENT_SLOTS,
   WEBSITE_DESIGN_ACTIONS,
@@ -295,7 +296,7 @@ const getDesignRegistry = async (organizationId: string) => {
     ],
     entitlements: { premiumTemplates: { enabled: access.premiumTemplates, feature: 'premiumTemplates' } },
     actions: [...WEBSITE_DESIGN_ACTIONS],
-    metadata: { generatedAt: new Date().toISOString(), designSchemaVersion: WEBSITE_DESIGN_SCHEMA_VERSION },
+    metadata: { generatedAt: new Date().toISOString(), designSchemaVersion: WEBSITE_DESIGN_SCHEMA_VERSION, rendererRollout: WebsiteRendererRolloutService.metadata(organizationId) },
   }
 }
 

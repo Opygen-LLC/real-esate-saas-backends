@@ -14,7 +14,7 @@ type ClientError = {
 }
 
 type OperationalEventInput = {
-  event: 'form_validation_failed' | 'website_template_render_failed'
+  event: 'form_validation_failed' | 'website_template_render_failed' | 'website_image_delivery_failed'
   route?: string
   templateId?: string
   fields?: string[]
@@ -73,7 +73,7 @@ const reportOperationalEvent = async (input: OperationalEventInput): Promise<{ a
     source: input.source || 'client',
     digest: String(input.digest || '').slice(0, 160),
     errorName: String(input.errorName || '').replace(/[^a-zA-Z0-9_. -]/g, '').slice(0, 80),
-  }, input.event === 'website_template_render_failed' ? 'error' : 'info')
+  }, input.event === 'website_template_render_failed' || input.event === 'website_image_delivery_failed' ? 'error' : 'info')
   return { accepted: true }
 }
 

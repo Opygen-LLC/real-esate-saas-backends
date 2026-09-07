@@ -3,6 +3,14 @@ import { DEFAULT_WEBSITE_CONTENT, WEBSITE_CONTENT_FIELDS, WEBSITE_CONTENT_SCHEMA
 export const WEBSITE_MANIFEST_VERSION = 1 as const
 export const WEBSITE_TEMPLATE_IDS = ['template-1', 'template-2', 'template-3', 'template-4', 'template-5', 'template-6', 'template-7', 'template-8', 'template-9', 'template-10'] as const
 export type WebsiteTemplateId = typeof WEBSITE_TEMPLATE_IDS[number]
+export const WEBSITE_RENDERER_VERSIONS = ['legacy-v1', 'premium-v2'] as const
+export type WebsiteRendererVersion = typeof WEBSITE_RENDERER_VERSIONS[number]
+export const LEGACY_WEBSITE_RENDERER_VERSION: WebsiteRendererVersion = 'legacy-v1'
+export const CURRENT_WEBSITE_RENDERER_VERSION: WebsiteRendererVersion = 'premium-v2'
+export const REDESIGNED_WEBSITE_TEMPLATE_IDS = ['template-3', 'template-4', 'template-5', 'template-6', 'template-7', 'template-8', 'template-9', 'template-10'] as const
+export const isWebsiteRendererVersion = (value: unknown): value is WebsiteRendererVersion => typeof value === 'string' && (WEBSITE_RENDERER_VERSIONS as readonly string[]).includes(value)
+export const resolveWebsiteRendererVersion = (value: unknown): WebsiteRendererVersion => isWebsiteRendererVersion(value) ? value : LEGACY_WEBSITE_RENDERER_VERSION
+export const isRedesignedWebsiteTemplate = (value: unknown): value is typeof REDESIGNED_WEBSITE_TEMPLATE_IDS[number] => typeof value === 'string' && (REDESIGNED_WEBSITE_TEMPLATE_IDS as readonly string[]).includes(value)
 export const PUBLIC_WEBSITE_PAGES = ['home', 'about', 'contact', 'properties', 'propertyDetail', 'agents', 'agentDetail'] as const
 export type PublicWebsitePage = typeof PUBLIC_WEBSITE_PAGES[number]
 export type WebsiteTemplateSectionCapability = { supported: boolean; label: string; required?: boolean }
@@ -15,6 +23,7 @@ export type WebsitePublicationContract = {
   status: 'provisioned' | 'published' | 'suspended'
   revision: number
   lastPublishedAt?: string | null
+  rendererVersion: WebsiteRendererVersion
 }
 export type WebsiteRevisionInput = { expectedPublicationRevision?: number }
 export const isPublicationRevision = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0

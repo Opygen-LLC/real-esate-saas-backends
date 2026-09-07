@@ -1,6 +1,7 @@
 import { normalizeStudioMedia, normalizeStudioLayout } from '../../../contracts/websiteCatalog/studio'
 import { mergeAndMigrateContent, assertContentPropertyReferences } from '../websiteBuilder/websiteContent.service'
 import type { WebsiteRevisionInput } from '../../../contracts/websiteCatalog/manifest'
+import { resolveWebsiteRendererVersion } from '../../../contracts/websiteCatalog/manifest'
 import { randomUUID } from 'crypto'
 import { performance } from 'perf_hooks'
 import httpStatus from 'http-status'
@@ -22,6 +23,7 @@ import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { WebsitePublicationService } from '../websiteBuilder/websitePublication.service'
 import { WebsiteArchitectureService } from '../websiteBuilder/websiteArchitecture.service'
 import { WebsiteDesignService } from '../websiteBuilder/websiteDesign.service'
+import { WebsiteRendererRolloutService } from '../websiteBuilder/websiteRendererRollout.service'
 import type { WebsiteRenderMode } from '../websiteBuilder/websiteArchitecture.contract'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import type { EffectiveTenantAccess } from '../tenantAccess/tenantAccess.types'
@@ -78,6 +80,7 @@ const mongoUpdate = (set: Record<string, unknown>, unset: Record<string, ''>) =>
 const canonicalWebsiteSettings = (settings?: OrganizationWebsiteSettings | null): OrganizationWebsiteSettings => ({
   ...(settings || {}),
   renderMode: settings?.renderMode || 'template',
+  rendererVersion: resolveWebsiteRendererVersion(settings?.rendererVersion),
   media: normalizeStudioMedia(settings?.media),
   layout: normalizeStudioLayout(settings?.layout),
   sectionStyles: WebsiteArchitectureService.canonicalizeSectionStyles((settings as any)?.sectionStyles),
@@ -202,7 +205,11 @@ const createOrganization = async (payload: Partial<IOrganization>): Promise<IOrg
   const socialLinks = payload.socialLinks ? canonicalSocialLinks(payload.socialLinks) : undefined
   const sub_domain = await resolveInitialSubdomain(organizationId, payload)
   try {
-    return await Organization.create({ ...payload, organizationId, sub_domain, ...(socialLinks ? { socialLinks } : {}) })
+    const websiteSettings = {
+      ...(payload.websiteSettings || {}),
+      rendererVersion: payload.websiteSettings?.rendererVersion || WebsiteRendererRolloutService.initialRendererVersion(),
+    }
+    return await Organization.create({ ...payload, websiteSettings, organizationId, sub_domain, ...(socialLinks ? { socialLinks } : {}) })
   } catch (error: any) {
     if (error?.code === 11000 && (error?.keyPattern?.sub_domain || error?.keyValue?.sub_domain)) {
       throw new ApiError(httpStatus.CONFLICT, 'This website address is already taken')

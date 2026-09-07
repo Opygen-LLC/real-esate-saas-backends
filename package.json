@@ -211,7 +211,16 @@
     "test:phase3-studio": "node --test tests/phase3-studio/*.test.cjs",
     "migrate:phase3-studio": "ts-node --transpile-only src/app/db/migratePhase3WebsiteStudio.ts",
     "test:phase3-studio:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase3StudioLifecycle.integration.test.ts",
-    "gate:phase3-studio": "pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase3-studio && pnpm test:phase3-studio:integration"
+    "gate:phase3-studio": "pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase3-studio && pnpm test:phase3-studio:integration",
+    "migrate:phase5-website-renderer": "ts-node --transpile-only src/app/db/migratePhase5WebsiteRenderer.ts",
+    "test:phase5-website-rollout": "node --test tests/phase5-rollout/*.test.cjs",
+    "gate:phase5-website-rollout": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase1-unit && pnpm test:phase2-catalog && pnpm test:phase3-studio && pnpm test:phase5-website-rollout && pnpm verify:phase5-website-rollout && pnpm audit:dependencies",
+    "verify:phase5-website-rollout": "node scripts/verify-phase5-website-rollout.mjs",
+    "test:phase5-website-rollout:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run src/tests/integration/phase5WebsiteRollout.integration.test.ts",
+    "audit:dependencies": "pnpm audit --audit-level=high",
+    "gate:phase5-website-rollout:staging": "pnpm gate:phase5-website-rollout && pnpm test:integration && pnpm test:phase5-website-rollout:integration && pnpm profile:phase5-website-rollout && pnpm verify:phase5-query-plans",
+    "profile:phase5-website-rollout": "node scripts/require-env.mjs PHASE2_DATABASE_URL PHASE2_ORGANIZATION_ID && pnpm profile:phase2-catalog -- --execution-stats",
+    "verify:phase5-query-plans": "node scripts/require-env.mjs PHASE2_DATABASE_URL PHASE2_ORGANIZATION_ID && pnpm verify:phase2-query-plans"
   },
   "keywords": [
     "real-estate",

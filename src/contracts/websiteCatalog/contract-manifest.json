@@ -11,8 +11,8 @@
       "generatedSha256": "0fa119d725a2ebf54f228694289710f244bf87cd61146a103c3e81a8da508fe5"
     },
     "manifest.ts": {
-      "sourceSha256": "7fa58f42e6cce5ea7caa328e17a01bd268841ccb9531fb02c2f8cad96803c795",
-      "generatedSha256": "22727af80d762438335e45ab27a0a739285519674390e6969541851d5756e6e8"
+      "sourceSha256": "28a5cd528b800158523665f6198d6f1591bf0d03b620687c5dd1dae474e6b296",
+      "generatedSha256": "1f77d83ccfe81b993569ba258f4726715624cc80914958cbb9b00fe765cf85f9"
     },
     "photos.ts": {
       "sourceSha256": "3263a978061ee72872450cb9efdc0350448d5c57924935ec7d255f3987a6e1c8",
@@ -31,8 +31,8 @@
       "generatedSha256": "dda2b765c5f5d2f6f7041ae495fd4f6f5f0a6182ebe64a488d640c48b4aef4ad"
     },
     "studio.ts": {
-      "sourceSha256": "87c49cfb3b789e1aba0a257042e7fe2c72035b23d1fe958e0ffdd24bcaf65e39",
-      "generatedSha256": "c582d44d9823b2cc6fe93eaece543c13a871e1554d230dead96a7a8a1f7a79ed"
+      "sourceSha256": "0bd27e6108bd5e191c74dc6ab3fc60f6c18f5be1fd209387aa96dd529416bf49",
+      "generatedSha256": "14075c0654597e113acb018f49bddcbd27fab32ab593d620cd2f30815348348d"
     },
     "values.ts": {
       "sourceSha256": "b102d3aa41d417e9e9d7b30579b23a9f6467cfc8a79e5c4a5e50a4f3d5295eca",

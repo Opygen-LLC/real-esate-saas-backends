@@ -1,7 +1,7 @@
 // Backend-owned Studio wire contract. Generated into the frontend; never hand-copy.
 import type { WebsiteContentPatch } from './content'
 import type { WebsiteDesignContract, WebsiteRenderMode, WebsiteSectionStyles } from './architecture'
-import type { WebsiteTemplateId } from './manifest'
+import type { WebsiteTemplateId, WebsiteRendererVersion } from './manifest'
 
 export const STUDIO_SCHEMA_VERSION = 1 as const
 export const STUDIO_FONTS = ['Inter', 'Geist', 'Poppins', 'Manrope', 'Roboto', 'Playfair Display'] as const
@@ -44,6 +44,7 @@ export const normalizeStudioLayout = (value: unknown): StudioLayout => {
 }
 export type StudioWebsiteSettings = {
   renderMode: WebsiteRenderMode
+  rendererVersion: WebsiteRendererVersion
   content: WebsiteContentPatch
   contentSchemaVersion: number
   sectionStyles: WebsiteSectionStyles
@@ -90,7 +91,7 @@ export type StudioState = {
 export type StudioSaveRequest = { expectedDraftRevision: number; expectedPublicationRevision: number; mutationId: string; patch: StudioPatch }
 export type StudioPublishRequest = { expectedDraftRevision: number; expectedPublicationRevision: number; mutationId: string }
 export type StudioRestoreRequest = StudioPublishRequest & { revision: number }
-export type StudioHistoryEntry = { revision: number; publishedAt: string; templateId: WebsiteTemplateId; renderMode: WebsiteRenderMode; message: string }
+export type StudioHistoryEntry = { revision: number; publishedAt: string; templateId: WebsiteTemplateId; renderMode: WebsiteRenderMode; rendererVersion: WebsiteRendererVersion; message: string }
 export type StudioPreviewResponse<TSite = unknown> = {
   draftRevision: number
   publicationRevision: number

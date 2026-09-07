@@ -25,6 +25,7 @@ import { SuperAdminProfile } from '../superAdminProfile/superAdminProfile.model'
 import { ensureUserProfile, syncRoleProfile, toAuthUserDto } from '../user/userProfile.service'
 import { findUserWithProfiles } from '../user/userReadModel.service'
 import { buildDefaultWebsiteDocument } from '../websiteBuilder/defaultWebsiteDocument'
+import { WebsiteRendererRolloutService } from '../websiteBuilder/websiteRendererRollout.service'
 import { WebsitePage } from '../websiteBuilder/websitePage.model'
 import { AuthResult, IChangePassword, ILoginUser, IRegisterAgency, RegisterAgencyResult, RequestMeta } from './auth.interface'
 import { AuthSession } from './authSession.model'
@@ -275,6 +276,7 @@ const registerAgency = async (payload: IRegisterAgency, meta: RequestMeta): Prom
         enableLeadForm: true,
         enableWhatsAppChat: true,
         renderMode: 'template',
+        rendererVersion: WebsiteRendererRolloutService.initialRendererVersion(),
       },
       subscription: {
         plan: 'trial',

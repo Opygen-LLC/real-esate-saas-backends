@@ -1,6 +1,7 @@
 import mongoose, { Schema, model } from 'mongoose'
 import { IOrganization, OrganizationModel } from './organization.interface'
 import { WEBSITE_TEMPLATE_IDS } from '../websiteBuilder/websiteTemplate.constants'
+import { WEBSITE_RENDERER_VERSIONS } from '../../../contracts/websiteCatalog/manifest'
 import {
   WEBSITE_ANIMATION_DELAYS,
   WEBSITE_ANIMATION_DURATIONS,
@@ -284,6 +285,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       enableLeadForm: { type: Boolean, default: true },
       enableWhatsAppChat: { type: Boolean, default: true },
       renderMode: { type: String, enum: ['template', 'builder'], default: 'template' },
+      // Missing values on pre-Phase-5 tenants intentionally resolve to legacy-v1 at read time.
+      rendererVersion: { type: String, enum: [...WEBSITE_RENDERER_VERSIONS] },
       publicationRevision: { type: Number, min: 0, default: 0 },
       lastPublishedAt: { type: Date, default: null },
       content: { type: Schema.Types.Mixed, default: {} },

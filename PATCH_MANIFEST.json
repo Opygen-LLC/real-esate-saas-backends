@@ -1,0 +1,121 @@
+{
+  "phase": 5,
+  "base": "Apply after the Phase 4 updated-files patch has been applied.",
+  "scope": "Only Phase 5 changed/new repository files are included. PATCH_MANIFEST.json is packaging metadata.",
+  "changedFileCount": 25,
+  "changedFiles": [
+    {
+      "path": ".env.example",
+      "sha256": "5a8a61673fb0ff5e3b8019c3b9529e502c96047ab73c70385ca52b3aa1d2900c"
+    },
+    {
+      "path": "PHASE5_VERIFICATION.md",
+      "sha256": "a1ffd96a0196fb9b2b3fd88c026d37cebf1c8a78f1ab9f035909b1c7743c173d"
+    },
+    {
+      "path": "PHASE5_WEBSITE_RELEASE.md",
+      "sha256": "031e340c81ed80ba88847c6a8aa84a32a1a8459c024ba9e62301830086e49699"
+    },
+    {
+      "path": "package.json",
+      "sha256": "53c9dac33c2d0415220b4f54332084b99c89d5e26cc52f34bb10215445f61e80"
+    },
+    {
+      "path": "scripts/verify-phase5-website-rollout.mjs",
+      "sha256": "cfd5558b3004316b3c6d240c4949dc268e977043318504f38fbae20bd8add83c"
+    },
+    {
+      "path": "src/app/db/migratePhase5WebsiteRenderer.ts",
+      "sha256": "99d868a98fcf4ac6ff8bbdaf483866bafb18f1d439e7dd7b814086415382007d"
+    },
+    {
+      "path": "src/app/middlewares/globalErrorHandler.ts",
+      "sha256": "488a65e4304da3481f7da29b7692390b5423d1e0cc84bf7424a46a69f24d6e35"
+    },
+    {
+      "path": "src/app/module/auth/auth.services.ts",
+      "sha256": "d35eb14835515934635d98eaeaf0ff1665043d707681cd71227f4646f682d654"
+    },
+    {
+      "path": "src/app/module/observability/observability.route.ts",
+      "sha256": "692bf7576c3e68f691d558fb8e8934be51fd23cacc039b5fa3907c4a40e66c53"
+    },
+    {
+      "path": "src/app/module/observability/observability.service.ts",
+      "sha256": "e80ae7c836ec72a9f857ebae9c919d566ae149be4850156fd60b8f4016ec1ceb"
+    },
+    {
+      "path": "src/app/module/organization/organization.model.ts",
+      "sha256": "26155c3af8ee6f9e73176e26f569f37e8f8972557602f6468edd3cb9b5884820"
+    },
+    {
+      "path": "src/app/module/organization/organization.service.ts",
+      "sha256": "18b0a768ab5f95529a74627accdb72f3b10156a9d5a51ce2423a891a1f051efa"
+    },
+    {
+      "path": "src/app/module/organization/organizationWebsite.contract.ts",
+      "sha256": "d2ed5015dabdb9a6286d4d480e8a46f42966f50716afd05bb9c317bca6ab1830"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteArchitecture.service.ts",
+      "sha256": "672b4668b230cfa77d7477d2402925c0052ca9894e644a0501094741d973e808"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteDesign.service.ts",
+      "sha256": "83a1987e4fc2ff44cbd0ffe65cd29eb132ead2bb0c047d509f0a7f852bf29d6d"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteRendererRollout.service.ts",
+      "sha256": "98787528cff2f0790a8f4c5a85ca317445a883e7459890ceeb355080469c95e4"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteStudio.service.ts",
+      "sha256": "78e6830df0564c25d340845d7f13c216ea9ebb3235b29475991d132c09085b34"
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteStudio.validation.ts",
+      "sha256": "199b96d76afebd5a0068f7d0788998db268786bc4669da710b9c81c156cf43b0"
+    },
+    {
+      "path": "src/contracts/websiteCatalog/contract-manifest.json",
+      "sha256": "1c87259f75d5f06b6b5d4253b365ffaac5fdce8db7128e0d2a505151b84cc58f"
+    },
+    {
+      "path": "src/contracts/websiteCatalog/manifest.ts",
+      "sha256": "28a5cd528b800158523665f6198d6f1591bf0d03b620687c5dd1dae474e6b296"
+    },
+    {
+      "path": "src/contracts/websiteCatalog/studio.ts",
+      "sha256": "0bd27e6108bd5e191c74dc6ab3fc60f6c18f5be1fd209387aa96dd529416bf49"
+    },
+    {
+      "path": "src/shared/productionEvents.ts",
+      "sha256": "c205709cd02e2f945bd97c71487f0568e0938fbd4137c0179e2abca84462c302"
+    },
+    {
+      "path": "src/tests/integration/phase5WebsiteRollout.integration.test.ts",
+      "sha256": "faca09693164083504d09f5602cc085fde2660089fdd7ba0ba00d612a2bd6f03"
+    },
+    {
+      "path": "tests/phase5-rollout/release-observability.test.cjs",
+      "sha256": "f2ad136682b8bc7d13f1fb602ae647a7a264876c45461caaf324536e40c9b0d3"
+    },
+    {
+      "path": "tests/phase5-rollout/renderer-binding.test.cjs",
+      "sha256": "2f521d69784b76f0378e5a1678268e600649b028806d6bc187b6fbec883628a4"
+    }
+  ],
+  "removedFiles": [],
+  "localVerification": {
+    "dependencyFreeTests": "174/174 passed",
+    "format": "passed",
+    "canonicalContracts": "9 verified and synchronized",
+    "changedTypeScriptSyntax": "17 files, 0 syntax errors"
+  },
+  "requiredBeforeProductionDeployment": [
+    "Run the repository Phase 5 CI gate with the locked dependencies installed.",
+    "Run the Phase 5 staging gate against disposable fixtures and an isolated/staging database.",
+    "Require dependency vulnerability audit, production build/typecheck/lint, and browser/database E2E gates to pass."
+  ],
+  "environmentLimitation": "The current execution environment could not fetch pnpm/dependencies from registry.npmjs.org, so dependency-installed build/lint/full-typecheck/audit/browser/database gates were not executed locally."
+}

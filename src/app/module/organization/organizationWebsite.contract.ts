@@ -1,6 +1,7 @@
 import type { StudioMedia, StudioLayout } from '../../../contracts/websiteCatalog/studio'
 import type { WebsiteContentPatch } from '../../../contracts/websiteCatalog/content'
 import type { WebsiteTemplateId } from '../websiteBuilder/websiteTemplate.constants'
+import type { WebsiteRendererVersion } from '../../../contracts/websiteCatalog/manifest'
 import type { CanonicalWebsiteContract, WebsiteDesignContract, WebsiteRenderMode, WebsiteSectionStyles as CanonicalWebsiteSectionStyles } from '../websiteBuilder/websiteArchitecture.contract'
 export {
   WEBSITE_ANIMATION_DELAYS,
@@ -58,6 +59,7 @@ export type OrganizationWebsiteSettings = {
   enableLeadForm?: boolean
   enableWhatsAppChat?: boolean
   renderMode?: WebsiteRenderMode
+  rendererVersion?: WebsiteRendererVersion
   content?: WebsiteContentPatch
   contentSchemaVersion?: number
   layout?: StudioLayout

@@ -20,6 +20,8 @@ import { WebsiteAsset } from './websiteAsset.model'
 import { studioPatchSchema } from './websiteStudio.validation'
 import { STUDIO_FONTS, STUDIO_SCHEMA_VERSION, stableStudioJson, normalizeStudioMedia, normalizeStudioLayout, serializeStudioMedia, type StudioSnapshot, type StudioState, type StudioBuilderPage, type StudioSaveRequest, type StudioPublishRequest, type StudioRestoreRequest, type StudioPatch } from '../../../contracts/websiteCatalog/studio'
 import { collectStudioImageUrls, isBundledStudioImage } from './websiteStudioAssets.policy'
+import { resolveWebsiteRendererVersion } from '../../../contracts/websiteCatalog/manifest'
+import { WebsiteRendererRolloutService } from './websiteRendererRollout.service'
 
 const conflict = (message = 'This website changed in another session. Your local edits are safe; review the latest draft before saving again.') => new ApiError(409, message, '', 'STUDIO_REVISION_CONFLICT')
 const revisionOf = (org: any): number => Math.max(0, Number(org.websiteSettings?.publicationRevision || 0))
@@ -39,6 +41,7 @@ export const snapshotFromOrganization = (org: any): StudioSnapshot => {
     socialLinks: Object.fromEntries(['facebook', 'instagram', 'youtube', 'x', 'linkedin', 'whatsapp'].map((key) => [key, org.socialLinks?.[key] ?? settings.socialLinks?.[key] ?? (key === 'x' ? org.socialLinks?.twitter : '') ?? ''])),
     websiteSettings: {
       renderMode: settings.renderMode === 'builder' ? 'builder' : 'template',
+      rendererVersion: resolveWebsiteRendererVersion(settings.rendererVersion),
       content: migrated.content, contentSchemaVersion: migrated.contentSchemaVersion,
       sectionStyles: WebsiteArchitectureService.canonicalizeSectionStyles(settings.sectionStyles),
       websiteDesign: WebsiteArchitectureService.canonicalizeWebsiteDesign(settings.websiteDesign),
@@ -209,6 +212,7 @@ const restoreBuilderPublication = async (organizationId: string, pages: StudioBu
 }
 const publish = (organizationId: string, request: StudioPublishRequest, actor: WebsiteDesignActor = {}) => runMutation(organizationId, 'published', request, actor, async (studio, org, session) => {
   assertStudioRevisions(studio, revisionOf(org), request)
+  WebsiteRendererRolloutService.assertTransitionAllowed(organizationId, org.websiteSettings?.rendererVersion, studio.snapshot.websiteSettings.rendererVersion)
   await validateDraft(organizationId, snapshotFromOrganization(org), studio.snapshot, session, true)
   // Keep the pre-Studio live website available as an undo target as well.
   await snapshotHistory(organizationId, revisionOf(org), snapshotFromOrganization(org), await publishedBuilderPages(organizationId, session), new Date(org.websiteSettings?.lastPublishedAt || org.updatedAt || Date.now()), session, actor.actorId, 'Previous live website')
@@ -220,7 +224,7 @@ const publish = (organizationId: string, request: StudioPublishRequest, actor: W
   const next: IWebsiteStudio = { ...studio, draftRevision: studio.draftRevision + 1, publishedDraftRevision: studio.draftRevision + 1, basePublicationRevision: publication.publicationRevision, updatedBy: actor.actorId }
   const updated = await persistDraft(next, session)
   await snapshotHistory(organizationId, publication.publicationRevision, studio.snapshot, studio.builderPages, new Date(publication.lastPublishedAt), session, actor.actorId)
-  await TransactionalOutbox.emit({ organizationId, aggregateType: 'website', aggregateId: organizationId, eventType: 'website.published', actorId: actor.actorId, payload: { renderMode: studio.snapshot.websiteSettings.renderMode, publicationRevision: publication.publicationRevision, publicVisible: true } }, session)
+  await TransactionalOutbox.emit({ organizationId, aggregateType: 'website', aggregateId: organizationId, eventType: 'website.published', actorId: actor.actorId, payload: { renderMode: studio.snapshot.websiteSettings.renderMode, rendererVersion: studio.snapshot.websiteSettings.rendererVersion, publicationRevision: publication.publicationRevision, publicVisible: true } }, session)
   return toState(updated, publication.organization)
 })
 const restore = (organizationId: string, request: StudioRestoreRequest, actor: WebsiteDesignActor = {}) => runMutation(organizationId, 'revision_restored', request, actor, async (studio, org, session) => {
@@ -238,7 +242,7 @@ const resetFromPublished = (organizationId: string, request: StudioPublishReques
   const next = { ...studio, snapshot: snapshotFromOrganization(org), builderPages: await publishedBuilderPages(organizationId, session), draftRevision: studio.draftRevision + 1, publishedDraftRevision: studio.draftRevision + 1, basePublicationRevision: revisionOf(org), updatedBy: actor.actorId }
   return toState(await persistDraft(next, session), org)
 })
-const history = async (organizationId: string) => (await WebsiteStudioRevision.find({ organizationId }).select('revision publishedAt snapshot.templateId snapshot.websiteSettings.renderMode message').sort({ revision: -1 }).limit(50).lean()).map((entry) => ({ revision: entry.revision, publishedAt: entry.publishedAt.toISOString(), templateId: entry.snapshot.templateId, renderMode: entry.snapshot.websiteSettings.renderMode, message: entry.message }))
+const history = async (organizationId: string) => (await WebsiteStudioRevision.find({ organizationId }).select('revision publishedAt snapshot.templateId snapshot.websiteSettings.renderMode snapshot.websiteSettings.rendererVersion message').sort({ revision: -1 }).limit(50).lean()).map((entry) => ({ revision: entry.revision, publishedAt: entry.publishedAt.toISOString(), templateId: entry.snapshot.templateId, renderMode: entry.snapshot.websiteSettings.renderMode, rendererVersion: resolveWebsiteRendererVersion(entry.snapshot.websiteSettings.rendererVersion), message: entry.message }))
 const preview = async (organizationId: string, expectedDraftRevision: number) => {
   const org = await organization(organizationId)
   const studio = await load(organizationId, org)

@@ -1,4 +1,5 @@
 import { WEBSITE_TEMPLATE_IDS, type WebsiteTemplateId } from './websiteTemplate.constants'
+import { resolveWebsiteRendererVersion } from '../../../contracts/websiteCatalog/manifest'
 import {
   WEBSITE_ANIMATION_DELAYS,
   WEBSITE_ANIMATION_DURATIONS,
@@ -166,6 +167,7 @@ type CanonicalWebsiteSource = {
   domain_Verify?: unknown
   websiteSettings?: {
     renderMode?: unknown
+    rendererVersion?: unknown
     publicationRevision?: unknown
     lastPublishedAt?: unknown
     sectionStyles?: unknown
@@ -221,6 +223,7 @@ const toCanonicalWebsiteContract = (source: CanonicalWebsiteSource, options: Can
       status,
       revision: Math.max(0, Number(settings.publicationRevision || 0)),
       lastPublishedAt: lastPublishedAt || null,
+      rendererVersion: resolveWebsiteRendererVersion(settings.rendererVersion),
     },
     sectionStyles: canonicalizeSectionStyles(settings.sectionStyles),
     design: canonicalizeWebsiteDesign(settings.websiteDesign),

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { STUDIO_FONTS, STUDIO_IMAGE_SLOTS, STUDIO_ORDERABLE_SECTIONS, STUDIO_HIDEABLE_SECTIONS } from '../../../contracts/websiteCatalog/studio'
 import { WEBSITE_TEMPLATE_IDS } from './websiteTemplate.constants'
+import { WEBSITE_RENDERER_VERSIONS } from '../../../contracts/websiteCatalog/manifest'
 import { websiteSettingsSchema, websiteSocialLinksSchema } from '../organization/organization.validation'
 
 const revision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -27,7 +28,7 @@ export const studioPatchSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   font: z.enum(STUDIO_FONTS).optional(), metaTitle: z.string().max(120).optional(), metaDescription: z.string().max(300).optional(),
   defaultLanguage: z.enum(['en', 'bn']).optional(), socialLinks: websiteSocialLinksSchema.optional(),
-  websiteSettings: websiteSettingsSchema.omit({ heroTitle: true, heroSubtitle: true, heroImage: true }).extend({ media: studioMediaSchema.optional(), layout: studioLayoutSchema.optional() }).strict().optional(),
+  websiteSettings: websiteSettingsSchema.omit({ heroTitle: true, heroSubtitle: true, heroImage: true }).extend({ rendererVersion: z.enum(WEBSITE_RENDERER_VERSIONS).optional(), media: studioMediaSchema.optional(), layout: studioLayoutSchema.optional() }).strict().optional(),
 }).strict().refine((input) => Object.keys(input).length > 0, 'Change at least one field')
 const expected = { expectedDraftRevision: revision, expectedPublicationRevision: revision, mutationId }
 export const WebsiteStudioValidation = {

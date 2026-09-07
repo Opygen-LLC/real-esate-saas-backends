@@ -104,6 +104,41 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     }, statusCode >= 500 ? 'error' : 'warn')
   }
 
+
+  if (route.includes('/website/studio/publish') && statusCode >= 400) {
+    emitProductionEvent('website_publish_failed', {
+      method: req.method,
+      route,
+      statusCode,
+      errorCode: code,
+      organizationId: req.tenant?.organizationId,
+      requestId: req.requestId,
+    }, statusCode >= 500 ? 'error' : 'warn')
+  }
+
+  const publicFormRoute = route.includes('/viewing/public-request') || route.includes('/lead/public-capture')
+  if (publicFormRoute && statusCode >= 400) {
+    emitProductionEvent('public_form_failed', {
+      method: req.method,
+      route,
+      statusCode,
+      errorCode: code,
+      organizationId: req.tenant?.organizationId,
+      requestId: req.requestId,
+    }, statusCode >= 500 ? 'error' : 'warn')
+  }
+
+  if (req.method === 'GET' && route.includes('/property/public') && statusCode >= 400) {
+    emitProductionEvent('public_property_query_failed', {
+      method: req.method,
+      route,
+      statusCode,
+      errorCode: code,
+      organizationId: req.tenant?.organizationId,
+      requestId: req.requestId,
+    }, statusCode >= 500 ? 'error' : 'warn')
+  }
+
   res.locals.apiErrorCode = code
   res.locals.apiErrorEvent = event
 
