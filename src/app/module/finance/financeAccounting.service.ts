@@ -244,13 +244,13 @@ const initialize = async (organizationId: string, actor: AccountingActor) => acc
   const accountId = (code: string) => accountsByCode.get(code)?._id || null
   const now = new Date()
   const hasExistingLedger = Boolean(await withSession(FinanceJournalEntry.exists({ organizationId, status: { $in: ['POSTED', 'REVERSED'] } }), session))
-  const legacyPresence = !hasExistingLedger ? await Promise.all([
-    withSession(FinanceTransaction.exists({ organizationId }), session),
-    withSession(FinanceInvoice.exists({ organizationId }), session),
-    withSession(FinanceCommission.exists({ organizationId }), session),
-    withSession(FinanceVendor.exists({ organizationId }), session),
-    withSession(FinanceBudget.exists({ organizationId }), session),
-  ]) : []
+  const legacyPresence = !hasExistingLedger ? [
+    await withSession(FinanceTransaction.exists({ organizationId }), session),
+    await withSession(FinanceInvoice.exists({ organizationId }), session),
+    await withSession(FinanceCommission.exists({ organizationId }), session),
+    await withSession(FinanceVendor.exists({ organizationId }), session),
+    await withSession(FinanceBudget.exists({ organizationId }), session),
+  ] : []
   const legacyFinanceExists = !hasExistingLedger && legacyPresence.some(Boolean)
   const activationStatus = hasExistingLedger ? 'ACTIVE' : legacyFinanceExists ? 'MIGRATION_REQUIRED' : String(settings?.activationStatus || 'ACTIVE')
   settings = await FinanceAccountingSettings.findOneAndUpdate(
@@ -428,13 +428,13 @@ const updateAccount = async (organizationId: string, actor: AccountingActor, acc
     await assertParentAccount(organizationId, account.parentAccountId, nextType, session, accountId)
   }
   if (input.status === 'INACTIVE' && account.status !== 'INACTIVE') {
-    const [mapped, bankLinked, taxLinked, shareholderLoanLinked, companyLoanLinked] = await Promise.all([
-      withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
-      withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id, status: 'ACTIVE' }), session),
-      withSession(FinanceTaxCode.exists({ organizationId, status: 'ACTIVE', $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
-      withSession(FinanceShareholderLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
-      withSession(FinanceLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
-    ])
+    const [mapped, bankLinked, taxLinked, shareholderLoanLinked, companyLoanLinked] = [
+      await withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
+      await withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id, status: 'ACTIVE' }), session),
+      await withSession(FinanceTaxCode.exists({ organizationId, status: 'ACTIVE', $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
+      await withSession(FinanceShareholderLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
+      await withSession(FinanceLoan.exists({ organizationId, status: 'ACTIVE', $or: [{ liabilityAccountId: account._id }, { interestExpenseAccountId: account._id }] }), session),
+    ]
     if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while finance categories are mapped to it')
     if (bankLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active bank account is linked to it')
     if (taxLinked) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be made inactive while an active tax code is linked to it')
@@ -460,13 +460,13 @@ const deleteAccount = async (organizationId: string, actor: AccountingActor, acc
   const account: any = await withSession(FinanceAccount.findOne({ _id: asObjectId(accountId, 'account id'), organizationId }), session)
   if (!account) throw new ApiError(httpStatus.NOT_FOUND, 'Finance account not found')
   if (account.isSystem) throw new ApiError(httpStatus.CONFLICT, 'System accounts cannot be deleted')
-  const [child, used, mapped, bankLinked, taxLinked] = await Promise.all([
-    withSession(FinanceAccount.exists({ organizationId, parentAccountId: account._id }), session),
-    withSession(FinanceJournalLine.exists({ organizationId, accountId: account._id }), session),
-    withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
-    withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id }), session),
-    withSession(FinanceTaxCode.exists({ organizationId, $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
-  ])
+  const [child, used, mapped, bankLinked, taxLinked] = [
+    await withSession(FinanceAccount.exists({ organizationId, parentAccountId: account._id }), session),
+    await withSession(FinanceJournalLine.exists({ organizationId, accountId: account._id }), session),
+    await withSession(FinanceCategoryAccountMapping.exists({ organizationId, accountId: account._id }), session),
+    await withSession(FinanceBankAccount.exists({ organizationId, glAccountId: account._id }), session),
+    await withSession(FinanceTaxCode.exists({ organizationId, $or: [{ outputAccountId: account._id }, { inputAccountId: account._id }, { withholdingAccountId: account._id }] }), session),
+  ]
   if (child) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while it has child accounts')
   if (used) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted after it has been used in a journal')
   if (mapped) throw new ApiError(httpStatus.CONFLICT, 'Account cannot be deleted while finance categories are mapped to it')
@@ -601,18 +601,17 @@ const validateLineAmounts = (lines: FinanceJournalLineInput[], requireBalanced: 
 }
 
 const assertJournalLineRelations = async (organizationId: string, line: FinanceJournalLineInput, session?: ClientSession) => {
-  const checks: Promise<unknown>[] = []
-  if (line.propertyId) checks.push(TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, line.propertyId, session))
-  if (line.agentId) checks.push(TenantReferenceService.assertAgentBelongsToOrganization(organizationId, line.agentId, session))
-  if (line.vendorId) checks.push(TenantReferenceService.assertFinanceVendorBelongsToOrganization(organizationId, line.vendorId, session))
-  if (line.clientId) checks.push(TenantReferenceService.assertClientBelongsToOrganization(organizationId, line.clientId, session))
-  if (line.shareholderId) checks.push((async () => {
+  // Session-bound queries cannot run in parallel (including calls started before awaiting them).
+  if (line.propertyId) await TenantReferenceService.assertPropertyBelongsToOrganization(organizationId, line.propertyId, session)
+  if (line.agentId) await TenantReferenceService.assertAgentBelongsToOrganization(organizationId, line.agentId, session)
+  if (line.vendorId) await TenantReferenceService.assertFinanceVendorBelongsToOrganization(organizationId, line.vendorId, session)
+  if (line.clientId) await TenantReferenceService.assertClientBelongsToOrganization(organizationId, line.clientId, session)
+  if (line.shareholderId) {
     const shareholderId = asObjectId(line.shareholderId, 'shareholder id')
     const query = FinanceShareholder.exists({ _id: shareholderId, organizationId })
     if (session) query.session(session)
     if (!(await query)) throw new ApiError(httpStatus.BAD_REQUEST, 'Shareholder does not belong to this organization')
-  })())
-  await Promise.all(checks)
+  }
 }
 
 const assertJournalAccounts = async (organizationId: string, lines: FinanceJournalLineInput[], sourceType: string, session?: ClientSession) => {

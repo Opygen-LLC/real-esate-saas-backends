@@ -38,11 +38,15 @@ import {
   requestRoute,
 } from "./shared/httpObservability";
 
+import catchAsync from "./shared/catchAsync";
+import { authMiddlewares } from "./app/middlewares/auth";
+import { parseTrustedProxy } from "./shared/trustedProxy";
+
 const app: Application = express();
 const startedAt = Date.now();
 
 app.disable("x-powered-by");
-app.set("trust proxy", 1);
+app.set("trust proxy", parseTrustedProxy(process.env.TRUST_PROXY));
 
 app.use(cors(corsOptionsDelegate));
 app.options("*", cors(corsOptionsDelegate) as any);
@@ -108,7 +112,12 @@ app.get("/", (_req: Request, res: Response) => {
   });
 });
 
-app.get("/health", async (_req, res) => {
+app.get("/health", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(200).json({ status: "ok" });
+});
+app.get("/internal/health", authMiddlewares.authSuperAdmin, catchAsync(async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const mongo = mongoose.connection.readyState === 1;
   const worker = getWorkerHealth();
   const emptyDatabaseBackupStatus: DatabaseBackupOperationStatus = {
@@ -159,8 +168,10 @@ app.get("/health", async (_req, res) => {
       propertyMedia,
     },
   });
-});
-app.get("/ready", async (_req, res) => {
+}));
+const readinessHandler = async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
   const mongo = mongoose.connection.readyState === 1;
   const [
     transactions,
@@ -197,7 +208,7 @@ app.get("/ready", async (_req, res) => {
   ]);
   const worker = getWorkerHealth();
   const workerReady = !config.runtime.worker_enabled || worker.healthy;
-  const transactionReady = !config.isProduction || transactions;
+  const transactionReady = transactions;
   const emailReady = !config.isProduction || email;
   const mediaReady =
     !config.isProduction || (objectStorage.healthy && clamav.healthy);
@@ -220,6 +231,10 @@ app.get("/ready", async (_req, res) => {
     workerReady &&
     mediaReady &&
     privacyReady;
+  if (req.path !== "/internal/ready") {
+    res.status(ready ? 200 : 503).json({ status: ready ? "ready" : "not_ready" });
+    return;
+  }
   const emailStatus = emailProviderStatus();
   res.status(ready ? 200 : 503).json({
     status: ready ? "ready" : "not_ready",
@@ -243,7 +258,13 @@ app.get("/ready", async (_req, res) => {
       },
     },
   });
-});
+  } catch (error) {
+    logger.error("readiness_check_failed", { error });
+    res.status(503).json({ status: "not_ready" });
+  }
+};
+app.get("/ready", readinessHandler);
+app.get("/internal/ready", authMiddlewares.authSuperAdmin, readinessHandler);
 app.get("/metrics", (req, res) => {
   if (config.isProduction) {
     const token = req.get("authorization")?.replace(/^Bearer\s+/i, "") || "";

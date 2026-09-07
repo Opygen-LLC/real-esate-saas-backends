@@ -1,3 +1,4 @@
+import type { ClientSession } from 'mongoose'
 import { createHash } from 'crypto'
 import { IPrivacyConsentContext, PrivacyConsentPurpose } from './privacyConsent.interface'
 import { PrivacyConsentRecord } from './privacyConsent.model'
@@ -10,8 +11,9 @@ const record = (
   userId: string,
   payload: { purpose: PrivacyConsentPurpose; policyVersion: string; granted: boolean },
   context: IPrivacyConsentContext = {},
-) =>
-  PrivacyConsentRecord.create({
+  session?: ClientSession,
+) => {
+  const payloadToSave = {
     organizationId,
     userId,
     purpose: payload.purpose,
@@ -20,19 +22,23 @@ const record = (
     capturedAt: new Date(),
     ip: context.ip || '',
     requestId: context.requestId || '',
-  })
+  }
+  return session ? PrivacyConsentRecord.create([payloadToSave], { session }).then((rows) => rows[0]) : PrivacyConsentRecord.create(payloadToSave)
+}
 
 const recordPublicPrivacyPolicy = (
   organizationId: string,
   normalizedIdentifier: string,
   policyVersion: string,
   context: IPrivacyConsentContext = {},
+  session?: ClientSession,
 ) =>
   record(
     organizationId,
     publicSubjectId(normalizedIdentifier),
     { purpose: 'privacy_policy', policyVersion, granted: true },
     context,
+    session,
   )
 
 export const PrivacyConsentService = {

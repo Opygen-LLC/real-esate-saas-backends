@@ -73,7 +73,7 @@ const sharedOptions: Pick<cors.CorsOptions, 'methods' | 'allowedHeaders' | 'expo
     'Idempotency-Key',
     'traceparent',
   ],
-  exposedHeaders: ['X-Request-ID', 'traceparent', 'Server-Timing'],
+  exposedHeaders: ['Idempotency-Replayed', 'X-Request-ID', 'traceparent', 'Server-Timing'],
   maxAge: 86400,
 }
 

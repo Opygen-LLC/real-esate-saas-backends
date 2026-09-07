@@ -145,12 +145,10 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     }).sort({ periodStart: -1, _id: -1 }).select('_id baseLeadAllowance bonusLeadAllowance totalLeadAllowance leadAllowanceModel').lean()
     activeBenefitForLeadCapacity = await withSession(benefitQuery, session)
 
-    const [topup, recurring] = await Promise.all([
-      activeBenefitForLeadCapacity
-        ? LeadTopupGrantService.getActiveGrantSummary(organizationId, activeBenefitForLeadCapacity._id, session)
-        : Promise.resolve({ topupLeadAllowance: 0, grantCount: 0 }),
-      LeadAddonSubscriptionService.getActiveSummary(organizationId, session),
-    ])
+    const topup = activeBenefitForLeadCapacity
+      ? await LeadTopupGrantService.getActiveGrantSummary(organizationId, activeBenefitForLeadCapacity._id, session)
+      : { topupLeadAllowance: 0, grantCount: 0 }
+    const recurring = await LeadAddonSubscriptionService.getActiveSummary(organizationId, session)
     activeTopupLeadAllowance = topup.topupLeadAllowance
     activeRecurringLeadAllowance = recurring.recurringLeadAllowance
 
@@ -639,7 +637,13 @@ const withLocalLeadQuotaLock = async <T>(organizationId: string, work: (session?
   }
 }
 
-const withLeadQuotaGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+const withLeadQuotaGuard = async <T>(organizationId: string, work: (session?: ClientSession) => Promise<T>, outerSession?: ClientSession): Promise<T> => {
+  if (outerSession) {
+    if (!outerSession.inTransaction()) throw new ApiError(500, 'Lead allowance requires an active transaction')
+    const lock = await Organization.updateOne({ organizationId }, { $inc: { leadQuotaRevision: 1 } }, { session: outerSession })
+    if (!lock.matchedCount) throw new ApiError(404, 'Organization not found')
+    return work(outerSession)
+  }
   if (await mongoSupportsTransactions()) {
     const session = await mongoose.startSession()
     try {
@@ -749,7 +753,7 @@ const inactiveBenefitPeriodError = (currentPlan: string) => new ApiError(
 const reserveLeadAllowance = async (
   organizationId: string,
   requestedUnits = 1,
-  options: { allowPartial?: boolean; source?: LeadAllowanceSource } = {},
+  options: { allowPartial?: boolean; source?: LeadAllowanceSource; session?: ClientSession } = {},
 ): Promise<LeadAllowanceReservationResult> => {
   const requested = Math.max(1, Math.trunc(Number(requestedUnits || 1)))
   const allowPartial = Boolean(options.allowPartial)
@@ -769,16 +773,12 @@ const reserveLeadAllowance = async (
     if (benefit) {
       mode = 'benefit_period'
       benefitPeriodId = String(benefit._id)
-      const [topup, recurring] = await Promise.all([
-        LeadTopupGrantService.getActiveGrantSummary(organizationId, benefit._id, session),
-        LeadAddonSubscriptionService.getActiveSummary(organizationId, session),
-      ])
+      const topup = await LeadTopupGrantService.getActiveGrantSummary(organizationId, benefit._id, session)
+      const recurring = await LeadAddonSubscriptionService.getActiveSummary(organizationId, session)
       limit = Math.max(0, Number(benefit.totalLeadAllowance || 0)) + topup.topupLeadAllowance + recurring.recurringLeadAllowance
       if (benefit.leadAllowanceModel === 'active_capacity') {
-        const [accessibleUsed, outstanding] = await Promise.all([
-          synchronizeActiveLeadCapacityUsage(organizationId, limit, session),
-          outstandingLeadReservationUnits(organizationId, session, { mode: 'benefit_period', benefitPeriodId: benefit._id }),
-        ])
+        const accessibleUsed = await synchronizeActiveLeadCapacityUsage(organizationId, limit, session)
+        const outstanding = await outstandingLeadReservationUnits(organizationId, session, { mode: 'benefit_period', benefitPeriodId: benefit._id })
         used = accessibleUsed + outstanding
       } else {
         // Grandfathered benefit periods retain the historical paid-period credit counter.
@@ -795,10 +795,8 @@ const reserveLeadAllowance = async (
       used = 0
       limit = 0
     } else {
-      const [pipelineUsed, outstanding] = await Promise.all([
-        countLimitedResourceUsage(organizationId, 'leads', session),
-        outstandingFallbackReservationUnits(organizationId, session),
-      ])
+      const pipelineUsed = await countLimitedResourceUsage(organizationId, 'leads', session)
+      const outstanding = await outstandingFallbackReservationUnits(organizationId, session)
       used = pipelineUsed + outstanding
       limit = Math.max(0, Number(resolved.limits.maxLeads || 0))
     }
@@ -882,10 +880,10 @@ const reserveLeadAllowance = async (
       legacyFallback,
       periodInactive,
     }
-  })
+  }, options.session)
 }
 
-const consumeLeadAllowanceReservation = async (organizationId: string, reservationId: string, units = 1): Promise<void> => {
+const consumeLeadAllowanceReservation = async (organizationId: string, reservationId: string, units = 1, session?: ClientSession): Promise<void> => {
   const increment = Math.max(1, Math.trunc(Number(units || 1)))
   const reservation: any = await LeadAllowanceReservation.findOneAndUpdate(
     {
@@ -895,12 +893,12 @@ const consumeLeadAllowanceReservation = async (organizationId: string, reservati
       $expr: { $lte: [{ $add: ['$consumedUnits', '$releasedUnits', increment] }, '$grantedUnits'] },
     },
     { $inc: { consumedUnits: increment } },
-    { new: true },
+    { new: true, ...(session ? { session } : {}) },
   )
   if (!reservation) throw new ApiError(409, 'Lead allowance reservation is no longer available', '', 'LEAD_ALLOWANCE_RESERVATION_INVALID')
   if (Number(reservation.consumedUnits || 0) + Number(reservation.releasedUnits || 0) >= Number(reservation.grantedUnits || 0)) {
     reservation.status = Number(reservation.consumedUnits || 0) > 0 ? 'finalized' : 'released'
-    await reservation.save()
+    await reservation.save(session ? { session } : undefined)
   }
 }
 

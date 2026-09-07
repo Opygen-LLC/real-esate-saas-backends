@@ -4,10 +4,12 @@ import validateRequest from '../../middlewares/validateRequest'
 import { ViewingController } from './viewing.controller'
 import { ViewingValidation } from './viewing.validation'
 
+import { publicViewingRateLimiter, publicViewingTenantRateLimiter } from '../../middlewares/publicViewingRateLimiter'
+
 const router = express.Router()
 
 // Public Viewing Request
-router.post('/public-request', validateRequest(ViewingValidation.publicRequestZodSchema), ViewingController.publicRequestViewing)
+router.post('/public-request', publicViewingRateLimiter, validateRequest(ViewingValidation.publicRequestZodSchema), publicViewingTenantRateLimiter, ViewingController.publicRequestViewing)
 
 // Authenticated viewing endpoints
 router.post(

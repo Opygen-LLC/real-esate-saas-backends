@@ -154,8 +154,8 @@ const loadAssignableLead = async (
   return lead
 }
 
-const validateConfiguredStage = async (organizationId: string, status: LeadStatus, lostReason?: string) => {
-  const configDoc: any = await CrmService.getConfig(organizationId)
+const validateConfiguredStage = async (organizationId: string, status: LeadStatus, lostReason?: string, session?: ClientSession) => {
+  const configDoc: any = await CrmService.getConfig(organizationId, session)
   const stage = (configDoc.pipelineStages || []).find((item: any) => item.key === status)
   if (!stage) throw new ApiError(400, 'Pipeline stage is not configured for this agency')
   if (stage.lost && (!lostReason || !(configDoc.lostReasons || []).includes(lostReason))) {
@@ -205,7 +205,7 @@ const applyStatusChange = async (input: {
   effects: LifecycleEffects
 }) => {
   const previousStatus = normalizeLeadStatus(input.lead.leadStatus) || String(input.lead.leadStatus || LEAD_STATUS.NEW)
-  const { stage } = await validateConfiguredStage(input.organizationId, input.newStatus, input.lostReason)
+  const { stage } = await validateConfiguredStage(input.organizationId, input.newStatus, input.lostReason, input.session)
   if (input.newStatus === LEAD_STATUS.FOLLOW_UP_SCHEDULED && !input.lead.followUpDate) {
     throw new ApiError(400, 'Follow-up Scheduled requires a follow-up date. Schedule the follow-up first.')
   }
@@ -475,7 +475,7 @@ const changeStatusInTransaction = async (
   options: { lostReason?: string; reason?: string; actorId?: string; access?: CrmAccessContext } = {},
 ): Promise<{ result: LeadLifecycleResult; effects: LifecycleEffects }> => {
   const newStatus = requireLeadStatus(status)
-  await validateConfiguredStage(organizationId, newStatus, options.lostReason)
+  await validateConfiguredStage(organizationId, newStatus, options.lostReason, session)
   if (newStatus === LEAD_CONVERSION_STATUS) {
     return convertToContactInTransaction(organizationId, leadId, session, options)
   }

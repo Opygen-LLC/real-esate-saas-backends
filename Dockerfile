@@ -10,6 +10,7 @@ ENV NODE_OPTIONS="--max-old-space-size=1536"
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
+COPY scripts/require-pnpm.mjs ./scripts/require-pnpm.mjs
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY scripts ./scripts

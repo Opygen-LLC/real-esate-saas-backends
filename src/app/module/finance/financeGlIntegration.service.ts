@@ -116,6 +116,14 @@ const postAutomaticJournal = async (
   lines: input.lines,
 }, session)
 
+const assertLinkedJournalReversed = async (organizationId: string, journalId: unknown, session?: ClientSession): Promise<void> => {
+  if (!journalId) return
+  const query = FinanceJournalEntry.findOne({ _id: journalId, organizationId }).select('status')
+  if (session) query.session(session)
+  const journal: any = await query.lean()
+  if (!journal || journal.status !== 'REVERSED') throw new ApiError(httpStatus.CONFLICT, 'Reconcile the linked accounting journal before removing this record', '', 'FINANCE_JOURNAL_NOT_REVERSED')
+}
+
 const reverseLinkedJournal = async (organizationId: string, actor: AccountingActor, journalId: unknown, reason: string, reversalDate: Date, session?: ClientSession) => {
   if (!journalId) return null
   const query = FinanceJournalEntry.findOne({ _id: journalId, organizationId })
@@ -280,4 +288,5 @@ export const FinanceGlIntegrationService = {
   postCommissionPayout,
   postPropertyInvestorMovement,
   reverseLinkedJournal,
+  assertLinkedJournalReversed,
 }

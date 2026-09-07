@@ -81,7 +81,7 @@ const publicRequestZodSchema = z.object({
     privacyConsent: z.literal(true, { errorMap: () => ({ message: 'Privacy consent is required' }) }),
     policyVersion: z.string().trim().min(1, 'Privacy policy version is required').max(80),
     attribution,
-  }).strict()),
+  }).strict(), { requireFuture: false }),
 })
 
 export const ViewingValidation = {

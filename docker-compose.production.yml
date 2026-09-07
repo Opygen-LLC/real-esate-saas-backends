@@ -11,6 +11,8 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
       WORKER_ENABLED: "true"
+      TRUST_PROXY: ${TRUST_PROXY:?Set the trusted reverse-proxy CIDR or IP list}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       DOMAIN_PROVIDER: ${DOMAIN_PROVIDER:?DOMAIN_PROVIDER is required}
       PUBLIC_SITE_ORIGIN: ${PUBLIC_SITE_ORIGIN:?PUBLIC_SITE_ORIGIN is required}
       # PUBLIC_API_URL must point to the HTTPS domain — this is what the backend

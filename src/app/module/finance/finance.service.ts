@@ -1,13 +1,13 @@
 import { randomBytes } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession } from 'mongoose'
-import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
 import { createQueryProfile } from '../../helpers/queryPerformance'
-import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
+import { requiredTransaction } from '../../db/requiredTransaction'
+import { assertRemovalActor, assertFinanceRemovalOwner, assertManualTransaction, assertTransactionRemovable, assertInvoiceRemovable, assertCommissionRemovable } from './financeRemovalPolicy'
 import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
 import { Organization } from '../organization/organization.model'
@@ -96,29 +96,19 @@ const invoiceAudit = async (organizationId: string, actor: FinanceActorContext, 
   await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType: 'financeInvoice', entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata }, session)
 }
 
-const financeDestructiveAudit = async (organizationId: string, actor: FinanceActorContext, action: string, entityType: string, entityId: string, reason: string, metadata: Record<string, unknown> = {}) => {
-  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType, entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata })
+const financeDestructiveAudit = async (organizationId: string, actor: FinanceActorContext, action: string, entityType: string, entityId: string, reason: string, metadata: Record<string, unknown> = {}, session?: ClientSession) => {
+  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType, entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata }, session)
 }
 
-const financeCommercialTransaction = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
-  if (await mongoSupportsTransactions()) {
-    const session = await mongoose.startSession()
-    try {
-      let value: T | undefined
-      await session.withTransaction(async () => { value = await work(session) })
-      if (value === undefined) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Finance transaction did not complete')
-      return value
-    } finally { await session.endSession() }
-  }
-  if (config.env === 'production') throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Financial accounting writes require a MongoDB replica set or mongos in production')
-  return work()
-}
+const financeCommercialTransaction = requiredTransaction
 
-const withOptionalAutomaticAccounting = async <T>(organizationId: string, work: (session: ClientSession | undefined, accountingReady: boolean) => Promise<T>): Promise<T> => {
-  const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId)
-  if (!accountingReady) return work(undefined, false)
-  return financeCommercialTransaction((session) => work(session, true))
-}
+// Optional accounting must never mean optional atomicity. Resolve settings in
+// the same snapshot as the writes, including when accounting is disabled.
+const withOptionalAutomaticAccounting = async <T>(organizationId: string, work: (session: ClientSession, accountingReady: boolean) => Promise<T>): Promise<T> =>
+  financeCommercialTransaction(async (session) => {
+    const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+    return work(session, accountingReady)
+  })
 
 const querySession = <T>(query: T, session?: ClientSession): T => {
   if (session && typeof (query as any)?.session === 'function') (query as any).session(session)
@@ -239,6 +229,7 @@ const updateTransaction = async (organizationId: string, actorId: string, id: st
     if ('bankAccountId' in payload) normalized.bankAccountId = accountingReady ? (await resolveFinanceBankAccountId(organizationId, payload.bankAccountId, session) || null) : null
     const accountingFields = ['type', 'category', 'amount', 'transactionDate', 'propertyId', 'vendorId', 'bankAccountId', 'description', 'reference']
     const accountingChanged = accountingFields.some((key) => key in payload)
+    if (!accountingReady && existing.accountingJournalId && (accountingChanged || payload.status !== undefined)) throw new ApiError(409, 'Enable Advanced Accounting before editing a posted transaction; use Void for a reversal', '', 'FINANCE_ACCOUNTING_REQUIRED')
     const wasPaid = existing.status === 'paid'
     const nextStatus = payload.status ?? existing.status
 
@@ -273,53 +264,22 @@ const updateTransaction = async (organizationId: string, actorId: string, id: st
 }
 
 const voidTransaction = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const existing: any = await querySession(FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }), session)
+  const result: any = await financeCommercialTransaction(async (session) => {
+    const existing: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }).session(session)
     if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
+    assertManualTransaction(existing)
     if (existing.status === 'voided') return existing
-    if (accountingReady && existing.accountingJournalId) {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accountingJournalId, reason, new Date(), session).catch(() => undefined)
+    // Previously posted journals must be reversed even after an accounting downgrade.
+    if (existing.accountingJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accountingJournalId, reason, new Date(), session)
     }
-
-    if (existing.sourceType === 'invoice_payment' && existing.sourceId) {
-      const invQuery: any = FinanceInvoice.findOne({ _id: existing.sourceId, organizationId })
-      if (session) invQuery.session(session)
-      const invoice: any = await invQuery
-      if (invoice) {
-        invoice.payments = (invoice.payments || []).filter((p: any) => String(p.transactionId) !== String(existing._id))
-        const totalPaid = (invoice.payments || []).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
-        invoice.paidAmount = Math.max(0, totalPaid)
-        if (invoice.status !== 'cancelled' && invoice.status !== 'draft') {
-          if (invoice.paidAmount <= 0) {
-            invoice.status = (invoice.dueDate && new Date(invoice.dueDate) < new Date()) ? 'overdue' : 'sent'
-          } else if (invoice.paidAmount < Number(invoice.total || 0)) {
-            invoice.status = 'partial'
-          } else {
-            invoice.status = 'paid'
-          }
-        }
-        invoice.updatedBy = actorObjectId(actorId)
-        await invoice.save(session ? { session } : undefined)
-      }
-    } else if (existing.sourceType === 'commission_payout' && existing.sourceId) {
-      const comQuery: any = FinanceCommission.findOne({ _id: existing.sourceId, organizationId })
-      if (session) comQuery.session(session)
-      const commission: any = await comQuery
-      if (commission) {
-        if (commission.status === 'paid') commission.status = 'approved'
-        commission.paidAt = null
-        commission.payoutTransactionId = null
-        commission.updatedBy = actorObjectId(actorId)
-        await commission.save(session ? { session } : undefined)
-      }
-    }
-
     existing.status = 'voided'
     existing.voidedAt = new Date()
     existing.voidedBy = actorObjectId(actorId)
-    existing.voidReason = reason
+    existing.voidReason = reason.trim()
     existing.updatedBy = actorObjectId(actorId)
-    await existing.save(session ? { session } : undefined)
+    await existing.save({ session })
+    await financeDestructiveAudit(organizationId, { id: actorId }, 'finance.transaction.voided', 'financeTransaction', id, reason, { sourceType: existing.sourceType }, session)
     return existing
   })
   await emitFinanceEvent(organizationId, actorId, 'finance_transaction', id, 'finance.transaction.voided', `Transaction voided: ${reason}`)
@@ -327,66 +287,22 @@ const voidTransaction = async (organizationId: string, actorId: string, id: stri
 }
 
 const deleteTransaction = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Removed by agency owner') => {
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const txQuery: any = FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null })
-    if (session) txQuery.session(session)
-    const transaction: any = await txQuery
+  assertRemovalActor(actor)
+  const result: any = await financeCommercialTransaction(async (session) => {
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const transaction: any = await FinanceTransaction.findOne({ _id: id, organizationId, deletedAt: null }).session(session)
     if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Transaction not found')
-
-    if (accountingReady && transaction.accountingJournalId && transaction.status !== 'voided') {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), transaction.accountingJournalId, reason, new Date(), session).catch(() => undefined)
-    }
-
-    if (transaction.sourceType === 'invoice_payment' && transaction.sourceId) {
-      const invQuery: any = FinanceInvoice.findOne({ _id: transaction.sourceId, organizationId })
-      if (session) invQuery.session(session)
-      const invoice: any = await invQuery
-      if (invoice) {
-        invoice.payments = (invoice.payments || []).filter((p: any) => String(p.transactionId) !== String(transaction._id))
-        const totalPaid = (invoice.payments || []).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
-        invoice.paidAmount = Math.max(0, totalPaid)
-        if (invoice.status !== 'cancelled' && invoice.status !== 'draft') {
-          if (invoice.paidAmount <= 0) {
-            invoice.status = (invoice.dueDate && new Date(invoice.dueDate) < new Date()) ? 'overdue' : 'sent'
-          } else if (invoice.paidAmount < Number(invoice.total || 0)) {
-            invoice.status = 'partial'
-          } else {
-            invoice.status = 'paid'
-          }
-        }
-        invoice.updatedBy = actorObjectId(actor.id)
-        await invoice.save(session ? { session } : undefined)
-      }
-    } else if (transaction.sourceType === 'commission_payout' && transaction.sourceId) {
-      const comQuery: any = FinanceCommission.findOne({ _id: transaction.sourceId, organizationId })
-      if (session) comQuery.session(session)
-      const commission: any = await comQuery
-      if (commission) {
-        if (commission.status === 'paid') commission.status = 'approved'
-        commission.paidAt = null
-        commission.payoutTransactionId = null
-        commission.updatedBy = actorObjectId(actor.id)
-        await commission.save(session ? { session } : undefined)
-      }
-    }
-
-    const now = new Date()
-    transaction.status = 'voided'
-    transaction.voidedAt = transaction.voidedAt || now
-    transaction.voidedBy = transaction.voidedBy || actorObjectId(actor.id)
-    transaction.voidReason = transaction.voidReason || reason
-    transaction.deletedAt = now
+    assertTransactionRemovable(transaction)
+    await FinanceGlIntegrationService.assertLinkedJournalReversed(organizationId, transaction.accountingJournalId, session)
+    transaction.deletedAt = new Date()
     transaction.deletedBy = actorObjectId(actor.id)
     transaction.deleteReason = reason.trim()
     transaction.updatedBy = actorObjectId(actor.id)
-    await transaction.save(session ? { session } : undefined)
+    await transaction.save({ session })
+    await financeDestructiveAudit(organizationId, actor, 'finance.transaction.deleted', 'financeTransaction', id, reason, { sourceType: transaction.sourceType, status: transaction.status, amount: transaction.amount, type: transaction.type }, session)
     return transaction
   })
-
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_transaction', id, 'finance.transaction.deleted', `Transaction removed from Money: ${result.description}`),
-    financeDestructiveAudit(organizationId, actor, 'finance.transaction.deleted', 'financeTransaction', id, result.deleteReason || reason, { sourceType: result.sourceType, status: result.status, amount: result.amount, type: result.type }),
-  ])
+  await emitFinanceEvent(organizationId, actor.id, 'finance_transaction', id, 'finance.transaction.deleted', `Transaction removed from Money: ${result.description}`)
   return { _id: result._id, deletedAt: result.deletedAt }
 }
 
@@ -484,30 +400,8 @@ const refreshOverdueInvoices = async (organizationId: string) => {
   }, { $set: { status: 'overdue' } })
 }
 
-const syncArchivedInvoiceTransactions = async (organizationId: string) => {
-  const archivedInvoices = await FinanceInvoice.find({ organizationId, archivedAt: { $ne: null } }).select('_id invoiceNumber payments').lean()
-  if (!archivedInvoices.length) return
-  const archivedIds = archivedInvoices.map((inv: any) => inv._id)
-  const paymentTxIds = archivedInvoices.flatMap((inv: any) => (inv.payments || []).map((p: any) => p.transactionId).filter(Boolean))
-  await FinanceTransaction.updateMany(
-    {
-      organizationId,
-      deletedAt: null,
-      $or: [
-        { sourceType: 'invoice_payment', sourceId: { $in: archivedIds } },
-        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
-      ],
-    },
-    {
-      $set: {
-        deletedAt: new Date(),
-        status: 'voided',
-        voidedAt: new Date(),
-        deleteReason: 'Cleaned up transaction linked to archived invoice',
-      },
-    }
-  )
-}
+// Historical archived invoices require an explicit audited reconciliation.
+// Listing transactions or reading a dashboard must never void/hide payments.
 
 const INVOICE_PROPERTY_SELECT = 'title slug address city state status listingType price currency bangladeshAddress'
 
@@ -548,11 +442,9 @@ const organizationIssuerSnapshot = (organization: any): IFinanceIssuerSnapshot =
   taxId: String(organization?.licenseNumber || '').trim(),
 })
 
-const currentIssuerSnapshot = async (organizationId: string): Promise<IFinanceIssuerSnapshot> => {
-  const [profile, organization]: any[] = await Promise.all([
-    FinanceBillingProfile.findOne({ organizationId }).lean(),
-    Organization.findOne({ organizationId }).select('agencyName email phone address city state country licenseNumber').lean(),
-  ])
+const currentIssuerSnapshot = async (organizationId: string, session?: ClientSession): Promise<IFinanceIssuerSnapshot> => {
+  const profile: any = await querySession(FinanceBillingProfile.findOne({ organizationId }), session).lean()
+  const organization: any = await querySession(Organization.findOne({ organizationId }).select('agencyName email phone address city state country licenseNumber'), session).lean()
   if (!organization) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found')
   if (!profile) return organizationIssuerSnapshot(organization)
   return {
@@ -564,10 +456,11 @@ const currentIssuerSnapshot = async (organizationId: string): Promise<IFinanceIs
   }
 }
 
-const freezeLegacyInvoiceIssuerSnapshots = async (organizationId: string, snapshot: IFinanceIssuerSnapshot) => {
+const freezeLegacyInvoiceIssuerSnapshots = async (organizationId: string, snapshot: IFinanceIssuerSnapshot, session?: ClientSession) => {
   await FinanceInvoice.updateMany(
     { organizationId, $or: [{ issuerSnapshot: { $exists: false } }, { 'issuerSnapshot.legalName': { $exists: false } }, { 'issuerSnapshot.legalName': '' }] },
     { $set: { issuerSnapshot: snapshot } },
+    session ? { session } : undefined,
   )
 }
 
@@ -590,26 +483,40 @@ const getBillingProfile = async (organizationId: string) => {
   }
 }
 
+// Billing profile changes and legacy issuer snapshots share one commit.
 const updateBillingProfile = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceBillingProfile>) => {
-  const previousSnapshot = await currentIssuerSnapshot(organizationId)
-  await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot)
   const legalName = String(payload.legalName || '').trim()
   if (!legalName) throw financeFieldError('legalName', 'Billing name is required')
-  const profile: any = await FinanceBillingProfile.findOneAndUpdate(
-    { organizationId },
-    { $set: { legalName, email: String(payload.email || '').trim(), phone: String(payload.phone || '').trim(), address: String(payload.address || '').trim(), taxId: String(payload.taxId || '').trim(), updatedBy: actorObjectId(actor.id) }, $setOnInsert: { organizationId, createdBy: actorObjectId(actor.id) } },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
-  ).lean()
-  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.updated', entityType: 'financeBillingProfile', entityId: String(profile._id), reason: 'Billing information updated', requestId: actor.requestId, ip: actor.ip, metadata: { historicalInvoiceSnapshotsPreserved: true } })
+  await financeCommercialTransaction(async (session) => {
+    // Serialize profile writes even when no profile exists yet.
+    const organization = await Organization.findOneAndUpdate({ organizationId }, { $inc: { financeMutationVersion: 1 } }, { session, new: true })
+    if (!organization) throw new ApiError(404, 'Organization not found')
+    const previousSnapshot = await currentIssuerSnapshot(organizationId, session)
+    await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot, session)
+    const profile: any = await FinanceBillingProfile.findOneAndUpdate(
+      { organizationId },
+      { $set: { legalName, email: String(payload.email || '').trim(), phone: String(payload.phone || '').trim(), address: String(payload.address || '').trim(), taxId: String(payload.taxId || '').trim(), updatedBy: actorObjectId(actor.id) }, $setOnInsert: { organizationId, createdBy: actorObjectId(actor.id) } },
+      { session, new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+    ).lean()
+    await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.updated', entityType: 'financeBillingProfile', entityId: String(profile._id), reason: 'Billing information updated', requestId: actor.requestId, ip: actor.ip, metadata: { historicalInvoiceSnapshotsPreserved: true } }, session)
+    return profile
+  })
   emitProductionEvent('finance_billing_profile_updated', { organizationId })
   return getBillingProfile(organizationId)
 }
 
 const removeBillingProfile = async (organizationId: string, actor: FinanceActorContext, reason = 'Billing information removed') => {
-  const previousSnapshot = await currentIssuerSnapshot(organizationId)
-  await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot)
-  const removed: any = await FinanceBillingProfile.findOneAndDelete({ organizationId }).lean()
-  await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.removed', entityType: 'financeBillingProfile', entityId: removed?._id ? String(removed._id) : organizationId, reason, requestId: actor.requestId, ip: actor.ip, metadata: { existed: Boolean(removed), historicalInvoiceSnapshotsPreserved: true } })
+  assertRemovalActor(actor)
+  await financeCommercialTransaction(async (session) => {
+    const organization = await Organization.findOneAndUpdate({ organizationId }, { $inc: { financeMutationVersion: 1 } }, { session, new: true })
+    if (!organization) throw new ApiError(404, 'Organization not found')
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const previousSnapshot = await currentIssuerSnapshot(organizationId, session)
+    await freezeLegacyInvoiceIssuerSnapshots(organizationId, previousSnapshot, session)
+    const removed: any = await FinanceBillingProfile.findOneAndDelete({ organizationId }, { session }).lean()
+    await writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action: 'finance.billing_profile.removed', entityType: 'financeBillingProfile', entityId: removed?._id ? String(removed._id) : organizationId, reason, requestId: actor.requestId, ip: actor.ip, metadata: { existed: Boolean(removed), historicalInvoiceSnapshotsPreserved: true } }, session)
+    return { removed: Boolean(removed) }
+  })
   emitProductionEvent('finance_billing_profile_removed', { organizationId })
   return getBillingProfile(organizationId)
 }
@@ -626,10 +533,10 @@ const createInvoice = async (organizationId: string, actor: FinanceActorContext,
   const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
   validateInvoiceDates(issueDate, dueDate)
   const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
-  const issuerSnapshot = await currentIssuerSnapshot(organizationId)
   if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
 
   const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+    const issuerSnapshot = await currentIssuerSnapshot(organizationId, session)
     if (payload.taxCodeId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Tax/VAT accounting requires Advanced Accounting')
     const amounts = await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId, session)
     const rows = await FinanceInvoice.create([{
@@ -733,6 +640,7 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
 
     const recognizedBefore = !['draft', 'cancelled'].includes(existing.status)
     const accountingChanged = amountFieldsChanged || ['issueDate', 'propertyId', 'status', 'clientName', 'taxCodeId'].some((key) => key in payload)
+    if (!accountingReady && existing.revenueJournalId && accountingChanged) throw new ApiError(409, 'Enable Advanced Accounting before changing a posted invoice; use Void for a reversal', '', 'FINANCE_ACCOUNTING_REQUIRED')
     if (accountingReady && recognizedBefore && existing.revenueJournalId && accountingChanged) {
       await FinanceGlIntegrationService.reverseLinkedJournal(
         organizationId,
@@ -772,152 +680,57 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
   return populated
 }
 
+const assertNoInvoicePayments = async (organizationId: string, invoice: any, session: ClientSession) => {
+  if (Number(invoice.paidAmount || 0) !== 0 || (invoice.payments || []).length || ['partial', 'paid'].includes(invoice.status)) {
+    throw new ApiError(409, 'Invoices with payment history cannot be voided or removed', '', 'FINANCE_PAYMENT_HISTORY')
+  }
+  // A corrupted paidAmount must not conceal a real payment in Money.
+  const payment = await FinanceTransaction.exists({ organizationId, sourceType: 'invoice_payment', sourceId: invoice._id }).session(session)
+  if (payment) throw new ApiError(409, 'Resolve the linked invoice payment through its source workflow before continuing', '', 'FINANCE_PAYMENT_HISTORY')
+}
+
 const voidInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason: string) => {
-  const invoice: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const row: any = await querySession(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), session)
+  const invoice: any = await financeCommercialTransaction(async (session) => {
+    const row: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }).session(session)
     if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
     if (row.status === 'cancelled') return row
-    if (row.status === 'draft') throw new ApiError(httpStatus.CONFLICT, 'Draft invoices should be archived instead of voided')
-    if (Number(row.paidAmount || 0) > 0 || ['partial', 'paid'].includes(row.status)) throw new ApiError(httpStatus.CONFLICT, 'Paid or partially paid invoices cannot be voided')
-
-    if (accountingReady && row.revenueJournalId) {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), row.revenueJournalId, reason, new Date(), session).catch(() => undefined)
+    if (!['sent', 'overdue'].includes(row.status)) throw new ApiError(409, 'Only unpaid issued invoices can be voided; draft invoices can be removed by the owner')
+    await assertNoInvoicePayments(organizationId, row, session)
+    if (row.revenueJournalId) {
+      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), row.revenueJournalId, reason, new Date(), session)
     }
-
-    const paymentTxIds = (row.payments || []).map((p: any) => p.transactionId).filter(Boolean)
-    const paymentJournalIds = (row.payments || []).map((p: any) => p.journalEntryId).filter(Boolean)
-
-    if (accountingReady) {
-      for (const journalId of paymentJournalIds) {
-        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), journalId, `Invoice ${row.invoiceNumber} payment reversed: ${reason}`, new Date(), session).catch(() => undefined)
-      }
-    }
-
-    const linkedTxFilter: any = {
-      organizationId,
-      deletedAt: null,
-      $or: [
-        { sourceType: 'invoice_payment', sourceId: row._id },
-        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
-      ],
-    }
-    const linkedTxQuery: any = FinanceTransaction.find(linkedTxFilter)
-    if (session) linkedTxQuery.session(session)
-    const linkedTransactions: any[] = await linkedTxQuery
-
-    if (accountingReady) {
-      for (const tx of linkedTransactions) {
-        if (tx.accountingJournalId && !paymentJournalIds.some((jId: any) => String(jId) === String(tx.accountingJournalId))) {
-          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, `Invoice ${row.invoiceNumber} transaction reversed: ${reason}`, new Date(), session).catch(() => undefined)
-        }
-      }
-    }
-
-    if (linkedTransactions.length > 0) {
-      const now = new Date()
-      await FinanceTransaction.updateMany(
-        linkedTxFilter,
-        {
-          $set: {
-            status: 'voided',
-            voidedAt: now,
-            voidedBy: actorObjectId(actor.id),
-            voidReason: `Invoice ${row.invoiceNumber} voided: ${reason}`,
-            updatedBy: actorObjectId(actor.id),
-          },
-        },
-        session ? { session } : undefined
-      )
-    }
-
     row.status = 'cancelled'
     row.cancelledAt = new Date()
     row.cancelledBy = actorObjectId(actor.id)
-    row.cancelReason = reason
+    row.cancelReason = reason.trim()
     row.updatedBy = actorObjectId(actor.id)
-    await row.save(session ? { session } : undefined)
+    await row.save({ session })
+    await invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: row.invoiceNumber, total: row.total }, session)
     return row
   })
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.voided', id, reason, { invoiceNumber: invoice.invoiceNumber, total: invoice.total, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }),
-  ])
+  await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.voided', `Invoice ${invoice.invoiceNumber} voided: ${reason}`)
   return invoicePopulate(FinanceInvoice.findOne({ _id: id, organizationId }), organizationId).lean()
 }
 
-const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Invoice removed by agency') => {
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const invoiceQuery: any = FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
-    if (session) invoiceQuery.session(session)
-    const invoice: any = await invoiceQuery
+const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Invoice removed by agency owner') => {
+  assertRemovalActor(actor)
+  const result: any = await financeCommercialTransaction(async (session) => {
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const invoice: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }).session(session)
     if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-
-    if (accountingReady && invoice.revenueJournalId) {
-      await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), invoice.revenueJournalId, `Invoice ${invoice.invoiceNumber} deleted: ${reason}`, new Date(), session).catch(() => undefined)
-    }
-
-    const paymentTxIds = (invoice.payments || []).map((p: any) => p.transactionId).filter(Boolean)
-    const paymentJournalIds = (invoice.payments || []).map((p: any) => p.journalEntryId).filter(Boolean)
-
-    if (accountingReady) {
-      for (const journalId of paymentJournalIds) {
-        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), journalId, `Invoice ${invoice.invoiceNumber} payment removed: ${reason}`, new Date(), session).catch(() => undefined)
-      }
-    }
-
-    const linkedTxFilter: any = {
-      organizationId,
-      deletedAt: null,
-      $or: [
-        { sourceType: 'invoice_payment', sourceId: invoice._id },
-        ...(paymentTxIds.length ? [{ _id: { $in: paymentTxIds } }] : []),
-      ],
-    }
-    const linkedTxQuery: any = FinanceTransaction.find(linkedTxFilter)
-    if (session) linkedTxQuery.session(session)
-    const linkedTransactions: any[] = await linkedTxQuery
-
-    if (accountingReady) {
-      for (const tx of linkedTransactions) {
-        if (tx.accountingJournalId && !paymentJournalIds.some((jId: any) => String(jId) === String(tx.accountingJournalId))) {
-          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, `Transaction reversed on invoice deletion: ${reason}`, new Date(), session).catch(() => undefined)
-        }
-      }
-    }
-
-    if (linkedTransactions.length > 0) {
-      const now = new Date()
-      await FinanceTransaction.updateMany(
-        linkedTxFilter,
-        {
-          $set: {
-            deletedAt: now,
-            deletedBy: actorObjectId(actor.id),
-            deleteReason: `Invoice ${invoice.invoiceNumber} deleted: ${reason}`,
-            status: 'voided',
-            voidedAt: now,
-            voidedBy: actorObjectId(actor.id),
-            voidReason: `Invoice ${invoice.invoiceNumber} deleted: ${reason}`,
-            updatedBy: actorObjectId(actor.id),
-          },
-        },
-        session ? { session } : undefined
-      )
-    }
-
+    assertInvoiceRemovable(invoice)
+    await assertNoInvoicePayments(organizationId, invoice, session)
+    await FinanceGlIntegrationService.assertLinkedJournalReversed(organizationId, invoice.revenueJournalId, session)
     invoice.archivedAt = new Date()
     invoice.archivedBy = actorObjectId(actor.id)
-    invoice.archiveReason = reason
-    invoice.status = 'cancelled'
+    invoice.archiveReason = reason.trim()
     invoice.updatedBy = actorObjectId(actor.id)
-    await invoice.save(session ? { session } : undefined)
+    // Archiving is visibility only. Do not cancel a draft or delete journal history.
+    await invoice.save({ session })
+    await invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: invoice.invoiceNumber, status: invoice.status, total: invoice.total }, session)
     return invoice
   })
-
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Invoice ${result.invoiceNumber} archived: ${reason}`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.archived', id, reason, { invoiceNumber: result.invoiceNumber, total: result.total, paidAmount: result.paidAmount, propertyId: result.propertyId ? String(result.propertyId) : null }),
-  ])
+  await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.archived', `Invoice ${result.invoiceNumber} archived`)
   return { _id: result._id, invoiceNumber: result.invoiceNumber, archivedAt: result.archivedAt }
 }
 
@@ -1098,6 +911,7 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
     const accountingChanged = ['agentId', 'propertyId', 'commissionAmount', 'agentShare', 'companyShare', 'grossDealValue', 'commissionRate', 'agentSplitPercent', 'manualOverride', 'status'].some((key) => key in payload)
     const wasApproved = existing.status === 'approved'
     const nextStatus = payload.status ?? existing.status
+    if (!accountingReady && existing.accrualJournalId && (accountingChanged || nextStatus !== 'approved')) throw new ApiError(409, 'Enable Advanced Accounting before changing an accrued commission; use Cancel for a reversal', '', 'FINANCE_ACCOUNTING_REQUIRED')
     if (accountingReady && wasApproved && existing.accrualJournalId && (accountingChanged || nextStatus !== 'approved')) {
       await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), existing.accrualJournalId, `Commission ${existing.commissionNumber} was revised`, new Date(), session)
     }
@@ -1121,14 +935,21 @@ const updateCommission = async (organizationId: string, actorId: string, id: str
     .populate({ path: 'propertyId', select: 'title', match: { organizationId } })
 }
 
+const assertNoCommissionPayout = async (organizationId: string, commission: any, session: ClientSession) => {
+  const payout = await FinanceTransaction.exists({ organizationId, sourceType: 'commission_payout', sourceId: commission._id }).session(session)
+  if (commission.status === 'paid' || commission.paidAt || commission.payoutTransactionId || commission.payoutJournalId || payout) {
+    throw new ApiError(409, 'Commissions with payout history cannot be cancelled or removed', '', 'FINANCE_PAYOUT_HISTORY')
+  }
+}
+
 const cancelCommission = async (organizationId: string, actorId: string, id: string, reason: string) => {
-  const commission: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const row: any = await querySession(FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }), session)
+  const commission: any = await financeCommercialTransaction(async (session) => {
+    const row: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).session(session)
     if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-    if (row.status === 'paid') throw new ApiError(httpStatus.CONFLICT, 'Paid commissions cannot be cancelled')
     if (row.status === 'cancelled') return row
-    if (!['pending', 'approved'].includes(row.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot cancel a ${row.status} commission`)
-    if (accountingReady && row.status === 'approved' && row.accrualJournalId) {
+    await assertNoCommissionPayout(organizationId, row, session)
+    if (!['pending', 'approved'].includes(row.status)) throw new ApiError(409, `Cannot cancel a ${row.status} commission`)
+    if (row.accrualJournalId) {
       await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actorId), row.accrualJournalId, reason, new Date(), session)
     }
     row.status = 'cancelled'
@@ -1136,7 +957,8 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
     row.cancelledBy = actorObjectId(actorId)
     row.cancelReason = reason.trim()
     row.updatedBy = actorObjectId(actorId)
-    await row.save(session ? { session } : undefined)
+    await row.save({ session })
+    await financeDestructiveAudit(organizationId, { id: actorId }, 'finance.commission.cancelled', 'financeCommission', id, reason, { commissionNumber: row.commissionNumber }, session)
     return row
   })
   await emitFinanceEvent(organizationId, actorId, 'finance_commission', id, 'finance.commission.cancelled', `Commission ${commission.commissionNumber} cancelled`)
@@ -1144,72 +966,23 @@ const cancelCommission = async (organizationId: string, actorId: string, id: str
 }
 
 const archiveCommission = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Commission removed by agency owner') => {
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const commissionQuery: any = FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null })
-    if (session) commissionQuery.session(session)
-    const commission: any = await commissionQuery
+  assertRemovalActor(actor)
+  const result: any = await financeCommercialTransaction(async (session) => {
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const commission: any = await FinanceCommission.findOne({ _id: id, organizationId, archivedAt: null }).session(session)
     if (!commission) throw new ApiError(httpStatus.NOT_FOUND, 'Commission not found')
-
-    if (accountingReady) {
-      if (commission.accrualJournalId) {
-        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), commission.accrualJournalId, reason, new Date(), session).catch(() => undefined)
-      }
-      if (commission.payoutJournalId) {
-        await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), commission.payoutJournalId, reason, new Date(), session).catch(() => undefined)
-      }
-    }
-
-    const payoutFilter: any = {
-      organizationId,
-      deletedAt: null,
-      $or: [
-        { sourceType: 'commission_payout', sourceId: commission._id },
-        ...(commission.payoutTransactionId ? [{ _id: commission.payoutTransactionId }] : []),
-      ],
-    }
-    const payoutTxQuery: any = FinanceTransaction.find(payoutFilter)
-    if (session) payoutTxQuery.session(session)
-    const payoutTransactions: any[] = await payoutTxQuery
-    if (accountingReady) {
-      for (const tx of payoutTransactions) {
-        if (tx.accountingJournalId && String(tx.accountingJournalId) !== String(commission.payoutJournalId)) {
-          await FinanceGlIntegrationService.reverseLinkedJournal(organizationId, financeAccountingActor(actor), tx.accountingJournalId, reason, new Date(), session).catch(() => undefined)
-        }
-      }
-    }
-    if (payoutTransactions.length > 0) {
-      const now = new Date()
-      await FinanceTransaction.updateMany(
-        payoutFilter,
-        {
-          $set: {
-            deletedAt: now,
-            deletedBy: actorObjectId(actor.id),
-            deleteReason: `Commission ${commission.commissionNumber} archived: ${reason}`,
-            status: 'voided',
-            voidedAt: now,
-            voidedBy: actorObjectId(actor.id),
-            voidReason: `Commission ${commission.commissionNumber} archived: ${reason}`,
-            updatedBy: actorObjectId(actor.id),
-          },
-        },
-        session ? { session } : undefined
-      )
-    }
-
+    assertCommissionRemovable(commission)
+    await assertNoCommissionPayout(organizationId, commission, session)
+    await FinanceGlIntegrationService.assertLinkedJournalReversed(organizationId, commission.accrualJournalId, session)
     commission.archivedAt = new Date()
     commission.archivedBy = actorObjectId(actor.id)
     commission.archiveReason = reason.trim()
-    commission.status = 'cancelled'
     commission.updatedBy = actorObjectId(actor.id)
-    await commission.save(session ? { session } : undefined)
+    await commission.save({ session })
+    await financeDestructiveAudit(organizationId, actor, 'finance.commission.archived', 'financeCommission', id, reason, { commissionNumber: commission.commissionNumber, status: commission.status, agentShare: commission.agentShare }, session)
     return commission
   })
-
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_commission', id, 'finance.commission.archived', `Commission ${result.commissionNumber} archived`),
-    financeDestructiveAudit(organizationId, actor, 'finance.commission.archived', 'financeCommission', id, result.archiveReason || reason, { commissionNumber: result.commissionNumber, status: result.status, agentShare: result.agentShare }),
-  ])
+  await emitFinanceEvent(organizationId, actor.id, 'finance_commission', id, 'finance.commission.archived', `Commission ${result.commissionNumber} archived`)
   return { _id: result._id, commissionNumber: result.commissionNumber, archivedAt: result.archivedAt }
 }
 
@@ -1297,22 +1070,34 @@ const listVendors = async (organizationId: string, query: Record<string, unknown
 }
 
 const updateVendor = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceVendor>) => {
-  const result = await FinanceVendor.findOneAndUpdate({ _id: id, organizationId }, { ...payload, updatedBy: actorObjectId(actorId) }, { new: true, runValidators: true })
-  if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor not found')
+  const result = await financeCommercialTransaction(async (session) => {
+    const existing: any = await FinanceVendor.findOne({ _id: id, organizationId }).session(session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor not found')
+    const statusChanged = payload.status !== undefined && payload.status !== existing.status
+    // A PATCH must not bypass the owner-only archive/restore policy.
+    if (statusChanged) await assertFinanceRemovalOwner(organizationId, { id: actorId, role: 'agency_owner' }, session)
+    Object.assign(existing, payload, { updatedBy: actorObjectId(actorId) })
+    await existing.save({ session })
+    if (statusChanged) await financeDestructiveAudit(organizationId, { id: actorId, role: 'agency_owner' }, 'finance.vendor.status_changed', 'financeVendor', id, 'Owner changed vendor lifecycle status', { status: existing.status }, session)
+    return existing
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_vendor', id, 'finance.vendor.updated', `Vendor ${result.name} updated`)
   return result
 }
 const archiveVendor = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Vendor archived by agency owner') => {
-  const vendor: any = await FinanceVendor.findOne({ _id: id, organizationId })
-  if (!vendor) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor not found')
-  vendor.status = 'inactive'
-  vendor.updatedBy = actorObjectId(actor.id)
-  await vendor.save()
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_vendor', id, 'finance.vendor.archived', `Vendor ${vendor.name} archived`),
-    financeDestructiveAudit(organizationId, actor, 'finance.vendor.archived', 'financeVendor', id, reason, { name: vendor.name }),
-  ])
-  return vendor
+  assertRemovalActor(actor)
+  const result = await financeCommercialTransaction(async (session) => {
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const vendor: any = await FinanceVendor.findOne({ _id: id, organizationId }).session(session)
+    if (!vendor) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor not found')
+    vendor.status = 'inactive'
+    vendor.updatedBy = actorObjectId(actor.id)
+    await vendor.save({ session })
+    await financeDestructiveAudit(organizationId, actor, 'finance.vendor.archived', 'financeVendor', id, reason, { name: vendor.name }, session)
+    return vendor
+  })
+  await emitFinanceEvent(organizationId, actor.id, 'finance_vendor', id, 'finance.vendor.archived', `Vendor ${result.name} archived`)
+  return result
 }
 
 const createBudget = async (organizationId: string, actorId: string, payload: Partial<IFinanceBudget>) => {
@@ -1372,25 +1157,36 @@ const listBudgets = async (organizationId: string, query: Record<string, unknown
 }
 
 const updateBudget = async (organizationId: string, actorId: string, id: string, payload: Partial<IFinanceBudget>) => {
-  const existing: any = await FinanceBudget.findOne({ _id: id, organizationId })
-  if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
-  const startDate = payload.startDate ? asDate(payload.startDate) : existing.startDate, endDate = payload.endDate ? asDate(payload.endDate) : existing.endDate
-  if (endDate < startDate) throw financeFieldError('endDate', 'End date cannot be before start date')
-  const result = await FinanceBudget.findOneAndUpdate({ _id: id, organizationId }, { ...payload, startDate, endDate, updatedBy: actorObjectId(actorId) }, { new: true, runValidators: true }).lean()
+  const result: any = await financeCommercialTransaction(async (session) => {
+    const existing: any = await FinanceBudget.findOne({ _id: id, organizationId }).session(session)
+    if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
+    const statusChanged = payload.status !== undefined && payload.status !== existing.status
+    if (statusChanged) await assertFinanceRemovalOwner(organizationId, { id: actorId, role: 'agency_owner' }, session)
+    const startDate = payload.startDate ? asDate(payload.startDate) : existing.startDate
+    const endDate = payload.endDate ? asDate(payload.endDate) : existing.endDate
+    if (endDate < startDate) throw financeFieldError('endDate', 'End date cannot be before start date')
+    Object.assign(existing, payload, { startDate, endDate, updatedBy: actorObjectId(actorId) })
+    await existing.save({ session })
+    if (statusChanged) await financeDestructiveAudit(organizationId, { id: actorId, role: 'agency_owner' }, 'finance.budget.status_changed', 'financeBudget', id, 'Owner changed budget lifecycle status', { status: existing.status }, session)
+    return existing.toObject()
+  })
   await emitFinanceEvent(organizationId, actorId, 'finance_budget', id, 'finance.budget.updated', `Budget ${result?.name || id} updated`)
-  return (await enrichBudgets(organizationId, result ? [result] : []))[0]
+  return (await enrichBudgets(organizationId, [result]))[0]
 }
 const archiveBudget = async (organizationId: string, actor: FinanceActorContext, id: string, reason = 'Budget archived by agency owner') => {
-  const budget: any = await FinanceBudget.findOne({ _id: id, organizationId })
-  if (!budget) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
-  budget.status = 'archived'
-  budget.updatedBy = actorObjectId(actor.id)
-  await budget.save()
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_budget', id, 'finance.budget.archived', `Budget ${budget.name} archived`),
-    financeDestructiveAudit(organizationId, actor, 'finance.budget.archived', 'financeBudget', id, reason, { name: budget.name, amount: budget.amount, category: budget.category }),
-  ])
-  return budget
+  assertRemovalActor(actor)
+  const result = await financeCommercialTransaction(async (session) => {
+    await assertFinanceRemovalOwner(organizationId, actor, session)
+    const budget: any = await FinanceBudget.findOne({ _id: id, organizationId }).session(session)
+    if (!budget) throw new ApiError(httpStatus.NOT_FOUND, 'Budget not found')
+    budget.status = 'archived'
+    budget.updatedBy = actorObjectId(actor.id)
+    await budget.save({ session })
+    await financeDestructiveAudit(organizationId, actor, 'finance.budget.archived', 'financeBudget', id, reason, { name: budget.name }, session)
+    return budget
+  })
+  await emitFinanceEvent(organizationId, actor.id, 'finance_budget', id, 'finance.budget.archived', `Budget ${result.name} archived`)
+  return result
 }
 
 const aggregateCategory = async (organizationId: string, type: 'income' | 'expense', startDate?: Date, endDate?: Date) => FinanceTransaction.aggregate([
@@ -1416,7 +1212,6 @@ const aggregateTrend = async (organizationId: string, startDate?: Date, endDate?
 
 const getSummary = async (organizationId: string, startDate?: Date, endDate?: Date) => {
   await refreshOverdueInvoices(organizationId)
-  await syncArchivedInvoiceTransactions(organizationId)
   const transactionMatch: any = { organizationId, deletedAt: null, status: 'paid', affectsProfit: { $ne: false }, ...(startDate || endDate ? { transactionDate: dateCondition(startDate, endDate) } : {}) }
   const invoiceMatch: any = { organizationId, archivedAt: null, status: { $nin: ['cancelled', 'draft'] }, ...(startDate || endDate ? { issueDate: dateCondition(startDate, endDate) } : {}) }
   const commissionMatch: any = { organizationId, archivedAt: null, status: { $in: ['pending', 'approved'] }, ...(startDate || endDate ? { createdAt: dateCondition(startDate, endDate) } : {}) }

@@ -44,7 +44,7 @@ export const appointmentTimeSchema = z.string()
 
 const dhakaDateTimeMs = (date: string, time: string): number => Date.parse(`${date}T${time}:00+06:00`)
 
-export const addAppointmentWindowValidation = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema.superRefine((value, ctx) => {
+export const addAppointmentWindowValidation = <T extends z.ZodRawShape>(schema: z.ZodObject<T>, options: { requireFuture?: boolean } = {}) => schema.superRefine((value, ctx) => {
   const date = String((value as Record<string, unknown>).date || '')
   const startTime = String((value as Record<string, unknown>).startTime || '')
   const endTime = String((value as Record<string, unknown>).endTime || '')
@@ -58,7 +58,7 @@ export const addAppointmentWindowValidation = <T extends z.ZodRawShape>(schema: 
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['endTime'], message: 'End time must be after start time' })
   }
 
-  if (start <= Date.now()) {
+  if (options.requireFuture !== false && start <= Date.now()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['startTime'], message: 'Viewing time must be in the future' })
   }
 

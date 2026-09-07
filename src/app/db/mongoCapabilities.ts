@@ -14,8 +14,7 @@ export const mongoSupportsTransactions = async (): Promise<boolean> => {
 
   const db = mongoose.connection.db
   if (!db) {
-    transactionsSupported = false
-    return transactionsSupported
+    return false
   }
 
   try {
@@ -24,7 +23,7 @@ export const mongoSupportsTransactions = async (): Promise<boolean> => {
   } catch {
     // If topology discovery is unavailable, do not attempt a transaction that
     // would turn a recoverable request into a MongoDB TransactionNumbers error.
-    transactionsSupported = false
+    return false
   }
 
   return transactionsSupported

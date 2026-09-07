@@ -69,9 +69,10 @@ const stringify = (payload: Record<string, unknown> = {}): string => {
  * their Mongo transaction commits so websocket/cache consumers never observe
  * uncommitted state.
  */
-const publish = async (input: DomainEventInput) => {
+const publish = async (input: DomainEventInput, options: { strict?: boolean } = {}) => {
   try {
-    await CacheInvalidationService.fromEvent(input).catch(() => undefined)
+    if (options.strict) await CacheInvalidationService.fromEvent(input)
+    else await CacheInvalidationService.fromEvent(input).catch(() => undefined)
     RealtimeService.fromDomainEvent(input)
     await NextRevalidationService.trigger({
       organizationId: input.organizationId,

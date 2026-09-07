@@ -365,6 +365,8 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     visitorUsageMonth: { type: String, default: '' },
     teamQuotaRevision: { type: Number, default: 0, min: 0, select: false },
     propertyQuotaRevision: { type: Number, default: 0, min: 0, select: false },
+    financeMutationVersion: { type: Number, default: 0, min: 0, select: false },
+    viewingMutationVersion: { type: Number, default: 0, min: 0, select: false },
     leadQuotaRevision: { type: Number, default: 0, min: 0, select: false },
     subscriptionBenefitRevision: { type: Number, default: 0, min: 0, select: false },
   },

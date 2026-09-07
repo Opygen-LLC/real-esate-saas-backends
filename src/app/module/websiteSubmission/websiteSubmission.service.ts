@@ -1,3 +1,5 @@
+import type { ClientSession } from 'mongoose'
+import { TransactionalOutbox } from '../domainEvent/transactionalOutbox.service'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { IPaginationOptions } from '../../../interfaces/common'
@@ -53,13 +55,18 @@ const leadSubmissionType = (payload: PublicLeadCaptureInput): WebsiteSubmissionT
   return 'GENERAL_LEAD'
 }
 
-const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'submittedAt'> & { submittedAt?: Date }) => {
-  await TenantPurgeBarrier.assertTenantWritable(payload.organizationId)
-  const submission = await WebsiteSubmission.create({
+const createSubmission = async (payload: Omit<IWebsiteSubmission, 'status' | 'submittedAt'> & { submittedAt?: Date }, session?: ClientSession) => {
+  if (!session) await TenantPurgeBarrier.assertTenantWritable(payload.organizationId)
+  const input = {
     ...payload,
     status: 'NEW',
     submittedAt: payload.submittedAt || new Date(),
-  })
+  }
+  const submission = session ? (await WebsiteSubmission.create([input], { session }))[0] : await WebsiteSubmission.create(input)
+  if (session) {
+    await TransactionalOutbox.emit({ organizationId: payload.organizationId, aggregateType: 'website_submission', aggregateId: String(submission._id), eventType: 'website_submission.created', payload: { submissionType: payload.submissionType } }, session)
+    return submission
+  }
   RealtimeService.emitOrganization(payload.organizationId, {
     type: 'website_submission.changed',
     action: 'created',
@@ -130,7 +137,7 @@ const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadS
   })
 }
 
-const captureViewing = async (payload: PublicViewingRequestInput, viewing: any) => {
+const captureViewing = async (payload: PublicViewingRequestInput, viewing: any, session?: ClientSession) => {
   const landingPage = payload.attribution?.landingPage || ''
   return createSubmission({
     organizationId: payload.organizationId,
@@ -148,7 +155,7 @@ const captureViewing = async (payload: PublicViewingRequestInput, viewing: any) 
     attribution: payload.attribution,
     privacyConsent: payload.privacyConsent,
     policyVersion: payload.policyVersion,
-  })
+  }, session)
 }
 
 const captureReview = async (review: any) => createSubmission({

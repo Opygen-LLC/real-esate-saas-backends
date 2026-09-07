@@ -69,7 +69,7 @@ export const TenantReferenceService = {
     let contactQuery = Contact.exists({ _id: normalized, organizationId })
     let leadQuery = Lead.exists({ _id: normalized, organizationId })
     if (session) { contactQuery = contactQuery.session(session); leadQuery = leadQuery.session(session) }
-    const [contact, lead] = await Promise.all([contactQuery, leadQuery])
+    const [contact, lead] = session ? [await contactQuery, await leadQuery] : await Promise.all([contactQuery, leadQuery])
     if (!contact && !lead) throw new ApiError(httpStatus.BAD_REQUEST, 'Client does not belong to this agency')
     return normalized
   },

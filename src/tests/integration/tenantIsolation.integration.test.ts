@@ -110,7 +110,9 @@ suite('cross-tenant negative matrix', () => {
   })
 
   it('Calendar Sync cannot load a viewing from another tenant', async () => {
-    await expect(CalendarSyncService.syncViewing(tenantA, viewingB._id.toString())).rejects.toMatchObject({ statusCode: 404 })
+    // Missing/deleted/foreign rows are an idempotent no-op for background delivery.
+    // No foreign viewing or provider payload may be returned.
+    expect(await CalendarSyncService.syncViewing(tenantA, viewingB._id.toString())).toBeUndefined()
   })
 
   it('rejects duplicate requested subdomains at organization creation', async () => {

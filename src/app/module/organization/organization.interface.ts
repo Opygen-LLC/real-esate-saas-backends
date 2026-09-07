@@ -135,6 +135,8 @@ export interface IOrganization {
   visitorUsageMonth?: string
   teamQuotaRevision?: number
   propertyQuotaRevision?: number
+  financeMutationVersion?: number
+  viewingMutationVersion?: number
   leadQuotaRevision?: number
   subscriptionBenefitRevision?: number
   createdAt?: Date

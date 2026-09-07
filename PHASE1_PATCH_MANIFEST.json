@@ -1,0 +1,560 @@
+{
+  "patch": "phase1-atomic-operations",
+  "project": "backend",
+  "format": "changed-and-new-files-overlay",
+  "asOf": "2026-09-06",
+  "releaseStatus": "BLOCKED_NOT_PRODUCTION_CERTIFIED",
+  "baseArchive": "real-esate-saas-backends-main.zip",
+  "baseArchiveSha256": "ed3d1ec2e09b1776e9ec8db86df53ca382536a9422d84dcb93ac40f733b287f4",
+  "manifestSelfExcluded": true,
+  "applyInstructions": "PHASE1_README.md",
+  "files": [
+    {
+      "path": ".env.example",
+      "change": "modified",
+      "originalSha256": "4c91da4b570656164c61140db394f2293b431ef2fdb1d029ffbfbf0b711316a4",
+      "sha256": "a18f6a9ade91c558faaf887637b19a91cd6a1e68c43aac1852a1ecc26a38ad5d",
+      "bytes": 3057
+    },
+    {
+      "path": ".node-version",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "f14b4987904bcb5814e4459a057ed4d20f58a633152288a761214dcd28780b56",
+      "bytes": 3
+    },
+    {
+      "path": "Dockerfile",
+      "change": "modified",
+      "originalSha256": "bc9375efd3778884a1e44401a3a193418fb36cd9fde624977be599ed23b5b126",
+      "sha256": "2c9413c96949a8c03fab4f226f3f819ac8f71483c5e8e91205a56b037f956ab4",
+      "bytes": 3070
+    },
+    {
+      "path": "PHASE1_README.md",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "2d7372d77cb79f36dc1d52a3dfdc8842d686710f34ffb0d6dc86fe7a8dde7f67",
+      "bytes": 13369
+    },
+    {
+      "path": "compose.phase1-test.yml",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "dd869045d40da5bd72b6439333397507d739850468c090ff4eaf3e892640d89f",
+      "bytes": 564
+    },
+    {
+      "path": "docker-compose.production.yml",
+      "change": "modified",
+      "originalSha256": "8c305e4ce253c36d1eaf32b07fef64ef8b7983c9d00c6ec365cdaa605aecdb8c",
+      "sha256": "2fa672286f5c85d9365016a3099e6b1d6b58e4ae86ded31ef3cc91a5cbbd92ea",
+      "bytes": 5275
+    },
+    {
+      "path": "docker-compose.yml",
+      "change": "modified",
+      "originalSha256": "bc2c1edf692ef32ad37256af1f323c8a8058c977e9455d6d52ff98fcfec5e1b4",
+      "sha256": "929584cdb1e3a32b9698dd4d0a455b426bd16045585461242fb050d748ffb14a",
+      "bytes": 3339
+    },
+    {
+      "path": "docs/phase1/OPERATIONS.md",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "2dce87841241fd6d31508b452321e267981573c03f5a2ab1e3b1fd158377953d",
+      "bytes": 3978
+    },
+    {
+      "path": "docs/phase1/SECURITY_REVIEW.md",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "fe7cfa96e3aa5bc9158dcdddbae33391f869537283f83062864a38e4ca441de3",
+      "bytes": 4154
+    },
+    {
+      "path": "docs/phase1/VALIDATION.md",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "809cd75a5ffbe54a89387d0f4519506e2b64510dc06f526dd1d340de7f1a8695",
+      "bytes": 4063
+    },
+    {
+      "path": "docs/phase1/backend-adapter-tests.tap",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "76c316677699274475cb5bf2c048fb90b1a08b470ac516c6f51feb3ec0480d45",
+      "bytes": 22410
+    },
+    {
+      "path": "docs/phase1/format-check.txt",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "47fd0fa9a3a5a9fbff36a903c0990cfdbf243238ddd491f361540a4c39c50e20",
+      "bytes": 25
+    },
+    {
+      "path": "docs/phase1/syntax-check.json",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "747c5d2f15042a72483c7812159090b389c3dc6be8773cb3310e6de262ed9fee",
+      "bytes": 111
+    },
+    {
+      "path": "docs/phase1/validation.json",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "de883d2e3e298c11e553e9942cc1748b5731fde3ec497dcc4da9fa013c689914",
+      "bytes": 794
+    },
+    {
+      "path": "package.json",
+      "change": "modified",
+      "originalSha256": "a984429c6cce96e642ba30a415af326abc8b03b4e33028de8fe83d6036ad2002",
+      "sha256": "80347b90323c2acee535ab447b6479d6d6cf38afd8e16125da7a468ddf1c3081",
+      "bytes": 26147
+    },
+    {
+      "path": "scripts/require-pnpm.mjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "fe076756865126df4153c5aa4b92eefc62567412464b1ac16f5af99e3859efba",
+      "bytes": 467
+    },
+    {
+      "path": "scripts/run-phase1-integration.mjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "69e91c4defb4ef79b9ac9eb87a4ab4fdb6dbcba74f2998e70b9d7510c489b712",
+      "bytes": 1178
+    },
+    {
+      "path": "scripts/verify-phase1-patch.mjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "90df74bd33908fa79e01643b50241a069003c16a2590e203cd1aeaf7bfbcb6cb",
+      "bytes": 1624
+    },
+    {
+      "path": "src/app/db/auditPhase1AtomicOperations.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "49266a36cecac6962c448dfe3981d715ef236671421d3d1e6f0eeb0cb27b9177",
+      "bytes": 3288
+    },
+    {
+      "path": "src/app/db/isolatedTestDatabase.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "530e1d6e5b0b07bb143c0d065dcb57ac12530687e3a33953070d1e7b2e39e250",
+      "bytes": 744
+    },
+    {
+      "path": "src/app/db/migratePhase1AtomicOperations.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "d63eac7c2b9d20feaece7dbab146a47a55f1bf69f649f3c067d0d88aceac447e",
+      "bytes": 1986
+    },
+    {
+      "path": "src/app/db/mongoCapabilities.ts",
+      "change": "modified",
+      "originalSha256": "d72bf5d4fd365e8543efc0d2fb84e73d652d28b79af560aea2a13ba352fa8e9e",
+      "sha256": "209961e9f2fbac6e9acbe2d1c3c9570e8e4a571dec79e37e0fbf4d40f24a79bc",
+      "bytes": 1109
+    },
+    {
+      "path": "src/app/db/requiredTransaction.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "19143fc609f0758d468e359929b18eb1502ff44d43264cb24a2add4a49e71773",
+      "bytes": 1315
+    },
+    {
+      "path": "src/app/db/seedPhase1VisualFixtures.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "b9009645dc5a55c7b01ea6c93d4e8c03f65a1953606a8770235bbe83cbfa66da",
+      "bytes": 3282
+    },
+    {
+      "path": "src/app/helpers/inputValidation.ts",
+      "change": "modified",
+      "originalSha256": "ea577e5686e67664436a5896809c28827e702271ab9a64a2cc7f734580871ef8",
+      "sha256": "5d774c0a674d547782d41aa294eb29ea60bb5399d91fa7ae4369a9b3ef276214",
+      "bytes": 2432
+    },
+    {
+      "path": "src/app/helpers/remoteImage.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "1fb2664c166f256746990713bf43c5160257519b854319b0ab333b8faa7105c2",
+      "bytes": 7397
+    },
+    {
+      "path": "src/app/middlewares/corsPolicy.ts",
+      "change": "modified",
+      "originalSha256": "3467383fe61ed0d8da91511df8eb173c347f82af91c7c23591aa82e2e11f39e3",
+      "sha256": "b3b6a2863bdbdecb4e2289d82ad47933501b2edb19f49ea296182849013ef329",
+      "bytes": 4495
+    },
+    {
+      "path": "src/app/middlewares/publicViewingRateLimiter.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "41334df0e7717622b02043736685f1f7acf9c32fed18e6e7a68758aa508b7c1a",
+      "bytes": 4302
+    },
+    {
+      "path": "src/app/module/compliance/tenantDataCollections.ts",
+      "change": "modified",
+      "originalSha256": "2d26543be1a78aa0578f06925f567c29d74209b8054fe8cc314d4a6af1b27508",
+      "sha256": "7888304d49bcf234ff82c883e53f71be2cb8b13b735041fe2c808b8b80372a04",
+      "bytes": 4440
+    },
+    {
+      "path": "src/app/module/crm/calendarSync.service.ts",
+      "change": "modified",
+      "originalSha256": "216bbb45ad87448d36822bb599482f291a14f512fcb3f2824ac080816fe45b4d",
+      "sha256": "4dfc2ed88da618b158469deff63c11c9191761973947cb096aa1a9cddae205ed",
+      "bytes": 4623
+    },
+    {
+      "path": "src/app/module/crm/crm.service.ts",
+      "change": "modified",
+      "originalSha256": "8f4107001789018ecefdeec9368c8861a4b56d2e905f9e676a58f709cc0b4fa8",
+      "sha256": "2e2abe55061f6bd5ef02d6ba5f9d73fcf60c8aa1a9f2653cf340cee4b3085e1b",
+      "bytes": 8460
+    },
+    {
+      "path": "src/app/module/domainEvent/domainEvent.service.ts",
+      "change": "modified",
+      "originalSha256": "4800e722ffebdc3401887f1505a100a318d2bb4a5d9fc490e209aa27b7e0ace8",
+      "sha256": "fe7a6b8937790fdcd47e818a101d274b39b18b6a41371712bbbf7d25f8953d42",
+      "bytes": 5767
+    },
+    {
+      "path": "src/app/module/domainEvent/transactionalOutbox.service.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "554428e1faf135c98ee8852ff60e42228c2bbac10a71e7e13a966a40535463a3",
+      "bytes": 901
+    },
+    {
+      "path": "src/app/module/entitlement/entitlement.service.ts",
+      "change": "modified",
+      "originalSha256": "5a00c9dce93dd5111d344759c05592e7703e84c786b69a1cfabc5c902195da13",
+      "sha256": "b7eb5ec12a54acd198ea703924b931a59e10d2b8685ca3ed45af9b9cf72e86d7",
+      "bytes": 54896
+    },
+    {
+      "path": "src/app/module/finance/finance.route.ts",
+      "change": "modified",
+      "originalSha256": "68773c7d29941942d3ee50396d3598751826737d2012e758d5c0122f2b1420a2",
+      "sha256": "c43fdcc75fef21e02e43035442c28b4c186bb13fe20c01efd4f662a6b773a380",
+      "bytes": 23258
+    },
+    {
+      "path": "src/app/module/finance/finance.service.ts",
+      "change": "modified",
+      "originalSha256": "32dff9645b9fd744b6e0833b884ef41a4bee60e6554156262262ea68282f031b",
+      "sha256": "22653efe8af006c76dbe31b725c3f53434225d2a3a3ed969cc69614256cedcc3",
+      "bytes": 87180
+    },
+    {
+      "path": "src/app/module/finance/financeAccounting.service.ts",
+      "change": "modified",
+      "originalSha256": "158e8308b2886adc904b422169fbedf67d25d79ca51d10a011bc84f4b0733eef",
+      "sha256": "64106a6cb158d4078ace9db58b790c76f86537909e4086cf034963db2c54bb10",
+      "bytes": 67831
+    },
+    {
+      "path": "src/app/module/finance/financeGlIntegration.service.ts",
+      "change": "modified",
+      "originalSha256": "e57c3156d7180e17bd4fe1ffb90d3ffc4789d6a4958c28ba295fb7280001434f",
+      "sha256": "e6e1fa585295d7f718f27f7a74d8029be7dda80476b1be844bdb521358e4deb8",
+      "bytes": 20865
+    },
+    {
+      "path": "src/app/module/finance/financeRemovalPolicy.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "ca019deb1c0b25594adb58bfbf6a2fef05d7b2544feba074dadd0483a98f9f99",
+      "bytes": 3232
+    },
+    {
+      "path": "src/app/module/lead/leadEntitlement.service.ts",
+      "change": "modified",
+      "originalSha256": "4948dfa8bd7de9bdc98ebd17a1befccfc72de6152aadec9061c661cacb93ecc7",
+      "sha256": "634e7dbf33d5f212489b39a4367a356b12af2f21b2789d56abdc12da84241aca",
+      "bytes": 12294
+    },
+    {
+      "path": "src/app/module/lead/leadLifecycle.service.ts",
+      "change": "modified",
+      "originalSha256": "4c8049a0ca2f438853148810b2ff5ebca15f6b30a08974c98fd6f9ea2045f33e",
+      "sha256": "b02d3249d194028eee64f1d72459b40f60c6a6327599b9c94978d3b6e1fb7242",
+      "bytes": 26201
+    },
+    {
+      "path": "src/app/module/notification/notification.service.ts",
+      "change": "modified",
+      "originalSha256": "6023e748a66aa32a80309bb2530aa0777fae9c4e9094a02cf3951f73f683ab3e",
+      "sha256": "db6e74cbec19936297184115a9ba8b19b4170288b0ac3026e03de94bc9b8c67c",
+      "bytes": 5457
+    },
+    {
+      "path": "src/app/module/operationsQueue/operationsJob.model.ts",
+      "change": "modified",
+      "originalSha256": "e84921e9673c246ce489e8c677a11d05c815ba4d7dbf3ed91c3e37a16ebc47ae",
+      "sha256": "f153d54f9e6f8af0c561d3bd07c36bc29925c133c8ec980f15466952be072880",
+      "bytes": 1461
+    },
+    {
+      "path": "src/app/module/operationsQueue/operationsQueue.service.ts",
+      "change": "modified",
+      "originalSha256": "60f626d4bc42ab5d5725e83323a1b4ef0d43991afab625c0ff672e405ca2422b",
+      "sha256": "19a8376b943081e871179a6a83110b7b009290dd9c41c687bf546ae9bd3cba77",
+      "bytes": 18154
+    },
+    {
+      "path": "src/app/module/organization/organization.interface.ts",
+      "change": "modified",
+      "originalSha256": "3fa9c323b4f6b9376f527b27cad98aea88fc523363c825e0ea5e9209940597df",
+      "sha256": "2e1dca75beb9b79f02ad6a15b2892baa2e36dc908dc61ff01744dfb0e174cb45",
+      "bytes": 4842
+    },
+    {
+      "path": "src/app/module/organization/organization.model.ts",
+      "change": "modified",
+      "originalSha256": "db48bc081cb2475691d1b19ab947857c4618c7971dcd5e6f0862512746b06904",
+      "sha256": "413503d743c02429a56202dc3e8252685c7a3b25bfff383689de4c985993aa10",
+      "bytes": 16468
+    },
+    {
+      "path": "src/app/module/privacy/privacyConsent.service.ts",
+      "change": "modified",
+      "originalSha256": "d15e660f4c1d51ce4d8740849559df09a57345c8455e1d88242439dbf6efc239",
+      "sha256": "9bac4ae06f91411c9f0afa6441c760054014337b634b59dabc9237a3299985ec",
+      "bytes": 1470
+    },
+    {
+      "path": "src/app/module/realtime/realtime.service.ts",
+      "change": "modified",
+      "originalSha256": "11c6e451629485f036587b9725b6f98a9712afb695a9b29f9253c7909afd0f72",
+      "sha256": "1498194e9c932d44c0eb393404ea92fe4227ac107bb3a529cb251202f7ad5a22",
+      "bytes": 9407
+    },
+    {
+      "path": "src/app/module/tenantAccess/tenantAccessTransition.service.ts",
+      "change": "modified",
+      "originalSha256": "08bc16e48734689a3dd899107cf480c177cd7ecd12cdc90e419966fcb4d7713a",
+      "sha256": "d72943dde4e9db75e909a2cd13e13a0042a6b1e903b525776885bdeea0ef3a4a",
+      "bytes": 6832
+    },
+    {
+      "path": "src/app/module/viewing/viewing.controller.ts",
+      "change": "modified",
+      "originalSha256": "e2dee7182ead4efef827da97415763178ff6da1923045a27f74d33ffe56fb4dc",
+      "sha256": "3d28c59e448c1e58366138e761fecab270fd88bfbf777ba8fdd3d2972dccde54",
+      "bytes": 6381
+    },
+    {
+      "path": "src/app/module/viewing/viewing.interface.ts",
+      "change": "modified",
+      "originalSha256": "a581bbfda9cd30ad6a4fe71fc7b434798c83c8f8dc295bf4c4b7acd463ffc95d",
+      "sha256": "c4bbc902c99d7805c3dcb2a4673e8fc5496601354273090b560200873cf5db31",
+      "bytes": 1625
+    },
+    {
+      "path": "src/app/module/viewing/viewing.model.ts",
+      "change": "modified",
+      "originalSha256": "4cc44c710d7c9298ad8337edbc7f29ad2dd71f1f722f11c29ce2f410f81e4626",
+      "sha256": "58e922aa893076f1a587b13a8730d17db1320769f31417834f048b99a6aeea9a",
+      "bytes": 2644
+    },
+    {
+      "path": "src/app/module/viewing/viewing.route.ts",
+      "change": "modified",
+      "originalSha256": "cf3a53ffa414b54ba45cbd2d7148568b88b2fb8638f2ccbd50fec876c0e3b1c2",
+      "sha256": "c977061d4f851227fe8a345512304f9023112272ecaf7fb48e2a675b53261760",
+      "bytes": 1706
+    },
+    {
+      "path": "src/app/module/viewing/viewing.service.ts",
+      "change": "modified",
+      "originalSha256": "b45322d51ba75504fe748377463cc5c00b2595ba0a847ca592900678e9818d4a",
+      "sha256": "fbde48a1dadf58dae7d57b9e3d22f30f4a59c5d8c93815675067b7e2763508b6",
+      "bytes": 22865
+    },
+    {
+      "path": "src/app/module/viewing/viewing.validation.ts",
+      "change": "modified",
+      "originalSha256": "c0f8dd0ad42ddc0fc048ddfe57f04e5fdc4f6da3743f5a924f52fc37815ef00d",
+      "sha256": "dfe84edb7bfe5fba25845d0808c74442ec2360d08e78d49dad2345346a5b9b05",
+      "bytes": 3799
+    },
+    {
+      "path": "src/app/module/viewing/viewingIdempotency.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "c9fe21f5eacf1298480373005f09ec3a3246798222581dd61fbf8c7809bcaad3",
+      "bytes": 1489
+    },
+    {
+      "path": "src/app/module/viewing/viewingLead.service.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "5b0c6caf101479e7558d3cef8b507d5a28c17e4099ec810593225d28e6860455",
+      "bytes": 4559
+    },
+    {
+      "path": "src/app/module/viewing/viewingReminder.service.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "d8e3f8eccbdb6269c9622f94381c8bffbcaf1be94a4028935bc52c5ec0f957f1",
+      "bytes": 2539
+    },
+    {
+      "path": "src/app/module/viewing/viewingRequestReceipt.model.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "313551f7964f03d6f1d37b63626e9a12364e3e3e72492eb6635f657a6ff61cc8",
+      "bytes": 625
+    },
+    {
+      "path": "src/app/module/viewing/viewingTransaction.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "b26c85c1cba0da653ed4e6d4ad9bb1a2b6ac6283f6590a3cc5bcb71c926de255",
+      "bytes": 1571
+    },
+    {
+      "path": "src/app/module/viewing/viewingWindow.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "42c088b1f3b785f42ff03851c9cbf06a82c0766bc5d89724bbd81a86d96e5cf0",
+      "bytes": 1472
+    },
+    {
+      "path": "src/app/module/websiteBuilder/websiteBuilder.service.ts",
+      "change": "modified",
+      "originalSha256": "c5eac88312f21933d1185e073dcb658477ed38a3744f0e298a9b9a45f93fbf16",
+      "sha256": "61cf0b1519bfc3c0aacb4b10bd738f0a6bd4a3a52b3a8fd5f1ea8218c8f00386",
+      "bytes": 50182
+    },
+    {
+      "path": "src/app/module/websiteSubmission/websiteSubmission.service.ts",
+      "change": "modified",
+      "originalSha256": "80b854cff32376402ff304e59c290ce9d1eca07ec84249f93c396df15351384b",
+      "sha256": "8909fcd1ec8e9861edf8831bf5f65848f4e6bfe11d9747af84fa6e2790d2b6e3",
+      "bytes": 29394
+    },
+    {
+      "path": "src/app/shared/tenantReference.service.ts",
+      "change": "modified",
+      "originalSha256": "239f562a127a54813522c9e44008071f7b78410d222427fcc51219cc1c82fdde",
+      "sha256": "7741e971a5ed5197420fecfe4d672222c46d1a48e5f0952fec8114d9c65cb832",
+      "bytes": 5059
+    },
+    {
+      "path": "src/app.ts",
+      "change": "modified",
+      "originalSha256": "7e34948128898c624f7990e811b2a8100ddec46e548a8d74f976f85d1c25ad25",
+      "sha256": "54077dd5aef724625689f35f44835dda09af12d0aedcdbfab44f334a6eb4668b",
+      "bytes": 10165
+    },
+    {
+      "path": "src/config/index.ts",
+      "change": "modified",
+      "originalSha256": "5c699bc7a97ccc1283831c8737b941105a164e98cb31506288df87a8bfe43d48",
+      "sha256": "f6803bff6b2ca55fa9b464babed6382454bcfa43fd8a7e443aa518a629f5ae4a",
+      "bytes": 24299
+    },
+    {
+      "path": "src/shared/trustedProxy.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "ccae0c1a176e3702130f0773f6c78b62c5e0aad662581e822e7f6ba66f12a805",
+      "bytes": 916
+    },
+    {
+      "path": "src/tests/integration/ownerSafeDeletionPhase1.integration.test.ts",
+      "change": "modified",
+      "originalSha256": "e3f7818a4171aa91d5aee840f01cb5dc4ff8f9c8376aed57b3c8448bcef18204",
+      "sha256": "3f335f15b1d4b182eee82b08ce031fa9a55aaafa58529f5f83b994cc846ffdd5",
+      "bytes": 15886
+    },
+    {
+      "path": "src/tests/integration/phase1AtomicOperations.integration.test.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "2bb345f6f84ad5798d8d82db9807076871d059cca48134f645a213e7db7096c9",
+      "bytes": 17420
+    },
+    {
+      "path": "src/tests/integration/phase2PublicForms.integration.test.ts",
+      "change": "modified",
+      "originalSha256": "27e5bce3f120b311182e401b0b84af603c7a4883bddfca23183b9ec53d3443c8",
+      "sha256": "651c2fc55153f44fe5b6564d33ef1d4937b641ecb2677d625bb0fe8cd1c19719",
+      "bytes": 18024
+    },
+    {
+      "path": "src/tests/integration/tenantIsolation.integration.test.ts",
+      "change": "modified",
+      "originalSha256": "558340d4883a7cc54e675b3f515e6c96c3d2f0b3f94d21b2e3bc737460f7f467",
+      "sha256": "03a6fab0a044cc5938e1abca0dfe88a0e034e237bce90a713982c72f5f39ea6c",
+      "bytes": 9956
+    },
+    {
+      "path": "src/tests/setup/isolatedDatabase.ts",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "4ca9d7ecc892b8fc3d39f15b8cf7fe450b25d449c469288477f11c25d86a6859",
+      "bytes": 790
+    },
+    {
+      "path": "tests/phase1/finance-atomic.test.cjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "9b8a440f019fb5f588d8ac1a85a2231ac514fc651d568120aca2fd78c6641f96",
+      "bytes": 7474
+    },
+    {
+      "path": "tests/phase1/load-ts.cjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "ed600076e7bb480109577c48f668775042c6d37c9c67ee9e72e2a16f3506a642",
+      "bytes": 2136
+    },
+    {
+      "path": "tests/phase1/remote-image.test.cjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "1c1dbdf85f2767acbb5fc262df71ecaab62f48e08b99778a4d40b8becc7373a4",
+      "bytes": 4596
+    },
+    {
+      "path": "tests/phase1/security-and-integrity.test.cjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "9744afc680a38986aef50997ceaa49107e444bc42d7e5ea42672e449e8baa0d2",
+      "bytes": 10998
+    },
+    {
+      "path": "tests/phase1/viewing-delivery.test.cjs",
+      "change": "added",
+      "originalSha256": null,
+      "sha256": "7f875be5e174058cb2943efea1caa135d4119805632d8a601d07be3d3b3dc4c2",
+      "bytes": 8524
+    },
+    {
+      "path": "vitest.config.ts",
+      "change": "modified",
+      "originalSha256": "c70300e0c2dc9d5b52d9fc083f8a86ca7f0ad2b35707374179cf25f257cba137",
+      "sha256": "506c62b0323b2e3770c08397a4c5d1d17fb9e6426801c1705460b3bf6e7665d2",
+      "bytes": 302
+    }
+  ],
+  "deletions": []
+}

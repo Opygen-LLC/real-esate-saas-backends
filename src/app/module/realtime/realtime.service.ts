@@ -60,6 +60,7 @@ const fromDomainEvent = (input: DomainRealtimeInput) => {
     contact: 'contact.changed',
     task: 'task.changed',
     viewing: 'viewing.changed',
+    website_submission: 'website_submission.changed',
     organization: 'organization.changed',
     website: 'organization.changed',
     team: 'team.changed',

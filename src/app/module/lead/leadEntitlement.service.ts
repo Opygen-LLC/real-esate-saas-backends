@@ -102,7 +102,7 @@ const reconcileLeadCapacity = async (
     totalQuery.session(session)
     lockedQuery.session(session)
   }
-  const [totalBefore, lockedBefore] = await Promise.all([totalQuery, lockedQuery])
+  const [totalBefore, lockedBefore] = session ? [await totalQuery, await lockedQuery] : await Promise.all([totalQuery, lockedQuery])
   const desiredLocked = Math.max(0, totalBefore - limit)
 
   if (lockedBefore === desiredLocked) {
@@ -192,7 +192,7 @@ const reconcileLeadCapacity = async (
     totalAfterQuery.session(session)
     lockedAfterQuery.session(session)
   }
-  const [used, subscriptionLockedCount] = await Promise.all([totalAfterQuery, lockedAfterQuery])
+  const [used, subscriptionLockedCount] = session ? [await totalAfterQuery, await lockedAfterQuery] : await Promise.all([totalAfterQuery, lockedAfterQuery])
   return {
     limit,
     used,
@@ -214,7 +214,7 @@ const releaseSubscriptionLeadLocks = async (
   const lockedQuery = Lead.countDocuments({ organizationId, isLocked: true, lockReason: LEAD_SUBSCRIPTION_LOCK_REASON })
   const totalQuery = Lead.countDocuments({ organizationId })
   if (session) { lockedQuery.session(session); totalQuery.session(session) }
-  const [lockedBefore, used] = await Promise.all([lockedQuery, totalQuery])
+  const [lockedBefore, used] = session ? [await lockedQuery, await totalQuery] : await Promise.all([lockedQuery, totalQuery])
   let unlockedCount = 0
   if (lockedBefore > 0) {
     const unlockResult = await Lead.updateMany(

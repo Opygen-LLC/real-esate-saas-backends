@@ -19,7 +19,7 @@ export const ACCESS_CONTROLLED_OPERATION_TYPES = [
   'meta_capi',
 ] as const
 
-export const MAINTENANCE_OPERATION_TYPES = ['domain_verify', 'asset_finalize', 'support_email'] as const
+export const MAINTENANCE_OPERATION_TYPES = ['domain_verify', 'asset_finalize', 'support_email', 'calendar_delete', 'domain_event_publish'] as const
 
 const ACCESS_CONTROLLED_OPERATION_TYPE_SET = new Set<string>(ACCESS_CONTROLLED_OPERATION_TYPES)
 

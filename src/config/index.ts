@@ -442,7 +442,7 @@ export default {
     max_deep_pagination_skip: Math.max(1000, Math.min(100_000, Number(process.env.MAX_DEEP_PAGINATION_SKIP || 10_000))),
   },
   observability: {
-    metrics_token: process.env.METRICS_TOKEN || 'real_estate_saas_metrics_token_production_default_32bytes',
+    metrics_token: process.env.METRICS_TOKEN?.trim() || '',
     client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
   },

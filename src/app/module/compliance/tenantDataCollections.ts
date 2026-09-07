@@ -24,6 +24,7 @@ export const TENANT_DELETION_COLLECTIONS = [
   'activities',
   'tasks',
   'viewings',
+  'viewingrequestreceipts',
   'billings',
   'notifications',
   'authsessions',

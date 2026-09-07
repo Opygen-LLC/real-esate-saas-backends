@@ -1,11 +1,7 @@
 import httpStatus from 'http-status'
-import mongoose, { type ClientSession } from 'mongoose'
-import config from '../../../config'
+import type { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
-import { logger } from '../../../shared/logger'
-import { Metrics } from '../../../shared/metrics'
-import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import paginationHelper from '../../helpers/paginationHelper'
 import { createQueryProfile } from '../../helpers/queryPerformance'
 import { safeRegexPattern } from '../../helpers/searchQuery'
@@ -15,64 +11,162 @@ import { PrivacyPolicyService } from '../privacy/privacyPolicy.service'
 import { CrmService } from '../crm/crm.service'
 import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
 import { CrmAssignableMemberService } from '../crm/crmAssignableMember.service'
-import { DomainEventService, type DomainEventInput } from '../domainEvent/domainEvent.service'
-import { LeadService } from '../lead/lead.service'
+import { TransactionalOutbox } from '../domainEvent/transactionalOutbox.service'
 import { Lead } from '../lead/lead.model'
-import { LeadLifecycleService, type LifecycleEffects } from '../lead/leadLifecycle.service'
+import { LeadEntitlementService } from '../lead/leadEntitlement.service'
+import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import { LEAD_STATUS } from '../lead/leadStatus.contract'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { Property } from '../property/property.model'
 import { VIEWING_REQUESTABLE_PROPERTY_STATUSES } from '../property/property.constants'
-import { Organization } from '../organization/organization.model'
 import { userRefPopulate } from '../user/userProfile.service'
 import { IViewing, IViewingCalendarFilter, IViewingFilter, ViewingCalendarItem } from './viewing.interface'
 import { Viewing } from './viewing.model'
 import type { PublicViewingRequestInput } from './viewing.validation'
-import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
-const normalizePhone=(value:string)=>{try{return normalizeBangladeshPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
-const timeToMinutes=(time:string)=>{const[h,m]=time.split(':').map(Number);return h*60+m}
-const viewingStartMs=(date:string,startTime:string)=>Date.parse(`${date}T${startTime}:00+06:00`)
-const assertViewingWindowIsFuture=(date:string,startTime:string)=>{const start=viewingStartMs(date,startTime);if(!Number.isFinite(start)||start<=Date.now())throw new ApiError(400,'This time has already passed. Choose a future viewing time.','','VIEWING_TIME_PAST',undefined,{startTime:['Viewing time must be in the future']})}
-const referenceId=(value:unknown):string|undefined=>{if(value===undefined||value===null||value==='')return undefined;if(typeof value==='object'&&value!==null&&'_id' in value)return String((value as {_id:unknown})._id);return String(value)}
-const withSession=<T extends {session:(session:ClientSession)=>T}>(query:T,session?:ClientSession):T=>session?query.session(session):query
-// status:'Available',quotaLocked:{ $ne:true }
-const assertViewingRequestableProperty=async(organizationId:string,propertyId:string,session?:ClientSession)=>{const query=Property.findOne({_id:propertyId,organizationId,quotaLocked:{$ne:true}}).select('agentId status title').lean();const property:any=await withSession(query as any,session);if(!property)throw new ApiError(404,'Property not found');if(!VIEWING_REQUESTABLE_PROPERTY_STATUSES.includes(property.status))throw new ApiError(409,'This property is no longer accepting viewing requests.','','PROPERTY_VIEWING_UNAVAILABLE');return property}
-const assertViewingLead=async(organizationId:string,leadId:string,access?:CrmAccessContext)=>{if(access){await LeadService.getLeadById(organizationId,leadId,access);return}const lead=await Lead.exists({_id:leadId,organizationId});if(!lead)throw new ApiError(400,'Linked lead must belong to this agency')}
-const checkConflict=async(organizationId:string,agentId:string,propertyId:string,date:string,startTime:string,endTime:string,excludeViewingId?:string,session?:ClientSession)=>{const start=timeToMinutes(startTime),end=timeToMinutes(endTime);if(end<=start)return{hasConflict:true,reason:'End time must be after start time',code:'VIEWING_INVALID_WINDOW'};const query:any={organizationId,date,status:{$in:['Scheduled','Confirmed']},startTime:{$lt:endTime},endTime:{$gt:startTime},$or:[{agentId},{propertyId}]};if(excludeViewingId)query._id={$ne:excludeViewingId};let cursor:any=Viewing.findOne(query).select('agentId propertyId startTime endTime');if(session)cursor=cursor.session(session);const conflict:any=await cursor.lean();if(!conflict)return{hasConflict:false};if(String(conflict.agentId)===String(agentId))return{hasConflict:true,reason:`Agent is already booked (${conflict.startTime} - ${conflict.endTime})`,code:'VIEWING_AGENT_BUSY'};return{hasConflict:true,reason:`Property already has a viewing (${conflict.startTime} - ${conflict.endTime})`,code:'VIEWING_SLOT_UNAVAILABLE'}}
-const scheduleReminder=async(viewing:any,options:{session?:ClientSession;viewingMinutesBefore?:number}={})=>{const viewingMinutesBefore=options.viewingMinutesBefore??Number((await CrmService.getConfig(viewing.organizationId)).reminders?.viewingMinutesBefore||0);const when=new Date(`${viewing.date}T${viewing.startTime}:00+06:00`);const runAt=new Date(when.getTime()-viewingMinutesBefore*60_000);await OperationsQueueService.schedule({organizationId:viewing.organizationId,type:'viewing_reminder',entityId:viewing._id.toString(),runAt,payload:{agentId:referenceId(viewing.agentId)}},{session:options.session})}
-const createViewing=async(organizationId:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext):Promise<IViewing>=>{if(access&&!canManageTeamCrm(access)&&String(payload.agentId||'')!==access.userId)throw new ApiError(403,'Team members can only schedule viewings assigned to themselves');await CrmAssignableMemberService.assertAssignableMember(organizationId,String(payload.agentId||''),'viewing');if(payload.leadId)await assertViewingLead(organizationId,String(payload.leadId),access);assertViewingWindowIsFuture(payload.date!,payload.startTime!);await assertViewingRequestableProperty(organizationId,String(payload.propertyId));const conflict=await checkConflict(organizationId,String(payload.agentId),String(payload.propertyId),payload.date!,payload.startTime!,payload.endTime!);if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict','',conflict.code||'VIEWING_SLOT_UNAVAILABLE');const result:any=await Viewing.create({...payload,organizationId,clientPhone:payload.clientPhone?normalizePhone(payload.clientPhone):payload.clientPhone});await scheduleReminder(result);if(payload.leadId)await LeadLifecycleService.changeStatus(organizationId,String(payload.leadId),LEAD_STATUS.VIEWING_SCHEDULED,{actorId:actorId||String(payload.agentId),access,reason:'Viewing scheduled'});await OperationsQueueService.schedule({organizationId,type:'calendar_sync',entityId:result._id.toString(),runAt:new Date(Date.now()+1_000)});await DomainEventService.emit({organizationId,aggregateType:'viewing',aggregateId:result._id.toString(),eventType:'viewing.scheduled',leadId:referenceId(result.leadId),propertyId:referenceId(result.propertyId),actorId:actorId||referenceId(result.agentId),payload:{summary:`Viewing scheduled for ${result.date} at ${result.startTime}`,clientName:result.clientName}});return result}
-const resolvePublicViewingAgent = async (organizationId:string, preferredAgentId?:string):Promise<string> => {
-  if (preferredAgentId) {
-    const preferred = await CrmAssignableMemberService.getAssignableMemberForCapabilities(organizationId, preferredAgentId, ['viewing', 'lead'])
-    if (preferred?._id) return preferred._id.toString()
-  }
-  const organization:any = await Organization.findOne({ organizationId }).select('ownerId').lean()
-  if (organization?.ownerId) {
-    const owner = await CrmAssignableMemberService.getAssignableMemberForCapabilities(organizationId, String(organization.ownerId), ['viewing', 'lead'])
-    if (owner?._id) return owner._id.toString()
-  }
-  const fallback = await CrmAssignableMemberService.listAssignableMembersForCapabilities(organizationId, ['viewing', 'lead'])
-  if (!fallback[0]?._id) throw new ApiError(503, 'This agency is not accepting viewing requests right now', '', 'VIEWING_AGENT_UNAVAILABLE')
-  return fallback[0]._id.toString()
+import { WebsiteSubmissionService } from '../websiteSubmission/websiteSubmission.service'
+import { viewingTransaction } from './viewingTransaction'
+import { ACTIVE_VIEWING_STATUSES, assertViewingWindow, isActiveViewingStatus } from './viewingWindow'
+import { captureViewingLead } from './viewingLead.service'
+import { ViewingRequestReceipt } from './viewingRequestReceipt.model'
+import { viewingRequestIdentity, VIEWING_RECEIPT_TTL_MS } from './viewingIdempotency'
+
+const normalizePhone = (value: string): string => {
+  try { return normalizeBangladeshPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
+}
+const referenceId = (value: unknown): string | undefined => {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value === 'object' && '_id' in value) return String((value as { _id: unknown })._id)
+  return String(value)
 }
 
-const publicRequestViewing=async(payload:PublicViewingRequestInput,context:{ip?:string;requestId?:string}):Promise<IViewing>=>{
-  const{organizationId,propertyId,date,startTime,endTime,clientName,clientPhone,clientEmail,notes,privacyConsent,policyVersion,attribution}=payload
-  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
-  await TenantPurgeBarrier.assertTenantWritable(organizationId)
-  assertViewingWindowIsFuture(date,startTime)
-  const prop:any=await assertViewingRequestableProperty(organizationId,propertyId)
-  if(!privacyConsent)throw new ApiError(400,'Privacy consent is required','','VALIDATION_ERROR',undefined,{privacyConsent:['Privacy consent is required']})
-  await PrivacyPolicyService.assertCurrentPublicPolicy(policyVersion)
-  const agentId=await resolvePublicViewingAgent(organizationId,prop.agentId?.toString())
-  const conflict=await checkConflict(organizationId,agentId,propertyId,date,startTime,endTime)
-  if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict','',conflict.code||'VIEWING_SLOT_UNAVAILABLE')
-  const normalizedPhone=normalizePhone(clientPhone)
-  const lead:any=await LeadService.createLead(organizationId,{name:clientName,phone:normalizedPhone,email:clientEmail,source:'Website',leadStatus:LEAD_STATUS.NEW,assignedAgent:agentId,propertyInterest:[propertyId],notes:notes||'',attribution},undefined,undefined,{allowanceSource:'website'})
-  await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId,normalizedPhone,policyVersion,context)
-  return createViewing(organizationId,{propertyId,agentId,leadId:lead._id,date,startTime,endTime,clientName,clientPhone:normalizedPhone,clientEmail,status:'Scheduled',notes},agentId)
+const assertViewingRequestableProperty = async (organizationId: string, propertyId: string, session?: ClientSession) => {
+  const query = Property.findOne({ _id: propertyId, organizationId, quotaLocked: { $ne: true } }).select('agentId status title')
+  if (session) query.session(session)
+  const property: any = await query.lean()
+  if (!property) throw new ApiError(404, 'Property not found')
+  if (!VIEWING_REQUESTABLE_PROPERTY_STATUSES.includes(property.status)) throw new ApiError(409, 'This property is no longer accepting viewing requests', '', 'PROPERTY_VIEWING_UNAVAILABLE')
+  return property
 }
+
+const assertViewingLead = async (organizationId: string, leadId: string, session: ClientSession, access?: CrmAccessContext) => {
+  const lead = await Lead.findOne({ _id: leadId, organizationId, ...crmReadOwnerFilter('assignedAgent', access) }).session(session)
+  if (!lead) throw new ApiError(404, 'Linked lead not found')
+  await LeadEntitlementService.assertLeadAccessible(organizationId, leadId, session)
+  return lead
+}
+
+/** Advisory only outside viewingTransaction; mutations always hold the tenant write lock. */
+const checkConflict = async (organizationId: string, agentId: string, propertyId: string, date: string, startTime: string, endTime: string, excludeViewingId?: string, session?: ClientSession) => {
+  assertViewingWindow(date, startTime, endTime)
+  const query = Viewing.findOne({
+    organizationId, date, status: { $in: [...ACTIVE_VIEWING_STATUSES] },
+    startTime: { $lt: endTime }, endTime: { $gt: startTime }, $or: [{ agentId }, { propertyId }],
+    ...(excludeViewingId ? { _id: { $ne: excludeViewingId } } : {}),
+  }).select('agentId propertyId startTime endTime')
+  if (session) query.session(session)
+  const conflict: any = await query.lean()
+  if (!conflict) return { hasConflict: false }
+  if (String(conflict.agentId) === agentId) return { hasConflict: true, reason: 'The assigned agent is unavailable for this time', code: 'VIEWING_AGENT_BUSY' }
+  return { hasConflict: true, reason: 'This property is unavailable for this time', code: 'VIEWING_SLOT_UNAVAILABLE' }
+}
+
+const rejectConflict = async (organizationId: string, agentId: string, propertyId: string, date: string, startTime: string, endTime: string, session: ClientSession, excludeId?: string) => {
+  const conflict = await checkConflict(organizationId, agentId, propertyId, date, startTime, endTime, excludeId, session)
+  if (conflict.hasConflict) throw new ApiError(409, conflict.reason || 'Viewing conflict', '', conflict.code || 'VIEWING_SLOT_UNAVAILABLE')
+}
+
+const scheduleReminder = async (viewing: any, session: ClientSession) => {
+  const crm: any = await CrmService.getConfig(viewing.organizationId, session)
+  const start = Date.parse(`${viewing.date}T${viewing.startTime}:00+06:00`)
+  const runAt = new Date(start - Number(crm.reminders?.viewingMinutesBefore || 0) * 60000)
+  await OperationsQueueService.schedule({ organizationId: viewing.organizationId, type: 'viewing_reminder', entityId: String(viewing._id), runAt, payload: { agentId: referenceId(viewing.agentId), scheduleVersion: viewing.scheduleVersion } }, { session })
+}
+
+const queueViewingEffects = async (viewing: any, session: ClientSession) => {
+  if (isActiveViewingStatus(viewing.status)) await scheduleReminder(viewing, session)
+  else await OperationsQueueService.cancel(viewing.organizationId, 'viewing_reminder', String(viewing._id), { session })
+  await OperationsQueueService.schedule({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId: String(viewing._id), runAt: new Date(), payload: { scheduleVersion: viewing.scheduleVersion } }, { session })
+}
+
+const changeLinkedLeadStage = async (organizationId: string, leadId: string, status: string, session: ClientSession, actorId?: string, access?: CrmAccessContext) => {
+  const lifecycle = await LeadLifecycleService.changeStatusInTransaction(organizationId, leadId, status, session, { actorId, access, reason: status === LEAD_STATUS.VIEWING_COMPLETED ? 'Viewing completed' : 'Viewing scheduled' })
+  // Viewing stages only project events. Persist every delivery intention before commit.
+  for (const event of lifecycle.effects.events) await TransactionalOutbox.queuePublish(event, session)
+  if (lifecycle.effects.cancelTaskReminderIds.length || lifecycle.effects.refreshTaskReminderIds.length) {
+    throw new ApiError(500, 'Unexpected task effect for a viewing stage; no changes were committed')
+  }
+}
+
+const createViewingInTransaction = async (organizationId: string, payload: Partial<IViewing>, session: ClientSession, actorId?: string, access?: CrmAccessContext): Promise<any> => {
+  const agentId = referenceId(payload.agentId) || ''
+  const propertyId = referenceId(payload.propertyId) || ''
+  const leadId = referenceId(payload.leadId)
+  if (access && !canManageTeamCrm(access) && agentId !== access.userId) throw new ApiError(403, 'Team members can only schedule viewings assigned to themselves')
+  assertViewingWindow(payload.date || '', payload.startTime || '', payload.endTime || '', true)
+  await CrmAssignableMemberService.assertAssignableMember(organizationId, agentId, 'viewing', session)
+  await assertViewingRequestableProperty(organizationId, propertyId, session)
+  if (leadId) await assertViewingLead(organizationId, leadId, session, access)
+  const status = payload.status || 'Scheduled'
+  if (isActiveViewingStatus(status)) await rejectConflict(organizationId, agentId, propertyId, payload.date!, payload.startTime!, payload.endTime!, session)
+  const viewing: any = (await Viewing.create([{
+    organizationId, propertyId, agentId, leadId, date: payload.date, startTime: payload.startTime, endTime: payload.endTime,
+    status, clientName: payload.clientName, clientPhone: normalizePhone(payload.clientPhone || ''),
+    clientEmail: payload.clientEmail, notes: payload.notes || '', scheduleVersion: 1, calendarSyncStatus: 'pending',
+  }], { session }))[0]
+  if (leadId && isActiveViewingStatus(status)) await changeLinkedLeadStage(organizationId, leadId, LEAD_STATUS.VIEWING_SCHEDULED, session, actorId || agentId, access)
+  await queueViewingEffects(viewing, session)
+  await TransactionalOutbox.emit({ organizationId, aggregateType: 'viewing', aggregateId: String(viewing._id), eventType: 'viewing.scheduled', leadId, propertyId, actorId: actorId || agentId, payload: { summary: `Viewing scheduled for ${viewing.date} at ${viewing.startTime}` } }, session)
+  return viewing
+}
+
+const createViewing = async (organizationId: string, payload: Partial<IViewing>, actorId?: string, access?: CrmAccessContext): Promise<IViewing> =>
+  viewingTransaction(organizationId, (session) => createViewingInTransaction(organizationId, payload, session, actorId, access))
+
+const resolvePublicViewingAgent = async (organizationId: string, ownerId: unknown, session: ClientSession, preferredAgentId?: string): Promise<string> => {
+  for (const candidate of [...new Set([preferredAgentId, referenceId(ownerId)].filter(Boolean))]) {
+    const member = await CrmAssignableMemberService.getAssignableMemberForCapabilities(organizationId, candidate!, ['viewing', 'lead'], session)
+    if (member?._id) return String(member._id)
+  }
+  const fallback = await CrmAssignableMemberService.listAssignableMembersForCapabilities(organizationId, ['viewing', 'lead'], { session })
+  if (!fallback[0]?._id) throw new ApiError(503, 'This agency is not accepting viewing requests right now', '', 'VIEWING_AGENT_UNAVAILABLE')
+  return String(fallback[0]._id)
+}
+
+const publicRequestViewing = async (input: PublicViewingRequestInput, context: { ip?: string; requestId?: string; idempotencyKey?: string }) => {
+  const payload = { ...input, clientPhone: normalizePhone(input.clientPhone) }
+  const { organizationId, propertyId, date, startTime, endTime } = payload
+  const identity = viewingRequestIdentity(payload, context.idempotencyKey)
+  // Reconcile subscription boundaries before entering the business transaction.
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  return viewingTransaction(organizationId, async (session, organization) => {
+    const key = { organizationId, keyDigest: identity.keyDigest }
+    const previous: any = await ViewingRequestReceipt.findOne(key).session(session).lean()
+    if (previous && new Date(previous.expiresAt).getTime() > Date.now()) {
+      if (previous.payloadHash !== identity.payloadHash) throw new ApiError(409, 'This request key has already been used for a different viewing', '', 'IDEMPOTENCY_KEY_REUSED')
+      return { data: previous.response, replayed: true }
+    }
+    if (previous) await ViewingRequestReceipt.deleteOne({ _id: previous._id, organizationId }, { session })
+    assertViewingWindow(date, startTime, endTime, true)
+    if (!payload.privacyConsent) throw new ApiError(400, 'Privacy consent is required')
+    await PrivacyPolicyService.assertCurrentPublicPolicy(payload.policyVersion)
+    const property: any = await assertViewingRequestableProperty(organizationId, propertyId, session)
+    const agentId = await resolvePublicViewingAgent(organizationId, organization.ownerId, session, referenceId(property.agentId))
+    await rejectConflict(organizationId, agentId, propertyId, date, startTime, endTime, session)
+    const lead = await captureViewingLead(payload, agentId, session)
+    await PrivacyConsentService.recordPublicPrivacyPolicy(organizationId, payload.clientPhone, payload.policyVersion, context, session)
+    const viewing = await createViewingInTransaction(organizationId, {
+      propertyId, agentId, leadId: lead._id, date, startTime, endTime, status: 'Scheduled',
+      clientName: payload.clientName, clientPhone: payload.clientPhone, clientEmail: payload.clientEmail, notes: payload.notes,
+    }, session, agentId)
+    const submission = await WebsiteSubmissionService.captureViewing(payload, viewing, session)
+    // Do not expose a CRM Lead, internal assignee or the visitor's contact data in a public receipt.
+    const response = WebsiteSubmissionService.withPublicReceipt({ _id: String(viewing._id), date, startTime, endTime, status: viewing.status }, submission)
+    await ViewingRequestReceipt.create([{ ...key, payloadHash: identity.payloadHash, response, expiresAt: new Date(Date.now() + VIEWING_RECEIPT_TTL_MS) }], { session })
+    return { data: response, replayed: false }
+  }, true)
+}
+
 const VIEWING_LIST_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'date', 'status', 'clientName'])
 
 const getAllViewings = async (
@@ -164,136 +258,75 @@ const getCalendarViewings = async (filters: IViewingCalendarFilter, access?: Crm
   }))
 }
 
-const getViewingById=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)}).populate({path:'propertyId',select:'title price images address city propertyType bedrooms bathrooms',match:{organizationId}}).populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId })).populate({ path: 'leadId', select: 'name phone email leadStatus', match: { organizationId, isLocked: { $ne: true } } });if(!result)throw new ApiError(404,'Viewing not found');return result}
-const updateViewing=async(organizationId:string,id:string,payload:Partial<IViewing>,actorId?:string,access?:CrmAccessContext)=>{
-  if(payload.clientPhone)payload.clientPhone=normalizePhone(payload.clientPhone)
 
-  // Resolve reminder policy before starting the transaction. CrmService.getConfig can
-  // create/canonicalize configuration, which should not become an unrelated write in
-  // the viewing transaction itself.
-  const crmConfig:any=await CrmService.getConfig(organizationId)
-  const viewingMinutesBefore=Number(crmConfig.reminders?.viewingMinutesBefore||0)
-  let viewingEvent:DomainEventInput|undefined
-  let leadEffects:LifecycleEffects|undefined
-
-  const mutate=async(session?:ClientSession)=>{
-    let existingQuery:any=Viewing.findOne({_id:id,organizationId,...crmMutationOwnerFilter('agentId',access)})
-    if(session)existingQuery=existingQuery.session(session)
-    const existing:any=await existingQuery
-    if(!existing)throw new ApiError(404,'Viewing not found')
-
-    if(access&&!canManageTeamCrm(access)&&payload.agentId!==undefined&&String(payload.agentId)!==access.userId){
-      throw new ApiError(403,'Team members cannot reassign viewings to another member')
-    }
-
-    const linkedLeadId=referenceId(payload.leadId??existing.leadId)
-    // For ordinary edits retain the existing CRM visibility check. Completing a
-    // viewing also re-checks the Lead inside this same transaction below.
-    if(linkedLeadId&&payload.status!=='Completed')await assertViewingLead(organizationId,linkedLeadId,access)
-
-    const date=String(payload.date??existing.date)
-    const startTime=String(payload.startTime??existing.startTime)
-    const endTime=String(payload.endTime??existing.endTime)
-    const existingAgentId=referenceId(existing.agentId)||''
-    const existingPropertyId=referenceId(existing.propertyId)||''
-    const agentId=referenceId(payload.agentId??existing.agentId)||''
-    const propertyId=referenceId(payload.propertyId??existing.propertyId)||''
-    const scheduleChanged=Boolean(
-      (payload.date!==undefined&&date!==String(existing.date))||
-      (payload.startTime!==undefined&&startTime!==String(existing.startTime))||
-      (payload.endTime!==undefined&&endTime!==String(existing.endTime))||
-      (payload.agentId!==undefined&&agentId!==existingAgentId)||
-      (payload.propertyId!==undefined&&propertyId!==existingPropertyId)||
-      payload.status==='Rescheduled'
-    )
-
-    if(payload.agentId!==undefined)await CrmAssignableMemberService.assertAssignableMember(organizationId,agentId,'viewing',session)
-    if(scheduleChanged){
-      assertViewingWindowIsFuture(date,startTime)
-      await assertViewingRequestableProperty(organizationId,propertyId,session)
-      const conflict=await checkConflict(organizationId,agentId,propertyId,date,startTime,endTime,id,session)
-      if(conflict.hasConflict)throw new ApiError(409,conflict.reason||'Viewing conflict','',conflict.code||'VIEWING_SLOT_UNAVAILABLE')
-    }
-
-    const result:any=await Viewing.findOneAndUpdate(
-      {_id:id,organizationId,...crmMutationOwnerFilter('agentId',access)},
-      payload,
-      {new:true,runValidators:true,...(session?{session}:{})},
-    )
-    if(!result)throw new ApiError(404,'Viewing not found')
-
-    if(['Cancelled','Completed','NoShow'].includes(result.status)){
-      await OperationsQueueService.cancel(organizationId,'viewing_reminder',id,{session})
-    }else if(scheduleChanged){
-      await scheduleReminder(result,{session,viewingMinutesBefore})
-    }
-
-    if(payload.status==='Completed'&&linkedLeadId){
-      if(session){
-        const lifecycle=await LeadLifecycleService.changeStatusInTransaction(organizationId,linkedLeadId,LEAD_STATUS.VIEWING_COMPLETED,session,{actorId,access,reason:'Viewing completed'})
-        leadEffects=lifecycle.effects
-      }else{
-        await LeadLifecycleService.changeStatus(organizationId,linkedLeadId,LEAD_STATUS.VIEWING_COMPLETED,{actorId,access,reason:'Viewing completed'})
-      }
-    }
-
-    if(payload.date||payload.startTime||payload.endTime||payload.status){
-      await OperationsQueueService.schedule({organizationId,type:'calendar_sync',entityId:id,runAt:new Date(Date.now()+1_000)}, {session})
-    }
-
-    const event:DomainEventInput={
-      organizationId,
-      aggregateType:'viewing',
-      aggregateId:id,
-      eventType:payload.status==='Completed'?'viewing.completed':'viewing.updated',
-      // Never stringify a populated Lead document into leadId. linkedLeadId is a
-      // canonical ObjectId string resolved before any populate is performed.
-      leadId:linkedLeadId,
-      propertyId,
-      actorId:actorId||agentId,
-      payload:{summary:`Viewing ${result.status} for ${result.date} at ${result.startTime}`,status:result.status},
-    }
-    await DomainEventService.emit(event,session?{session,deferPublish:true}:undefined)
-    if(session)viewingEvent=event
-    return result
-  }
-
-  if(await mongoSupportsTransactions()){
-    const session=await mongoose.startSession()
-    try{
-      await session.withTransaction(async()=>{
-        // withTransaction may retry; only publish effects from the successful attempt.
-        viewingEvent=undefined
-        leadEffects=undefined
-        await mutate(session)
-      })
-    }catch(error){
-      if(!(error instanceof ApiError)) Metrics.inc('viewing_update_internal_failures_total', { stage: 'transaction' })
-      throw error
-    }finally{
-      await session.endSession()
-    }
-
-    if(leadEffects)await LeadLifecycleService.publishDeferredEffects(organizationId,leadEffects)
-    if(viewingEvent){
-      try{await DomainEventService.publish(viewingEvent)}catch(error){logger.warn('viewing_post_commit_publish_failed',{organizationId,viewingId:id,eventType:viewingEvent.eventType,error})}
-    }
-  }else{
-    if(config.isProduction)throw new ApiError(503,'Viewing mutations require a MongoDB replica set or mongos in production')
-    try{
-      await mutate(undefined)
-    }catch(error){
-      if(!(error instanceof ApiError)) Metrics.inc('viewing_update_internal_failures_total', { stage: 'standalone' })
-      throw error
-    }
-  }
-
-  const result=await Viewing.findOne({_id:id,organizationId,...crmReadOwnerFilter('agentId',access)})
-    .populate({path:'propertyId',select:'title price images address city',match:{organizationId}})
-    .populate(userRefPopulate('agentId','name email phoneNumber userRole',{organizationId}))
-    .populate({path:'leadId',select:'name phone email leadStatus',match:{organizationId,isLocked:{$ne:true}}})
-  if(!result)throw new ApiError(404,'Viewing not found')
+const getViewingById = async (organizationId: string, id: string, access?: CrmAccessContext) => {
+  const result = await Viewing.findOne({ _id: id, organizationId, ...crmReadOwnerFilter('agentId', access) })
+    .populate({ path: 'propertyId', select: 'title price images address city propertyType bedrooms bathrooms', match: { organizationId } })
+    .populate(userRefPopulate('agentId', 'name email phoneNumber userRole', { organizationId }))
+    .populate({ path: 'leadId', select: 'name phone email leadStatus', match: { organizationId, isLocked: { $ne: true } } })
+  if (!result) throw new ApiError(404, 'Viewing not found')
   return result
 }
-const deleteViewing=async(organizationId:string,id:string,access?:CrmAccessContext)=>{const result:any=await Viewing.findOneAndDelete({_id:id,organizationId,...crmMutationOwnerFilter('agentId',access)});if(!result)throw new ApiError(httpStatus.NOT_FOUND,'Viewing not found');await OperationsQueueService.cancel(organizationId,'viewing_reminder',id);await DomainEventService.emit({organizationId,aggregateType:'viewing',aggregateId:id,eventType:'viewing.deleted',leadId:referenceId(result.leadId),propertyId:referenceId(result.propertyId),actorId:access?.userId||referenceId(result.agentId),payload:{summary:`Viewing deleted for ${result.date} at ${result.startTime}`,status:result.status}});return result}
-export const ViewingService={checkConflict,createViewing,publicRequestViewing,getAllViewings,getCalendarViewings,getViewingById,updateViewing,deleteViewing}
+
+const updateViewing = async (organizationId: string, id: string, input: Partial<IViewing>, actorId?: string, access?: CrmAccessContext) => {
+  // Keep tenant, provider-state and version fields immutable even for internal callers.
+  const allowed = ['propertyId', 'agentId', 'leadId', 'date', 'startTime', 'endTime', 'clientName', 'clientPhone', 'clientEmail', 'status', 'notes', 'feedback'] as const
+  const payload: Partial<IViewing> = Object.fromEntries(allowed.filter((key) => input[key] !== undefined).map((key) => [key, input[key]]))
+  if (payload.clientPhone) payload.clientPhone = normalizePhone(payload.clientPhone)
+  await viewingTransaction(organizationId, async (session) => {
+    const scope = { _id: id, organizationId, ...crmMutationOwnerFilter('agentId', access) }
+    const existing: any = await Viewing.findOne(scope).session(session)
+    if (!existing) throw new ApiError(404, 'Viewing not found')
+    const agentId = referenceId(payload.agentId ?? existing.agentId) || ''
+    const propertyId = referenceId(payload.propertyId ?? existing.propertyId) || ''
+    const leadId = referenceId(payload.leadId ?? existing.leadId)
+    if (access && !canManageTeamCrm(access) && agentId !== access.userId) throw new ApiError(403, 'Team members cannot reassign viewings to another member')
+    const date = payload.date ?? existing.date
+    const startTime = payload.startTime ?? existing.startTime
+    const endTime = payload.endTime ?? existing.endTime
+    const status = payload.status ?? existing.status
+    const scheduleChanged = date !== existing.date || startTime !== existing.startTime || endTime !== existing.endTime ||
+      agentId !== referenceId(existing.agentId) || propertyId !== referenceId(existing.propertyId)
+    const reactivated = isActiveViewingStatus(status) && !isActiveViewingStatus(existing.status)
+    assertViewingWindow(date, startTime, endTime, isActiveViewingStatus(status) && (scheduleChanged || reactivated))
+    if (isActiveViewingStatus(status)) {
+      if (scheduleChanged || reactivated) {
+        await CrmAssignableMemberService.assertAssignableMember(organizationId, agentId, 'viewing', session)
+        await assertViewingRequestableProperty(organizationId, propertyId, session)
+      }
+      await rejectConflict(organizationId, agentId, propertyId, date, startTime, endTime, session, id)
+    }
+    if (leadId) await assertViewingLead(organizationId, leadId, session, access)
+    const result: any = await Viewing.findOneAndUpdate(scope, { $set: { ...payload, scheduleVersion: Number(existing.scheduleVersion || 1) + 1, calendarSyncStatus: 'pending' } }, { new: true, runValidators: true, session })
+    if (!result) throw new ApiError(404, 'Viewing not found')
+    if (leadId && status === 'Completed' && existing.status !== 'Completed') {
+      await changeLinkedLeadStage(organizationId, leadId, LEAD_STATUS.VIEWING_COMPLETED, session, actorId, access)
+    } else if (leadId && reactivated) {
+      await changeLinkedLeadStage(organizationId, leadId, LEAD_STATUS.VIEWING_SCHEDULED, session, actorId, access)
+    }
+    await queueViewingEffects(result, session)
+    await TransactionalOutbox.emit({ organizationId, aggregateType: 'viewing', aggregateId: id,
+      eventType: status === 'Completed' ? 'viewing.completed' : 'viewing.updated', leadId, propertyId, actorId: actorId || agentId,
+      payload: { summary: `Viewing ${status} for ${date} at ${startTime}`, status },
+    }, session)
+    return result
+  })
+  return getViewingById(organizationId, id, access)
+}
+
+const deleteViewing = async (organizationId: string, id: string, access?: CrmAccessContext) =>
+  viewingTransaction(organizationId, async (session) => {
+    const result: any = await Viewing.findOneAndDelete({ _id: id, organizationId, ...crmMutationOwnerFilter('agentId', access) }, { session })
+    if (!result) throw new ApiError(httpStatus.NOT_FOUND, 'Viewing not found')
+    await OperationsQueueService.cancel(organizationId, 'viewing_reminder', id, { session })
+    await OperationsQueueService.cancel(organizationId, 'calendar_sync', id, { session })
+    // A durable tombstone tells the gateway to cancel even though the row is gone.
+    await OperationsQueueService.schedule({ organizationId, type: 'calendar_delete', entityId: id, runAt: new Date(), payload: { scheduleVersion: Number(result.scheduleVersion || 1) + 1, providerEventId: result.calendarProviderEventId || '' }, maxAttempts: 10 }, { session })
+    await TransactionalOutbox.emit({ organizationId, aggregateType: 'viewing', aggregateId: id, eventType: 'viewing.deleted',
+      leadId: referenceId(result.leadId), propertyId: referenceId(result.propertyId), actorId: access?.userId || referenceId(result.agentId),
+      payload: { summary: `Viewing deleted for ${result.date} at ${result.startTime}`, status: result.status },
+    }, session)
+    return result
+  })
+
+export const ViewingService = { checkConflict, createViewing, publicRequestViewing, getAllViewings, getCalendarViewings, getViewingById, updateViewing, deleteViewing }

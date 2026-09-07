@@ -1,4 +1,4 @@
-import { isValidObjectId } from 'mongoose'
+import { isValidObjectId, type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
 import { Notification } from './notification.model'
 import { RealtimeService } from '../realtime/realtime.service'
@@ -28,7 +28,7 @@ const isDuplicateKeyError = (error: unknown): boolean => Boolean(
   error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === 11000,
 )
 
-const createFromJob = async (input: NotificationJobInput) => {
+const createFromJob = async (input: NotificationJobInput, session?: ClientSession) => {
   if (!input.userId) return null
 
   // updateOne + upsertedId lets worker retries remain idempotent without
@@ -36,20 +36,21 @@ const createFromJob = async (input: NotificationJobInput) => {
   const result = await Notification.updateOne(
     { organizationId: input.organizationId, jobId: input.jobId, userId: input.userId },
     { $setOnInsert: { ...input } },
-    { upsert: true, setDefaultsOnInsert: true },
+    { upsert: true, setDefaultsOnInsert: true, ...(session ? { session } : {}) },
   ).catch((error: unknown) => {
     // Two worker deliveries can race on the unique job/user key. The reminder
     // is already present in that case, so resolve it below instead of failing the job.
-    if (isDuplicateKeyError(error)) return null
+    if (!session && isDuplicateKeyError(error)) return null
     throw error
   })
   if (!result) return Notification.findOne({ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId })
 
-  const row = result.upsertedId
-    ? await Notification.findOne({ _id: result.upsertedId, organizationId: input.organizationId })
-    : await Notification.findOne({ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId })
+  const query = result.upsertedId
+    ? Notification.findOne({ _id: result.upsertedId, organizationId: input.organizationId })
+    : Notification.findOne({ organizationId: input.organizationId, jobId: input.jobId, userId: input.userId })
+  const row = await (session ? query.session(session) : query)
 
-  if (row && result.upsertedId) {
+  if (row && result.upsertedId && !session) {
     RealtimeService.emitNotification(input.organizationId, input.userId, row._id.toString(), 'created')
   }
   return row

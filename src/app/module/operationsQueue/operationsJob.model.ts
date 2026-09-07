@@ -1,7 +1,7 @@
 import { Schema, model } from 'mongoose'
 
 export const OPERATIONS_JOB_TYPES = [
-  'task_reminder', 'viewing_reminder', 'calendar_sync',
+  'task_reminder', 'viewing_reminder', 'calendar_sync', 'calendar_delete', 'domain_event_publish',
   'sms_send', 'meta_capi', 'domain_verify', 'asset_finalize', 'support_email',
 ] as const
 
@@ -19,6 +19,7 @@ const operationsJobSchema = new Schema({
   lockedAt: Date,
   lockedBy: { type: String, default: '' },
   completedAt: Date,
+  effectsCommittedAt: { type: Date, default: null },
   lastError: { type: String, default: '' },
   accessDeferredAt: { type: Date, default: null, index: true },
 }, { timestamps: true })

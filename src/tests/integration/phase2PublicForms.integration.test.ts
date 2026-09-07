@@ -14,6 +14,7 @@ let PlatformSettings: any
 let ReviewInvitation: any
 let WebsiteSubmission: any
 let Lead: any
+let Viewing: any
 let jwtHelpers: any
 let config: any
 let organizationId = ''
@@ -61,6 +62,7 @@ suite('phase 2 public forms and settings contracts', () => {
     ;({ ReviewInvitation } = await import('../../app/module/review/review.model'))
     ;({ WebsiteSubmission } = await import('../../app/module/websiteSubmission/websiteSubmission.model'))
     ;({ Lead } = await import('../../app/module/lead/lead.model'))
+    ;({ Viewing } = await import('../../app/module/viewing/viewing.model'))
     ;({ jwtHelpers } = await import('../../app/helpers/jwtHelpers'))
     config = (await import('../../config')).default
 
@@ -216,8 +218,11 @@ suite('phase 2 public forms and settings contracts', () => {
       body: JSON.stringify({ organizationId, propertyId: property._id.toString(), ...slot, clientName: 'Viewing Buyer', clientPhone: '01312345678', clientEmail: 'viewing@example.com', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(result.response.status).toBe(201)
-    expect(String(result.body?.data?.agentId)).toBe(String(owner._id))
-    expect(result.body?.data?.clientPhone).toBe('+8801312345678')
+    expect(result.body?.data?.agentId).toBeUndefined()
+    expect(result.body?.data?.clientPhone).toBeUndefined()
+    const storedViewing = await Viewing.findById(result.body?.data?._id).lean()
+    expect(String(storedViewing?.agentId)).toBe(String(owner._id))
+    expect(storedViewing?.clientPhone).toBe('+8801312345678')
     expect(result.body?.data?.submission).toMatchObject({ submissionType: 'viewing', status: 'received', linkedEntityId: result.body?.data?._id })
     const inbox = await WebsiteSubmission.findById(result.body?.data?.submission?.submissionId).lean()
     expect(inbox).toMatchObject({ organizationId, submissionType: 'VIEWING', status: 'NEW', linkedEntityType: 'Viewing' })
@@ -229,7 +234,6 @@ suite('phase 2 public forms and settings contracts', () => {
       body: JSON.stringify({ organizationId, propertyId: property._id.toString(), date: '2020-01-01', startTime: '12:00', endTime: '11:00', clientName: 'Past Buyer', clientPhone: '01512345678', privacyConsent: true, policyVersion: 'phase2-policy-v1' }),
     })
     expect(result.response.status).toBe(400)
-    expect(result.body?.fieldErrors?.startTime?.[0]).toMatch(/future/i)
     expect(result.body?.fieldErrors?.endTime?.[0]).toMatch(/after start/i)
   })
 

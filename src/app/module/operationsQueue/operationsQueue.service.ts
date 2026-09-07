@@ -11,6 +11,9 @@ import { MetaEvent } from '../metaIntegration/metaEvent.model'
 import { MetaIntegrationService } from '../metaIntegration/metaIntegration.service'
 import { Task } from '../task/task.model'
 import { Viewing } from '../viewing/viewing.model'
+import { viewingTransaction } from '../viewing/viewingTransaction'
+import { deliverViewingReminder } from '../viewing/viewingReminder.service'
+import { RealtimeService } from '../realtime/realtime.service'
 import { NotificationService } from '../notification/notification.service'
 import { Organization } from '../organization/organization.model'
 import { evaluateTenantAccessOrganization, tenantPlatformStatusOf } from '../tenantAccess/tenantAccess.policy'
@@ -73,7 +76,7 @@ const schedule = async (
   if (!(await tenantCanRunBackgroundWork(input.organizationId, input.type, options))) return null
 
   await OperationsJob.updateMany(
-    { organizationId: input.organizationId, type: input.type, entityId: input.entityId, status: 'pending' },
+    { organizationId: input.organizationId, type: input.type, entityId: input.entityId, status: { $in: ['pending', 'processing'] } },
     { $set: { status: 'cancelled' } },
     options.session ? { session: options.session } : undefined,
   )
@@ -117,7 +120,7 @@ const cancelOrganization = async (organizationId: string) => {
 }
 
 const deliver = async (job: any) => {
-  const stillClaimed = await OperationsJob.exists({ _id: job._id, status: 'processing', lockedBy: workerId })
+  const stillClaimed = await OperationsJob.exists({ _id: job._id, status: 'processing', lockedBy: job.lockedBy })
   if (!stillClaimed) return
   if (!(await tenantCanRunBackgroundWork(job.organizationId, job.type))) {
     const error: any = new Error('Tenant runtime access is inactive')
@@ -148,7 +151,19 @@ const deliver = async (job: any) => {
     await WebsiteAssetProcessor.finalize(job.organizationId, job.entityId, job.payload || {})
     return
   }
-  if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.organizationId, job.entityId); return }
+  if (job.type === 'domain_event_publish') {
+    const event = job.payload?.event
+    if (!event || event.organizationId !== job.organizationId || typeof event.eventType !== 'string' || typeof event.aggregateId !== 'string') throw new Error('Invalid outbox event')
+    await DomainEventService.publish(event, { strict: true })
+    if (event.eventType === 'notification.created' && event.payload?.userId) RealtimeService.emitNotification(job.organizationId, String(event.payload.userId), event.aggregateId, 'created')
+    return
+  }
+  if (job.type === 'calendar_delete') {
+    await CalendarSyncService.deleteViewing(job.organizationId, job.entityId, Number(job.payload?.scheduleVersion || 1), String(job.payload?.providerEventId || ''))
+    return
+  }
+  if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.organizationId, job.entityId, job.payload?.scheduleVersion); return }
+  if (job.type === 'viewing_reminder') { await deliverViewingReminder(job); return }
   if (job.type === 'task_reminder') {
     const task: any = await Task.findOne({ _id: job.entityId, organizationId: job.organizationId }).lean()
     if (!task || ['Completed', 'Cancelled'].includes(task.status)) return
@@ -156,10 +171,7 @@ const deliver = async (job: any) => {
     await DomainEventService.emit({ organizationId: job.organizationId, aggregateType: 'task', aggregateId: job.entityId, eventType: 'task.reminder_due', leadId: task.linkedLead?.toString(), actorId: task.assignedAgent?.toString(), payload: { summary: `Reminder due: ${task.title}`, dueDate: task.dueDate, dueTime: task.dueTime } })
     return
   }
-  const viewing: any = await Viewing.findOne({ _id: job.entityId, organizationId: job.organizationId }).lean()
-  if (!viewing || ['Completed', 'Cancelled', 'NoShow'].includes(viewing.status)) return
-  await NotificationService.createFromJob({ organizationId: job.organizationId, userId: viewing.agentId?.toString(), jobId: job._id.toString(), type: 'viewing_reminder', title: `Viewing: ${viewing.clientName}`, body: `${viewing.date} at ${viewing.startTime}`, entityId: job.entityId, leadId: viewing.leadId?.toString() })
-  await DomainEventService.emit({ organizationId: job.organizationId, aggregateType: 'viewing', aggregateId: job.entityId, eventType: 'viewing.reminder_due', leadId: viewing.leadId?.toString(), propertyId: viewing.propertyId?.toString(), actorId: viewing.agentId?.toString(), payload: { summary: `Viewing reminder for ${viewing.clientName}`, date: viewing.date, startTime: viewing.startTime } })
+  throw new Error(`Unsupported operations job type: ${String(job.type)}`)
 }
 
 const claimOne = async () => OperationsJob.findOneAndUpdate(
@@ -171,7 +183,7 @@ const claimOne = async () => OperationsJob.findOneAndUpdate(
       { status: 'processing', lockedAt: { $lte: new Date(Date.now() - 10 * 60_000) } },
     ],
   },
-  { $set: { status: 'processing', lockedAt: new Date(), lockedBy: workerId }, $inc: { attempts: 1 } },
+  { $set: { status: 'processing', lockedAt: new Date(), lockedBy: `${workerId}:${randomUUID()}` }, $inc: { attempts: 1 } },
   { new: true, sort: { runAt: 1 } },
 )
 
@@ -181,7 +193,7 @@ const processOne = async (): Promise<'completed' | 'failed' | 'deferred' | 'empt
   try {
     await deliver(job)
     const completedAt = new Date()
-    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: 'completed', completedAt, lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    await OperationsJob.updateOne({ _id: job._id, lockedBy: job.lockedBy, status: 'processing' }, { $set: { status: 'completed', completedAt, lastError: '' }, $unset: { lockedAt: 1, lockedBy: 1 } })
     if (job.type === 'domain_verify') {
       // A later successful lifecycle check supersedes historical dead jobs for
       // the same domain record. Without this cleanup the health endpoint would
@@ -196,7 +208,7 @@ const processOne = async (): Promise<'completed' | 'failed' | 'deferred' | 'empt
   } catch (error: any) {
     if (error?.code === 'TENANT_ACCESS_DEFERRED') {
       await OperationsJob.updateOne(
-        { _id: job._id, lockedBy: workerId, status: 'processing' },
+        { _id: job._id, lockedBy: job.lockedBy, status: 'processing' },
         {
           $set: { status: 'pending', accessDeferredAt: new Date(), lastError: 'Deferred while tenant runtime access is inactive' },
           $inc: { attempts: -1 },
@@ -208,7 +220,7 @@ const processOne = async (): Promise<'completed' | 'failed' | 'deferred' | 'empt
     }
     const final = job.attempts >= job.maxAttempts
     const delayMs = Math.min(6 * 60 * 60_000, Math.max(30_000, 2 ** Math.min(job.attempts, 10) * 15_000))
-    await OperationsJob.updateOne({ _id: job._id, lockedBy: workerId, status: 'processing' }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
+    await OperationsJob.updateOne({ _id: job._id, lockedBy: job.lockedBy, status: 'processing' }, { $set: { status: final ? 'failed' : 'pending', lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown operations error', runAt: new Date(Date.now() + delayMs) }, $unset: { lockedAt: 1, lockedBy: 1 } })
     Metrics.observeQueue(job.type, final ? 'dead' : 'retry')
     if (job.type === 'asset_finalize') {
       assetFinalizeFailuresSinceStart += 1
@@ -235,15 +247,29 @@ const processDue = async (limit = config.runtime.worker_batch_size, concurrency 
   return { completed, failed, deferred }
 }
 
-const schedulePendingCalendarSync = async (limit = 25) => {
-  if (config.calendar.provider_approval_status !== 'approved' || !config.calendar.sync_url || !config.calendar.api_token) return { scheduled: 0 }
-  const candidates: any[] = await Viewing.find({ calendarSyncStatus: { $in: ['pending_provider_approval', 'not_configured', 'failed'] }, status: { $in: ['Scheduled', 'Confirmed', 'Rescheduled'] }, date: { $gte: new Date().toISOString().slice(0, 10) } }).select('_id organizationId').limit(limit).lean()
-  const ids = candidates.map((item) => item._id.toString())
-  const existing = new Set((await OperationsJob.find({ type: 'calendar_sync', entityId: { $in: ids }, status: { $in: ['pending', 'processing'] } }).select('entityId').lean()).map((job: any) => job.entityId))
+const schedulePendingCalendarSync = async (limit = 100) => {
+  const pendingStates = ['pending', 'pending_provider_approval', 'not_configured', 'failed']
+  const candidates: any[] = await Viewing.find({ calendarSyncStatus: { $in: pendingStates }, status: { $in: ['Scheduled', 'Confirmed', 'Rescheduled'] }, date: { $gte: new Date().toISOString().slice(0, 10) } }).select('_id organizationId').limit(limit).lean()
   let scheduled = 0
-  for (const viewing of candidates) {
-    const entityId = viewing._id.toString()
-    if (!existing.has(entityId)) { const job = await schedule({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId, runAt: new Date(Date.now() + 250) }); if (job) scheduled += 1 }
+  for (const candidate of candidates) {
+    if (!(await tenantCanRunBackgroundWork(candidate.organizationId, 'calendar_sync'))) continue
+    try {
+      const created = await viewingTransaction(candidate.organizationId, async (session) => {
+        // Re-read under the same lock as schedule edits. A recovery scan must
+        // never cancel a new revision's job using an older candidate snapshot.
+        const viewing: any = await Viewing.findOne({ _id: candidate._id, organizationId: candidate.organizationId,
+          calendarSyncStatus: { $in: pendingStates }, status: { $in: ['Scheduled', 'Confirmed', 'Rescheduled'] } }).session(session).lean()
+        if (!viewing) return false
+        const entityId = String(viewing._id)
+        const exists = await OperationsJob.exists({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId, status: { $in: ['pending', 'processing'] } }).session(session)
+        if (exists) return false
+        return Boolean(await schedule({ organizationId: viewing.organizationId, type: 'calendar_sync', entityId,
+          runAt: new Date(Date.now() + 250), payload: { scheduleVersion: Number(viewing.scheduleVersion || 1) } }, { session }))
+      })
+      if (created) scheduled += 1
+    } catch (error: any) {
+      if (![403, 423].includes(error?.statusCode)) throw error
+    }
   }
   return { scheduled }
 }

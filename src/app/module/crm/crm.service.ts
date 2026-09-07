@@ -45,16 +45,22 @@ const getAssignees = async (organizationId: string, capability: CrmAssignmentCap
   }))
 }
 
-const getConfig = async (organizationId: string) => {
-  let config = await CrmConfig.findOne({ organizationId }).populate({ path: 'assignment.eligibleAgentIds', select: 'name email userRole status', match: { organizationId } }).populate({ path: 'assignment.territoryRules.agentIds', select: 'name email userRole status', match: { organizationId } })
-  if (!config) return CrmConfig.create({ organizationId, pipelineStages: DEFAULT_LEAD_PIPELINE_STAGES })
+const getConfig = async (organizationId: string, session?: ClientSession) => {
+  const query = CrmConfig.findOne({ organizationId })
+  if (session) query.session(session)
+  else query.populate({ path: 'assignment.eligibleAgentIds', select: 'name email userRole status', match: { organizationId } }).populate({ path: 'assignment.territoryRules.agentIds', select: 'name email userRole status', match: { organizationId } })
+  const config = await query
+  if (!config) {
+    const input = { organizationId, pipelineStages: DEFAULT_LEAD_PIPELINE_STAGES }
+    return session ? (await CrmConfig.create([input], { session }))[0] : CrmConfig.create(input)
+  }
 
   const canonicalStages = canonicalizePipelineStages(config.pipelineStages || [])
   const currentContract = (config.pipelineStages || []).map((stage: any) => ({ key: stage.key, label: stage.label, order: stage.order, terminal: Boolean(stage.terminal), won: Boolean(stage.won), lost: Boolean(stage.lost), color: stage.color || undefined }))
   const nextContract = canonicalStages.map((stage: any) => ({ ...stage, color: stage.color || '#64748b' }))
   if (JSON.stringify(currentContract) !== JSON.stringify(nextContract)) {
     config.pipelineStages = canonicalStages as any
-    await config.save()
+    await config.save(session ? { session } : undefined)
   }
   return config
 }
