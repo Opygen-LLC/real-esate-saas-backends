@@ -3,8 +3,11 @@ export const permissionValues = [
   'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
   'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
   'contacts.read', 'contacts.write',
-  'materials.read', 'materials.write',
-  'suppliers.read', 'suppliers.write', 'suppliers.payments',
+  'customerFinance.read', 'customerFinance.manage', 'customerPayments.manage',
+  'materials.read', 'materials.manage', 'inventory.adjust',
+  'suppliers.read', 'suppliers.manage', 'supplierPayments.manage',
+  // Legacy Phase 3/4 permission names remain accepted so existing custom roles do not lose access during migration.
+  'materials.write', 'suppliers.write', 'suppliers.payments',
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
   'users.read', 'users.write', 'organization.manage',
@@ -33,8 +36,9 @@ export const permissionMatrix: Record<string, Permission[]> = {
     'properties.read', 'properties.write', 'properties.publish', 'properties.delete',
     'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
     'contacts.read', 'contacts.write',
-    'materials.read', 'materials.write',
-    'suppliers.read', 'suppliers.write', 'suppliers.payments',
+    'customerFinance.read', 'customerFinance.manage', 'customerPayments.manage',
+    'materials.read', 'materials.manage', 'inventory.adjust',
+    'suppliers.read', 'suppliers.manage', 'supplierPayments.manage',
     'tasks.read', 'tasks.write',
     'viewings.read', 'viewings.write',
     'users.read', 'users.write', 'organization.manage',
@@ -52,11 +56,12 @@ export const permissionMatrix: Record<string, Permission[]> = {
   agent: [
     'dashboard.read', 'properties.read', 'properties.write',
     'leads.read', 'leads.write', 'contacts.read', 'contacts.write',
+    'customerFinance.read', 'customerFinance.manage',
     'tasks.read', 'tasks.write', 'viewings.read', 'viewings.write',
   ],
   staff: [
     'dashboard.read', 'properties.read', 'leads.read',
-    'contacts.read', 'contacts.write', 'tasks.read', 'tasks.write',
+    'contacts.read', 'contacts.write', 'customerFinance.read', 'tasks.read', 'tasks.write',
     'viewings.read', 'viewings.write',
   ],
   viewer: [
@@ -75,6 +80,12 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'leads.assign': ['leads.read'],
   'crm.team.manage': ['crm.team.read', 'leads.read', 'leads.write', 'leads.assign', 'contacts.read', 'contacts.write', 'tasks.read', 'tasks.write', 'viewings.read', 'viewings.write'],
   'contacts.write': ['contacts.read'],
+  'customerFinance.manage': ['customerFinance.read', 'contacts.read'],
+  'customerPayments.manage': ['customerFinance.read'],
+  'materials.manage': ['materials.read'],
+  'inventory.adjust': ['materials.read'],
+  'suppliers.manage': ['suppliers.read'],
+  'supplierPayments.manage': ['suppliers.read'],
   'materials.write': ['materials.read'],
   'suppliers.write': ['suppliers.read'],
   'suppliers.payments': ['suppliers.read'],
@@ -121,6 +132,15 @@ export const normalizeCustomPermissions = (input: string[] = [], options: { allo
     if (ownerOnlyPermissions.has(value as Permission) && !(options.allowBilling && value === 'billing.manage')) continue
     selected.add(value as Permission)
   }
+  // Preserve access for custom roles saved before the Phase 5 permission split.
+  // New writes should use the explicit permissions below; these aliases can be
+  // removed only after all persisted custom roles have been migrated.
+  if (selected.has('materials.write')) {
+    selected.add('materials.manage')
+    selected.add('inventory.adjust')
+  }
+  if (selected.has('suppliers.write')) selected.add('suppliers.manage')
+  if (selected.has('suppliers.payments')) selected.add('supplierPayments.manage')
   let changed = true
   while (changed) {
     changed = false
@@ -186,14 +206,20 @@ export const permissionCatalog = [
     { permission: 'viewings.read', label: 'View viewings', description: 'View property viewing schedule.' },
     { permission: 'viewings.write', label: 'Manage viewings', description: 'Create and update viewings.' },
   ] },
+  { group: 'Customer finance', items: [
+    { permission: 'customerFinance.read', label: 'View customer finance', description: 'View bookings, installment schedules, payment history and customer financial summaries when the organization is entitled.' },
+    { permission: 'customerFinance.manage', label: 'Manage bookings & installments', description: 'Create bookings and manage the customer installment workflow. Property write access is still required to reserve a unit.' },
+    { permission: 'customerPayments.manage', label: 'Record customer payments', description: 'Record customer payments into the Finance-backed booking ledger without granting broad Finance write access.' },
+  ] },
   { group: 'Materials & inventory', items: [
     { permission: 'materials.read', label: 'View materials & inventory', description: 'View material catalog, requirements, stock balances, usage and purchase costs when the organization is entitled.' },
-    { permission: 'materials.write', label: 'Manage materials & inventory', description: 'Create materials, requirements and stock movements. Stock mutations are ledgered and cannot make inventory negative.' },
+    { permission: 'materials.manage', label: 'Manage materials', description: 'Create and update materials and material requirements.' },
+    { permission: 'inventory.adjust', label: 'Adjust inventory', description: 'Create immutable stock movements for usage, returns, purchases and controlled adjustments.' },
   ] },
   { group: 'Suppliers & purchases', items: [
     { permission: 'suppliers.read', label: 'View suppliers & purchases', description: 'View supplier profiles, purchase history, delivery status, prices and supplier balances when the organization is entitled.' },
-    { permission: 'suppliers.write', label: 'Manage suppliers & purchases', description: 'Create and update suppliers, material purchases, invoice attachments and received quantities.' },
-    { permission: 'suppliers.payments', label: 'Record supplier payments', description: 'Record or void supplier payments linked to material purchases and the finance ledger.' },
+    { permission: 'suppliers.manage', label: 'Manage suppliers & purchases', description: 'Create and update suppliers, purchases, invoice attachments and delivery records.' },
+    { permission: 'supplierPayments.manage', label: 'Record supplier payments', description: 'Record or reverse supplier payments linked to material purchases and the Finance ledger.' },
   ] },
   { group: 'Team & agency', items: [
     { permission: 'users.read', label: 'View team', description: 'View the agency roster.' },

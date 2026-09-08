@@ -45,9 +45,18 @@ const getBooking = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Customer booking fetched successfully', data })
 })
 
+const voidPayment = catchAsync(async (req: Request, res: Response) => {
+  const data = await CustomerFinanceService.voidPayment(requireTenant(req), req.params.bookingId, req.params.paymentId, financeActor(req), req.body.reason, crmRecordReadAccessFromRequest(req))
+  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Customer payment reversed successfully', data })
+})
+
 const recordPayment = catchAsync(async (req: Request, res: Response) => {
-  const data = await CustomerFinanceService.recordPayment(requireTenant(req), req.params.bookingId, financeActor(req), req.body, crmRecordReadAccessFromRequest(req))
+  const headerKey = typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'].trim() : ''
+  const data = await CustomerFinanceService.recordPayment(requireTenant(req), req.params.bookingId, financeActor(req), {
+    ...req.body,
+    idempotencyKey: req.body?.idempotencyKey || headerKey || undefined,
+  }, crmRecordReadAccessFromRequest(req))
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Customer payment recorded successfully', data })
 })
 
-export const CustomerFinanceController = { listCustomers, createBooking, getProfile, listBookings, getBooking, recordPayment }
+export const CustomerFinanceController = { listCustomers, createBooking, getProfile, listBookings, getBooking, recordPayment, voidPayment }

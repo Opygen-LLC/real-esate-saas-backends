@@ -227,7 +227,10 @@
     "migrate:materials-inventory-phase3": "ts-node --transpile-only src/app/db/migrateMaterialsInventoryPhase3.ts",
     "verify:materials-inventory-phase3": "node scripts/verify-materials-inventory-phase3.mjs",
     "migrate:supplier-management-phase4": "ts-node --transpile-only src/app/db/migrateSupplierManagementPhase4.ts",
-    "verify:supplier-management-phase4": "node scripts/verify-supplier-management-phase4.mjs"
+    "verify:supplier-management-phase4": "node scripts/verify-supplier-management-phase4.mjs",
+    "migrate:premium-operations-security-phase5": "ts-node --transpile-only src/app/db/migratePremiumOperationsSecurityPhase5.ts",
+    "verify:premium-operations-phase5": "node scripts/verify-premium-operations-phase5.mjs",
+    "test:premium-operations-phase5": "vitest run src/tests/contract/premiumOperationsPhase5.contract.test.ts"
   },
   "keywords": [
     "real-estate",

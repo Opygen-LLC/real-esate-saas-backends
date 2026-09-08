@@ -1,7 +1,7 @@
 import { Schema, model } from 'mongoose'
 
 export const OPERATIONS_JOB_TYPES = [
-  'task_reminder', 'viewing_reminder', 'installment_reminder', 'calendar_sync', 'calendar_delete', 'domain_event_publish',
+  'task_reminder', 'viewing_reminder', 'installment_reminder', 'low_stock_reminder', 'material_requirement_reminder', 'supplier_payment_due', 'calendar_sync', 'calendar_delete', 'domain_event_publish',
   'sms_send', 'meta_capi', 'domain_verify', 'asset_finalize', 'website_asset_delete', 'support_email',
 ] as const
 

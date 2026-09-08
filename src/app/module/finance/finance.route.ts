@@ -19,6 +19,7 @@ import { FinanceInitializationValidation } from './financeInitialization.validat
 import { FinanceCloseController } from './financeClose.controller'
 import { FinanceCloseValidation } from './financeClose.validation'
 import type { FinancePermission } from './finance.contract'
+import { requireInvoicePaymentPermission } from './financeInvoicePaymentAccess.middleware'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -162,7 +163,7 @@ router.get('/invoices', ...read, FinanceController.listInvoices)
 router.post('/invoices', ...write, validateRequest(FinanceValidation.createInvoice), FinanceController.createInvoice)
 router.get('/invoices/:id/pdf', ...read, FinanceController.downloadInvoicePdf)
 router.post('/invoices/:id/void', ...write, validateRequest(FinanceValidation.voidInvoice), FinanceController.voidInvoice)
-router.post('/invoices/:id/payments', ...write, validateRequest(FinanceValidation.recordInvoicePayment), FinanceController.recordInvoicePayment)
+router.post('/invoices/:id/payments', authMiddlewares.auth(), requireInvoicePaymentPermission, authMiddlewares.rejectAccountingMigrationLock, validateRequest(FinanceValidation.recordInvoicePayment), FinanceController.recordInvoicePayment)
 router.get('/invoices/:id', ...read, FinanceController.getInvoice)
 router.patch('/invoices/:id', ...write, validateRequest(FinanceValidation.updateInvoice), FinanceController.updateInvoice)
 router.delete('/invoices/:id', authMiddlewares.auth(), authMiddlewares.requirePermission('finance.delete'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(FinanceValidation.archiveInvoice), FinanceController.archiveInvoice)

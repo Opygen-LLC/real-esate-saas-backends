@@ -467,6 +467,9 @@ const getCustomerProfile = async (organizationId: string, contactId: string, acc
     notes: payment.notes,
     recordedBy: payment.recordedBy,
     transactionId: payment.transactionId,
+    status: payment.status || 'posted',
+    voidedAt: payment.voidedAt || null,
+    voidReason: payment.voidReason || '',
   }))
   const followUpDate = (lead as any)?.followUpDate || (followUpTask as any)?.dueAt || contact.followUpDate
   return {
@@ -500,8 +503,9 @@ const recordPayment = async (
   const booking = await bookingAccessFilter(organizationId, bookingId, access)
   if (booking.status === 'Cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cannot record a payment for a cancelled booking')
   if (!booking.financeInvoiceId) throw new ApiError(httpStatus.CONFLICT, 'Booking finance invoice is missing')
-  const invoice: any = await FinanceService.recordInvoicePayment(organizationId, actor, String(booking.financeInvoiceId), payload)
-  await DomainEventService.emit({
+  const paymentResult: any = await FinanceService.recordInvoicePayment(organizationId, actor, String(booking.financeInvoiceId), payload, { includeReplayMetadata: true })
+  const invoice: any = paymentResult.invoice
+  if (!paymentResult.replayed) await DomainEventService.emit({
     organizationId,
     aggregateType: 'sale_booking',
     aggregateId: bookingId,
@@ -514,4 +518,29 @@ const recordPayment = async (
   return getBookingById(organizationId, bookingId, access)
 }
 
-export const CustomerFinanceService = { createBooking, listCustomers, getCustomerProfile, listBookings, getBookingById, recordPayment, projectInstallments }
+
+const voidPayment = async (
+  organizationId: string,
+  bookingId: string,
+  paymentId: string,
+  actor: FinanceActorContext,
+  reason: string,
+  access?: CrmAccessContext,
+) => {
+  const booking = await bookingAccessFilter(organizationId, bookingId, access)
+  if (!booking.financeInvoiceId) throw new ApiError(httpStatus.CONFLICT, 'Booking finance invoice is missing')
+  await FinanceService.voidInvoicePayment(organizationId, actor, String(booking.financeInvoiceId), paymentId, reason)
+  await DomainEventService.emit({
+    organizationId,
+    aggregateType: 'sale_booking',
+    aggregateId: bookingId,
+    eventType: 'customer_finance.payment_voided',
+    contactId: String(booking.contactId),
+    leadId: booking.originatingLeadId ? String(booking.originatingLeadId) : undefined,
+    actorId: actor.id,
+    payload: { summary: `Customer payment reversed for booking ${booking.bookingNumber}`, paymentId, reason },
+  }).catch(() => undefined)
+  return getBookingById(organizationId, bookingId, access)
+}
+
+export const CustomerFinanceService = { createBooking, listCustomers, getCustomerProfile, listBookings, getBookingById, recordPayment, voidPayment, projectInstallments }

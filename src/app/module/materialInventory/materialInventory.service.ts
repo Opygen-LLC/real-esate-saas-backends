@@ -6,6 +6,7 @@ import type { IPaginationOptions } from '../../../interfaces/common'
 import { requiredTransaction } from '../../db/requiredTransaction'
 import { moneyToMinorUnits } from '../finance/finance.money'
 import { Property } from '../property/property.model'
+import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { Material } from './material.model'
 import { MaterialRequirement } from './materialRequirement.model'
 import { StockMovement } from './stockMovement.model'
@@ -178,6 +179,37 @@ const getMaterial = async (organizationId: string, materialId: string) => {
   }
 }
 
+
+const reminderRunAt = (candidate: Date) => candidate.getTime() > Date.now() + 1_000 ? candidate : new Date(Date.now() + 30_000)
+
+const syncRequirementReminder = async (organizationId: string, requirement: any) => {
+  const entityId = String(requirement._id)
+  if (['Completed', 'Cancelled'].includes(String(requirement.status))) {
+    await OperationsQueueService.cancel(organizationId, 'material_requirement_reminder', entityId)
+    return
+  }
+  const due = new Date(requirement.requiredBy)
+  const runAt = reminderRunAt(new Date(due.getTime() - 7 * 24 * 60 * 60 * 1000))
+  await OperationsQueueService.schedule({ organizationId, type: 'material_requirement_reminder', entityId, runAt, payload: { materialId: String(requirement.materialId) } })
+}
+
+const syncLowStockReminder = async (organizationId: string, materialId: string) => {
+  const material: any = await Material.findOne({ _id: materialObjectId(materialId), organizationId, active: true }).select('_id stockQuantity minimumStock').lean()
+  if (!material) {
+    await OperationsQueueService.cancel(organizationId, 'low_stock_reminder', materialId)
+    return
+  }
+  const rows: any[] = await MaterialRequirement.find({ organizationId, materialId: material._id, status: { $in: ['Planned', 'Partially Available'] } }).select('requiredQuantity').lean()
+  const required = rows.reduce((sum, row) => sum + Number(row.requiredQuantity || 0), 0)
+  const stock = Number(material.stockQuantity || 0)
+  const low = (material.minimumStock != null && stock < Number(material.minimumStock)) || required > stock
+  if (!low) {
+    await OperationsQueueService.cancel(organizationId, 'low_stock_reminder', materialId)
+    return
+  }
+  await OperationsQueueService.schedule({ organizationId, type: 'low_stock_reminder', entityId: materialId, runAt: new Date(Date.now() + 30_000) })
+}
+
 const createRequirement = async (organizationId: string, materialId: string, actorId: string, payload: any) => {
   const material = await Material.findOne({ _id: materialObjectId(materialId), organizationId, active: true }).select('_id').lean()
   if (!material) throw new ApiError(httpStatus.NOT_FOUND, 'Active material not found')
@@ -194,6 +226,7 @@ const createRequirement = async (organizationId: string, materialId: string, act
     createdBy: actorObjectId(actorId),
     updatedBy: actorObjectId(actorId),
   }])
+  await Promise.all([syncRequirementReminder(organizationId, row), syncLowStockReminder(organizationId, materialId)])
   return row.toObject()
 }
 
@@ -212,13 +245,14 @@ const updateRequirement = async (organizationId: string, requirementId: string, 
   if (payload.status !== undefined) row.status = payload.status
   row.updatedBy = actorObjectId(actorId)
   await row.save()
+  await Promise.all([syncRequirementReminder(organizationId, row), syncLowStockReminder(organizationId, String(row.materialId))])
   return row.toObject()
 }
 
 const createMovement = async (organizationId: string, materialId: string, actorId: string, payload: any, headerIdempotencyKey?: string) => {
   const idempotencyKey = String(payload.idempotencyKey || headerIdempotencyKey || '').trim() || undefined
   if (idempotencyKey && idempotencyKey.length > 120) throw new ApiError(httpStatus.BAD_REQUEST, 'Idempotency key is too long')
-  return requiredTransaction(async (session) => {
+  const result = await requiredTransaction(async (session) => {
     if (idempotencyKey) {
       const existing = await StockMovement.findOne({ organizationId, idempotencyKey }).session(session).lean()
       if (existing) {
@@ -273,6 +307,8 @@ const createMovement = async (organizationId: string, materialId: string, actorI
     }
     return { movement: movement.toObject(), material: updatedMaterial.toObject(), replayed: false }
   })
+  await syncLowStockReminder(organizationId, materialId)
+  return result
 }
 
 
@@ -340,4 +376,4 @@ const listMovements = async (organizationId: string, materialId: string, query: 
   return { meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }, data: rows }
 }
 
-export const MaterialInventoryService = { listMaterials, createMaterial, updateMaterial, getMaterial, createRequirement, updateRequirement, createMovement, recordPurchaseReceiptInSession, listMovements }
+export const MaterialInventoryService = { listMaterials, createMaterial, updateMaterial, getMaterial, createRequirement, updateRequirement, createMovement, recordPurchaseReceiptInSession, syncRequirementReminder, syncLowStockReminder, listMovements }

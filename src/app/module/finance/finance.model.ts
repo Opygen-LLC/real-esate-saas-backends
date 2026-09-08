@@ -77,6 +77,11 @@ const invoicePaymentSchema = new Schema(
     transactionId: { type: Schema.Types.ObjectId, ref: 'FinanceTransaction' },
     bankAccountId: { type: Schema.Types.ObjectId, ref: 'FinanceBankAccount' },
     journalEntryId: { type: Schema.Types.ObjectId, ref: 'FinanceJournalEntry' },
+    idempotencyKey: { type: String, trim: true, maxlength: 120 },
+    status: { type: String, enum: ['posted', 'voided'], default: 'posted', required: true },
+    voidedAt: { type: Date, default: null },
+    voidedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    voidReason: { type: String, trim: true, maxlength: 500, default: '' },
   },
   { _id: true },
 )

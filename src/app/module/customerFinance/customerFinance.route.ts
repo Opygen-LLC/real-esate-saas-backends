@@ -10,7 +10,7 @@ const customerFinance = authMiddlewares.requireEntitlement('CUSTOMER_FINANCE')
 router.get(
   '/',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.read'),
+  authMiddlewares.requirePermission('customerFinance.read'),
   validateRequest(CustomerFinanceValidation.listCustomers),
   CustomerFinanceController.listCustomers,
 )
@@ -18,7 +18,7 @@ router.get(
 router.get(
   '/:contactId/profile',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.read'),
+  authMiddlewares.requirePermission('customerFinance.read'),
   validateRequest(CustomerFinanceValidation.contactId),
   CustomerFinanceController.getProfile,
 )
@@ -26,7 +26,7 @@ router.get(
 router.get(
   '/:contactId/bookings',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.read'),
+  authMiddlewares.requirePermission('customerFinance.read'),
   validateRequest(CustomerFinanceValidation.listBookings),
   CustomerFinanceController.listBookings,
 )
@@ -34,9 +34,8 @@ router.get(
 router.post(
   '/:contactId/bookings',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.write'),
+  authMiddlewares.requirePermission('customerFinance.manage'),
   authMiddlewares.requirePermission('properties.write'),
-  authMiddlewares.requirePermission('finance.write'),
   validateRequest(CustomerFinanceValidation.createBooking),
   CustomerFinanceController.createBooking,
 )
@@ -44,7 +43,7 @@ router.post(
 router.get(
   '/bookings/:bookingId',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.read'),
+  authMiddlewares.requirePermission('customerFinance.read'),
   validateRequest(CustomerFinanceValidation.bookingId),
   CustomerFinanceController.getBooking,
 )
@@ -52,10 +51,18 @@ router.get(
 router.post(
   '/bookings/:bookingId/payments',
   customerFinance,
-  authMiddlewares.requirePermission('contacts.read'),
-  authMiddlewares.requirePermission('finance.write'),
+  authMiddlewares.requirePermission('customerPayments.manage'),
   validateRequest(CustomerFinanceValidation.recordPayment),
   CustomerFinanceController.recordPayment,
+)
+
+
+router.post(
+  '/bookings/:bookingId/payments/:paymentId/void',
+  customerFinance,
+  authMiddlewares.requirePermission('customerPayments.manage'),
+  validateRequest(CustomerFinanceValidation.voidPayment),
+  CustomerFinanceController.voidPayment,
 )
 
 export const CustomerFinanceRoute = router

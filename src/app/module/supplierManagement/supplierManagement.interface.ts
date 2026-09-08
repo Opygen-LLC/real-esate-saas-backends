@@ -16,12 +16,14 @@ export interface IMaterialPurchase {
   totalMinor: number
   purchaseDate: Date
   expectedDeliveryDate?: Date | null
+  paymentDueDate?: Date | null
   actualDeliveryDate?: Date | null
   receivedQuantity: number
   status: MaterialPurchaseStatus
   invoiceNumber?: string
   notes?: string
   idempotencyKey?: string
+  paymentMutationVersion?: number
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string
   createdAt?: Date

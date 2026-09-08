@@ -69,6 +69,7 @@ const createPurchase = z.object({ body: z.object({
   unitPrice: money,
   purchaseDate: dateValue,
   expectedDeliveryDate: dateValue.optional(),
+  paymentDueDate: dateValue.optional(),
   invoiceNumber: optionalText(160),
   propertyId: optionalObjectId,
   flatId: optionalText(120),
@@ -84,6 +85,7 @@ const updatePurchase = z.object({
   params: z.object({ purchaseId: objectId }).strict(),
   body: z.object({
     expectedDeliveryDate: z.union([dateValue, z.null()]).optional(),
+    paymentDueDate: z.union([dateValue, z.null()]).optional(),
     invoiceNumber: z.union([z.string().trim().max(160), z.null()]).optional(),
     notes: z.union([z.string().trim().max(2000), z.null()]).optional(),
   }).strict().refine((value) => Object.keys(value).length > 0, 'At least one field is required'),

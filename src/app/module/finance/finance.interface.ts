@@ -59,6 +59,11 @@ export interface IFinanceInvoicePayment {
   transactionId?: mongoose.Types.ObjectId | string
   bankAccountId?: mongoose.Types.ObjectId | string
   journalEntryId?: mongoose.Types.ObjectId | string
+  idempotencyKey?: string
+  status?: 'posted' | 'voided'
+  voidedAt?: Date
+  voidedBy?: mongoose.Types.ObjectId | string
+  voidReason?: string
 }
 
 export interface IFinanceInvoice {

@@ -917,100 +917,219 @@ const archiveDraftInvoice = async (organizationId: string, actor: FinanceActorCo
   return { _id: result._id, invoiceNumber: result.invoiceNumber, archivedAt: result.archivedAt }
 }
 
-const recordInvoicePayment = async (organizationId: string, actor: FinanceActorContext, id: string, payload: any) => {
-  const invoiceNumber = await financeCommercialTransaction(async (session) => {
-    const invoiceQuery: any = FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
-    if (session) invoiceQuery.session(session)
-    const invoice: any = await invoiceQuery
+const recordInvoicePayment = async (organizationId: string, actor: FinanceActorContext, id: string, payload: any, options: { includeReplayMetadata?: boolean } = {}) => {
+  const idempotencyKey = String(payload?.idempotencyKey || '').trim() || undefined
+  if (idempotencyKey && idempotencyKey.length > 120) throw financeFieldError('idempotencyKey', 'Idempotency key is too long')
+
+  const finish = async (replayed: boolean) => {
+    const invoice = await getInvoiceById(organizationId, id)
+    return options.includeReplayMetadata ? { invoice, replayed } : invoice
+  }
+
+  const findExistingPayment = async () => {
+    if (!idempotencyKey) return null
+    const existing: any = await FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', idempotencyKey, deletedAt: null }).lean()
+    if (!existing) return null
+    if (String(existing.sourceId || '') !== String(id)) {
+      throw new ApiError(httpStatus.CONFLICT, 'This idempotency key is already used for another invoice payment')
+    }
+    return existing
+  }
+
+  if (await findExistingPayment()) return finish(true)
+
+  let invoiceNumber = ''
+  let replayed = false
+  try {
+    invoiceNumber = await financeCommercialTransaction(async (session) => {
+      const invoiceQuery: any = FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null })
+      if (session) invoiceQuery.session(session)
+      const invoice: any = await invoiceQuery
+      if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+
+      if (idempotencyKey) {
+        const retryQuery: any = FinanceTransaction.findOne({ organizationId, sourceType: 'invoice_payment', idempotencyKey, deletedAt: null })
+        if (session) retryQuery.session(session)
+        const retry: any = await retryQuery.lean()
+        if (retry) {
+          if (String(retry.sourceId || '') !== String(invoice._id)) throw new ApiError(httpStatus.CONFLICT, 'This idempotency key is already used for another invoice payment')
+          replayed = true
+          return invoice.invoiceNumber
+        }
+      }
+
+      if (invoice.bookingId) {
+        const entitlement = await EntitlementService.resolve(organizationId, session, { allowInactive: true })
+        if (!entitlement.limits?.entitlements?.customerFinance?.enabled) {
+          throw new ApiError(403, 'customer finance is not enabled for this organization', '', 'FEATURE_NOT_INCLUDED', {
+            entitlement: 'CUSTOMER_FINANCE',
+            feature: 'customer_finance',
+            currentPlan: entitlement.organization?.subscription?.plan,
+            upgradeRequired: true,
+          })
+        }
+      }
+      if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
+      const amountPaidNumber = Number(payload.amount)
+      if (!Number.isFinite(amountPaidNumber) || amountPaidNumber <= 0) throw financeFieldError('amount', 'Enter a valid positive payment amount')
+      const amountPaidMinor = invoiceMoneyMinorUnits(amountPaidNumber, 'amount')
+      const totalMinor = invoiceMoneyMinorUnits(Number(invoice.total || 0), 'amount')
+      const paidMinor = invoiceMoneyMinorUnits(Number(invoice.paidAmount || 0), 'amount')
+      const outstandingMinor = Math.max(0, totalMinor - paidMinor)
+      if (amountPaidMinor > outstandingMinor) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${moneyFromMinorUnits(outstandingMinor).toFixed(2)}`)
+      const amountPaid = moneyFromMinorUnits(amountPaidMinor)
+      const paidAt = asDate(payload.paidAt)
+      const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+      if (payload.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
+      const bankAccountId = accountingReady ? await resolveFinanceBankAccountId(organizationId, payload.bankAccountId, session) : undefined
+
+      if (accountingReady && !invoice.revenueJournalId && Number(invoice.total || 0) > 0) {
+        const version = Number(invoice.accountingVersion || 0) + 1
+        const revenueJournal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
+        if (revenueJournal?._id) {
+          invoice.accountingVersion = version
+          invoice.revenueJournalId = revenueJournal._id
+        }
+      }
+
+      const transactionDocs: any[] = await FinanceTransaction.create([{
+        organizationId,
+        type: 'income',
+        category: 'Invoice payment',
+        amount: amountPaid,
+        currency: 'BDT',
+        transactionDate: paidAt,
+        paymentMethod: payload.paymentMethod,
+        bankAccountId,
+        status: 'paid',
+        description: `Payment received for ${invoice.invoiceNumber}`,
+        reference: payload.reference || invoice.invoiceNumber,
+        sourceType: 'invoice_payment',
+        sourceId: invoice._id,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        propertyId: invoice.propertyId || undefined,
+        leadId: invoice.leadId || undefined,
+        createdBy: actorObjectId(actor.id),
+      }], session ? { session } : undefined)
+      const transaction: any = transactionDocs[0]
+      let paymentJournal: any = null
+      if (accountingReady) {
+        paymentJournal = await FinanceGlIntegrationService.postInvoicePayment(organizationId, financeAccountingActor(actor), invoice, transaction, session)
+        if (paymentJournal?._id) {
+          transaction.accountingVersion = 1
+          transaction.accountingJournalId = paymentJournal._id
+          await transaction.save(session ? { session } : undefined)
+        }
+      }
+
+      invoice.payments.push({
+        amount: amountPaid,
+        paidAt,
+        paymentMethod: payload.paymentMethod,
+        bankAccountId,
+        reference: payload.reference || '',
+        notes: payload.notes || '',
+        recordedBy: actorObjectId(actor.id),
+        transactionId: transaction._id,
+        journalEntryId: paymentJournal?._id,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      })
+      const nextPaidMinor = paidMinor + amountPaidMinor
+      invoice.paidAmount = moneyFromMinorUnits(nextPaidMinor)
+      invoice.status = nextPaidMinor >= totalMinor ? 'paid' : 'partial'
+      invoice.updatedBy = actorObjectId(actor.id)
+      await invoice.save(session ? { session } : undefined)
+      if (invoice.bookingId) {
+        await syncBookingPaymentProjection(organizationId, String(invoice.bookingId), nextPaidMinor, session)
+      }
+      await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), journalEntryId: paymentJournal?._id ? String(paymentJournal._id) : null, idempotencyKey: idempotencyKey || null, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
+      return invoice.invoiceNumber
+    })
+  } catch (error: any) {
+    if (idempotencyKey && error?.code === 11000) {
+      if (await findExistingPayment()) return finish(true)
+    }
+    throw error
+  }
+
+  if (!replayed) {
+    await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
+    emitProductionEvent('invoice_payment_recorded', { organizationId, invoiceId: id })
+  }
+  return finish(replayed)
+}
+
+
+const voidInvoicePayment = async (organizationId: string, actor: FinanceActorContext, invoiceId: string, paymentId: string, reason: string) => {
+  if (!mongoose.isValidObjectId(invoiceId) || !mongoose.isValidObjectId(paymentId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid invoice payment reference')
+  if (String(reason || '').trim().length < 3) throw financeFieldError('reason', 'Enter a reason for reversing this payment')
+  let invoiceNumber = ''
+  await financeCommercialTransaction(async (session) => {
+    const invoice: any = await FinanceInvoice.findOne({ _id: invoiceId, organizationId, archivedAt: null }).session(session)
     if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
-    if (invoice.bookingId) {
-      const entitlement = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
-      if (!entitlement.limits?.entitlements?.customerFinance?.enabled) {
-        throw new ApiError(403, 'customer finance is not enabled for this organization', '', 'FEATURE_NOT_INCLUDED', {
-          entitlement: 'CUSTOMER_FINANCE',
-          feature: 'customer_finance',
-          currentPlan: entitlement.organization?.subscription?.plan,
-          upgradeRequired: true,
-        })
-      }
-    }
-    if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
-    const amountPaidNumber = Number(payload.amount)
-    if (!Number.isFinite(amountPaidNumber) || amountPaidNumber <= 0) throw financeFieldError('amount', 'Enter a valid positive payment amount')
-    const amountPaidMinor = invoiceMoneyMinorUnits(amountPaidNumber, 'amount')
-    const totalMinor = invoiceMoneyMinorUnits(Number(invoice.total || 0), 'amount')
-    const paidMinor = invoiceMoneyMinorUnits(Number(invoice.paidAmount || 0), 'amount')
-    const outstandingMinor = Math.max(0, totalMinor - paidMinor)
-    if (amountPaidMinor > outstandingMinor) throw financeFieldError('amount', `Payment cannot exceed the outstanding amount of BDT ${moneyFromMinorUnits(outstandingMinor).toFixed(2)}`)
-    const amountPaid = moneyFromMinorUnits(amountPaidMinor)
-    const paidAt = asDate(payload.paidAt)
-    const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
-    if (payload.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
-    const bankAccountId = accountingReady ? await resolveFinanceBankAccountId(organizationId, payload.bankAccountId, session) : undefined
+    const payment: any = invoice.payments?.id?.(paymentId) || invoice.payments?.find((row: any) => String(row._id) === paymentId)
+    if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice payment not found')
+    invoiceNumber = invoice.invoiceNumber
+    if (payment.status === 'voided') return invoice
+    if (!payment.transactionId) throw new ApiError(httpStatus.CONFLICT, 'This historical payment is missing its Finance transaction link and cannot be reversed automatically')
 
-    if (accountingReady && !invoice.revenueJournalId && Number(invoice.total || 0) > 0) {
-      const version = Number(invoice.accountingVersion || 0) + 1
-      const revenueJournal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
-      if (revenueJournal?._id) {
-        invoice.accountingVersion = version
-        invoice.revenueJournalId = revenueJournal._id
-      }
-    }
-
-    const transactionDocs: any[] = await FinanceTransaction.create([{
+    const transaction: any = await FinanceTransaction.findOne({
+      _id: payment.transactionId,
       organizationId,
-      type: 'income',
-      category: 'Invoice payment',
-      amount: amountPaid,
-      currency: 'BDT',
-      transactionDate: paidAt,
-      paymentMethod: payload.paymentMethod,
-      bankAccountId,
-      status: 'paid',
-      description: `Payment received for ${invoice.invoiceNumber}`,
-      reference: payload.reference || invoice.invoiceNumber,
       sourceType: 'invoice_payment',
       sourceId: invoice._id,
-      propertyId: invoice.propertyId || undefined,
-      leadId: invoice.leadId || undefined,
-      createdBy: actorObjectId(actor.id),
-    }], session ? { session } : undefined)
-    const transaction: any = transactionDocs[0]
-    let paymentJournal: any = null
-    if (accountingReady) {
-      paymentJournal = await FinanceGlIntegrationService.postInvoicePayment(organizationId, financeAccountingActor(actor), invoice, transaction, session)
-      if (paymentJournal?._id) {
-        transaction.accountingVersion = 1
-        transaction.accountingJournalId = paymentJournal._id
-        await transaction.save(session ? { session } : undefined)
+      deletedAt: null,
+    }).session(session)
+    if (!transaction) throw new ApiError(httpStatus.CONFLICT, 'The linked Finance transaction for this payment is unavailable')
+
+    if (transaction.status !== 'voided') {
+      if (transaction.accountingJournalId) {
+        await FinanceGlIntegrationService.reverseLinkedJournal(
+          organizationId,
+          financeAccountingActor(actor),
+          transaction.accountingJournalId,
+          reason.trim(),
+          new Date(),
+          session,
+        )
       }
+      transaction.status = 'voided'
+      transaction.voidedAt = new Date()
+      transaction.voidedBy = actorObjectId(actor.id)
+      transaction.voidReason = reason.trim()
+      transaction.updatedBy = actorObjectId(actor.id)
+      await transaction.save({ session })
     }
 
-    invoice.payments.push({
-      amount: amountPaid,
-      paidAt,
-      paymentMethod: payload.paymentMethod,
-      bankAccountId,
-      reference: payload.reference || '',
-      notes: payload.notes || '',
-      recordedBy: actorObjectId(actor.id),
-      transactionId: transaction._id,
-      journalEntryId: paymentJournal?._id,
-    })
-    const nextPaidMinor = paidMinor + amountPaidMinor
-    invoice.paidAmount = moneyFromMinorUnits(nextPaidMinor)
-    invoice.status = nextPaidMinor >= totalMinor ? 'paid' : 'partial'
+    payment.status = 'voided'
+    payment.voidedAt = new Date()
+    payment.voidedBy = actorObjectId(actor.id)
+    payment.voidReason = reason.trim()
+
+    const activePayments = (invoice.payments || []).filter((row: any) => row.status !== 'voided')
+    const paidMinor = activePayments.reduce((sum: number, row: any) => sum + invoiceMoneyMinorUnits(Number(row.amount || 0), 'amount'), 0)
+    const totalMinor = invoiceMoneyMinorUnits(Number(invoice.total || 0), 'amount')
+    invoice.paidAmount = moneyFromMinorUnits(paidMinor)
+    if (paidMinor >= totalMinor && totalMinor > 0) invoice.status = 'paid'
+    else if (paidMinor > 0) invoice.status = 'partial'
+    else if (invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now()) invoice.status = 'overdue'
+    else invoice.status = 'sent'
     invoice.updatedBy = actorObjectId(actor.id)
-    await invoice.save(session ? { session } : undefined)
-    if (invoice.bookingId) {
-      await syncBookingPaymentProjection(organizationId, String(invoice.bookingId), nextPaidMinor, session)
-    }
-    await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), journalEntryId: paymentJournal?._id ? String(paymentJournal._id) : null, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
-    return invoice.invoiceNumber
+    await invoice.save({ session })
+
+    if (invoice.bookingId) await syncBookingPaymentProjection(organizationId, String(invoice.bookingId), paidMinor, session)
+    await financeDestructiveAudit(organizationId, actor, 'finance.invoice.payment_voided', 'financeInvoice', invoiceId, reason, {
+      invoiceNumber: invoice.invoiceNumber,
+      paymentId,
+      transactionId: String(transaction._id),
+      amount: Number(payment.amount || 0),
+      status: invoice.status,
+      bookingId: invoice.bookingId ? String(invoice.bookingId) : null,
+    }, session)
+    return invoice
   })
-  await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.payment_recorded', `Payment recorded for ${invoiceNumber}`)
-  emitProductionEvent('invoice_payment_recorded', { organizationId, invoiceId: id })
-  return getInvoiceById(organizationId, id)
+  await emitFinanceEvent(organizationId, actor.id, 'finance_invoice', invoiceId, 'finance.invoice.payment_voided', `Payment reversed for ${invoiceNumber}`)
+  return getInvoiceById(organizationId, invoiceId)
 }
 
 const renderInvoiceDocument = async (organizationId: string, actor: FinanceActorContext, id: string) => {
@@ -1483,7 +1602,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 
 export const FinanceService = {
   createTransaction, createLinkedExpenseTransactionInSession, voidLinkedExpenseTransactionInSession, listTransactions, updateTransaction, voidTransaction, deleteTransaction,
-  createInvoice, createCustomerFinanceBookingInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
+  createInvoice, createCustomerFinanceBookingInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, voidInvoicePayment, renderInvoiceDocument,
   createCommission, listCommissions, updateCommission, cancelCommission, archiveCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,

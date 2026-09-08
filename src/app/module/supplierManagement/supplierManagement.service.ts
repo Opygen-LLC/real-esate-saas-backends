@@ -12,6 +12,7 @@ import { FinanceTransaction, FinanceVendor } from '../finance/finance.model'
 import { MaterialInventoryService } from '../materialInventory/materialInventory.service'
 import { Material } from '../materialInventory/material.model'
 import { Property } from '../property/property.model'
+import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { MaterialPurchase } from './materialPurchase.model'
 import { MaterialPurchaseReceipt } from './materialPurchaseReceipt.model'
 import { SupplierInvoiceAttachmentService } from './supplierInvoiceAttachment.service'
@@ -292,6 +293,24 @@ const listPurchases = async (organizationId: string, query: any, options: IPagin
   return { meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }, data: await enrichPurchases(organizationId, rows) }
 }
 
+
+const syncSupplierPaymentReminder = async (organizationId: string, purchaseId: string) => {
+  const purchase: any = await MaterialPurchase.findOne({ _id: objectId(purchaseId, 'purchase id'), organizationId }).lean()
+  if (!purchase || purchase.status === 'Cancelled' || !purchase.paymentDueDate) {
+    await OperationsQueueService.cancel(organizationId, 'supplier_payment_due', purchaseId)
+    return
+  }
+  const paidMap = await purchasePaymentMap(organizationId, [purchase._id])
+  const outstanding = Math.max(0, Number(purchase.totalMinor || 0) - (paidMap.get(String(purchase._id)) || 0))
+  if (outstanding <= 0) {
+    await OperationsQueueService.cancel(organizationId, 'supplier_payment_due', purchaseId)
+    return
+  }
+  const candidate = new Date(new Date(purchase.paymentDueDate).getTime() - 24 * 60 * 60 * 1000)
+  const runAt = candidate.getTime() > Date.now() + 1_000 ? candidate : new Date(Date.now() + 30_000)
+  await OperationsQueueService.schedule({ organizationId, type: 'supplier_payment_due', entityId: purchaseId, runAt })
+}
+
 const createPurchase = async (organizationId: string, actorId: string, payload: any, headerIdempotencyKey?: string) => {
   const idempotencyKey = String(payload.idempotencyKey || headerIdempotencyKey || '').trim() || undefined
   if (idempotencyKey && idempotencyKey.length > 120) throw new ApiError(httpStatus.BAD_REQUEST, 'Idempotency key is too long')
@@ -322,6 +341,7 @@ const createPurchase = async (organizationId: string, actorId: string, payload: 
         totalMinor,
         purchaseDate: payload.purchaseDate,
         ...(payload.expectedDeliveryDate ? { expectedDeliveryDate: payload.expectedDeliveryDate } : {}),
+        ...(payload.paymentDueDate ? { paymentDueDate: payload.paymentDueDate } : {}),
         receivedQuantity: 0,
         status: 'Ordered',
         ...(payload.invoiceNumber ? { invoiceNumber: String(payload.invoiceNumber).trim() } : {}),
@@ -336,6 +356,7 @@ const createPurchase = async (organizationId: string, actorId: string, payload: 
     const stored = await MaterialPurchase.findOne({ _id: purchaseId, organizationId }).lean()
     const [data] = await enrichPurchases(organizationId, stored ? [stored] : [])
     if (!txResult.replayed) await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.created', `Material purchase ${purchaseId} created`)
+    await syncSupplierPaymentReminder(organizationId, purchaseId)
     return { data, replayed: txResult.replayed }
   } catch (error: any) {
     if (error?.code === 11000 && idempotencyKey) {
@@ -351,10 +372,12 @@ const updatePurchase = async (organizationId: string, purchaseId: string, actorI
   if (!purchase) throw new ApiError(httpStatus.NOT_FOUND, 'Material purchase not found')
   if (purchase.status === 'Cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancelled purchases cannot be edited')
   if (payload.expectedDeliveryDate !== undefined) purchase.expectedDeliveryDate = payload.expectedDeliveryDate || null
+  if (payload.paymentDueDate !== undefined) purchase.paymentDueDate = payload.paymentDueDate || null
   if (payload.invoiceNumber !== undefined) purchase.invoiceNumber = String(payload.invoiceNumber || '').trim()
   if (payload.notes !== undefined) purchase.notes = String(payload.notes || '').trim()
   purchase.updatedBy = actorObjectId(actorId)
   await purchase.save()
+  await syncSupplierPaymentReminder(organizationId, purchaseId)
   return (await enrichPurchases(organizationId, [purchase.toObject()]))[0]
 }
 
@@ -409,7 +432,8 @@ const receivePurchase = async (organizationId: string, purchaseId: string, actor
     })
     const purchase = await MaterialPurchase.findOne({ _id: purchaseId, organizationId }).lean()
     const [data] = await enrichPurchases(organizationId, purchase ? [purchase] : [])
-    await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.received', `Material purchase received${result.replayed ? ' (replayed)' : ''}`)
+    if (purchase) await MaterialInventoryService.syncLowStockReminder(organizationId, String(purchase.materialId))
+    if (!result.replayed) await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.received', 'Material purchase received')
     return { data, receiptId: result.receiptId, replayed: result.replayed }
   } catch (error: any) {
     if (error?.code === 11000 && idempotencyKey) {
@@ -437,6 +461,13 @@ const recordPurchasePayment = async (organizationId: string, purchaseId: string,
       const purchase: any = await MaterialPurchase.findOne({ _id: objectId(purchaseId, 'purchase id'), organizationId }).session(session)
       if (!purchase) throw new ApiError(httpStatus.NOT_FOUND, 'Material purchase not found')
       if (purchase.status === 'Cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancelled purchases cannot be paid')
+      // Serialize supplier-payment mutations on the purchase without storing a paid balance.
+      // This makes concurrent distinct payments conflict/retry before outstanding is recalculated.
+      await MaterialPurchase.updateOne(
+        { _id: purchase._id, organizationId },
+        { $inc: { paymentMutationVersion: 1 } },
+        { session },
+      )
       const [supplier] = await Promise.all([ensureSupplier(organizationId, String(purchase.supplierId), session, false), ensureProperty(organizationId, purchase.propertyId ? String(purchase.propertyId) : undefined, session)])
       const paidMap = await purchasePaymentMap(organizationId, [purchase._id], session)
       const alreadyPaidMinor = paidMap.get(String(purchase._id)) || 0
@@ -461,7 +492,8 @@ const recordPurchasePayment = async (organizationId: string, purchaseId: string,
     })
     const purchase = await MaterialPurchase.findOne({ _id: purchaseId, organizationId }).lean()
     const [data] = await enrichPurchases(organizationId, purchase ? [purchase] : [])
-    await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.payment_recorded', 'Supplier payment recorded')
+    if (!result.replayed) await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.payment_recorded', 'Supplier payment recorded')
+    await syncSupplierPaymentReminder(organizationId, purchaseId)
     return { data, paymentId: result.transactionId, replayed: result.replayed }
   } catch (error: any) {
     if (error?.code === 11000 && idempotencyKey) {
@@ -484,6 +516,7 @@ const voidPurchasePayment = async (organizationId: string, purchaseId: string, p
   })
   const purchase = await MaterialPurchase.findOne({ _id: purchaseId, organizationId }).lean()
   await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.payment_voided', 'Supplier payment voided')
+  await syncSupplierPaymentReminder(organizationId, purchaseId)
   return (await enrichPurchases(organizationId, purchase ? [purchase] : []))[0]
 }
 
@@ -502,6 +535,7 @@ const cancelPurchase = async (organizationId: string, purchaseId: string, actorI
     return purchase
   })
   await emit(organizationId, actorId, 'material_purchase', purchaseId, 'material_purchase.cancelled', `Material purchase cancelled: ${reason}`)
+  await OperationsQueueService.cancel(organizationId, 'supplier_payment_due', purchaseId)
   return (await enrichPurchases(organizationId, [result.toObject ? result.toObject() : result]))[0]
 }
 
@@ -566,6 +600,7 @@ export const SupplierManagementService = {
   recordPurchasePayment,
   voidPurchasePayment,
   cancelPurchase,
+  syncSupplierPaymentReminder,
   latestPricesForMaterial,
   propertyCostSummary,
 }

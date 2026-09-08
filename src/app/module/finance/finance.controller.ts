@@ -77,7 +77,11 @@ const updateInvoice = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice updated successfully', data })
 })
 const recordInvoicePayment = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.recordInvoicePayment(requireTenant(req), financeActor(req), req.params.id, req.body)
+  const headerKey = typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'].trim() : ''
+  const data = await FinanceService.recordInvoicePayment(requireTenant(req), financeActor(req), req.params.id, {
+    ...req.body,
+    idempotencyKey: req.body?.idempotencyKey || headerKey || undefined,
+  })
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoice payment recorded successfully', data })
 })
 const voidInvoice = catchAsync(async (req: Request, res: Response) => {

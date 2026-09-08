@@ -113,6 +113,7 @@ const recordInvoicePayment = z.object({ body: z.object({
   bankAccountId: optionalObjectId,
   reference: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(500).optional(),
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
 }).strict() })
 
 const voidInvoice = z.object({ body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() })

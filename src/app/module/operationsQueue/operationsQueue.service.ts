@@ -15,6 +15,7 @@ import { Viewing } from '../viewing/viewing.model'
 import { viewingTransaction } from '../viewing/viewingTransaction'
 import { deliverViewingReminder } from '../viewing/viewingReminder.service'
 import { deliverInstallmentReminder } from '../customerFinance/installmentReminder.service'
+import { PremiumOperationsReminderService } from './premiumOperationsReminder.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { NotificationService } from '../notification/notification.service'
 import { Organization } from '../organization/organization.model'
@@ -82,7 +83,7 @@ const schedule = async (
     { $set: { status: 'cancelled' } },
     options.session ? { session: options.session } : undefined,
   )
-  if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder', 'installment_reminder'].includes(input.type)) return null
+  if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder', 'installment_reminder', 'low_stock_reminder', 'material_requirement_reminder', 'supplier_payment_due'].includes(input.type)) return null
 
   const payload = {
     organizationId: input.organizationId,
@@ -109,7 +110,7 @@ const scheduleMany = async (
   }
   if (!(await tenantCanRunBackgroundWork(organizationId, type, options))) return []
 
-  const reminderType = ['task_reminder', 'viewing_reminder', 'installment_reminder'].includes(type)
+  const reminderType = ['task_reminder', 'viewing_reminder', 'installment_reminder', 'low_stock_reminder', 'material_requirement_reminder', 'supplier_payment_due'].includes(type)
   const runnable = inputs.filter((input) => !reminderType || input.runAt.getTime() > Date.now())
   if (!runnable.length) return []
   const entityIds = [...new Set(runnable.map((input) => input.entityId))]
@@ -207,6 +208,7 @@ const deliver = async (job: any) => {
   if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.organizationId, job.entityId, job.payload?.scheduleVersion); return }
   if (job.type === 'viewing_reminder') { await deliverViewingReminder(job); return }
   if (job.type === 'installment_reminder') { await deliverInstallmentReminder(job); return }
+  if (['low_stock_reminder', 'material_requirement_reminder', 'supplier_payment_due'].includes(job.type)) { await PremiumOperationsReminderService.deliver(job); return }
   if (job.type === 'task_reminder') {
     const task: any = await Task.findOne({ _id: job.entityId, organizationId: job.organizationId }).lean()
     if (!task || ['Completed', 'Cancelled'].includes(task.status)) return
