@@ -20,7 +20,7 @@ export class FinanceMoneyValidationError extends Error {
   }
 }
 
-export const moneyToMinorUnits = (value: number, field: string) => {
+export const moneyToMinorUnits = (value: number, field = 'amount') => {
   if (!Number.isFinite(value)) throw new FinanceMoneyValidationError(field, 'Enter a valid number')
   const minorUnits = Math.round((value + Math.sign(value) * Number.EPSILON) * MONEY_SCALE)
   if (!Number.isSafeInteger(minorUnits)) throw new FinanceMoneyValidationError(field, 'Amount is too large to calculate safely')
