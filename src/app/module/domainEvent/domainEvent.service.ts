@@ -33,7 +33,7 @@ const activityProjection: Record<string, { type: string; title: string }> = {
   'lead.updated': { type: 'note', title: 'Lead details updated' },
   'lead.response_recorded': { type: 'system', title: 'First contact recorded' },
   'lead.converted': { type: 'system', title: 'Lead converted to contact' },
-  'lead.follow_up_scheduled': { type: 'system', title: 'Lead follow-up scheduled' },
+  'lead.follow_up_scheduled': { type: 'follow_up', title: 'Lead follow-up scheduled' },
   'lead.follow_up_completed': { type: 'follow_up', title: 'Lead follow-up completed' },
   'activity.call': { type: 'call', title: 'Call logged' },
   'activity.email': { type: 'email', title: 'Email logged' },

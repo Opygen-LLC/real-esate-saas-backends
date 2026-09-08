@@ -10,6 +10,7 @@ export type IActivityType =
   | 'viewing'
   | 'offer'
   | 'system'
+  | 'follow_up'
 
 export interface IActivity {
   organizationId: string

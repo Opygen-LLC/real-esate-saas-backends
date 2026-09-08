@@ -34,6 +34,7 @@ const activitySchema = new Schema<IActivity, ActivityModel>(
         'viewing',
         'offer',
         'system',
+        'follow_up',
       ],
       default: 'note',
       required: true,
