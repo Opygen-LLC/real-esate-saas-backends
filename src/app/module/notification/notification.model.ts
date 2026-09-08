@@ -4,7 +4,7 @@ const notificationSchema = new Schema({
   organizationId: { type: String, required: true, index: true },
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   jobId: { type: Schema.Types.ObjectId, ref: 'OperationsJob', required: true },
-  type: { type: String, enum: ['task_reminder', 'viewing_reminder'], required: true },
+  type: { type: String, enum: ['task_reminder', 'viewing_reminder', 'installment_reminder'], required: true },
   title: { type: String, required: true, maxlength: 180 },
   body: { type: String, default: '', maxlength: 600 },
   entityId: { type: String, required: true },

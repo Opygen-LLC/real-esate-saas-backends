@@ -221,7 +221,9 @@
     "gate:phase5-website-rollout:staging": "pnpm gate:phase5-website-rollout && pnpm test:integration && pnpm test:phase5-website-rollout:integration && pnpm profile:phase5-website-rollout && pnpm verify:phase5-query-plans",
     "profile:phase5-website-rollout": "node scripts/require-env.mjs PHASE2_DATABASE_URL PHASE2_ORGANIZATION_ID && pnpm profile:phase2-catalog -- --execution-stats",
     "verify:phase5-query-plans": "node scripts/require-env.mjs PHASE2_DATABASE_URL PHASE2_ORGANIZATION_ID && pnpm verify:phase2-query-plans",
-    "migrate:premium-operations-plan-v1": "ts-node --transpile-only src/app/db/migratePremiumOperationsPlanV1.ts"
+    "migrate:premium-operations-plan-v1": "ts-node --transpile-only src/app/db/migratePremiumOperationsPlanV1.ts",
+    "migrate:customer-finance-phase2": "ts-node --transpile-only src/app/db/migrateCustomerFinancePhase2.ts",
+    "verify:customer-finance-phase2": "node scripts/verify-customer-finance-phase2.mjs"
   },
   "keywords": [
     "real-estate",

@@ -119,6 +119,8 @@ const invoiceSchema = new Schema<IFinanceInvoice>(
     notes: { type: String, trim: true, maxlength: 3000, default: '' },
     propertyId: { type: Schema.Types.ObjectId, ref: 'Property', index: true },
     leadId: { type: Schema.Types.ObjectId, ref: 'Lead', index: true },
+    contactId: { type: Schema.Types.ObjectId, ref: 'Contact', index: true },
+    bookingId: { type: Schema.Types.ObjectId, ref: 'SaleBooking', index: true },
     payments: { type: [invoicePaymentSchema], default: [] },
     accountingVersion: { type: Number, default: 0, min: 0 },
     revenueJournalId: { type: Schema.Types.ObjectId, ref: 'FinanceJournalEntry', default: null, index: true },
@@ -133,6 +135,8 @@ invoiceSchema.index({ organizationId: 1, issueDate: -1 })
 invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })
 invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1, _id: -1 }, { name: 'finance_invoice_tenant_archived_created_cursor' })
 invoiceSchema.index({ organizationId: 1, propertyId: 1, createdAt: -1 })
+invoiceSchema.index({ organizationId: 1, bookingId: 1 }, { unique: true, name: 'finance_invoice_tenant_booking_unique', partialFilterExpression: { bookingId: { $type: 'objectId' } } })
+invoiceSchema.index({ organizationId: 1, contactId: 1, createdAt: -1 }, { name: 'finance_invoice_tenant_contact_created' })
 
 const commissionSchema = new Schema<IFinanceCommission>(
   {

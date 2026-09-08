@@ -9,7 +9,7 @@ type NotificationJobInput = {
   organizationId: string
   userId?: string
   jobId: string
-  type: 'task_reminder' | 'viewing_reminder'
+  type: 'task_reminder' | 'viewing_reminder' | 'installment_reminder'
   title: string
   body?: string
   entityId: string

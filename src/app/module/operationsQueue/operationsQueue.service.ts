@@ -14,6 +14,7 @@ import { Task } from '../task/task.model'
 import { Viewing } from '../viewing/viewing.model'
 import { viewingTransaction } from '../viewing/viewingTransaction'
 import { deliverViewingReminder } from '../viewing/viewingReminder.service'
+import { deliverInstallmentReminder } from '../customerFinance/installmentReminder.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { NotificationService } from '../notification/notification.service'
 import { Organization } from '../organization/organization.model'
@@ -81,7 +82,7 @@ const schedule = async (
     { $set: { status: 'cancelled' } },
     options.session ? { session: options.session } : undefined,
   )
-  if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder'].includes(input.type)) return null
+  if (input.runAt.getTime() <= Date.now() && ['task_reminder', 'viewing_reminder', 'installment_reminder'].includes(input.type)) return null
 
   const payload = {
     organizationId: input.organizationId,
@@ -94,6 +95,40 @@ const schedule = async (
 
   if (options.session) return (await OperationsJob.create([payload], { session: options.session }))[0]
   return OperationsJob.create(payload)
+}
+
+const scheduleMany = async (
+  inputs: Array<{ organizationId: string; type: OperationsJobType; entityId: string; runAt: Date; payload?: Record<string, unknown>; maxAttempts?: number }>,
+  options: QueueWriteOptions = {},
+) => {
+  if (!inputs.length) return []
+  const organizationId = inputs[0].organizationId
+  const type = inputs[0].type
+  if (inputs.some((input) => input.organizationId !== organizationId || input.type !== type)) {
+    throw new Error('OperationsQueueService.scheduleMany requires one organization and one job type per batch')
+  }
+  if (!(await tenantCanRunBackgroundWork(organizationId, type, options))) return []
+
+  const reminderType = ['task_reminder', 'viewing_reminder', 'installment_reminder'].includes(type)
+  const runnable = inputs.filter((input) => !reminderType || input.runAt.getTime() > Date.now())
+  if (!runnable.length) return []
+  const entityIds = [...new Set(runnable.map((input) => input.entityId))]
+
+  await OperationsJob.updateMany(
+    { organizationId, type, entityId: { $in: entityIds }, status: { $in: ['pending', 'processing'] } },
+    { $set: { status: 'cancelled' } },
+    options.session ? { session: options.session } : undefined,
+  )
+
+  const payloads = runnable.map((input) => ({
+    organizationId,
+    type,
+    entityId: input.entityId,
+    runAt: input.runAt,
+    payload: input.payload || {},
+    maxAttempts: Math.max(1, Math.min(10, input.maxAttempts || 5)),
+  }))
+  return OperationsJob.insertMany(payloads, { ordered: true, ...(options.session ? { session: options.session } : {}) })
 }
 
 const cancel = async (
@@ -171,6 +206,7 @@ const deliver = async (job: any) => {
   }
   if (job.type === 'calendar_sync') { await CalendarSyncService.syncViewing(job.organizationId, job.entityId, job.payload?.scheduleVersion); return }
   if (job.type === 'viewing_reminder') { await deliverViewingReminder(job); return }
+  if (job.type === 'installment_reminder') { await deliverInstallmentReminder(job); return }
   if (job.type === 'task_reminder') {
     const task: any = await Task.findOne({ _id: job.entityId, organizationId: job.organizationId }).lean()
     if (!task || ['Completed', 'Cancelled'].includes(task.status)) return
@@ -359,4 +395,4 @@ const domainBacklog = async () => {
   return { pending, processing, failed, oldestPendingAt: (oldest as any)?.runAt || null }
 }
 
-export const OperationsQueueService = { schedule, cancel, cancelOrganization, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog, assetBacklog }
+export const OperationsQueueService = { schedule, scheduleMany, cancel, cancelOrganization, processDue, schedulePendingCalendarSync, schedulePendingMeta, schedulePendingDomainChecks, resolveFailedDomainChecks, backlog, domainBacklog, assetBacklog }

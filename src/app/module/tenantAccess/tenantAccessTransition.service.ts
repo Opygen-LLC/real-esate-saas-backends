@@ -14,6 +14,7 @@ import { TenantAccessMonitoringService } from './tenantAccessMonitoring.service'
 export const ACCESS_CONTROLLED_OPERATION_TYPES = [
   'task_reminder',
   'viewing_reminder',
+  'installment_reminder',
   'calendar_sync',
   'sms_send',
   'meta_capi',

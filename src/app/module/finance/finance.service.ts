@@ -37,6 +37,8 @@ import { FinanceGlIntegrationService } from './financeGlIntegration.service'
 import { FinanceBankAccount, FinanceTaxCode } from './financeOperations.model'
 import { FinanceBillingProfile } from './financeBillingProfile.model'
 import type { IFinanceBillingProfile, IFinanceIssuerSnapshot } from './financeBillingProfile.interface'
+import { syncBookingPaymentProjection } from '../customerFinance/customerFinanceProjection.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -527,6 +529,78 @@ const propertyAuditMetadata = (property: any) => property ? {
   propertyReference: property.slug || '',
 } : { propertyId: null }
 
+const createCustomerFinanceBookingInvoice = async (
+  organizationId: string,
+  actor: FinanceActorContext,
+  payload: {
+    bookingId: string | mongoose.Types.ObjectId
+    propertyId: string | mongoose.Types.ObjectId
+    contactId: string | mongoose.Types.ObjectId
+    leadId?: string | mongoose.Types.ObjectId
+    bookingNumber: string
+    propertyTitle: string
+    clientName: string
+    clientPhone?: string
+    clientEmail?: string
+    issueDate: Date
+    dueDate: Date
+    amount: number
+  },
+  session: ClientSession,
+) => {
+  const issuerSnapshot = await currentIssuerSnapshot(organizationId, session)
+  const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+  const invoiceNumber = `CF-${payload.bookingNumber}`
+  const rows: any[] = await FinanceInvoice.create([{
+    organizationId,
+    invoiceNumber,
+    clientName: payload.clientName,
+    clientPhone: payload.clientPhone || '',
+    clientEmail: payload.clientEmail || '',
+    issuerSnapshot,
+    issueDate: payload.issueDate,
+    dueDate: payload.dueDate,
+    lineItems: [{ description: `Property booking - ${payload.propertyTitle}`, quantity: 1, unitPrice: payload.amount, amount: payload.amount }],
+    subtotal: payload.amount,
+    discount: 0,
+    taxAmount: 0,
+    total: payload.amount,
+    paidAmount: 0,
+    currency: 'BDT',
+    status: 'sent',
+    notes: `System-generated customer finance invoice for booking ${payload.bookingNumber}.`,
+    propertyId: payload.propertyId,
+    leadId: payload.leadId,
+    contactId: payload.contactId,
+    bookingId: payload.bookingId,
+    payments: [],
+    createdBy: actorObjectId(actor.id),
+    updatedBy: actorObjectId(actor.id),
+  }], { session })
+  const invoice: any = rows[0]
+
+  if (accountingReady && Number(invoice.total || 0) > 0) {
+    const version = 1
+    const journal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
+    if (journal?._id) {
+      invoice.accountingVersion = version
+      invoice.revenueJournalId = journal._id
+      await invoice.save({ session })
+    }
+  }
+
+  await invoiceAudit(
+    organizationId,
+    actor,
+    'finance.invoice.created',
+    String(invoice._id),
+    'Customer Finance booking invoice created',
+    { invoiceNumber, status: invoice.status, total: invoice.total, currency: invoice.currency, propertyId: String(payload.propertyId), bookingId: String(payload.bookingId) },
+    session,
+  )
+  return invoice
+}
+
 const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
   const baseAmounts = calculateInvoiceAmounts(organizationId, payload.lineItems || [], Number(payload.discount || 0))
   const issueDate = asDate(payload.issueDate)
@@ -609,6 +683,7 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
   const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
     const existing: any = await querySession(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), session)
     if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (existing.bookingId) throw new ApiError(httpStatus.CONFLICT, 'Customer Finance booking invoices are system-managed and cannot be edited from Finance')
     if (existing.status === 'cancelled') throw new ApiError(httpStatus.CONFLICT, 'Voided invoices cannot be edited')
 
     const keys = Object.keys(payload)
@@ -693,6 +768,7 @@ const voidInvoice = async (organizationId: string, actor: FinanceActorContext, i
   const invoice: any = await financeCommercialTransaction(async (session) => {
     const row: any = await FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }).session(session)
     if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (row.bookingId) throw new ApiError(httpStatus.CONFLICT, 'Customer Finance booking invoices must be managed from Customer Finance')
     if (row.status === 'cancelled') return row
     if (!['sent', 'overdue'].includes(row.status)) throw new ApiError(409, 'Only unpaid issued invoices can be voided; draft invoices can be removed by the owner')
     await assertNoInvoicePayments(organizationId, row, session)
@@ -740,6 +816,17 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     if (session) invoiceQuery.session(session)
     const invoice: any = await invoiceQuery
     if (!invoice) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
+    if (invoice.bookingId) {
+      const entitlement = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
+      if (!entitlement.limits?.entitlements?.customerFinance?.enabled) {
+        throw new ApiError(403, 'customer finance is not enabled for this organization', '', 'FEATURE_NOT_INCLUDED', {
+          entitlement: 'CUSTOMER_FINANCE',
+          feature: 'customer_finance',
+          currentPlan: entitlement.organization?.subscription?.plan,
+          upgradeRequired: true,
+        })
+      }
+    }
     if (!['sent', 'partial', 'overdue'].includes(invoice.status)) throw new ApiError(httpStatus.CONFLICT, `Cannot record a payment for a ${invoice.status} invoice`)
     const amountPaidNumber = Number(payload.amount)
     if (!Number.isFinite(amountPaidNumber) || amountPaidNumber <= 0) throw financeFieldError('amount', 'Enter a valid positive payment amount')
@@ -808,6 +895,9 @@ const recordInvoicePayment = async (organizationId: string, actor: FinanceActorC
     invoice.status = nextPaidMinor >= totalMinor ? 'paid' : 'partial'
     invoice.updatedBy = actorObjectId(actor.id)
     await invoice.save(session ? { session } : undefined)
+    if (invoice.bookingId) {
+      await syncBookingPaymentProjection(organizationId, String(invoice.bookingId), nextPaidMinor, session)
+    }
     await invoiceAudit(organizationId, actor, 'finance.invoice.payment_recorded', id, 'Invoice payment recorded', { invoiceNumber: invoice.invoiceNumber, amount: amountPaid, paymentMethod: payload.paymentMethod, reference: payload.reference || '', transactionId: String(transaction._id), journalEntryId: paymentJournal?._id ? String(paymentJournal._id) : null, status: invoice.status, propertyId: invoice.propertyId ? String(invoice.propertyId) : null }, session)
     return invoice.invoiceNumber
   })
@@ -1286,7 +1376,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 
 export const FinanceService = {
   createTransaction, listTransactions, updateTransaction, voidTransaction, deleteTransaction,
-  createInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
+  createInvoice, createCustomerFinanceBookingInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
   createCommission, listCommissions, updateCommission, cancelCommission, archiveCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,
   createBudget, listBudgets, updateBudget, archiveBudget,

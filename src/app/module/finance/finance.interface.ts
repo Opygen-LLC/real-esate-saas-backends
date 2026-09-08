@@ -87,6 +87,9 @@ export interface IFinanceInvoice {
   notes?: string
   propertyId?: mongoose.Types.ObjectId | string
   leadId?: mongoose.Types.ObjectId | string
+  /** Optional CRM/customer-finance linkage for system-generated booking invoices. */
+  contactId?: mongoose.Types.ObjectId | string
+  bookingId?: mongoose.Types.ObjectId | string
   payments: IFinanceInvoicePayment[]
   accountingVersion?: number
   revenueJournalId?: mongoose.Types.ObjectId | string | null

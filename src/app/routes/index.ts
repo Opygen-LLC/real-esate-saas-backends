@@ -30,6 +30,7 @@ import { PlatformAdminRoute } from '../module/platformAdmin/platformAdmin.route'
 import { ObservabilityRoute } from '../module/observability/observability.route'
 import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.route'
 import { FinanceRoute } from '../module/finance/finance.route'
+import { CustomerFinanceRoute } from '../module/customerFinance/customerFinance.route'
 import { UploadRoute } from '../module/upload/upload.route'
 import { ReviewRoute } from '../module/review/review.route'
 import { WebsiteSubmissionRoute } from '../module/websiteSubmission/websiteSubmission.route'
@@ -49,6 +50,7 @@ const moduleRoutes = [
   { path: '/reviews', route: ReviewRoute },
   { path: '/upload', route: UploadRoute },
   { path: '/finance', route: FinanceRoute },
+  { path: '/customers', route: CustomerFinanceRoute },
 
   { path: '/team-invitations', route: TeamInvitationRoute },
   { path: '/observability', route: ObservabilityRoute },
