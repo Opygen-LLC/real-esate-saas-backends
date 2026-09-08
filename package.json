@@ -223,7 +223,9 @@
     "verify:phase5-query-plans": "node scripts/require-env.mjs PHASE2_DATABASE_URL PHASE2_ORGANIZATION_ID && pnpm verify:phase2-query-plans",
     "migrate:premium-operations-plan-v1": "ts-node --transpile-only src/app/db/migratePremiumOperationsPlanV1.ts",
     "migrate:customer-finance-phase2": "ts-node --transpile-only src/app/db/migrateCustomerFinancePhase2.ts",
-    "verify:customer-finance-phase2": "node scripts/verify-customer-finance-phase2.mjs"
+    "verify:customer-finance-phase2": "node scripts/verify-customer-finance-phase2.mjs",
+    "migrate:materials-inventory-phase3": "ts-node --transpile-only src/app/db/migrateMaterialsInventoryPhase3.ts",
+    "verify:materials-inventory-phase3": "node scripts/verify-materials-inventory-phase3.mjs"
   },
   "keywords": [
     "real-estate",
