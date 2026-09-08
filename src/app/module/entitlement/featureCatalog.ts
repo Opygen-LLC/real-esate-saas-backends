@@ -8,7 +8,7 @@ import {
 } from './entitlement.types'
 
 type LimitLegacyField = 'maxAgents' | 'maxProperties' | 'maxLeads' | 'maxStorageMb' | 'maxMonthlyVisitors'
-type BooleanLegacyField = 'hasCustomDomain' | 'hasAdvancedAnalytics' | 'hasWhatsAppIntegration' | 'hasSmsAutomation' | 'hasLeadAutomations' | 'hasPremiumTemplates' | 'hasAdvancedAccounting'
+type BooleanLegacyField = 'hasCustomDomain' | 'hasAdvancedAnalytics' | 'hasWhatsAppIntegration' | 'hasSmsAutomation' | 'hasLeadAutomations' | 'hasPremiumTemplates' | 'hasAdvancedAccounting' | 'hasCustomerFinance' | 'hasMaterialsInventory' | 'hasSupplierManagement'
 
 export interface FeatureCatalogEntry {
   id: EntitlementFeatureId
@@ -31,6 +31,9 @@ export const FEATURE_CATALOG: Record<EntitlementFeatureId, FeatureCatalogEntry> 
   leadAutomations: { id: 'leadAutomations', label: 'Lead automation', kind: 'boolean', legacyField: 'hasLeadAutomations' },
   premiumTemplates: { id: 'premiumTemplates', label: 'Premium templates', kind: 'boolean', legacyField: 'hasPremiumTemplates' },
   advancedAccounting: { id: 'advancedAccounting', label: 'Advanced accounting', kind: 'boolean', legacyField: 'hasAdvancedAccounting' },
+  customerFinance: { id: 'customerFinance', label: 'Customer finance & installments', kind: 'boolean', legacyField: 'hasCustomerFinance' },
+  materialsInventory: { id: 'materialsInventory', label: 'Materials & inventory', kind: 'boolean', legacyField: 'hasMaterialsInventory' },
+  supplierManagement: { id: 'supplierManagement', label: 'Supplier management', kind: 'boolean', legacyField: 'hasSupplierManagement' },
 }
 
 const asPlainEntitlements = (value: unknown): Record<string, unknown> => {

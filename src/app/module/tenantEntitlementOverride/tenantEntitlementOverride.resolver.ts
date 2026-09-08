@@ -15,6 +15,9 @@ export type EffectiveTenantLimits = {
   hasLeadAutomations: boolean
   hasPremiumTemplates: boolean
   hasAdvancedAccounting: boolean
+  hasCustomerFinance: boolean
+  hasMaterialsInventory: boolean
+  hasSupplierManagement: boolean
 }
 
 const numeric = (base: number, input?: TenantNumericEntitlementOverride) => {
@@ -51,5 +54,8 @@ export const applyTenantEntitlementOverride = (base: EffectiveTenantLimits, over
     hasLeadAutomations: features.leadAutomations ?? base.hasLeadAutomations,
     hasPremiumTemplates: features.premiumTemplates ?? base.hasPremiumTemplates,
     hasAdvancedAccounting: features.advancedAccounting ?? base.hasAdvancedAccounting,
+    hasCustomerFinance: features.customerFinance ?? base.hasCustomerFinance,
+    hasMaterialsInventory: features.materialsInventory ?? base.hasMaterialsInventory,
+    hasSupplierManagement: features.supplierManagement ?? base.hasSupplierManagement,
   }
 }

@@ -23,6 +23,9 @@ export interface TrialPolicy {
   hasSmsAutomation: boolean
   hasLeadAutomations: boolean
   hasAdvancedAccounting: boolean
+  hasCustomerFinance: boolean
+  hasMaterialsInventory: boolean
+  hasSupplierManagement: boolean
 }
 
 const DEFAULT_TRIAL_LEGACY = {
@@ -38,6 +41,9 @@ const DEFAULT_TRIAL_LEGACY = {
   hasSmsAutomation: false,
   hasLeadAutomations: false,
   hasAdvancedAccounting: false,
+  hasCustomerFinance: false,
+  hasMaterialsInventory: false,
+  hasSupplierManagement: false,
 }
 
 export const DEFAULT_TRIAL_POLICY: TrialPolicy = {

@@ -1,5 +1,27 @@
 import { z } from 'zod'
-import { normalizeBangladeshPhone, normalizeEmail } from './identity'
+import { normalizeBangladeshPhone, normalizeEmail, normalizeInternationalPhone } from './identity'
+
+
+const validateInternationalPhone = (value: string): boolean => {
+  try {
+    normalizeInternationalPhone(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const internationalPhoneSchema = z.string()
+  .trim()
+  .min(1, 'Phone number is required')
+  .max(40, 'Phone number is too long')
+  .refine(validateInternationalPhone, 'Enter a valid international phone number with country code')
+  .transform(normalizeInternationalPhone)
+
+export const optionalInternationalPhoneSchema = z.union([
+  z.literal(''),
+  internationalPhoneSchema,
+]).optional()
 
 const validateBangladeshPhone = (value: string): boolean => {
   try {

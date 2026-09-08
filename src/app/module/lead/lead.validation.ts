@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { bangladeshPhoneSchema, optionalEmailSchema } from '../../helpers/inputValidation'
+import { internationalPhoneSchema, optionalEmailSchema } from '../../helpers/inputValidation'
 import { LEAD_STATUS_VALUES, normalizeLeadStatus } from './leadStatus.contract'
 import { CONSTRUCTION_STAGES, CONSTRUCTION_TYPES, DESIGN_REQUIREMENTS, INQUIRY_PROJECT_TYPES, INQUIRY_PURPOSES } from '../../shared/inquiryPurpose.contract'
 
@@ -31,7 +31,7 @@ const attribution = z.object({
 
 const leadFields = {
   name: z.string().trim().min(1, 'Name is required').max(120),
-  phone: bangladeshPhoneSchema,
+  phone: internationalPhoneSchema,
   email: optionalEmailSchema,
   source: z.enum(['Website', 'WhatsApp', 'Facebook', 'Instagram', 'Google', 'Referral', 'WalkIn', 'Portal', 'Phone', 'Email', 'Ad', 'Other']).optional(),
   budgetMin: z.number().nonnegative().optional(),
@@ -129,6 +129,7 @@ const manageLeadBody = z.object({
 const manageLeadZodSchema = z.object({ body: manageLeadBody })
 const updateLeadStatusZodSchema = z.object({ body: z.object({ leadStatus: leadStatusSchema, lostReason: z.string().trim().max(120).optional(), reason: z.string().trim().max(500).optional() }).strict() })
 const scheduleLeadFollowUpZodSchema = z.object({ body: z.object({ followUpDate: z.string().datetime(), title: z.string().trim().min(1).max(200).optional(), priority: z.enum(['low','medium','high','urgent']).optional(), reason: z.string().trim().max(500).optional() }).strict() })
+const completeLeadFollowUpZodSchema = z.object({ body: z.object({ outcome: z.enum(['called','meeting_done','no_answer','customer_busy','not_interested','payment_discussion','other']), note: z.string().trim().max(3000).optional(), nextFollowUpDate: z.string().datetime().optional() }).strict() })
 const reengageLeadZodSchema = z.object({ body: z.object({ reason: z.string().trim().max(500).optional() }).strict() })
 const assignLeadAgentZodSchema = z.object({
   body: z.object({
@@ -138,6 +139,6 @@ const assignLeadAgentZodSchema = z.object({
 })
 const confirmImportZodSchema = z.object({ body: z.object({ importSessionId: z.string().uuid('Invalid import session') }).strict() })
 
-export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, manageLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
+export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, manageLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, completeLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
 export type PublicLeadCaptureInput = z.infer<typeof publicCaptureZodSchema>['body']
 export type ManageLeadInput = z.infer<typeof manageLeadBody>

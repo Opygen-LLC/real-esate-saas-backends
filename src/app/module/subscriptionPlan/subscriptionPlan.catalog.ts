@@ -22,6 +22,9 @@ export interface CurrentPlanCatalogEntry {
     smsAutomation: boolean
     premiumTemplates: boolean
     advancedAccounting: boolean
+    customerFinance: boolean
+    materialsInventory: boolean
+    supplierManagement: boolean
   }
   isPopular: boolean
 }
@@ -64,6 +67,9 @@ export const CURRENT_PLAN_CATALOG = {
       smsAutomation: false,
       premiumTemplates: false,
       advancedAccounting: false,
+      customerFinance: false,
+      materialsInventory: false,
+      supplierManagement: false,
     },
     isPopular: false,
   },
@@ -98,6 +104,9 @@ export const CURRENT_PLAN_CATALOG = {
       smsAutomation: false,
       premiumTemplates: true,
       advancedAccounting: false,
+      customerFinance: false,
+      materialsInventory: false,
+      supplierManagement: false,
     },
     isPopular: true,
   },
@@ -105,8 +114,8 @@ export const CURRENT_PLAN_CATALOG = {
     planId: 'agency',
     name: 'Agency Scale',
     tierRank: 30,
-    priceMonthly: 1_500,
-    priceYearly: 15_000,
+    priceMonthly: 2_000,
+    priceYearly: 20_000,
     teamMembers: 10,
     maxProperties: 50,
     baseLeadCapacity: 2_000,
@@ -124,6 +133,9 @@ export const CURRENT_PLAN_CATALOG = {
       'Lead Automations',
       'Premium Templates',
       'Advanced Accounting',
+      'Customer Finance & Installments',
+      'Materials & Inventory',
+      'Supplier Management',
     ],
     features: {
       customDomain: true,
@@ -133,6 +145,9 @@ export const CURRENT_PLAN_CATALOG = {
       smsAutomation: true,
       premiumTemplates: true,
       advancedAccounting: true,
+      customerFinance: true,
+      materialsInventory: true,
+      supplierManagement: true,
     },
     isPopular: false,
   },
@@ -163,5 +178,8 @@ export const catalogEntryToPlanWrite = (entry: CurrentPlanCatalogEntry): Record<
   hasSmsAutomation: entry.features.smsAutomation,
   hasPremiumTemplates: entry.features.premiumTemplates,
   hasAdvancedAccounting: entry.features.advancedAccounting,
+  hasCustomerFinance: entry.features.customerFinance,
+  hasMaterialsInventory: entry.features.materialsInventory,
+  hasSupplierManagement: entry.features.supplierManagement,
   isPopular: entry.isPopular,
 })

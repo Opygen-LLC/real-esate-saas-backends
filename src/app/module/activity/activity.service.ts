@@ -221,7 +221,7 @@ const historyKind = (eventType: string, activityType: string): CrmHistoryKind =>
   if (eventType === 'lead.created') return 'lead_created'
   if (eventType === 'lead.assigned') return 'assignment'
   if (eventType === 'lead.stage_changed') return 'status_change'
-  if (eventType === 'lead.follow_up_scheduled') return 'follow_up'
+  if (eventType === 'lead.follow_up_scheduled' || eventType === 'lead.follow_up_completed') return 'follow_up'
   if (eventType === 'lead.converted') return 'conversion'
   if (eventType.startsWith('task.')) return 'task'
   if (eventType.startsWith('viewing.')) return 'viewing'

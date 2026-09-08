@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import ExcelJS from 'exceljs'
 import ApiError from '../../../errors/ApiError'
 import { csvCell, parseSpreadsheetUpload } from '../import/spreadsheetImport.service'
-import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
+import { normalizeInternationalPhone, normalizeEmail } from '../../helpers/identity'
 import { canAssignLeadTo, type CrmAccessContext } from '../crm/crmAccess'
 import { Contact } from '../contact/contact.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
@@ -198,8 +198,8 @@ const validateBaseRow = (
   const rawPhone = stringAt(row.values, columns, 'phone')
   if (!rawPhone) errors.push('Phone is required')
   else {
-    try { normalized.phone = normalizeBangladeshPhone(rawPhone) }
-    catch { errors.push('Phone must be a valid Bangladesh mobile number') }
+    try { normalized.phone = normalizeInternationalPhone(rawPhone) }
+    catch { errors.push('Phone must be a valid international phone number with country code') }
   }
 
   const rawEmail = stringAt(row.values, columns, 'email')

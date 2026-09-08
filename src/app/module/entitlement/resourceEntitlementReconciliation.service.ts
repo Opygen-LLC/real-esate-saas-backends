@@ -27,6 +27,9 @@ export interface ResourceEntitlementSnapshot {
   hasPremiumTemplates: boolean
   hasLeadAutomations: boolean
   hasAdvancedAccounting?: boolean
+  hasCustomerFinance?: boolean
+  hasMaterialsInventory?: boolean
+  hasSupplierManagement?: boolean
 }
 
 export interface ResourceEntitlementReconciliationResult {

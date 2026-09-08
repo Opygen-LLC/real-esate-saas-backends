@@ -26,6 +26,9 @@ export interface ITenantEntitlementOverride {
     leadAutomations?: boolean
     premiumTemplates?: boolean
     advancedAccounting?: boolean
+    customerFinance?: boolean
+    materialsInventory?: boolean
+    supplierManagement?: boolean
   }
   startsAt: Date
   expiresAt?: Date | null

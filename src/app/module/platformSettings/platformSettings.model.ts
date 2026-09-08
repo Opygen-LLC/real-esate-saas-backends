@@ -52,6 +52,9 @@ const platformSettingsSchema = new Schema({
     hasSmsAutomation: { type: Boolean, default: false },
     hasLeadAutomations: { type: Boolean, default: false },
     hasAdvancedAccounting: { type: Boolean, default: false },
+    hasCustomerFinance: { type: Boolean, default: false },
+    hasMaterialsInventory: { type: Boolean, default: false },
+    hasSupplierManagement: { type: Boolean, default: false },
   },
   areaConversion: {
     kathaSqft: { type: Number, default: 720, min: 1 },

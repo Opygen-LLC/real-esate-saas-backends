@@ -6,7 +6,7 @@ import { IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
 import { createQueryProfile } from '../../helpers/queryPerformance'
-import { normalizeBangladeshPhone } from '../../helpers/identity'
+import { normalizeInternationalPhone } from '../../helpers/identity'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import type { PublicLeadCaptureInput } from '../lead/lead.validation'
 import { Lead } from '../lead/lead.model'
@@ -103,7 +103,7 @@ const captureLead = async (payload: PublicLeadCaptureInput, context: PublicLeadS
 
   let normalizedPhone: string
   try {
-    normalizedPhone = normalizeBangladeshPhone(payload.phone)
+    normalizedPhone = normalizeInternationalPhone(payload.phone)
   } catch (error) {
     throw new ApiError(httpStatus.BAD_REQUEST, (error as Error).message, '', 'VALIDATION_ERROR', undefined, { phone: [(error as Error).message] })
   }
@@ -318,7 +318,7 @@ const list = async (
     if (raw.includes('@')) conditions.push({ email: raw.toLowerCase() })
     else if (/^[+()\d\s-]{6,30}$/.test(raw)) {
       let normalizedPhone = raw
-      try { normalizedPhone = normalizeBangladeshPhone(raw) } catch { /* keep exact raw fallback */ }
+      try { normalizedPhone = normalizeInternationalPhone(raw) } catch { /* keep exact raw fallback */ }
       conditions.push({ $or: [{ phone: normalizedPhone }, { phone: raw }] })
     } else {
       const prefix = { $regex: `^${escaped}`, $options: 'i' }

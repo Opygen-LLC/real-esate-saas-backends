@@ -7,7 +7,7 @@ import paginationHelper from '../../helpers/paginationHelper'
 import { finalizeCursorPage, parseDateCursorValue, prepareCursorPagination } from '../../helpers/cursorPagination'
 import { createQueryProfile } from '../../helpers/queryPerformance'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
-import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
+import { normalizeInternationalPhone, normalizeEmail } from '../../helpers/identity'
 import { safeRegexPattern } from '../../helpers/searchQuery'
 import { ActivityService } from '../activity/activity.service'
 import { ActivityExportService } from '../activity/activityExport.service'
@@ -37,7 +37,7 @@ import {
   normalizeLeadStatus,
 } from './leadStatus.contract'
 
-const normalizePhone=(value:string)=>{try{return normalizeBangladeshPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
+const normalizePhone=(value:string)=>{try{return normalizeInternationalPhone(value)}catch(error){throw new ApiError(400,(error as Error).message)}}
 const normalizeOptionalEmail=(value?:string)=>value?.trim()?normalizeEmail(value):''
 const uniqueStrings=(values:any[]=[])=>[...new Set(values.filter(Boolean).map(String))]
 const requireLeadStatus=(value:unknown)=>{const status=normalizeLeadStatus(value);if(!status)throw new ApiError(400,`Unsupported lead status: ${String(value||'')}`);return status}
@@ -638,6 +638,10 @@ const scheduleFollowUp=async(organizationId:string,id:string,followUpDate:string
   await LeadEntitlementService.assertLeadAccessible(organizationId,id)
   return LeadLifecycleService.scheduleFollowUp(organizationId,id,followUpDate,{actorId,access,reason,title,priority})
 }
+const completeFollowUp=async(organizationId:string,id:string,input:{outcome:'called'|'meeting_done'|'no_answer'|'customer_busy'|'not_interested'|'payment_discussion'|'other';note?:string;nextFollowUpDate?:string|Date},actorId?:string,access?:CrmAccessContext)=>{
+  await LeadEntitlementService.assertLeadAccessible(organizationId,id)
+  return LeadLifecycleService.completeFollowUp(organizationId,id,input,{actorId,access})
+}
 const recordFirstResponse=async(organizationId:string,id:string,actorId?:string,access?:CrmAccessContext)=>{
   await LeadEntitlementService.assertLeadAccessible(organizationId,id)
   return LeadLifecycleService.recordContact(organizationId,id,{actorId,access,channel:'manual'})
@@ -752,4 +756,4 @@ const exportCsv = async (organizationId: string, filters: ILeadFilter, access?: 
 const exportXlsx = async (organizationId: string, filters: ILeadFilter, access?: CrmAccessContext) =>
   buildCrmXlsx('Leads', LEAD_EXPORT_COLUMNS, await getLeadExportRows(organizationId, filters, access))
 
-export const LeadService={createLead,createLeadWithOutcome,getAllLeads,getTodayFollowUps,getLeadById,updateLead,manageLead,updateLeadStatus,assignAgent,scheduleFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}
+export const LeadService={createLead,createLeadWithOutcome,getAllLeads,getTodayFollowUps,getLeadById,updateLead,manageLead,updateLeadStatus,assignAgent,scheduleFollowUp,completeFollowUp,recordFirstResponse,reengage,deleteLead,exportCsv,exportXlsx}

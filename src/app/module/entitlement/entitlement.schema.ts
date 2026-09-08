@@ -18,4 +18,7 @@ export const entitlementConfigSchema = new Schema({
   leadAutomations: { type: entitlementValueSchema, default: undefined },
   premiumTemplates: { type: entitlementValueSchema, default: undefined },
   advancedAccounting: { type: entitlementValueSchema, default: undefined },
+  customerFinance: { type: entitlementValueSchema, default: undefined },
+  materialsInventory: { type: entitlementValueSchema, default: undefined },
+  supplierManagement: { type: entitlementValueSchema, default: undefined },
 }, { _id: false })

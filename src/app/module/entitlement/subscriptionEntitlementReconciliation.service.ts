@@ -29,6 +29,9 @@ export interface SubscriptionEntitlementInput {
   hasPremiumTemplates?: boolean
   hasLeadAutomations?: boolean
   hasAdvancedAccounting?: boolean
+  hasCustomerFinance?: boolean
+  hasMaterialsInventory?: boolean
+  hasSupplierManagement?: boolean
   /** Internal marker: the input already contains tenant-specific override effects. */
   tenantOverrideApplied?: boolean
 }
@@ -78,6 +81,9 @@ const resolveCatalogPolicy = async (input: SubscriptionEntitlementInput | null |
       hasPremiumTemplates: Boolean(policy.hasPremiumTemplates),
       hasLeadAutomations: Boolean(policy.hasLeadAutomations),
       hasAdvancedAccounting: Boolean(policy.hasAdvancedAccounting),
+      hasCustomerFinance: Boolean(policy.hasCustomerFinance),
+      hasMaterialsInventory: Boolean(policy.hasMaterialsInventory),
+      hasSupplierManagement: Boolean(policy.hasSupplierManagement),
     }
   }
 
@@ -115,6 +121,9 @@ export const resolveSubscriptionEntitlementSnapshot = async (
     hasPremiumTemplates: booleanOrUndefined(input?.hasPremiumTemplates) ?? booleanOrUndefined(catalog?.hasPremiumTemplates) ?? fallback?.hasPremiumTemplates ?? false,
     hasLeadAutomations: booleanOrUndefined(input?.hasLeadAutomations) ?? booleanOrUndefined(catalog?.hasLeadAutomations) ?? fallback?.hasLeadAutomations ?? false,
     hasAdvancedAccounting: booleanOrUndefined(input?.hasAdvancedAccounting) ?? booleanOrUndefined(catalog?.hasAdvancedAccounting) ?? fallback?.hasAdvancedAccounting ?? ['agency', 'enterprise'].includes(plan.toLowerCase()),
+    hasCustomerFinance: booleanOrUndefined(input?.hasCustomerFinance) ?? booleanOrUndefined(catalog?.hasCustomerFinance) ?? fallback?.hasCustomerFinance ?? false,
+    hasMaterialsInventory: booleanOrUndefined(input?.hasMaterialsInventory) ?? booleanOrUndefined(catalog?.hasMaterialsInventory) ?? fallback?.hasMaterialsInventory ?? false,
+    hasSupplierManagement: booleanOrUndefined(input?.hasSupplierManagement) ?? booleanOrUndefined(catalog?.hasSupplierManagement) ?? fallback?.hasSupplierManagement ?? false,
   }
 }
 
@@ -130,6 +139,9 @@ const hasDowngrade = (previous: SubscriptionEntitlementSnapshot, current: Subscr
   || (previous.hasPremiumTemplates && !current.hasPremiumTemplates)
   || (previous.hasLeadAutomations && !current.hasLeadAutomations)
   || (previous.hasAdvancedAccounting && !current.hasAdvancedAccounting)
+  || (previous.hasCustomerFinance && !current.hasCustomerFinance)
+  || (previous.hasMaterialsInventory && !current.hasMaterialsInventory)
+  || (previous.hasSupplierManagement && !current.hasSupplierManagement)
 
 const hasUpgrade = (previous: SubscriptionEntitlementSnapshot, current: SubscriptionEntitlementSnapshot) =>
   current.maxTeamMembers > previous.maxTeamMembers
@@ -143,6 +155,9 @@ const hasUpgrade = (previous: SubscriptionEntitlementSnapshot, current: Subscrip
   || (!previous.hasPremiumTemplates && current.hasPremiumTemplates)
   || (!previous.hasLeadAutomations && current.hasLeadAutomations)
   || (!previous.hasAdvancedAccounting && current.hasAdvancedAccounting)
+  || (!previous.hasCustomerFinance && current.hasCustomerFinance)
+  || (!previous.hasMaterialsInventory && current.hasMaterialsInventory)
+  || (!previous.hasSupplierManagement && current.hasSupplierManagement)
 
 /**
  * Canonical orchestration point for every effective subscription entitlement change.
@@ -168,8 +183,9 @@ export const reconcileOrganizationEntitlements = async (
       hasAdvancedAnalytics: snapshot.hasAdvancedAnalytics, hasWhatsAppIntegration: snapshot.hasWhatsAppIntegration,
       hasSmsAutomation: snapshot.hasSmsAutomation, hasLeadAutomations: snapshot.hasLeadAutomations,
       hasPremiumTemplates: snapshot.hasPremiumTemplates, hasAdvancedAccounting: Boolean(snapshot.hasAdvancedAccounting),
+      hasCustomerFinance: Boolean(snapshot.hasCustomerFinance), hasMaterialsInventory: Boolean(snapshot.hasMaterialsInventory), hasSupplierManagement: Boolean(snapshot.hasSupplierManagement),
     }, tenantOverride)
-    return { ...snapshot, maxLeads: applied.maxLeads, maxProperties: applied.maxProperties, maxTeamMembers: applied.maxTeamMembers, maxStorageMb: applied.maxStorageMb, hasCustomDomain: applied.hasCustomDomain, hasAdvancedAnalytics: applied.hasAdvancedAnalytics, hasWhatsAppIntegration: applied.hasWhatsAppIntegration, hasSmsAutomation: applied.hasSmsAutomation, hasLeadAutomations: applied.hasLeadAutomations, hasPremiumTemplates: applied.hasPremiumTemplates, hasAdvancedAccounting: applied.hasAdvancedAccounting }
+    return { ...snapshot, maxLeads: applied.maxLeads, maxProperties: applied.maxProperties, maxTeamMembers: applied.maxTeamMembers, maxStorageMb: applied.maxStorageMb, hasCustomDomain: applied.hasCustomDomain, hasAdvancedAnalytics: applied.hasAdvancedAnalytics, hasWhatsAppIntegration: applied.hasWhatsAppIntegration, hasSmsAutomation: applied.hasSmsAutomation, hasLeadAutomations: applied.hasLeadAutomations, hasPremiumTemplates: applied.hasPremiumTemplates, hasAdvancedAccounting: applied.hasAdvancedAccounting, hasCustomerFinance: applied.hasCustomerFinance, hasMaterialsInventory: applied.hasMaterialsInventory, hasSupplierManagement: applied.hasSupplierManagement }
   }
   if (!newPlan.tenantOverrideApplied) current = applyOverride(current)
   if (!previousPlan?.tenantOverrideApplied) previous = applyOverride(previous)

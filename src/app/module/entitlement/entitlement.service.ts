@@ -62,6 +62,9 @@ const trialLimits = async () => {
     hasPremiumTemplates: policy.hasPremiumTemplates,
     hasLeadAutomations: policy.hasLeadAutomations,
     hasAdvancedAccounting: policy.hasAdvancedAccounting,
+    hasCustomerFinance: policy.hasCustomerFinance,
+    hasMaterialsInventory: policy.hasMaterialsInventory,
+    hasSupplierManagement: policy.hasSupplierManagement,
   }
 }
 
@@ -80,6 +83,9 @@ export const trialEntitlements = {
   hasPremiumTemplates: DEFAULT_TRIAL_POLICY.hasPremiumTemplates,
   hasLeadAutomations: DEFAULT_TRIAL_POLICY.hasLeadAutomations,
   hasAdvancedAccounting: DEFAULT_TRIAL_POLICY.hasAdvancedAccounting,
+  hasCustomerFinance: DEFAULT_TRIAL_POLICY.hasCustomerFinance,
+  hasMaterialsInventory: DEFAULT_TRIAL_POLICY.hasMaterialsInventory,
+  hasSupplierManagement: DEFAULT_TRIAL_POLICY.hasSupplierManagement,
 }
 
 type ResolveOptions = { allowInactive?: boolean; allowUnavailable?: boolean }
@@ -192,6 +198,9 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     hasLeadAutomations: Boolean(plan?.hasLeadAutomations ?? baseTrial.hasLeadAutomations),
     hasPremiumTemplates: Boolean(plan?.hasPremiumTemplates ?? baseTrial.hasPremiumTemplates),
     hasAdvancedAccounting: Boolean(plan?.hasAdvancedAccounting ?? baseTrial.hasAdvancedAccounting),
+    hasCustomerFinance: Boolean(plan?.hasCustomerFinance ?? baseTrial.hasCustomerFinance),
+    hasMaterialsInventory: Boolean(plan?.hasMaterialsInventory ?? baseTrial.hasMaterialsInventory),
+    hasSupplierManagement: Boolean(plan?.hasSupplierManagement ?? baseTrial.hasSupplierManagement),
   }, activeTenantOverride)
   const effectiveEntitlements = {
     ...(baseTrial.entitlements || {}),
@@ -208,6 +217,9 @@ const resolve = async (organizationId: string, session?: ClientSession, options:
     leadAutomations: { enabled: overridden.hasLeadAutomations },
     premiumTemplates: { enabled: overridden.hasPremiumTemplates },
     advancedAccounting: { enabled: overridden.hasAdvancedAccounting },
+    customerFinance: { enabled: overridden.hasCustomerFinance },
+    materialsInventory: { enabled: overridden.hasMaterialsInventory },
+    supplierManagement: { enabled: overridden.hasSupplierManagement },
   }
   return {
     organization,

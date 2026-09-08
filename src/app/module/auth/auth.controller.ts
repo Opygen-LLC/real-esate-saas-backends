@@ -103,6 +103,9 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
     ? null
     : await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
   const advancedAccountingEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.advancedAccounting?.enabled)
+  const customerFinanceEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.customerFinance?.enabled)
+  const materialsInventoryEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.materialsInventory?.enabled)
+  const supplierManagementEntitled = Boolean(resolvedEntitlements?.limits?.entitlements?.supplierManagement?.enabled)
   const [accountingSettings, accountingInitialization]: any[] = organizationId && req.user?.userRole !== 'super-admin'
     ? await Promise.all([
       FinanceAccountingSettings.findOne({ organizationId }).select('initializedAt activationStatus accountingStartDate makerCheckerRequired').lean(),
@@ -138,6 +141,9 @@ const getSession = catchAsync(async (req: Request, res: Response) => {
       user: { ...req.user, permissions: req.tenant?.permissions || (req.user as any)?.permissions || [] },
       entitlements: {
         ADVANCED_ACCOUNTING: advancedAccountingEntitled,
+        CUSTOMER_FINANCE: customerFinanceEntitled,
+        MATERIALS_INVENTORY: materialsInventoryEntitled,
+        SUPPLIER_MANAGEMENT: supplierManagementEntitled,
       },
       accountingAccess,
       session: await AuthServices.getCurrentSessionSummary(

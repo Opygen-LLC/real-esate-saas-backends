@@ -44,6 +44,9 @@ const snapshotInput = (resolved: any): SubscriptionEntitlementInput => ({
   hasPremiumTemplates: Boolean(resolved.limits.hasPremiumTemplates),
   hasLeadAutomations: Boolean(resolved.limits.hasLeadAutomations),
   hasAdvancedAccounting: Boolean(resolved.limits.hasAdvancedAccounting),
+  hasCustomerFinance: Boolean(resolved.limits.hasCustomerFinance),
+  hasMaterialsInventory: Boolean(resolved.limits.hasMaterialsInventory),
+  hasSupplierManagement: Boolean(resolved.limits.hasSupplierManagement),
   tenantOverrideApplied: true,
 })
 
@@ -200,6 +203,9 @@ const applyDueExpirations = async (limit = 50, now = new Date()) => {
           hasLeadAutomations: Boolean(baseAfterExpiry.limits.hasLeadAutomations),
           hasPremiumTemplates: Boolean(baseAfterExpiry.limits.hasPremiumTemplates),
           hasAdvancedAccounting: Boolean(baseAfterExpiry.limits.hasAdvancedAccounting),
+          hasCustomerFinance: Boolean(baseAfterExpiry.limits.hasCustomerFinance),
+          hasMaterialsInventory: Boolean(baseAfterExpiry.limits.hasMaterialsInventory),
+          hasSupplierManagement: Boolean(baseAfterExpiry.limits.hasSupplierManagement),
         }, dueRow as ITenantEntitlementOverride)
         const before = {
           ...baseAfterExpiry,

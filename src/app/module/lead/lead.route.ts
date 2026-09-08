@@ -26,6 +26,7 @@ router.patch('/:id/manage',authMiddlewares.requirePermission('leads.write'),vali
 router.patch('/:id/status',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.updateLeadStatusZodSchema),LeadController.updateLeadStatus)
 router.patch('/:id/assign',authMiddlewares.requirePermission('leads.assign'),validateRequest(LeadValidation.assignLeadAgentZodSchema),LeadController.assignAgent)
 router.patch('/:id/follow-up',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.scheduleLeadFollowUpZodSchema),LeadController.scheduleFollowUp)
+router.post('/:id/follow-up/complete',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.completeLeadFollowUpZodSchema),LeadController.completeFollowUp)
 router.post('/:id/reengage',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.reengageLeadZodSchema),LeadController.reengageLead)
 router.post('/:id/response',authMiddlewares.requirePermission('leads.write'),LeadController.recordResponse)
 router.delete('/:id',authMiddlewares.requirePermission('leads.write'),LeadController.deleteLead)

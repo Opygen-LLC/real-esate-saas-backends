@@ -95,6 +95,13 @@ const scheduleFollowUp = catchAsync(async (req, res) => sendResponse(res, {
   data: await LeadService.scheduleFollowUp(requireTenant(req), req.params.id, req.body.followUpDate, actor(req), crmAccessFromRequest(req), req.body.reason, req.body.title, req.body.priority),
 }))
 
+const completeFollowUp = catchAsync(async (req, res) => sendResponse(res, {
+  statusCode: 200,
+  success: true,
+  message: 'Lead follow-up completed successfully',
+  data: await LeadService.completeFollowUp(requireTenant(req), req.params.id, req.body, actor(req), crmAccessFromRequest(req)),
+}))
+
 const reengageLead = catchAsync(async (req, res) => sendResponse(res, {
   statusCode: 200,
   success: true,
@@ -222,6 +229,7 @@ export const LeadController = {
   updateLeadStatus,
   assignAgent,
   scheduleFollowUp,
+  completeFollowUp,
   reengageLead,
   recordResponse,
   deleteLead,

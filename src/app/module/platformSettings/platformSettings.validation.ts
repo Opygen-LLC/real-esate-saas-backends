@@ -20,6 +20,9 @@ const trialEntitlementsInput = z.object({
   leadAutomations: booleanEntitlementInput.optional(),
   premiumTemplates: booleanEntitlementInput.optional(),
   advancedAccounting: booleanEntitlementInput.optional(),
+  customerFinance: booleanEntitlementInput.optional(),
+  materialsInventory: booleanEntitlementInput.optional(),
+  supplierManagement: booleanEntitlementInput.optional(),
 }).strict().optional()
 const trialPolicyInput = z.object({
   enabled: z.boolean(),
@@ -43,6 +46,9 @@ const trialPolicyInput = z.object({
   hasSmsAutomation: z.boolean(),
   hasLeadAutomations: z.boolean(),
   hasAdvancedAccounting: z.boolean().optional().default(false),
+  hasCustomerFinance: z.boolean().optional().default(false),
+  hasMaterialsInventory: z.boolean().optional().default(false),
+  hasSupplierManagement: z.boolean().optional().default(false),
 }).superRefine((value, ctx) => {
   if (value.maxTeamMembers === undefined && value.maxAgents === undefined) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['maxTeamMembers'], message: 'Team member limit is required' })

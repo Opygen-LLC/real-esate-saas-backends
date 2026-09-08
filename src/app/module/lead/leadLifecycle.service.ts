@@ -645,6 +645,93 @@ const scheduleFollowUpInTransaction = async (
   return { ...result, effects }
 }
 
+export const LEAD_FOLLOW_UP_OUTCOMES = ['called', 'meeting_done', 'no_answer', 'customer_busy', 'not_interested', 'payment_discussion', 'other'] as const
+export type LeadFollowUpOutcome = (typeof LEAD_FOLLOW_UP_OUTCOMES)[number]
+
+const completeFollowUpMutation = async (
+  organizationId: string,
+  leadId: string,
+  options: {
+    actorId?: string
+    outcome: LeadFollowUpOutcome
+    note?: string
+    nextFollowUpDate?: Date
+    access?: CrmAccessContext
+  },
+  session: ClientSession | undefined,
+  effects: LifecycleEffects,
+) => {
+  const lead: any = await loadMutableLead(organizationId, leadId, options.access, session)
+  if (lead.isConverted) throw new ApiError(409, 'Converted Leads are archived. Continue follow-up from the Contact instead.')
+
+  const completedAt = new Date()
+  const completedTaskIds = await TaskService.completeActiveLeadFollowUps(organizationId, leadId, completedAt, session)
+  const previousFollowUpDate = lead.followUpDate ? new Date(lead.followUpDate) : null
+
+  lead.followUpDate = undefined
+  lead.nextFollowUp = undefined
+  if (options.actorId) lead.updatedBy = options.actorId
+  await lead.save(session ? { session } : undefined)
+  effects.cancelTaskReminderIds.push(...completedTaskIds)
+
+  await emitLifecycleEvent({
+    organizationId,
+    aggregateType: 'lead',
+    aggregateId: leadId,
+    eventType: 'lead.follow_up_completed',
+    leadId,
+    actorId: options.actorId,
+    payload: {
+      summary: options.note?.trim()
+        ? `Follow-up completed: ${options.outcome.replace(/_/g, ' ')} · ${options.note.trim()}`
+        : `Follow-up completed: ${options.outcome.replace(/_/g, ' ')}`,
+      outcome: options.outcome,
+      note: options.note?.trim() || '',
+      completedAt: completedAt.toISOString(),
+      previousFollowUpDate: previousFollowUpDate?.toISOString() || '',
+      completedTaskIds,
+    },
+  }, session, effects)
+
+  let nextFollowUp: { lead: any; task: any } | null = null
+  if (options.nextFollowUpDate) {
+    if (options.nextFollowUpDate.getTime() <= completedAt.getTime()) throw new ApiError(400, 'Next follow-up must be in the future')
+    nextFollowUp = await scheduleFollowUpMutation(
+      organizationId,
+      leadId,
+      options.nextFollowUpDate,
+      {
+        actorId: options.actorId,
+        access: options.access,
+        reason: `Scheduled after ${options.outcome.replace(/_/g, ' ')} follow-up`,
+      },
+      session,
+      effects,
+    )
+  }
+
+  return { lead: nextFollowUp?.lead || lead, completedTaskIds, nextFollowUp }
+}
+
+const completeFollowUp = async (
+  organizationId: string,
+  leadId: string,
+  input: { outcome: LeadFollowUpOutcome; note?: string; nextFollowUpDate?: string | Date },
+  options: { actorId?: string; access?: CrmAccessContext } = {},
+) => {
+  const nextFollowUpDate = input.nextFollowUpDate
+    ? input.nextFollowUpDate instanceof Date ? input.nextFollowUpDate : new Date(input.nextFollowUpDate)
+    : undefined
+  if (nextFollowUpDate && Number.isNaN(nextFollowUpDate.getTime())) throw new ApiError(400, 'Invalid next follow-up date')
+  return runLifecycleMutation(organizationId, (session, effects) => completeFollowUpMutation(
+    organizationId,
+    leadId,
+    { ...options, outcome: input.outcome, note: input.note, nextFollowUpDate },
+    session,
+    effects,
+  ))
+}
+
 const recordContact = async (
   organizationId: string,
   leadId: string,
@@ -712,6 +799,7 @@ export const LeadLifecycleService = {
   assignLeadInTransaction,
   scheduleFollowUp,
   scheduleFollowUpInTransaction,
+  completeFollowUp,
   recordContact,
   convertToContact,
   convertToContactInTransaction,

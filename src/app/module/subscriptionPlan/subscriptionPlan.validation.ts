@@ -31,6 +31,9 @@ const planEntitlementsInput = z.object({
   leadAutomations: planBooleanEntitlementInput.optional(),
   premiumTemplates: planBooleanEntitlementInput.optional(),
   advancedAccounting: planBooleanEntitlementInput.optional(),
+  customerFinance: planBooleanEntitlementInput.optional(),
+  materialsInventory: planBooleanEntitlementInput.optional(),
+  supplierManagement: planBooleanEntitlementInput.optional(),
 }).strict()
 
 // These fields remain readable on historical immutable plan versions, but they
@@ -84,6 +87,9 @@ const commercialCreateShape = {
   hasSmsAutomation: z.boolean().default(false),
   hasPremiumTemplates: z.boolean().default(false),
   hasAdvancedAccounting: z.boolean().optional(),
+  hasCustomerFinance: z.boolean().optional(),
+  hasMaterialsInventory: z.boolean().optional(),
+  hasSupplierManagement: z.boolean().optional(),
   maxStorageMb: nonNegativeInteger.default(1024),
   maxMonthlyVisitors: nonNegativeInteger.default(10000),
   isPopular: z.boolean().default(false),
@@ -129,6 +135,9 @@ const updateBody = z.object({
   hasSmsAutomation: z.boolean().optional(),
   hasPremiumTemplates: z.boolean().optional(),
   hasAdvancedAccounting: z.boolean().optional(),
+  hasCustomerFinance: z.boolean().optional(),
+  hasMaterialsInventory: z.boolean().optional(),
+  hasSupplierManagement: z.boolean().optional(),
   maxStorageMb: nonNegativeInteger.optional(),
   maxMonthlyVisitors: nonNegativeInteger.optional(),
   isPopular: z.boolean().optional(),

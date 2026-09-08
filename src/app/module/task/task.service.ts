@@ -398,6 +398,9 @@ const updateTask = async (
 
   const previousStatus = task.status
   const prepared: any = normalizeDueFields(payload, task)
+  if (task.taskType === TASK_TYPE.LEAD_FOLLOW_UP && ['Completed', 'Cancelled'].includes(String(prepared.status || '')) && prepared.status !== task.status) {
+    throw new ApiError(400, 'Lead follow-ups must be completed or cancelled through the Lead follow-up lifecycle endpoint')
+  }
   if (access && !canManageTeamCrm(access) && prepared.assignedAgent !== undefined && String(prepared.assignedAgent) !== access.userId) {
     throw new ApiError(403, 'Team members cannot reassign tasks to another member')
   }
@@ -518,6 +521,31 @@ const cancelActiveLeadFollowUps = async (
   return ids.map(String)
 }
 
+const completeActiveLeadFollowUps = async (
+  organizationId: string,
+  leadId: string,
+  completedAt: Date,
+  session?: ClientSession,
+): Promise<string[]> => {
+  const filter = {
+    organizationId,
+    linkedLead: leadId,
+    taskType: TASK_TYPE.LEAD_FOLLOW_UP,
+    status: { $in: ['Pending', 'InProgress', 'Overdue'] },
+  }
+  let query = Task.find(filter).select('_id')
+  if (session) query = query.session(session)
+  const tasks: any[] = await query.lean()
+  if (!tasks.length) return []
+  const ids = tasks.map((task) => task._id)
+  await Task.updateMany(
+    { _id: { $in: ids }, organizationId },
+    { $set: { status: 'Completed', completedAt }, $unset: { activeLeadFollowUpKey: 1 } },
+    session ? { session } : undefined,
+  )
+  return ids.map(String)
+}
+
 const reassignActiveLeadFollowUp = async (
   organizationId: string,
   leadId: string,
@@ -573,4 +601,4 @@ const approveTask = async (organizationId: string, id: string, userId: string, a
   return result
 }
 
-export const TaskService = { createTask, getAllTasks, getTaskSummary, updateTask, syncLeadFollowUpTask, cancelActiveLeadFollowUps, reassignActiveLeadFollowUp, refreshTaskReminders, cancelTaskReminders, deleteTask, approveTask }
+export const TaskService = { createTask, getAllTasks, getTaskSummary, updateTask, syncLeadFollowUpTask, cancelActiveLeadFollowUps, completeActiveLeadFollowUps, reassignActiveLeadFollowUp, refreshTaskReminders, cancelTaskReminders, deleteTask, approveTask }

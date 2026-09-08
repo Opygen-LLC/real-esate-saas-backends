@@ -11,6 +11,9 @@ export const ENTITLEMENT_FEATURE_IDS = [
   'leadAutomations',
   'premiumTemplates',
   'advancedAccounting',
+  'customerFinance',
+  'materialsInventory',
+  'supplierManagement',
 ] as const
 
 export type EntitlementFeatureId = (typeof ENTITLEMENT_FEATURE_IDS)[number]
@@ -18,6 +21,16 @@ export type EntitlementFeatureKind = 'integer_limit' | 'storage_limit' | 'usage_
 
 export const ENTITLEMENT_CAPABILITIES = {
   ADVANCED_ACCOUNTING: 'advancedAccounting',
+  CUSTOMER_FINANCE: 'customerFinance',
+  MATERIALS_INVENTORY: 'materialsInventory',
+  SUPPLIER_MANAGEMENT: 'supplierManagement',
+} as const
+
+export const ENTITLEMENT_PUBLIC_KEYS = {
+  ADVANCED_ACCOUNTING: 'advanced_accounting',
+  CUSTOMER_FINANCE: 'customer_finance',
+  MATERIALS_INVENTORY: 'materials_inventory',
+  SUPPLIER_MANAGEMENT: 'supplier_management',
 } as const
 
 export type EntitlementCapability = keyof typeof ENTITLEMENT_CAPABILITIES
@@ -42,4 +55,7 @@ export interface LegacyEntitlementFields {
   hasLeadAutomations: boolean
   hasPremiumTemplates: boolean
   hasAdvancedAccounting: boolean
+  hasCustomerFinance: boolean
+  hasMaterialsInventory: boolean
+  hasSupplierManagement: boolean
 }

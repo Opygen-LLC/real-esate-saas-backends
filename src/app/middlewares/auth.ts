@@ -13,7 +13,7 @@ import { enforceSubscriptionAccess } from './subscriptionAccess'
 import { TenantPurgeBarrier } from '../module/compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../module/tenantAccess/tenantAccess.service'
 import { EntitlementService } from '../module/entitlement/entitlement.service'
-import { ENTITLEMENT_CAPABILITIES, type EntitlementCapability } from '../module/entitlement/entitlement.types'
+import { ENTITLEMENT_CAPABILITIES, ENTITLEMENT_PUBLIC_KEYS, type EntitlementCapability } from '../module/entitlement/entitlement.types'
 import { FinanceAccountingSettings } from '../module/finance/financeAccountingSettings.model'
 import { FinanceAccountingInitialization } from '../module/finance/financeInitialization.model'
 import { FINANCE_ERROR_CODES } from '../module/finance/finance.contract'
@@ -86,12 +86,16 @@ const requireEntitlement = (capability: EntitlementCapability) => async (req: Re
     const resolved = await EntitlementService.resolve(organizationId, undefined, { allowInactive: true })
     const enabled = Boolean(resolved.limits?.entitlements?.[featureId]?.enabled)
     if (!enabled) {
-      throw new ApiError(403, `${capability.replace(/_/g, ' ').toLowerCase()} is not enabled for this organization`, '', FINANCE_ERROR_CODES.entitlementRequired, {
+      const isAdvancedAccounting = capability === 'ADVANCED_ACCOUNTING'
+      throw new ApiError(403, `${capability.replace(/_/g, ' ').toLowerCase()} is not enabled for this organization`, '', isAdvancedAccounting ? FINANCE_ERROR_CODES.entitlementRequired : 'FEATURE_NOT_INCLUDED', {
         entitlement: capability,
+        feature: ENTITLEMENT_PUBLIC_KEYS[capability],
         currentPlan: resolved.organization?.subscription?.plan,
         upgradeRequired: true,
       })
     }
+    await enforceSubscriptionAccess(req)
+    await TenantPurgeBarrier.assertRequestWritable(req.method, req.tenant?.organizationId)
     next()
   } catch (error) { next(error) }
 }

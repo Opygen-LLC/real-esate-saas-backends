@@ -3,7 +3,7 @@ import ApiError from '../../../errors/ApiError'
 import { IGenericResponse, IPaginationOptions } from '../../../interfaces/common'
 import paginationHelper from '../../helpers/paginationHelper'
 import { createQueryProfile } from '../../helpers/queryPerformance'
-import { normalizeBangladeshPhone, normalizeEmail } from '../../helpers/identity'
+import { normalizeInternationalPhone, normalizeEmail } from '../../helpers/identity'
 import { ActivityExportService } from '../activity/activityExport.service'
 import { User } from '../user/user.model'
 import { canManageTeamCrm, crmMutationOwnerFilter, crmReadOwnerFilter, type CrmAccessContext } from '../crm/crmAccess'
@@ -22,7 +22,7 @@ import {
 } from './contactRelationship.contract'
 
 const normalizePhone = (value: string): string => {
-  try { return normalizeBangladeshPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
+  try { return normalizeInternationalPhone(value) } catch (error) { throw new ApiError(400, (error as Error).message) }
 }
 
 const normalizeOptionalEmail = (value?: string): string => value?.trim() ? normalizeEmail(value) : ''
