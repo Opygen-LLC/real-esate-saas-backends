@@ -9,6 +9,9 @@ export type MaterialRequirementStatus = typeof MATERIAL_REQUIREMENT_STATUSES[num
 export const STOCK_MOVEMENT_TYPES = ['PURCHASE', 'USAGE', 'ADJUSTMENT', 'RETURN'] as const
 export type StockMovementType = typeof STOCK_MOVEMENT_TYPES[number]
 
+export const STOCK_MOVEMENT_SOURCE_TYPES = ['MANUAL', 'MATERIAL_PURCHASE_RECEIPT'] as const
+export type StockMovementSourceType = typeof STOCK_MOVEMENT_SOURCE_TYPES[number]
+
 export interface IMaterial {
   organizationId: string
   name: string
@@ -55,6 +58,8 @@ export interface IStockMovement {
   occurredAt: Date
   notes?: string
   idempotencyKey?: string
+  sourceType?: StockMovementSourceType
+  sourceId?: mongoose.Types.ObjectId | string
   createdBy: mongoose.Types.ObjectId | string
   createdAt?: Date
   updatedAt?: Date

@@ -25,8 +25,9 @@ const transactionSchema = new Schema<IFinanceTransaction>(
     leadId: { type: Schema.Types.ObjectId, ref: 'Lead', index: true },
     receiptUrl: { type: String, trim: true, maxlength: 2000, default: '' },
     recurring: { type: Boolean, default: false },
-    sourceType: { type: String, enum: ['manual', 'invoice_payment', 'commission_payout', 'property_investment_contribution', 'property_investor_distribution'], default: 'manual', index: true },
+    sourceType: { type: String, enum: ['manual', 'invoice_payment', 'commission_payout', 'property_investment_contribution', 'property_investor_distribution', 'material_purchase_payment'], default: 'manual', index: true },
     sourceId: { type: Schema.Types.ObjectId, index: true },
+    idempotencyKey: { type: String, trim: true, maxlength: 120 },
     affectsProfit: { type: Boolean, default: true, index: true },
     accountingVersion: { type: Number, default: 0, min: 0 },
     accountingJournalId: { type: Schema.Types.ObjectId, ref: 'FinanceJournalEntry', default: null, index: true },
@@ -44,6 +45,7 @@ const transactionSchema = new Schema<IFinanceTransaction>(
 transactionSchema.index({ organizationId: 1, transactionDate: -1, type: 1, status: 1 })
 transactionSchema.index({ organizationId: 1, category: 1, transactionDate: -1 })
 transactionSchema.index({ organizationId: 1, sourceType: 1, sourceId: 1 })
+transactionSchema.index({ organizationId: 1, sourceType: 1, idempotencyKey: 1 }, { unique: true, sparse: true, name: 'finance_transaction_tenant_source_idempotency_unique' })
 transactionSchema.index({ organizationId: 1, deletedAt: 1, createdAt: -1 })
 transactionSchema.index({ organizationId: 1, deletedAt: 1, createdAt: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_created_cursor' })
 transactionSchema.index({ organizationId: 1, deletedAt: 1, transactionDate: -1, _id: -1 }, { name: 'finance_transaction_tenant_deleted_date_cursor' })
@@ -190,6 +192,9 @@ const vendorSchema = new Schema<IFinanceVendor>(
     address: { type: String, trim: true, maxlength: 1000, default: '' },
     taxId: { type: String, trim: true, maxlength: 100, default: '' },
     notes: { type: String, trim: true, maxlength: 2000, default: '' },
+    isSupplier: { type: Boolean, default: false, index: true },
+    contactPerson: { type: String, trim: true, maxlength: 160, default: '' },
+    materialsSupplied: [{ type: Schema.Types.ObjectId, ref: 'Material' }],
     status: { type: String, enum: ['active', 'inactive'], default: 'active', index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
@@ -198,6 +203,8 @@ const vendorSchema = new Schema<IFinanceVendor>(
 )
 vendorSchema.index({ organizationId: 1, name: 1 })
 vendorSchema.index({ organizationId: 1, status: 1, category: 1 })
+vendorSchema.index({ organizationId: 1, isSupplier: 1, status: 1, name: 1 }, { name: 'finance_vendor_tenant_supplier_status_name' })
+vendorSchema.index({ organizationId: 1, isSupplier: 1, materialsSupplied: 1 }, { name: 'finance_vendor_tenant_supplier_material' })
 
 const budgetSchema = new Schema<IFinanceBudget>(
   {

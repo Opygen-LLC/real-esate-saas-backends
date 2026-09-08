@@ -32,6 +32,7 @@ import { TeamInvitationRoute } from '../module/teamInvitation/teamInvitation.rou
 import { FinanceRoute } from '../module/finance/finance.route'
 import { CustomerFinanceRoute } from '../module/customerFinance/customerFinance.route'
 import { MaterialInventoryRoute } from '../module/materialInventory/materialInventory.route'
+import { SupplierManagementRoute } from '../module/supplierManagement/supplierManagement.route'
 import { UploadRoute } from '../module/upload/upload.route'
 import { ReviewRoute } from '../module/review/review.route'
 import { WebsiteSubmissionRoute } from '../module/websiteSubmission/websiteSubmission.route'
@@ -53,6 +54,7 @@ const moduleRoutes = [
   { path: '/finance', route: FinanceRoute },
   { path: '/customers', route: CustomerFinanceRoute },
   { path: '/materials', route: MaterialInventoryRoute },
+  { path: '/suppliers', route: SupplierManagementRoute },
 
   { path: '/team-invitations', route: TeamInvitationRoute },
   { path: '/observability', route: ObservabilityRoute },

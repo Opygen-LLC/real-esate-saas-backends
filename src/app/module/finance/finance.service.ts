@@ -167,6 +167,113 @@ const createTransaction = async (organizationId: string, actorId: string, payloa
   return result
 }
 
+
+export interface LinkedExpenseTransactionInput {
+  sourceType: 'material_purchase_payment'
+  sourceId: string
+  amountMinor: number
+  transactionDate: Date
+  paymentMethod: IFinanceTransaction['paymentMethod']
+  bankAccountId?: string
+  category: string
+  description: string
+  reference?: string
+  vendorId: string
+  propertyId?: string
+  idempotencyKey?: string
+}
+
+/**
+ * Creates a source-owned expense in an existing transaction. The source module
+ * keeps its own concurrency invariant (for example, preventing purchase
+ * overpayment) while Finance remains the ledger and optional-GL source of truth.
+ */
+const createLinkedExpenseTransactionInSession = async (
+  organizationId: string,
+  actorId: string,
+  input: LinkedExpenseTransactionInput,
+  session: ClientSession,
+) => {
+  if (!mongoose.isValidObjectId(input.sourceId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid linked finance source')
+  if (!mongoose.isValidObjectId(input.vendorId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid vendor id')
+  if (input.propertyId && !mongoose.isValidObjectId(input.propertyId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid property id')
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) throw new ApiError(httpStatus.BAD_REQUEST, 'Payment amount is invalid')
+
+  const accountingReady = await FinanceGlIntegrationService.isAutomaticPostingReady(organizationId, session)
+  if (input.bankAccountId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Finance bank accounts require Advanced Accounting')
+  const bankAccountId = accountingReady ? await resolveFinanceBankAccountId(organizationId, input.bankAccountId, session) : undefined
+  const rows = await FinanceTransaction.create([{
+    organizationId,
+    type: 'expense',
+    category: input.category,
+    amount: moneyFromMinorUnits(input.amountMinor),
+    currency: 'BDT',
+    transactionDate: input.transactionDate,
+    paymentMethod: input.paymentMethod,
+    bankAccountId,
+    status: 'paid',
+    description: input.description,
+    reference: input.reference || '',
+    vendorId: new mongoose.Types.ObjectId(input.vendorId),
+    ...(input.propertyId ? { propertyId: new mongoose.Types.ObjectId(input.propertyId) } : {}),
+    sourceType: input.sourceType,
+    sourceId: new mongoose.Types.ObjectId(input.sourceId),
+    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+    affectsProfit: true,
+    createdBy: actorObjectId(actorId),
+  }], { session })
+  const transaction: any = rows[0]
+  if (accountingReady) {
+    const journal: any = await FinanceGlIntegrationService.postManualTransaction(organizationId, financeAccountingActor(actorId), transaction, 1, session)
+    if (journal?._id) {
+      transaction.accountingVersion = 1
+      transaction.accountingJournalId = journal._id
+      await transaction.save({ session })
+    }
+  }
+  return transaction
+}
+
+const voidLinkedExpenseTransactionInSession = async (
+  organizationId: string,
+  actorId: string,
+  transactionId: string,
+  expectedSourceType: 'material_purchase_payment',
+  expectedSourceId: string,
+  reason: string,
+  session: ClientSession,
+) => {
+  if (!mongoose.isValidObjectId(transactionId) || !mongoose.isValidObjectId(expectedSourceId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid payment reference')
+  const transaction: any = await FinanceTransaction.findOne({
+    _id: transactionId,
+    organizationId,
+    deletedAt: null,
+    sourceType: expectedSourceType,
+    sourceId: expectedSourceId,
+  }).session(session)
+  if (!transaction) throw new ApiError(httpStatus.NOT_FOUND, 'Supplier payment not found')
+  if (transaction.status === 'voided') return transaction
+  if (transaction.status !== 'paid') throw new ApiError(httpStatus.CONFLICT, 'Only a posted supplier payment can be voided')
+  if (transaction.accountingJournalId) {
+    await FinanceGlIntegrationService.reverseLinkedJournal(
+      organizationId,
+      financeAccountingActor(actorId),
+      transaction.accountingJournalId,
+      reason,
+      new Date(),
+      session,
+    )
+  }
+  transaction.status = 'voided'
+  transaction.voidedAt = new Date()
+  transaction.voidedBy = actorObjectId(actorId)
+  transaction.voidReason = reason.trim()
+  transaction.updatedBy = actorObjectId(actorId)
+  await transaction.save({ session })
+  await financeDestructiveAudit(organizationId, { id: actorId }, 'finance.linked_transaction.voided', 'financeTransaction', transactionId, reason, { sourceType: expectedSourceType, sourceId: expectedSourceId }, session)
+  return transaction
+}
+
 const listTransactions = async (organizationId: string, query: Record<string, unknown>, pagination: IPaginationOptions): Promise<IGenericResponse<any[]>> => {
   const profile = createQueryProfile('/api/v1/finance/transactions', organizationId)
   const requestedSortBy = String(pagination.sortBy || 'createdAt')
@@ -1375,7 +1482,7 @@ const exportTransactionsCsv = async (organizationId: string, query: Record<strin
 }
 
 export const FinanceService = {
-  createTransaction, listTransactions, updateTransaction, voidTransaction, deleteTransaction,
+  createTransaction, createLinkedExpenseTransactionInSession, voidLinkedExpenseTransactionInSession, listTransactions, updateTransaction, voidTransaction, deleteTransaction,
   createInvoice, createCustomerFinanceBookingInvoice, listInvoices, getInvoiceById, updateInvoice, voidInvoice, archiveDraftInvoice, recordInvoicePayment, renderInvoiceDocument,
   createCommission, listCommissions, updateCommission, cancelCommission, archiveCommission, payCommission,
   createVendor, listVendors, updateVendor, archiveVendor,

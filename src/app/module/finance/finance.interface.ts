@@ -4,7 +4,7 @@ import type { IFinanceIssuerSnapshot } from './financeBillingProfile.interface'
 export type FinanceTransactionType = 'income' | 'expense'
 export type FinanceTransactionStatus = 'pending' | 'paid' | 'cancelled' | 'voided'
 export type FinancePaymentMethod = 'cash' | 'bank' | 'bkash' | 'nagad' | 'card' | 'cheque' | 'other'
-export type FinanceTransactionSourceType = 'manual' | 'invoice_payment' | 'commission_payout' | 'property_investment_contribution' | 'property_investor_distribution'
+export type FinanceTransactionSourceType = 'manual' | 'invoice_payment' | 'commission_payout' | 'property_investment_contribution' | 'property_investor_distribution' | 'material_purchase_payment'
 
 export interface IFinanceTransaction {
   organizationId: string
@@ -25,6 +25,7 @@ export interface IFinanceTransaction {
   recurring?: boolean
   sourceType?: FinanceTransactionSourceType
   sourceId?: mongoose.Types.ObjectId | string
+  idempotencyKey?: string
   affectsProfit?: boolean
   accountingVersion?: number
   accountingJournalId?: mongoose.Types.ObjectId | string | null
@@ -145,6 +146,9 @@ export interface IFinanceVendor {
   address?: string
   taxId?: string
   notes?: string
+  isSupplier?: boolean
+  contactPerson?: string
+  materialsSupplied?: Array<mongoose.Types.ObjectId | string>
   status: 'active' | 'inactive'
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string

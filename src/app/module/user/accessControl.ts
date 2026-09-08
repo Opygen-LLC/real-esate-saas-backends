@@ -4,6 +4,7 @@ export const permissionValues = [
   'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
   'contacts.read', 'contacts.write',
   'materials.read', 'materials.write',
+  'suppliers.read', 'suppliers.write', 'suppliers.payments',
   'tasks.read', 'tasks.write',
   'viewings.read', 'viewings.write',
   'users.read', 'users.write', 'organization.manage',
@@ -33,6 +34,7 @@ export const permissionMatrix: Record<string, Permission[]> = {
     'leads.read', 'leads.write', 'leads.assign', 'crm.team.read', 'crm.team.manage',
     'contacts.read', 'contacts.write',
     'materials.read', 'materials.write',
+    'suppliers.read', 'suppliers.write', 'suppliers.payments',
     'tasks.read', 'tasks.write',
     'viewings.read', 'viewings.write',
     'users.read', 'users.write', 'organization.manage',
@@ -74,6 +76,8 @@ const permissionDependencies: Partial<Record<Permission, Permission[]>> = {
   'crm.team.manage': ['crm.team.read', 'leads.read', 'leads.write', 'leads.assign', 'contacts.read', 'contacts.write', 'tasks.read', 'tasks.write', 'viewings.read', 'viewings.write'],
   'contacts.write': ['contacts.read'],
   'materials.write': ['materials.read'],
+  'suppliers.write': ['suppliers.read'],
+  'suppliers.payments': ['suppliers.read'],
   'tasks.write': ['tasks.read'],
   'viewings.write': ['viewings.read'],
   'website.submissions.manage': ['website.submissions.read'],
@@ -185,6 +189,11 @@ export const permissionCatalog = [
   { group: 'Materials & inventory', items: [
     { permission: 'materials.read', label: 'View materials & inventory', description: 'View material catalog, requirements, stock balances, usage and purchase costs when the organization is entitled.' },
     { permission: 'materials.write', label: 'Manage materials & inventory', description: 'Create materials, requirements and stock movements. Stock mutations are ledgered and cannot make inventory negative.' },
+  ] },
+  { group: 'Suppliers & purchases', items: [
+    { permission: 'suppliers.read', label: 'View suppliers & purchases', description: 'View supplier profiles, purchase history, delivery status, prices and supplier balances when the organization is entitled.' },
+    { permission: 'suppliers.write', label: 'Manage suppliers & purchases', description: 'Create and update suppliers, material purchases, invoice attachments and received quantities.' },
+    { permission: 'suppliers.payments', label: 'Record supplier payments', description: 'Record or void supplier payments linked to material purchases and the finance ledger.' },
   ] },
   { group: 'Team & agency', items: [
     { permission: 'users.read', label: 'View team', description: 'View the agency roster.' },

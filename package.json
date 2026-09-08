@@ -225,7 +225,9 @@
     "migrate:customer-finance-phase2": "ts-node --transpile-only src/app/db/migrateCustomerFinancePhase2.ts",
     "verify:customer-finance-phase2": "node scripts/verify-customer-finance-phase2.mjs",
     "migrate:materials-inventory-phase3": "ts-node --transpile-only src/app/db/migrateMaterialsInventoryPhase3.ts",
-    "verify:materials-inventory-phase3": "node scripts/verify-materials-inventory-phase3.mjs"
+    "verify:materials-inventory-phase3": "node scripts/verify-materials-inventory-phase3.mjs",
+    "migrate:supplier-management-phase4": "ts-node --transpile-only src/app/db/migrateSupplierManagementPhase4.ts",
+    "verify:supplier-management-phase4": "node scripts/verify-supplier-management-phase4.mjs"
   },
   "keywords": [
     "real-estate",

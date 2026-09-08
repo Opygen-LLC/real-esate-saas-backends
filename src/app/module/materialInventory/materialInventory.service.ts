@@ -275,6 +275,58 @@ const createMovement = async (organizationId: string, materialId: string, actorI
   })
 }
 
+
+const recordPurchaseReceiptInSession = async (
+  organizationId: string,
+  materialId: string,
+  actorId: string,
+  payload: {
+    quantity: number
+    unitPriceMinor: number
+    propertyId?: string
+    flatId?: string
+    occurredAt: Date
+    notes?: string
+    sourceId: string
+  },
+  session: ClientSession,
+) => {
+  if (!mongoose.isValidObjectId(payload.sourceId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid purchase receipt source')
+  const material = await Material.findOne({ _id: materialObjectId(materialId), organizationId, active: true }).session(session)
+  if (!material) throw new ApiError(httpStatus.NOT_FOUND, 'Active material not found')
+  await ensureProperty(organizationId, payload.propertyId, session)
+  const absolute = roundQuantity(Math.abs(Number(payload.quantity)))
+  if (!Number.isFinite(absolute) || absolute <= 0) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid receipt quantity')
+  if (!Number.isSafeInteger(payload.unitPriceMinor) || payload.unitPriceMinor < 0) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid purchase unit price')
+  const totalCostMinor = Math.round(absolute * payload.unitPriceMinor)
+  if (!Number.isSafeInteger(totalCostMinor)) throw new ApiError(httpStatus.BAD_REQUEST, 'Purchase receipt total is too large')
+
+  const updatedMaterial = await Material.findOneAndUpdate(
+    { _id: material._id, organizationId, active: true },
+    { $inc: { stockQuantity: absolute }, $set: { updatedBy: actorObjectId(actorId) } },
+    { new: true, session },
+  )
+  if (!updatedMaterial) throw new ApiError(httpStatus.CONFLICT, 'Material inventory changed. Refresh and try again.')
+
+  const [movement] = await StockMovement.create([{
+    organizationId,
+    materialId: material._id,
+    ...(payload.propertyId ? { propertyId: payload.propertyId } : {}),
+    ...(payload.flatId ? { flatId: String(payload.flatId).trim() } : {}),
+    type: 'PURCHASE',
+    quantityDelta: absolute,
+    quantityAbsolute: absolute,
+    unitPriceMinor: payload.unitPriceMinor,
+    totalCostMinor,
+    occurredAt: payload.occurredAt,
+    ...(payload.notes ? { notes: String(payload.notes).trim() } : {}),
+    sourceType: 'MATERIAL_PURCHASE_RECEIPT',
+    sourceId: new mongoose.Types.ObjectId(payload.sourceId),
+    createdBy: actorObjectId(actorId),
+  }], { session })
+  return { movement, material: updatedMaterial }
+}
+
 const listMovements = async (organizationId: string, materialId: string, query: any, options: IPaginationOptions) => {
   const material = await Material.findOne({ _id: materialObjectId(materialId), organizationId }).select('_id').lean()
   if (!material) throw new ApiError(httpStatus.NOT_FOUND, 'Material not found')
@@ -288,4 +340,4 @@ const listMovements = async (organizationId: string, materialId: string, query: 
   return { meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }, data: rows }
 }
 
-export const MaterialInventoryService = { listMaterials, createMaterial, updateMaterial, getMaterial, createRequirement, updateRequirement, createMovement, listMovements }
+export const MaterialInventoryService = { listMaterials, createMaterial, updateMaterial, getMaterial, createRequirement, updateRequirement, createMovement, recordPurchaseReceiptInSession, listMovements }
