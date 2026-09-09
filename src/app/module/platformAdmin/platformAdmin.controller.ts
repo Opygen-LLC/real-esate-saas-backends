@@ -4,6 +4,7 @@ import { sendResponse } from '../../../shared/customResponse'
 import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
 import { PlatformAdminService } from './platformAdmin.service'
+import { PlatformTenantNoteService } from './platformTenantNote.service'
 
 const impersonationCookie: CookieOptions = { httpOnly: true, secure: config.cookie_secure, sameSite: config.cookie_same_site, domain: config.cookie_domain, path: '/' }
 
@@ -81,4 +82,74 @@ const endImpersonation = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: 200, success: true, message: 'Support impersonation ended', data: result })
 })
 
-export const PlatformAdminController = { tenantDetails, tenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, tenantDeletionPreview, hardDeleteTenant, subscriptionRequests, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, editSubscriptionDates, applyTenantAdminPlanOverride, scheduleTenantAdminDowngrade, cancelTenantScheduledChange, setTenantCancellation, requestTenantRecurringAddon, getTenantEntitlementOverrides, setTenantEntitlementOverride, revokeTenantEntitlementOverride, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation }
+const getTenantNotes = catchAsync(async (req: Request, res: Response) =>
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Agency notes fetched',
+    data: await PlatformTenantNoteService.getTenantNotes(req.params.organizationId),
+  }),
+)
+
+const createTenantNote = catchAsync(async (req: Request, res: Response) =>
+  sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: 'Agency note created',
+    data: await PlatformTenantNoteService.createTenantNote(
+      req.params.organizationId,
+      req.body,
+      {
+        id: req.user!._id!,
+        name: req.user?.name || 'Super Admin',
+        email: req.user?.email || 'admin@platform.internal',
+        userRole: req.user?.userRole || 'super-admin',
+        requestId: req.requestId,
+        ip: req.ip,
+      },
+    ),
+  }),
+)
+
+const updateTenantNote = catchAsync(async (req: Request, res: Response) =>
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Agency note updated',
+    data: await PlatformTenantNoteService.updateTenantNote(
+      req.params.organizationId,
+      req.params.noteId,
+      req.body,
+      {
+        id: req.user!._id!,
+        name: req.user?.name || 'Super Admin',
+        email: req.user?.email || 'admin@platform.internal',
+        userRole: req.user?.userRole || 'super-admin',
+        requestId: req.requestId,
+        ip: req.ip,
+      },
+    ),
+  }),
+)
+
+const deleteTenantNote = catchAsync(async (req: Request, res: Response) =>
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Agency note deleted',
+    data: await PlatformTenantNoteService.deleteTenantNote(
+      req.params.organizationId,
+      req.params.noteId,
+      {
+        id: req.user!._id!,
+        name: req.user?.name || 'Super Admin',
+        email: req.user?.email || 'admin@platform.internal',
+        userRole: req.user?.userRole || 'super-admin',
+        requestId: req.requestId,
+        ip: req.ip,
+      },
+    ),
+  }),
+)
+
+export const PlatformAdminController = { tenantDetails, tenantHealth, suspendTenant, reactivateTenant, updateTenantProfile, updateTenantOwner, archiveTenant, restoreArchivedTenant, tenantDeletionPreview, hardDeleteTenant, subscriptionRequests, paymentLedger, benefitPeriodHistory, tenantLeadEntitlement, adjustTenantRenewalStreak, recordManualPayment, decideManualPayment, revenue, audit, subscriptionSummary, changeTenantSubscription, manageTenantTrial, editSubscriptionDates, applyTenantAdminPlanOverride, scheduleTenantAdminDowngrade, cancelTenantScheduledChange, setTenantCancellation, requestTenantRecurringAddon, getTenantEntitlementOverrides, setTenantEntitlementOverride, revokeTenantEntitlementOverride, platformSearch, platformNotifications, startImpersonation, currentImpersonation, endImpersonation, getTenantNotes, createTenantNote, updateTenantNote, deleteTenantNote }

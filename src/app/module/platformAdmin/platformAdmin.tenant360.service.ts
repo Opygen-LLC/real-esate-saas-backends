@@ -25,6 +25,7 @@ import { effectivePermissionsForUser } from '../user/accessControl'
 import { User } from '../user/user.model'
 import { USER_PROFILE_POPULATES, toUserDto } from '../user/userProfile.service'
 import { ImpersonationSession } from './impersonationSession.model'
+import { PlatformTenantNote } from './platformTenantNote.model'
 import { resolveEntitlementSource } from '../entitlement/featureCatalog'
 import { EntitlementService, propertyCountsTowardQuotaFilter } from '../entitlement/entitlement.service'
 import { TenantEntitlementOverride } from '../tenantEntitlementOverride/tenantEntitlementOverride.model'
@@ -144,6 +145,7 @@ export const getTenant360 = async (organizationId: string) => {
     authSessions,
     impersonationSessions,
     tenantOverrideHistory,
+    notes,
   ]: any[] = await Promise.all([
     User.find({ organizationId: normalizedOrganizationId, userRole: { $in: TEAM_ROLES } })
       .select('_id name email phoneNumber organizationId userRole status accessRestriction isVerified createdAt updatedAt')
@@ -180,6 +182,7 @@ export const getTenant360 = async (organizationId: string) => {
     AuthSession.find({ organizationId: normalizedOrganizationId }).select('_id userId expiresAt revokedAt revokeReason lastUsedAt lastUsedIp createdIp userAgent createdAt updatedAt').sort({ lastUsedAt: -1, _id: -1 }).limit(25).lean(),
     ImpersonationSession.find({ organizationId: normalizedOrganizationId }).select('_id adminUserId targetUserId reason readOnly startedAt expiresAt endedAt endedBy ip userAgent createdAt').sort({ startedAt: -1, _id: -1 }).limit(20).lean(),
     TenantEntitlementOverride.find({ organizationId: normalizedOrganizationId }).sort({ version: -1, _id: -1 }).limit(20).lean(),
+    PlatformTenantNote.find({ organizationId: normalizedOrganizationId }).sort({ pinned: -1, createdAt: -1 }).limit(50).lean(),
   ])
 
   const benefitAdjustment: any = activeBenefitPeriod
@@ -492,5 +495,6 @@ export const getTenant360 = async (organizationId: string) => {
       tenantOverridesAvailable: true,
       recurringLeadAddOnsAvailable: true,
     },
+    notes: notes || [],
   }
 }

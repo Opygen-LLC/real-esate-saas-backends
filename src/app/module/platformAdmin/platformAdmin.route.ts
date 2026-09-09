@@ -66,6 +66,34 @@ const deletionBody = z.object({
   }).strict(),
 })
 const organizationParams = z.object({ organizationId: z.string().trim().min(3).max(120) })
+const tenantNoteCategorySchema = z.enum(['general', 'support', 'billing', 'compliance', 'feature_request', 'operational'])
+const createTenantNoteBody = z.object({
+  params: organizationParams,
+  body: z.object({
+    content: z.string().trim().min(2).max(5000),
+    category: tenantNoteCategorySchema.optional(),
+    pinned: z.boolean().optional(),
+  }),
+})
+const updateTenantNoteBody = z.object({
+  params: z.object({
+    organizationId: z.string().trim().min(3).max(120),
+    noteId: z.string().trim().min(8).max(50),
+  }),
+  body: z.object({
+    content: z.string().trim().min(2).max(5000).optional(),
+    category: tenantNoteCategorySchema.optional(),
+    pinned: z.boolean().optional(),
+  }).refine((body) => body.content !== undefined || body.category !== undefined || body.pinned !== undefined, {
+    message: 'At least one field (content, category, pinned) must be provided',
+  }),
+})
+const deleteTenantNoteParams = z.object({
+  params: z.object({
+    organizationId: z.string().trim().min(3).max(120),
+    noteId: z.string().trim().min(8).max(50),
+  }),
+})
 
 const adminPlanOverrideBody = z.object({ params: organizationParams, body: z.object({
   planId: paidPlanIdSchema, planVersion: z.number().int().positive().optional(), billingCycle: z.enum(['monthly', 'yearly']).default('monthly'),
@@ -139,6 +167,10 @@ router.get('/tenants/:organizationId/deletion-preview', authMiddlewares.authSupe
 router.post('/tenants/:organizationId/hard-delete', authMiddlewares.authSuperAdmin, validateRequest(deletionBody), PlatformAdminController.hardDeleteTenant)
 router.post('/tenants/:organizationId/suspend', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.suspendTenant)
 router.post('/tenants/:organizationId/reactivate', authMiddlewares.authSuperAdmin, validateRequest(reasonBody), PlatformAdminController.reactivateTenant)
+router.get('/tenants/:organizationId/notes', authMiddlewares.authSuperAdmin, validateRequest(z.object({ params: organizationParams })), PlatformAdminController.getTenantNotes)
+router.post('/tenants/:organizationId/notes', authMiddlewares.authSuperAdmin, validateRequest(createTenantNoteBody), PlatformAdminController.createTenantNote)
+router.patch('/tenants/:organizationId/notes/:noteId', authMiddlewares.authSuperAdmin, validateRequest(updateTenantNoteBody), PlatformAdminController.updateTenantNote)
+router.delete('/tenants/:organizationId/notes/:noteId', authMiddlewares.authSuperAdmin, validateRequest(deleteTenantNoteParams), PlatformAdminController.deleteTenantNote)
 router.get('/subscription-requests', authMiddlewares.authSuperAdmin, validateRequest(subscriptionRequestQuery), PlatformAdminController.subscriptionRequests)
 router.get('/payments', authMiddlewares.authSuperAdmin, PlatformAdminController.paymentLedger)
 router.get('/benefit-periods', authMiddlewares.authSuperAdmin, validateRequest(benefitHistoryQuery), PlatformAdminController.benefitPeriodHistory)
