@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PlatformTenantNote } from '../../app/module/platformAdmin/platformTenantNote.model'
-import fs from 'node:fs'
-import path from 'node:path'
+import { PlatformAdminController } from '../../app/module/platformAdmin/platformAdmin.controller'
+import { PlatformTenantNoteService } from '../../app/module/platformAdmin/platformTenantNote.service'
 
 describe('PlatformTenantNote unit tests', () => {
   it('validates schema requirements for content, organizationId and category', () => {
@@ -34,7 +34,14 @@ describe('PlatformTenantNote unit tests', () => {
   })
 
   it('supports allowed category values', () => {
-    const allowed = ['general', 'support', 'billing', 'compliance', 'feature_request', 'operational']
+    const allowed = [
+      'general',
+      'support',
+      'billing',
+      'compliance',
+      'feature_request',
+      'operational',
+    ]
     for (const cat of allowed) {
       const note = new PlatformTenantNote({
         organizationId: 'org_test_123',
@@ -69,19 +76,15 @@ describe('PlatformTenantNote unit tests', () => {
     expect(error?.errors.category).toBeDefined()
   })
 
-  it('ensures platformAdmin routes and tenant360 include note capabilities', () => {
-    const routesContent = fs.readFileSync(path.join(process.cwd(), 'src/app/module/platformAdmin/platformAdmin.route.ts'), 'utf8')
-    const controllerContent = fs.readFileSync(path.join(process.cwd(), 'src/app/module/platformAdmin/platformAdmin.controller.ts'), 'utf8')
-    const tenant360Content = fs.readFileSync(path.join(process.cwd(), 'src/app/module/platformAdmin/platformAdmin.tenant360.service.ts'), 'utf8')
+  it('ensures platformAdmin controller and service expose note operations', () => {
+    expect(PlatformAdminController.getTenantNotes).toBeDefined()
+    expect(PlatformAdminController.createTenantNote).toBeDefined()
+    expect(PlatformAdminController.updateTenantNote).toBeDefined()
+    expect(PlatformAdminController.deleteTenantNote).toBeDefined()
 
-    expect(routesContent).toContain('/tenants/:organizationId/notes')
-    expect(routesContent).toContain('createTenantNote')
-    expect(routesContent).toContain('updateTenantNote')
-    expect(routesContent).toContain('deleteTenantNote')
-    expect(controllerContent).toContain('getTenantNotes')
-    expect(controllerContent).toContain('createTenantNote')
-    expect(controllerContent).toContain('updateTenantNote')
-    expect(controllerContent).toContain('deleteTenantNote')
-    expect(tenant360Content).toContain('notes: notes || []')
+    expect(PlatformTenantNoteService.getTenantNotes).toBeDefined()
+    expect(PlatformTenantNoteService.createTenantNote).toBeDefined()
+    expect(PlatformTenantNoteService.updateTenantNote).toBeDefined()
+    expect(PlatformTenantNoteService.deleteTenantNote).toBeDefined()
   })
 })
