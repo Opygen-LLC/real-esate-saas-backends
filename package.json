@@ -231,7 +231,13 @@
     "verify:supplier-management-phase4": "node scripts/verify-supplier-management-phase4.mjs",
     "migrate:premium-operations-security-phase5": "ts-node --transpile-only src/app/db/migratePremiumOperationsSecurityPhase5.ts",
     "verify:premium-operations-phase5": "node scripts/verify-premium-operations-phase5.mjs",
-    "test:premium-operations-phase5": "vitest run src/tests/contract/premiumOperationsPhase5.contract.test.ts"
+    "test:premium-operations-phase5": "vitest run src/tests/contract/premiumOperationsPhase5.contract.test.ts",
+    "verify:phase4-release": "node scripts/verify-phase4-release.mjs",
+    "test:phase4-release:unit": "vitest run src/tests/unit/phase4InvoiceFailureTelemetry.unit.test.ts",
+    "test:phase4-release:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run --fileParallelism=false src/tests/integration/phase4Release.integration.test.ts src/tests/integration/tenantIsolation.integration.test.ts",
+    "gate:phase4-release": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-release:source && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase4-release:unit && pnpm verify:phase4-release && pnpm build && pnpm audit --prod --audit-level=high",
+    "gate:phase4-release:ci": "pnpm gate:phase4-release && pnpm test:phase4-release:integration",
+    "test:phase4-release:source": "node --test tests/phase1/*.test.cjs tests/phase2/*.test.cjs tests/phase3-studio/*.test.cjs tests/phase4-templates/*.test.cjs tests/phase5-rollout/*.test.cjs"
   },
   "keywords": [
     "real-estate",

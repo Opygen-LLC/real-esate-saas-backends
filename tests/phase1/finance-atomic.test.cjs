@@ -37,11 +37,14 @@ function harness({ failReversal = false, failAudit = false, sourceType = 'manual
     '../../db/requiredTransaction': { requiredTransaction }, './financeRemovalPolicy': policy,
     '../audit/audit.service': { writeAudit: async (input,s) => { assert.equal(s,session); state.audits.push(input); events.push('audit'); if (failAudit) throw new Error('forced audit failure'); } },
     '../domainEvent/domainEvent.service': { DomainEventService: { emit: async () => events.push('publish') } },
+    '../domainEvent/transactionalOutbox.service': { TransactionalOutbox: { emit: async () => events.push('outbox'), queuePublish: async () => events.push('outbox') } },
     '../organization/organization.model': { Organization }, '../property/property.model': {Property:{}}, '../user/user.model': {User},
     '../user/userProfile.service': {}, './finance.money': load('src/app/module/finance/finance.money.ts'),
     './finance.model': {FinanceTransaction,FinanceBudget:{},FinanceCommission:{},FinanceInvoice:{},FinanceVendor:{}},
-    './invoicePdf.service': {}, '../../../shared/productionEvents': {}, '../../shared/tenantReference.service': {},
+    './invoicePdf.service': {}, '../../../shared/productionEvents': { emitProductionEvent: () => undefined }, '../../shared/tenantReference.service': {},
     './financeGlIntegration.service': {FinanceGlIntegrationService:gl}, './financeOperations.model':{}, './financeBillingProfile.model':{},
+    '../customerFinance/customerFinanceProjection.service': { syncBookingPaymentProjection: async () => undefined },
+    '../entitlement/entitlement.service': { EntitlementService: {} }, './finance.contract': { FINANCE_ERROR_CODES: {} },
   };
   return { service:load('src/app/module/finance/finance.service.ts',deps).FinanceService, state:()=>state, events, setJournal:v=>{state.journal=v;} };
 }

@@ -4,6 +4,7 @@ export const PRODUCTION_EVENT_NAMES = [
   'invoice_created',
   'invoice_property_linked',
   'invoice_calculation_rejected',
+  'invoice_request_failed',
   'invoice_payment_recorded',
   'form_validation_failed',
   'website_submission_received',

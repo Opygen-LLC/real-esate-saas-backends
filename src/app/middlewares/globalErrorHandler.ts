@@ -11,6 +11,7 @@ import handleZodError from '../../errors/handleZodError'
 import { IGenericErrorMessage } from '../../interfaces/common'
 import { errorLogger } from '../../shared/logger'
 import { httpErrorEvent, httpLogLevelForStatus, isUnexpectedServerError, requestRoute } from '../../shared/httpObservability'
+import { classifyInvoiceFailure } from '../../shared/invoiceFailureTelemetry'
 import { emitProductionEvent } from '../../shared/productionEvents'
 
 const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
@@ -93,7 +94,7 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     })
   }
 
-  if (route.includes('/finance') && [403, 409, 422, 500].includes(statusCode)) {
+  if (route.includes('/finance') && statusCode >= 400) {
     emitProductionEvent('finance_request_failed', {
       method: req.method,
       route,
@@ -101,6 +102,22 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
       errorCode: code,
       organizationId: req.tenant?.organizationId,
       requestId: req.requestId,
+    }, statusCode >= 500 ? 'error' : 'warn')
+  }
+
+  const invoiceWriteFailure = route.includes('/finance/invoices')
+    && ['POST', 'PUT', 'PATCH'].includes(req.method)
+    && statusCode >= 400
+  if (invoiceWriteFailure) {
+    emitProductionEvent('invoice_request_failed', {
+      method: req.method,
+      route,
+      statusCode,
+      errorCode: code,
+      failureClass: classifyInvoiceFailure(statusCode, code),
+      organizationId: req.tenant?.organizationId,
+      requestId: req.requestId,
+      fields: code === API_ERROR_CODES.VALIDATION_ERROR ? Object.keys(fieldErrors).slice(0, 50) : undefined,
     }, statusCode >= 500 ? 'error' : 'warn')
   }
 

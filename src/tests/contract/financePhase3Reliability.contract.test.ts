@@ -22,7 +22,7 @@ describe('Finance Phase 3 reliability contract', () => {
     const handler = read('src/app/middlewares/globalErrorHandler.ts')
     expect(events).toContain("'finance_request_failed'")
     expect(handler).toContain("route.includes('/finance')")
-    expect(handler).toContain('[403, 409, 422, 500]')
+    expect(handler).toContain('statusCode >= 400')
     expect(handler).toContain("emitProductionEvent('finance_request_failed'")
     expect(handler).toContain('requestId: req.requestId')
     expect(handler).toContain('errorCode: code')
