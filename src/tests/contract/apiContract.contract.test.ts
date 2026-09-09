@@ -25,6 +25,22 @@ describe('API error contract', () => {
     expect(error.message).toBe('Please correct the highlighted fields')
   })
 
+  it('preserves nested actionable field paths for form row errors', () => {
+    const schema = z.object({
+      body: z.object({
+        email: z.string().email('Enter a valid email address'),
+        lineItems: z.array(z.object({ unitPrice: z.number().positive('Unit price must be greater than zero') })),
+      }),
+    })
+    const result = schema.safeParse({ body: { email: 'not-an-email', lineItems: [{ unitPrice: 0 }] } })
+    expect(result.success).toBe(false)
+    if (result.success) return
+
+    const error = handleZodError(result.error)
+    expect(error.fieldErrors?.email).toEqual(['Enter a valid email address'])
+    expect(error.fieldErrors?.['lineItems.0.unitPrice']).toEqual(['Unit price must be greater than zero'])
+  })
+
   it('uses stable default error codes for common HTTP statuses', () => {
     expect(defaultErrorCodeForStatus(401)).toBe('UNAUTHORIZED')
     expect(defaultErrorCodeForStatus(404)).toBe('NOT_FOUND')
