@@ -1,6 +1,7 @@
 import httpStatus from 'http-status'
 import mongoose, { type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate } from '../../shared/tenantPopulate'
 import { writeAudit } from '../audit/audit.service'
 import type { AccountingActor, FinanceCategoryMappingType } from './financeAccounting.interface'
 import { FinanceAccount, FinanceCategoryAccountMapping } from './financeAccounting.model'
@@ -134,7 +135,7 @@ const ensureDefaults = async (organizationId: string, actor: AccountingActor, se
 }
 
 const list = async (organizationId: string, session?: ClientSession) => {
-  const query = FinanceCategoryAccountMapping.find({ organizationId }).sort({ category: 1, transactionType: 1 }).populate('accountId', 'code name type status').lean()
+  const query = FinanceCategoryAccountMapping.find({ organizationId }).sort({ category: 1, transactionType: 1 }).populate(tenantRefPopulate('accountId', 'code name type status', organizationId)).lean()
   if (session) query.session(session)
   return query
 }
@@ -161,7 +162,7 @@ const setMapping = async (organizationId: string, actor: AccountingActor, input:
       $setOnInsert: { organizationId, transactionType: input.transactionType, categoryKey: normalizeFinanceCategoryKey(category), createdBy: actorId },
     },
     { upsert: true, new: true, runValidators: true, session, setDefaultsOnInsert: true },
-  ).populate('accountId', 'code name type status')
+  ).populate(tenantRefPopulate('accountId', 'code name type status', organizationId))
   await writeAudit({
     organizationId,
     actorId: actor.id,

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import path from 'path'
 import { z } from 'zod'
+import { assertDistinctProductionSecrets, requireProductionSecret } from './productionSecrets'
 
 dotenv.config({
   path: path.join(process.cwd(), '.env'),
@@ -147,8 +148,7 @@ const redisHost = process.env.REDIS_HOST || '127.0.0.1'
 const realtimeEnabled = envBoolean('REALTIME_ENABLED', true)
 const nextRevalidateUrl = (process.env.NEXT_REVALIDATE_URL?.trim() || `${publicSiteOrigin}/api/revalidate`).replace(/\/$/, '')
 const nextRevalidateSecret = process.env.NEXT_REVALIDATE_SECRET?.trim()
-  || process.env.JWT_SECRET?.trim()
-  || (isProduction ? requiredInProduction('NEXT_REVALIDATE_SECRET', 32) : '')
+  || (!isProduction ? process.env.JWT_SECRET?.trim() || '' : '')
 if (nextRevalidateUrl && !z.string().url().safeParse(nextRevalidateUrl).success) throw new Error('NEXT_REVALIDATE_URL must be a valid absolute URL')
 
 const domainProvider = (process.env.DOMAIN_PROVIDER?.trim().toLowerCase() || 'generic')
@@ -215,14 +215,15 @@ if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).su
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
   requiredUrls.forEach((name) => requiredInProduction(name))
-  requiredInProduction('JWT_SECRET', 32)
-  requiredInProduction('JWT_REFRESH_SECRET', 32)
-  requiredInProduction('OTP_PEPPER', 32)
-  requiredInProduction('CRON_SIGNING_SECRET', 32)
-  requiredInProduction('DATA_ENCRYPTION_KEY', 32)
-  if (!nextRevalidateSecret || nextRevalidateSecret.length < 32) {
-    requiredInProduction('NEXT_REVALIDATE_SECRET', 32)
-  }
+  const securitySecrets: Array<[string, string]> = [
+    ['JWT_SECRET', requireProductionSecret(process.env, 'JWT_SECRET', 32)],
+    ['JWT_REFRESH_SECRET', requireProductionSecret(process.env, 'JWT_REFRESH_SECRET', 32)],
+    ['OTP_PEPPER', requireProductionSecret(process.env, 'OTP_PEPPER', 32)],
+    ['CRON_SIGNING_SECRET', requireProductionSecret(process.env, 'CRON_SIGNING_SECRET', 32)],
+    ['DATA_ENCRYPTION_KEY', requireProductionSecret(process.env, 'DATA_ENCRYPTION_KEY', 32)],
+    ['NEXT_REVALIDATE_SECRET', requireProductionSecret(process.env, 'NEXT_REVALIDATE_SECRET', 32)],
+  ]
+  assertDistinctProductionSecrets(securitySecrets)
   requiredInProduction('PUBLIC_SITE_ORIGIN')
   requiredInProduction('DOMAIN_PROVIDER')
   if (domainProvider === 'vercel') {

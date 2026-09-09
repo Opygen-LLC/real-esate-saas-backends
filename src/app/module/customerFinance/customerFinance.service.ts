@@ -12,6 +12,7 @@ import { Property } from '../property/property.model'
 import { Lead } from '../lead/lead.model'
 import { Task } from '../task/task.model'
 import { FinanceInvoice } from '../finance/finance.model'
+import { userRefPopulate } from '../user/userProfile.service'
 import { FinanceService, type FinanceActorContext } from '../finance/finance.service'
 import { moneyFromMinorUnits, moneyToMinorUnits } from '../finance/finance.money'
 import { ActivityService } from '../activity/activity.service'
@@ -447,7 +448,7 @@ const getCustomerProfile = async (organizationId: string, contactId: string, acc
   const [property, installments, invoice, activities, lead, followUpTask] = await Promise.all([
     Property.findOne({ _id: booking.propertyId, organizationId }).select('title slug status price pricing currency buildingName floorNumber address city images handoverDate').lean(),
     Installment.find({ organizationId, bookingId: booking._id }).sort({ sequence: 1 }).lean(),
-    booking.financeInvoiceId ? FinanceInvoice.findOne({ _id: booking.financeInvoiceId, organizationId }).populate('payments.recordedBy', 'name email').lean() : null,
+    booking.financeInvoiceId ? FinanceInvoice.findOne({ _id: booking.financeInvoiceId, organizationId }).populate(userRefPopulate('payments.recordedBy', 'name email', { organizationId })).lean() : null,
     activitiesPromise,
     followUpLeadId ? Lead.findOne({ _id: followUpLeadId, organizationId }).select('_id followUpDate').lean() : null,
     followUpLeadId ? Task.findOne({ organizationId, linkedLead: followUpLeadId, taskType: 'lead_follow_up', status: { $in: ['Pending', 'InProgress', 'Overdue'] } }).sort({ dueAt: 1 }).select('title description dueAt').lean() : null,

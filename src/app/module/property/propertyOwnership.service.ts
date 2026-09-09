@@ -10,6 +10,7 @@ import { FinanceTransaction } from '../finance/finance.model'
 import type { FinancePaymentMethod, FinanceTransactionSourceType } from '../finance/finance.interface'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import { Property } from './property.model'
+import { userRefPopulate } from '../user/userProfile.service'
 import {
   PropertyInvestment,
   PropertyInvestor,
@@ -466,7 +467,7 @@ const getActivity = async (organizationId: string, propertyId: string, limit = 5
       { propertyId: objectId(propertyId, 'property id') },
       { aggregateType: 'property', aggregateId: propertyId },
     ],
-  }).populate('actorId', 'name email').sort({ occurredAt: -1, _id: -1 }).limit(Math.min(Math.max(Number(limit) || 50, 1), 100)).lean()
+  }).populate(userRefPopulate('actorId', 'name email', { organizationId })).sort({ occurredAt: -1, _id: -1 }).limit(Math.min(Math.max(Number(limit) || 50, 1), 100)).lean()
   return rows.map((row) => ({
     _id: String(row._id),
     eventType: row.eventType,

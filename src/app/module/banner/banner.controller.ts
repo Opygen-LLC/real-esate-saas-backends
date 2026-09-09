@@ -7,6 +7,7 @@ import { requireTenant } from '../../middlewares/auth'
 import ApiError from '../../../errors/ApiError'
 import { tenantResourceFilter } from '../../repositories/tenantRepository'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { serializePublicBanner } from './banner.serializer'
 
 const createBanner = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
@@ -21,8 +22,7 @@ const createBanner = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getBanners = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = req.params.organizationId || requireTenant(req)
-  if (req.params.organizationId) await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  const organizationId = requireTenant(req)
   const result = await Banner.find({ organizationId }).sort({ createdAt: -1 })
 
   sendResponse(res, {
@@ -33,10 +33,29 @@ const getBanners = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getPublicBanners = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = String(req.params.organizationId || '').trim()
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  const rows = await Banner.find({ organizationId, status: true })
+    .sort({ createdAt: -1 })
+    .select('_id title subtitle image link btnText status')
+    .lean()
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Banners fetched successfully',
+    data: rows.map(serializePublicBanner),
+  })
+})
+
 const updateBanner = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const { organizationId: _ignored, ...safeBody } = req.body
-  const result = await Banner.findOneAndUpdate(tenantResourceFilter(requireTenant(req), id), safeBody, { new: true })
+  const result = await Banner.findOneAndUpdate(
+    tenantResourceFilter(requireTenant(req), id),
+    { $set: req.body },
+    { new: true, runValidators: true },
+  )
   if (!result) throw new ApiError(404, 'Banner not found')
 
   sendResponse(res, {
@@ -63,6 +82,7 @@ const deleteBanner = catchAsync(async (req: Request, res: Response) => {
 export const BannerController = {
   createBanner,
   getBanners,
+  getPublicBanners,
   updateBanner,
   deleteBanner,
 }

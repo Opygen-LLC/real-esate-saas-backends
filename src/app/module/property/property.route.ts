@@ -60,11 +60,11 @@ router.post('/:id/ownership/investors/:investorId/contributions/:investmentId/re
 router.post('/:id/ownership/investors/:investorId/distributions/:distributionId/reverse', authMiddlewares.requirePermission('properties.write'), authMiddlewares.requirePermission('finance.write'), authMiddlewares.rejectAccountingMigrationLock, validateRequest(PropertyOwnershipValidation.reverseDistribution), PropertyOwnershipController.reverseDistribution)
 router.get('/:id/activity', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyOwnershipValidation.activity), PropertyOwnershipController.getActivity)
 
-router.get('/:id', authMiddlewares.requirePermission('properties.read'), PropertyController.getPropertyById)
+router.get('/:id', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyValidation.propertyIdZodSchema), PropertyController.getPropertyById)
 router.patch('/:id', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.updatePropertyZodSchema), PropertyController.updateProperty)
 router.patch('/:id/status', authMiddlewares.requirePermission('properties.publish'), validateRequest(PropertyValidation.updateStatusZodSchema), PropertyController.updatePropertyStatus)
 router.patch('/:id/quota-access', authMiddlewares.requirePermission('properties.publish'), validateRequest(PropertyValidation.updateQuotaAccessZodSchema), PropertyController.updatePropertyQuotaAccess)
 router.patch('/:id/images/reorder', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.reorderImagesZodSchema), PropertyController.reorderPropertyImages)
-router.delete('/:id', authMiddlewares.requirePermission('properties.delete'), PropertyController.deleteProperty)
+router.delete('/:id', authMiddlewares.requirePermission('properties.delete'), validateRequest(PropertyValidation.propertyIdZodSchema), PropertyController.deleteProperty)
 
 export const PropertyRoute = router

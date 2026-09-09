@@ -1,6 +1,7 @@
 import httpStatus from 'http-status'
 import mongoose, { type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate } from '../../shared/tenantPopulate'
 import { writeAudit } from '../audit/audit.service'
 import { FinanceTransaction, FinanceInvoice, FinanceCommission, FinanceVendor, FinanceBudget } from './finance.model'
 import { FinanceBankAccount, FinanceVendorBill } from './financeOperations.model'
@@ -33,7 +34,7 @@ const withSession = <T>(query: T, session?: ClientSession): T => {
 const audit = (organizationId: string, actor: AccountingActor, action: string, entityType: string, entityId: string, reason: string, metadata: Record<string, unknown> = {}, session?: ClientSession) =>
   writeAudit({ organizationId, actorId: actor.id, actorRole: actor.role || 'tenant', action, entityType, entityId, reason, requestId: actor.requestId, ip: actor.ip, metadata }, session)
 
-const getMappings = async (organizationId: string) => FinanceLegacyPaymentMethodMapping.find({ organizationId }).sort({ paymentMethod: 1 }).populate('bankAccountId', 'name type currency glAccountId status').lean()
+const getMappings = async (organizationId: string) => FinanceLegacyPaymentMethodMapping.find({ organizationId }).sort({ paymentMethod: 1 }).populate(tenantRefPopulate('bankAccountId', 'name type currency glAccountId status', organizationId)).lean()
 
 const setPaymentMethodMapping = async (organizationId: string, actor: AccountingActor, input: { paymentMethod: LegacyFinancePaymentMethod; bankAccountId: string }) => FinanceAccountingService.accountingTransaction(async (session) => {
   const bank = await withSession(FinanceBankAccount.findOne({ _id: objectId(input.bankAccountId, 'bank account id'), organizationId, status: 'ACTIVE' }), session).lean()

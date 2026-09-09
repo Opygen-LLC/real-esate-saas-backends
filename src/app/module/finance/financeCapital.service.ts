@@ -1,6 +1,7 @@
 import httpStatus from 'http-status'
 import mongoose, { type ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate, tenantRefPopulates } from '../../shared/tenantPopulate'
 import { writeAudit } from '../audit/audit.service'
 import type { AccountingActor, FinanceJournalLineInput } from './financeAccounting.interface'
 import { FinanceAccount, FinanceAccountingSequence, FinanceJournalLine } from './financeAccounting.model'
@@ -120,7 +121,7 @@ const updateShareholder = async (organizationId: string, actor: AccountingActor,
 // Equity
 const listEquityTransactions = (organizationId: string, query: Record<string, any> = {}) => {
   const where: any = { organizationId }; if (query.shareholderId) where.shareholderId = objectId(query.shareholderId, 'shareholder id'); if (query.type) where.type = query.type
-  return FinanceEquityTransaction.find(where).sort({ transactionDate: -1, createdAt: -1 }).populate('shareholderId counterpartyShareholderId', 'name type shareClass sharesHeld ownershipPercentage').populate('bankAccountId', 'name type').lean()
+  return FinanceEquityTransaction.find(where).sort({ transactionDate: -1, createdAt: -1 }).populate(tenantRefPopulates(['shareholderId', 'counterpartyShareholderId'], 'name type shareClass sharesHeld ownershipPercentage', organizationId)).populate(tenantRefPopulate('bankAccountId', 'name type', organizationId)).lean()
 }
 const createEquityTransaction = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const s = await settings(organizationId, session); const type = String(input.type).toUpperCase() as FinanceEquityTransactionType; const transactionDate = dateValue(input.transactionDate, 'transaction date')
@@ -176,7 +177,7 @@ const createEquityTransaction = async (organizationId: string, actor: Accounting
 })
 
 // Shareholder loans
-const listShareholderLoans = (organizationId: string) => FinanceShareholderLoan.find({ organizationId }).sort({ startDate: -1 }).populate('shareholderId', 'name sharesHeld ownershipPercentage').populate('bankAccountId', 'name type').populate('liabilityAccountId interestExpenseAccountId', 'code name type').lean()
+const listShareholderLoans = (organizationId: string) => FinanceShareholderLoan.find({ organizationId }).sort({ startDate: -1 }).populate(tenantRefPopulate('shareholderId', 'name sharesHeld ownershipPercentage', organizationId)).populate(tenantRefPopulate('bankAccountId', 'name type', organizationId)).populate(tenantRefPopulates(['liabilityAccountId', 'interestExpenseAccountId'], 'code name type', organizationId)).lean()
 const createShareholderLoan = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const s = await settings(organizationId, session); const holder: any = await shareholder(organizationId, input.shareholderId, session); const bank = await bankAccount(organizationId, input.bankAccountId, session)
   const liability = input.liabilityAccountId ? await accountById(organizationId, input.liabilityAccountId, 'LIABILITY', 'shareholder loan liability account', session) : await systemAccount(organizationId, 'SHAREHOLDER_LOAN_PAYABLE', ['LIABILITY'], 'Shareholder Loan Payable account', session)
@@ -198,7 +199,7 @@ const payShareholderLoan = async (organizationId: string, actor: AccountingActor
 })
 
 // Dividends
-const listDividends = (organizationId: string) => FinanceDividend.find({ organizationId }).sort({ declarationDate: -1 }).populate('shareholderId', 'name sharesHeld ownershipPercentage').populate('retainedEarningsAccountId dividendPayableAccountId', 'code name type').lean()
+const listDividends = (organizationId: string) => FinanceDividend.find({ organizationId }).sort({ declarationDate: -1 }).populate(tenantRefPopulate('shareholderId', 'name sharesHeld ownershipPercentage', organizationId)).populate(tenantRefPopulates(['retainedEarningsAccountId', 'dividendPayableAccountId'], 'code name type', organizationId)).lean()
 const createDividend = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const s = await settings(organizationId, session); if (input.shareholderId) await shareholder(organizationId, input.shareholderId, session)
   const retained = await systemAccount(organizationId, 'RETAINED_EARNINGS', ['EQUITY'], 'Retained Earnings account', session); const payable = await systemAccount(organizationId, 'DIVIDEND_PAYABLE', ['LIABILITY'], 'Dividend Payable account', session); const declarationDate = dateValue(input.declarationDate, 'declaration date'); const number = await nextNumber(organizationId, 'dividend', 'DIV', declarationDate, session)
@@ -228,7 +229,7 @@ const payDividend = async (organizationId: string, actor: AccountingActor, id: s
 })
 
 // Company loans
-const listLoans = (organizationId: string) => FinanceLoan.find({ organizationId }).sort({ startDate: -1 }).populate('bankAccountId', 'name type').populate('liabilityAccountId interestExpenseAccountId', 'code name type').lean()
+const listLoans = (organizationId: string) => FinanceLoan.find({ organizationId }).sort({ startDate: -1 }).populate(tenantRefPopulate('bankAccountId', 'name type', organizationId)).populate(tenantRefPopulates(['liabilityAccountId', 'interestExpenseAccountId'], 'code name type', organizationId)).lean()
 const createLoan = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const s = await settings(organizationId, session); const bank = await bankAccount(organizationId, input.bankAccountId, session); const liability = input.liabilityAccountId ? await accountById(organizationId, input.liabilityAccountId, 'LIABILITY', 'loan liability account', session) : await systemAccount(organizationId, 'LOANS_PAYABLE', ['LIABILITY'], 'Loans Payable account', session); const interest = input.interestExpenseAccountId ? await accountById(organizationId, input.interestExpenseAccountId, 'EXPENSE', 'interest expense account', session) : await systemAccount(organizationId, 'INTEREST_EXPENSE', ['EXPENSE'], 'Interest Expense account', session)
   const principalMinor = moneyMinor(input.principal, 'principal'); const startDate = dateValue(input.startDate, 'start date'); const number = await nextNumber(organizationId, 'company-loan', 'LOAN', startDate, session); const _id = new mongoose.Types.ObjectId()

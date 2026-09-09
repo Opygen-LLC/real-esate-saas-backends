@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import ExcelJS from 'exceljs'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate } from '../../shared/tenantPopulate'
 import { FinanceAccount, FinanceCategoryAccountMapping, FinanceJournalEntry, FinanceJournalLine } from './financeAccounting.model'
 import { FinanceAccountingSettings } from './financeAccountingSettings.model'
 import { FinanceBudget, FinanceInvoice } from './finance.model'
@@ -188,7 +189,7 @@ const statementOfEquity = async (organizationId: string, query: Record<string, u
   const beforeEnd = new Date(startDate!.getTime() - 1)
   const [openingSheet, closingSheet, pnl, transactions] = await Promise.all([
     balanceSheet(organizationId, { endDate: beforeEnd }), balanceSheet(organizationId, { endDate }), profitLoss(organizationId, { startDate, endDate }),
-    FinanceEquityTransaction.find({ organizationId, transactionDate: { $gte: startDate!, $lte: endDate } }).sort({ transactionDate: 1 }).populate('shareholderId', 'name shareClass').lean(),
+    FinanceEquityTransaction.find({ organizationId, transactionDate: { $gte: startDate!, $lte: endDate } }).sort({ transactionDate: 1 }).populate(tenantRefPopulate('shareholderId', 'name shareClass', organizationId)).lean(),
   ])
   const contributionTypes = new Set(['CAPITAL_CONTRIBUTION', 'SHARE_ISSUE'])
   const distributionTypes = new Set(['SHARE_BUYBACK', 'CAPITAL_RETURN', 'OWNER_DRAW', 'DIVIDEND_DECLARATION'])
@@ -313,7 +314,7 @@ const drilldown = async (organizationId: string, query: Record<string, unknown> 
   if (query.startDate || query.endDate) filter.postingDate = { ...(query.startDate ? { $gte: startOfDay(query.startDate) } : {}), ...(query.endDate ? { $lte: inclusiveEnd(query.endDate) } : {}) }
   const page = Math.max(1, Number(query.page || 1)); const limit = Math.min(200, Math.max(1, Number(query.limit || 50))); const skip = (page - 1) * limit
   const [data, total] = await Promise.all([
-    FinanceJournalLine.find(filter).sort({ postingDate: -1, createdAt: -1, lineNumber: 1 }).skip(skip).limit(limit).populate('accountId', 'code name type normalBalance').lean(),
+    FinanceJournalLine.find(filter).sort({ postingDate: -1, createdAt: -1, lineNumber: 1 }).skip(skip).limit(limit).populate(tenantRefPopulate('accountId', 'code name type normalBalance', organizationId)).lean(),
     FinanceJournalLine.countDocuments(filter),
   ])
   const journalIds = [...new Set(data.map((r: any) => String(r.journalEntryId)))].map((id) => objectId(id, 'journal id'))
@@ -372,7 +373,7 @@ const completeGeneralLedgerForExport = async (organizationId: string, query: Rec
   const lines: any[] = await FinanceJournalLine.find(filter)
     .sort({ postingDate: 1, createdAt: 1, lineNumber: 1, _id: 1 })
     .limit(total)
-    .populate('accountId', 'code name type normalBalance')
+    .populate(tenantRefPopulate('accountId', 'code name type normalBalance', organizationId))
     .lean()
   const journalIds = [...new Set(lines.map((line: any) => String(line.journalEntryId)))].map((id) => objectId(id, 'journal id'))
   const journals: any[] = journalIds.length ? await FinanceJournalEntry.find({ organizationId, _id: { $in: journalIds } }, { journalNumber: 1, sourceType: 1, sourceId: 1, description: 1, reference: 1, status: 1 }).lean() : []

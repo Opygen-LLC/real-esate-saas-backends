@@ -1,6 +1,7 @@
 import httpStatus from 'http-status'
 import mongoose, { type ClientSession, type FilterQuery } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate } from '../../shared/tenantPopulate'
 import config from '../../../config'
 import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
@@ -727,7 +728,7 @@ const getJournal = async (organizationId: string, id: string, session?: ClientSe
   if (session) query.session(session)
   const journal = await query.lean()
   if (!journal) throw new ApiError(httpStatus.NOT_FOUND, 'Journal entry not found')
-  const linesQuery = FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }).populate('accountId', 'code name type normalBalance status').lean()
+  const linesQuery = FinanceJournalLine.find({ organizationId, journalEntryId: journal._id }).sort({ lineNumber: 1 }).populate(tenantRefPopulate('accountId', 'code name type normalBalance status', organizationId)).lean()
   if (session) linesQuery.session(session)
   const lines = await linesQuery
   return { ...journal, lines, totals: validateLineAmounts(lines.map((line: any) => ({ accountId: String(line.accountId?._id || line.accountId), debitMinor: line.debitMinor, creditMinor: line.creditMinor })), false) }
@@ -986,7 +987,7 @@ const getGeneralLedger = async (organizationId: string, query: Record<string, un
     ])
     : Promise.resolve([] as any[])
   const [lines, total, totals, priorPageTotals] = await Promise.all([
-    FinanceJournalLine.find(filter).sort({ postingDate: 1, createdAt: 1, lineNumber: 1, _id: 1 }).skip(skip).limit(limit).populate('accountId', 'code name type normalBalance').lean(),
+    FinanceJournalLine.find(filter).sort({ postingDate: 1, createdAt: 1, lineNumber: 1, _id: 1 }).skip(skip).limit(limit).populate(tenantRefPopulate('accountId', 'code name type normalBalance', organizationId)).lean(),
     FinanceJournalLine.countDocuments(filter),
     FinanceJournalLine.aggregate([{ $match: filter }, { $group: { _id: null, debit: { $sum: '$debitMinor' }, credit: { $sum: '$creditMinor' } } }]),
     priorPagePromise,

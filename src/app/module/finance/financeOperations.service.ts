@@ -2,6 +2,7 @@ import httpStatus from 'http-status'
 import mongoose, { type ClientSession } from 'mongoose'
 import ExcelJS from 'exceljs'
 import ApiError from '../../../errors/ApiError'
+import { tenantRefPopulate, tenantRefPopulates } from '../../shared/tenantPopulate'
 import { writeAudit } from '../audit/audit.service'
 import { TenantReferenceService } from '../../shared/tenantReference.service'
 import type { AccountingActor, FinanceJournalLineInput } from './financeAccounting.interface'
@@ -165,7 +166,7 @@ const receivables = async (organizationId: string, query: Record<string, unknown
 }
 
 // ---------- Tax codes ----------
-const listTaxCodes = (organizationId: string) => FinanceTaxCode.find({ organizationId }).sort({ code: 1 }).populate('outputAccountId inputAccountId withholdingAccountId', 'code name type status').lean()
+const listTaxCodes = (organizationId: string) => FinanceTaxCode.find({ organizationId }).sort({ code: 1 }).populate(tenantRefPopulates(['outputAccountId', 'inputAccountId', 'withholdingAccountId'], 'code name type status', organizationId)).lean()
 const createTaxCode = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const s = await settings(organizationId, session)
   const direction = String(input.direction).toUpperCase() as FinanceTaxDirection
@@ -213,7 +214,7 @@ const updateTaxCode = async (organizationId: string, actor: AccountingActor, id:
 
 // ---------- Bank accounts ----------
 const listBankAccounts = async (organizationId: string) => {
-  const rows: any[] = await FinanceBankAccount.find({ organizationId }).sort({ isDefaultOperating: -1, name: 1 }).populate('glAccountId', 'code name type normalBalance status').lean()
+  const rows: any[] = await FinanceBankAccount.find({ organizationId }).sort({ isDefaultOperating: -1, name: 1 }).populate(tenantRefPopulate('glAccountId', 'code name type normalBalance status', organizationId)).lean()
   return Promise.all(rows.map(async (row) => ({ ...row, ledgerBalanceMinor: await glBalanceMinor(organizationId, (row.glAccountId as any)?._id || row.glAccountId, new Date()) })))
 }
 const createBankAccount = async (organizationId: string, actor: AccountingActor, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
@@ -287,7 +288,7 @@ const transferBankFunds = async (organizationId: string, actor: AccountingActor,
   await audit(organizationId, actor, 'finance.bank_transfer_posted', 'financeBankTransfer', String(rows[0]._id), 'Bank transfer posted', { transferNumber, amountMinor, journalEntryId: String(journal._id) }, session)
   return rows[0].toObject()
 })
-const listBankTransfers = (organizationId: string) => FinanceBankTransfer.find({ organizationId }).sort({ transferDate: -1, createdAt: -1 }).populate('sourceBankAccountId destinationBankAccountId', 'name type').lean()
+const listBankTransfers = (organizationId: string) => FinanceBankTransfer.find({ organizationId }).sort({ transferDate: -1, createdAt: -1 }).populate(tenantRefPopulates(['sourceBankAccountId', 'destinationBankAccountId'], 'name type', organizationId)).lean()
 
 const glBalanceMinor = async (organizationId: string, glAccountId: unknown, asOf: Date) => {
   const gl = await FinanceAccount.findOne({ _id: glAccountId, organizationId }).select('normalBalance').lean()
@@ -340,10 +341,10 @@ const listVendorBills = async (organizationId: string, query: Record<string, unk
   const where: Record<string, any> = { organizationId }
   if (query.status) where.status = String(query.status).toUpperCase()
   if (query.vendorId) where.vendorId = objectId(query.vendorId, 'vendor id')
-  return FinanceVendorBill.find(where).sort({ billDate: -1, createdAt: -1 }).populate('vendorId', 'name category status').populate('lines.accountId', 'code name type').populate('taxCodeId', 'code name rateBasisPoints direction').lean()
+  return FinanceVendorBill.find(where).sort({ billDate: -1, createdAt: -1 }).populate(tenantRefPopulate('vendorId', 'name category status', organizationId)).populate(tenantRefPopulate('lines.accountId', 'code name type', organizationId)).populate(tenantRefPopulate('taxCodeId', 'code name rateBasisPoints direction', organizationId)).lean()
 }
 const getVendorBill = async (organizationId: string, id: string, session?: ClientSession) => {
-  const query = FinanceVendorBill.findOne({ _id: objectId(id, 'vendor bill id'), organizationId }).populate('vendorId', 'name category status').populate('lines.accountId', 'code name type').populate('taxCodeId', 'code name rateBasisPoints direction')
+  const query = FinanceVendorBill.findOne({ _id: objectId(id, 'vendor bill id'), organizationId }).populate(tenantRefPopulate('vendorId', 'name category status', organizationId)).populate(tenantRefPopulate('lines.accountId', 'code name type', organizationId)).populate(tenantRefPopulate('taxCodeId', 'code name rateBasisPoints direction', organizationId))
   if (session) query.session(session)
   const row = await query.lean()
   if (!row) throw new ApiError(httpStatus.NOT_FOUND, 'Vendor bill not found')
@@ -447,7 +448,7 @@ const voidVendorBill = async (organizationId: string, actor: AccountingActor, id
 })
 const payables = async (organizationId: string, query: Record<string, unknown> = {}) => {
   const asOf = query.asOf ? inclusiveEnd(query.asOf, 'as of date') : new Date()
-  const rows: any[] = await FinanceVendorBill.find({ organizationId, status: { $in: ['POSTED', 'PARTIALLY_PAID', 'PAID'] } }).populate('vendorId', 'name category').sort({ dueDate: 1, billDate: 1 }).lean()
+  const rows: any[] = await FinanceVendorBill.find({ organizationId, status: { $in: ['POSTED', 'PARTIALLY_PAID', 'PAID'] } }).populate(tenantRefPopulate('vendorId', 'name category', organizationId)).sort({ dueDate: 1, billDate: 1 }).lean()
   const buckets = { current: 0, days1to30: 0, days31to60: 0, days61to90: 0, days90plus: 0 }
   const data = rows.map((bill) => {
     const outstandingMinor = Math.max(0, Number(bill.totalMinor) - Number(bill.paidMinor))
@@ -504,7 +505,7 @@ const listClientDeposits = (organizationId: string, query: Record<string, unknow
   const where: Record<string, any> = { organizationId }
   if (query.status) where.status = String(query.status).toUpperCase()
   if (query.type) where.type = String(query.type).toUpperCase()
-  return FinanceClientDeposit.find(where).sort({ receivedAt: -1, createdAt: -1 }).populate('bankAccountId', 'name type').lean()
+  return FinanceClientDeposit.find(where).sort({ receivedAt: -1, createdAt: -1 }).populate(tenantRefPopulate('bankAccountId', 'name type', organizationId)).lean()
 }
 const applyClientDeposit = async (organizationId: string, actor: AccountingActor, id: string, input: Record<string, any>) => FinanceAccountingService.accountingTransaction(async (session) => {
   const deposit: any = await withSession(FinanceClientDeposit.findOne({ _id: objectId(id, 'deposit id'), organizationId }), session)
@@ -650,10 +651,10 @@ const listBankStatements = (organizationId: string, query: Record<string, unknow
   const where: Record<string, any> = { organizationId }
   if (query.bankAccountId) where.bankAccountId = objectId(query.bankAccountId, 'bank account id')
   if (query.status) where.status = String(query.status).toUpperCase()
-  return FinanceBankStatement.find(where).sort({ endDate: -1, createdAt: -1 }).populate('bankAccountId', 'name type glAccountId').lean()
+  return FinanceBankStatement.find(where).sort({ endDate: -1, createdAt: -1 }).populate(tenantRefPopulate('bankAccountId', 'name type glAccountId', organizationId)).lean()
 }
 const getBankStatement = async (organizationId: string, id: string, session?: ClientSession) => {
-  const statementQuery = FinanceBankStatement.findOne({ _id: objectId(id, 'statement id'), organizationId }).populate('bankAccountId', 'name type glAccountId')
+  const statementQuery = FinanceBankStatement.findOne({ _id: objectId(id, 'statement id'), organizationId }).populate(tenantRefPopulate('bankAccountId', 'name type glAccountId', organizationId))
   const linesQuery = FinanceBankStatementLine.find({ statementId: objectId(id, 'statement id'), organizationId }).sort({ lineNumber: 1 })
   if (session) { statementQuery.session(session); linesQuery.session(session) }
   const [statement, lines] = await Promise.all([statementQuery.lean(), linesQuery.lean()])

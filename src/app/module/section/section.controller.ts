@@ -7,10 +7,17 @@ import { requireTenant } from '../../middlewares/auth'
 import ApiError from '../../../errors/ApiError'
 import { tenantResourceFilter } from '../../repositories/tenantRepository'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { serializePublicSection } from './section.serializer'
+import { sanitizeStructuredPublicContent } from '../../shared/publicContentSanitize'
+
+const sanitizeSectionPayload = (payload: Record<string, unknown>) => ({
+  ...payload,
+  ...(payload.content !== undefined ? { content: sanitizeStructuredPublicContent(payload.content) } : {}),
+})
 
 const createSection = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
-  const result = await Section.create({ ...req.body, organizationId })
+  const result = await Section.create({ ...sanitizeSectionPayload(req.body), organizationId })
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -21,8 +28,7 @@ const createSection = catchAsync(async (req: Request, res: Response) => {
 })
 
 const getSections = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = req.params.organizationId || requireTenant(req)
-  if (req.params.organizationId) await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  const organizationId = requireTenant(req)
   const result = await Section.find({ organizationId }).sort({ order: 1 })
 
   sendResponse(res, {
@@ -33,10 +39,29 @@ const getSections = catchAsync(async (req: Request, res: Response) => {
   })
 })
 
+const getPublicSections = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = String(req.params.organizationId || '').trim()
+  await TenantAccessService.assertPublicWebsiteAccess(organizationId)
+  const rows = await Section.find({ organizationId, status: true })
+    .sort({ order: 1 })
+    .select('_id name type title subtitle limit order status content')
+    .lean()
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Sections fetched successfully',
+    data: rows.map(serializePublicSection),
+  })
+})
+
 const updateSection = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params
-  const { organizationId: _ignored, ...safeBody } = req.body
-  const result = await Section.findOneAndUpdate(tenantResourceFilter(requireTenant(req), id), safeBody, { new: true })
+  const result = await Section.findOneAndUpdate(
+    tenantResourceFilter(requireTenant(req), id),
+    { $set: sanitizeSectionPayload(req.body) },
+    { new: true, runValidators: true },
+  )
   if (!result) throw new ApiError(404, 'Section not found')
 
   sendResponse(res, {
@@ -63,6 +88,7 @@ const deleteSection = catchAsync(async (req: Request, res: Response) => {
 export const SectionController = {
   createSection,
   getSections,
+  getPublicSections,
   updateSection,
   deleteSection,
 }

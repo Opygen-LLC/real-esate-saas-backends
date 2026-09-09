@@ -42,6 +42,7 @@ const assetVariant = z.object({
   height: z.number().int().positive().optional(),
 }).strict()
 
+const recordId = z.string().trim().regex(/^[0-9a-fA-F]{24}$/, 'Invalid property id')
 const image = z.object({ _id: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), url: z.string().url(), publicId: z.string().max(1200).optional(), caption: z.string().max(200).optional(),
   isFeatured: z.boolean().optional(), order: z.number().int().nonnegative().optional() }).strict()
 const propertyImages = z.array(image).max(20).superRefine((items, ctx) => {
@@ -268,10 +269,11 @@ export const PropertyValidation = {
   presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),
-  updatePropertyZodSchema: z.object({ body: updateBody }),
-  updateStatusZodSchema: z.object({ body: z.object({ status: z.enum(PROPERTY_STATUSES) }).strict() }),
-  updateQuotaAccessZodSchema: z.object({ body: z.object({ active: z.boolean() }).strict() }),
-  reorderImagesZodSchema: z.object({ body: z.object({ images: propertyImages }).strict() }),
+  propertyIdZodSchema: z.object({ params: z.object({ id: recordId }).strict() }),
+  updatePropertyZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: updateBody }),
+  updateStatusZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: z.object({ status: z.enum(PROPERTY_STATUSES) }).strict() }),
+  updateQuotaAccessZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: z.object({ active: z.boolean() }).strict() }),
+  reorderImagesZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: z.object({ images: propertyImages }).strict() }),
   importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional(), uploadSessionId: z.string().uuid().optional() }).strict() }),
   draftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),
   cleanupDraftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),

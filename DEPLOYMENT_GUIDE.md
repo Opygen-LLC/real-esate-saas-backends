@@ -75,19 +75,22 @@ ALLOWED_ORIGINS=https://realestate.opygen.com
 # Next.js cache revalidation. Configure the exact same server-only secret in
 # the frontend/Vercel project. Production startup fails if it is missing or short.
 NEXT_REVALIDATE_URL=https://realestate.opygen.com/api/revalidate
-NEXT_REVALIDATE_SECRET=replace_with_a_random_shared_secret_at_least_32_chars
+# Generate NEXT_REVALIDATE_SECRET independently in the Security Keys section below.
 
 # Modes
-SMS_DEV_MODE=true
-EMAIL_DEV_MODE=true
-REDIS_ENABLED=false
+SMS_DEV_MODE=false
+EMAIL_DEV_MODE=false
+REDIS_ENABLED=true
 
 # Security Keys (must be 32+ characters)
-JWT_SECRET=real_estate_saas_jwt_secret_key_2026_super_secure_production_key_32bytes
-JWT_REFRESH_SECRET=real_estate_saas_jwt_refresh_secret_key_2026_super_secure_production_key_32bytes
-OTP_PEPPER=real_estate_saas_otp_pepper_super_secure_key_32bytes_min
-CRON_SIGNING_SECRET=real_estate_saas_cron_signing_secret_super_secure_32bytes
-DATA_ENCRYPTION_KEY=real_estate_saas_data_encryption_key_super_secure_32bytes
+
+> Generate each secret independently (for example, `openssl rand -base64 48`). Never copy example values from documentation into production. The server rejects known placeholder/default patterns and rejects reuse across JWT, OTP, cron, encryption, and revalidation secrets.
+JWT_SECRET=<generate-with-openssl-rand-base64-48>
+JWT_REFRESH_SECRET=<generate-a-different-value-with-openssl-rand-base64-48>
+OTP_PEPPER=<generate-a-different-value-with-openssl-rand-base64-48>
+CRON_SIGNING_SECRET=<generate-a-different-value-with-openssl-rand-base64-48>
+DATA_ENCRYPTION_KEY=<generate-a-different-value-with-openssl-rand-base64-48>
+NEXT_REVALIDATE_SECRET=<generate-a-different-value-with-openssl-rand-base64-48>
 
 # GCP Bucket Credentials
 PROJECTS_ID=opy-realestate-505614
