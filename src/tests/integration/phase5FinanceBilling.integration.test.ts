@@ -7,6 +7,7 @@ let FinanceService: any
 let FinanceInvoice: any
 let FinanceTransaction: any
 let AuditEvent: any
+let OperationsJob: any
 let User: any
 let Organization: any
 let Property: any
@@ -38,6 +39,7 @@ suite('phase 5 finance billing lifecycle', () => {
     ;({ FinanceService } = await import('../../app/module/finance/finance.service'))
     ;({ FinanceInvoice, FinanceTransaction } = await import('../../app/module/finance/finance.model'))
     ;({ AuditEvent } = await import('../../app/module/audit/audit.model'))
+    ;({ OperationsJob } = await import('../../app/module/operationsQueue/operationsJob.model'))
     ;({ User } = await import('../../app/module/user/user.model'))
     ;({ Organization } = await import('../../app/module/organization/organization.model'))
     ;({ Property } = await import('../../app/module/property/property.model'))
@@ -78,6 +80,21 @@ suite('phase 5 finance billing lifecycle', () => {
     expect(auditActions).toContain('finance.invoice.created')
     expect(auditActions).toContain('finance.invoice.updated')
     expect(auditActions).toContain('finance.invoice.archived')
+  })
+
+  it('replays invoice creation idempotently without duplicating the invoice or audit event', async () => {
+    const idempotencyKey = 'phase5-create-invoice-idempotency-001'
+    const payload = invoicePayload('draft')
+    const first = await FinanceService.createInvoice(organizationId, actor, payload, { idempotencyKey })
+    const replay = await FinanceService.createInvoice(organizationId, actor, payload, { idempotencyKey })
+
+    expect(String(replay._id)).toBe(String(first._id))
+    expect(await FinanceInvoice.countDocuments({ organizationId, creationIdempotencyKey: idempotencyKey })).toBe(1)
+    expect(await AuditEvent.countDocuments({ organizationId, entityId: String(first._id), action: 'finance.invoice.created' })).toBe(1)
+    expect(await OperationsJob.countDocuments({ organizationId, type: 'domain_event_publish', 'payload.event.aggregateId': String(first._id), 'payload.event.eventType': 'finance.invoice.created' })).toBe(1)
+
+    await expect(FinanceService.createInvoice(organizationId, actor, { ...payload, notes: 'Different request' }, { idempotencyKey }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'INVOICE_IDEMPOTENCY_KEY_REUSED' })
   })
 
   it('voids an unpaid sent invoice but refuses to void a draft', async () => {

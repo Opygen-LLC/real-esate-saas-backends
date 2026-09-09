@@ -3,7 +3,13 @@ import { moneyToMinorUnits } from './finance.money'
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid record id')
 const optionalObjectId = objectId.optional().or(z.literal(''))
+const nullableObjectId = z.union([objectId, z.literal(''), z.null()])
+const createNullableObjectId = nullableObjectId.optional().transform((value) => value === undefined || value === '' ? null : value)
+const updateNullableObjectId = nullableObjectId.optional().transform((value) => value === '' ? null : value)
 const dateInput = z.string().refine((value) => !Number.isNaN(new Date(value).getTime()), 'Invalid date')
+const nullableDateInput = z.union([dateInput, z.literal(''), z.null()])
+const createNullableDateInput = nullableDateInput.optional().transform((value) => value === undefined || value === '' ? null : value)
+const updateNullableDateInput = nullableDateInput.optional().transform((value) => value === '' ? null : value)
 const paymentMethod = z.enum(['cash', 'bank', 'bkash', 'nagad', 'card', 'cheque', 'other'])
 const money = z.coerce.number().finite('Enter a valid amount').positive('Amount must be greater than zero').max(1_000_000_000_000)
 const category = z.string().trim().min(2).max(100)
@@ -68,14 +74,14 @@ const createInvoice = z.object({ body: z.object({
   clientPhone: z.string().trim().max(40).optional(),
   clientEmail: z.string().email().max(200).optional().or(z.literal('')),
   issueDate: dateInput,
-  dueDate: dateInput.optional().or(z.literal('')),
+  dueDate: createNullableDateInput,
   lineItems: z.array(invoiceLine).min(1).max(100),
   discount: z.coerce.number().finite('Discount must be a valid number').nonnegative('Discount cannot be negative').max(1_000_000_000_000).optional(),
-  taxCodeId: optionalObjectId,
+  taxCodeId: createNullableObjectId,
   status: z.enum(['draft', 'sent']).optional(),
   notes: z.string().trim().max(3000).optional(),
-  propertyId: optionalObjectId,
-  leadId: optionalObjectId,
+  propertyId: createNullableObjectId,
+  leadId: createNullableObjectId,
 }).strict().superRefine((value, ctx) => {
   if (value.dueDate && new Date(value.dueDate) < new Date(value.issueDate)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dueDate'], message: 'Due date cannot be before the issue date' })
@@ -96,14 +102,14 @@ const updateInvoice = z.object({ body: z.object({
   clientPhone: z.string().trim().max(40).optional(),
   clientEmail: z.string().email().max(200).optional().or(z.literal('')),
   issueDate: dateInput.optional(),
-  dueDate: dateInput.optional().or(z.literal('')),
+  dueDate: updateNullableDateInput,
   lineItems: z.array(invoiceLine).min(1).max(100).optional(),
   discount: z.coerce.number().finite('Discount must be a valid number').nonnegative('Discount cannot be negative').max(1_000_000_000_000).optional(),
-  taxCodeId: optionalObjectId,
+  taxCodeId: updateNullableObjectId,
   status: z.enum(['draft', 'sent']).optional(),
   notes: z.string().trim().max(3000).optional(),
-  propertyId: optionalObjectId,
-  leadId: optionalObjectId,
+  propertyId: updateNullableObjectId,
+  leadId: updateNullableObjectId,
 }).strict().refine((value) => Object.keys(value).length > 0, 'At least one field is required') })
 
 const recordInvoicePayment = z.object({ body: z.object({

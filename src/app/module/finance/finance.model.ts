@@ -131,12 +131,18 @@ const invoiceSchema = new Schema<IFinanceInvoice>(
     payments: { type: [invoicePaymentSchema], default: [] },
     accountingVersion: { type: Number, default: 0, min: 0 },
     revenueJournalId: { type: Schema.Types.ObjectId, ref: 'FinanceJournalEntry', default: null, index: true },
+    creationIdempotencyKey: { type: String, trim: true, maxlength: 120, select: false },
+    creationRequestHash: { type: String, trim: true, maxlength: 64, select: false },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true },
 )
 invoiceSchema.index({ organizationId: 1, invoiceNumber: 1 }, { unique: true })
+invoiceSchema.index(
+  { organizationId: 1, creationIdempotencyKey: 1 },
+  { unique: true, name: 'finance_invoice_tenant_creation_idempotency_unique', partialFilterExpression: { creationIdempotencyKey: { $type: 'string' } } },
+)
 invoiceSchema.index({ organizationId: 1, status: 1, dueDate: 1 })
 invoiceSchema.index({ organizationId: 1, issueDate: -1 })
 invoiceSchema.index({ organizationId: 1, archivedAt: 1, createdAt: -1 })

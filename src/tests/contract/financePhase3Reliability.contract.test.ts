@@ -44,6 +44,24 @@ describe('Finance Phase 3 reliability contract', () => {
     expect(verifier).toContain('ACCOUNTING_EQUATION_MISMATCH')
   })
 
+  it('invoice creation is idempotent, audits inside the transaction, and production health checks use readiness', () => {
+    const service = read('src/app/module/finance/finance.service.ts')
+    const model = read('src/app/module/finance/finance.model.ts')
+    const controller = read('src/app/module/finance/finance.controller.ts')
+    const financeContract = read('src/app/module/finance/finance.contract.ts')
+    const dockerfile = read('Dockerfile')
+    const compose = read('docker-compose.production.yml')
+    expect(controller).toContain("req.headers['idempotency-key']")
+    expect(model).toContain('finance_invoice_tenant_creation_idempotency_unique')
+    expect(service).toContain('creationRequestHash')
+    expect(service).toContain('invoiceAudit(')
+    expect(service).toContain('TransactionalOutbox.emit(eventInput, session)')
+    expect(service).toContain('FINANCE_ERROR_CODES.invoiceAccountMappingRequired')
+    expect(financeContract).toContain("invoiceAccountMappingRequired: 'FINANCE_ACCOUNT_MAPPING_REQUIRED'")
+    expect(dockerfile).toContain('http://127.0.0.1:5000/ready')
+    expect(compose).toContain('http://127.0.0.1:5000/ready')
+  })
+
   it('package gates keep database integration and production verification explicit', () => {
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
     expect(pkg.scripts['test:finance-phase3:contract']).toBeTruthy()

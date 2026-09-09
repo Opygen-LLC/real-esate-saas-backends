@@ -74,7 +74,7 @@ export interface IFinanceInvoice {
   clientEmail?: string
   issuerSnapshot?: IFinanceIssuerSnapshot
   issueDate: Date
-  dueDate?: Date
+  dueDate?: Date | null
   lineItems: IFinanceInvoiceLineItem[]
   subtotal: number
   discount: number
@@ -91,14 +91,16 @@ export interface IFinanceInvoice {
   archivedBy?: mongoose.Types.ObjectId | string
   archiveReason?: string
   notes?: string
-  propertyId?: mongoose.Types.ObjectId | string
-  leadId?: mongoose.Types.ObjectId | string
+  propertyId?: mongoose.Types.ObjectId | string | null
+  leadId?: mongoose.Types.ObjectId | string | null
   /** Optional CRM/customer-finance linkage for system-generated booking invoices. */
   contactId?: mongoose.Types.ObjectId | string
   bookingId?: mongoose.Types.ObjectId | string
   payments: IFinanceInvoicePayment[]
   accountingVersion?: number
   revenueJournalId?: mongoose.Types.ObjectId | string | null
+  creationIdempotencyKey?: string
+  creationRequestHash?: string
   createdBy: mongoose.Types.ObjectId | string
   updatedBy?: mongoose.Types.ObjectId | string
   createdAt?: Date

@@ -22,6 +22,8 @@ export const FINANCE_ERROR_CODES = {
   unbalanced: 'ACCOUNTING_UNBALANCED',
   invalidAccountMapping: 'INVALID_ACCOUNT_MAPPING',
   duplicatePosting: 'DUPLICATE_ACCOUNTING_POSTING',
+  invoiceAccountMappingRequired: 'FINANCE_ACCOUNT_MAPPING_REQUIRED',
+  invoiceIdempotencyConflict: 'INVOICE_IDEMPOTENCY_KEY_REUSED',
 } as const
 
 export type FinanceErrorCode = typeof FINANCE_ERROR_CODES[keyof typeof FINANCE_ERROR_CODES]

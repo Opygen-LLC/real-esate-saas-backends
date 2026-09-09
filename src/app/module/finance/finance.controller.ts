@@ -65,7 +65,8 @@ const listInvoices = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Invoices fetched successfully', meta: result.meta, data: result.data })
 })
 const createInvoice = catchAsync(async (req: Request, res: Response) => {
-  const data = await FinanceService.createInvoice(requireTenant(req), financeActor(req), req.body)
+  const idempotencyKey = typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'].trim() : ''
+  const data = await FinanceService.createInvoice(requireTenant(req), financeActor(req), req.body, { idempotencyKey: idempotencyKey || undefined })
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Invoice created successfully', data })
 })
 const getInvoice = catchAsync(async (req: Request, res: Response) => {

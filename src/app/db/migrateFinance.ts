@@ -14,6 +14,7 @@ async function run() {
     ]],
     ['financeinvoices', [
       [{ organizationId: 1, invoiceNumber: 1 }, { name: 'tenant_invoice_number', unique: true }],
+      [{ organizationId: 1, creationIdempotencyKey: 1 }, { name: 'finance_invoice_tenant_creation_idempotency_unique', unique: true, partialFilterExpression: { creationIdempotencyKey: { $type: 'string' } } }],
       [{ organizationId: 1, status: 1, dueDate: 1 }, { name: 'tenant_status_due' }],
       [{ organizationId: 1, issueDate: -1 }, { name: 'tenant_issue_date' }],
     ]],

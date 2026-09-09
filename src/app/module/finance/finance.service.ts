@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession } from 'mongoose'
 import ApiError from '../../../errors/ApiError'
@@ -10,6 +10,7 @@ import { requiredTransaction } from '../../db/requiredTransaction'
 import { assertRemovalActor, assertFinanceRemovalOwner, assertManualTransaction, assertTransactionRemovable, assertInvoiceRemovable, assertCommissionRemovable } from './financeRemovalPolicy'
 import { writeAudit } from '../audit/audit.service'
 import { DomainEventService } from '../domainEvent/domainEvent.service'
+import { TransactionalOutbox } from '../domainEvent/transactionalOutbox.service'
 import { Organization } from '../organization/organization.model'
 import { Property } from '../property/property.model'
 import { User } from '../user/user.model'
@@ -39,6 +40,7 @@ import { FinanceBillingProfile } from './financeBillingProfile.model'
 import type { IFinanceBillingProfile, IFinanceIssuerSnapshot } from './financeBillingProfile.interface'
 import { syncBookingPaymentProjection } from '../customerFinance/customerFinanceProjection.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
+import { FINANCE_ERROR_CODES } from './finance.contract'
 
 const cleanOptionalId = (value: unknown): string | undefined => {
   if (typeof value !== 'string' || !value.trim()) return undefined
@@ -76,7 +78,39 @@ const dateCondition = (startDate?: Date, endDate?: Date) => ({
   ...(endDate ? { $lte: endDate } : {}),
 })
 
-const makeNumber = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`
+const makeNumber = (prefix: string) => `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(8).toString('hex').toUpperCase()}`
+
+const normalizeInvoiceIdempotencyKey = (value: unknown) => {
+  const key = typeof value === 'string' ? value.trim() : ''
+  if (!key) return undefined
+  if (key.length < 8 || key.length > 120) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Idempotency-Key must be between 8 and 120 characters', '', 'INVALID_IDEMPOTENCY_KEY')
+  }
+  return key
+}
+
+const invoiceRequestHash = (payload: Partial<IFinanceInvoice>) => createHash('sha256').update(JSON.stringify({
+  clientName: asString(payload.clientName),
+  clientPhone: asString(payload.clientPhone),
+  clientEmail: asString(payload.clientEmail).toLowerCase(),
+  issueDate: payload.issueDate ? asDate(payload.issueDate).toISOString() : '',
+  dueDate: payload.dueDate ? asDate(payload.dueDate).toISOString() : null,
+  lineItems: (payload.lineItems || []).map((item) => ({
+    description: asString(item.description),
+    quantity: Number(item.quantity),
+    unitPrice: Number(item.unitPrice),
+  })),
+  discount: Number(payload.discount || 0),
+  taxCodeId: payload.taxCodeId ? String(payload.taxCodeId) : null,
+  status: payload.status || 'draft',
+  notes: asString(payload.notes),
+  propertyId: payload.propertyId ? String(payload.propertyId) : null,
+  leadId: payload.leadId ? String(payload.leadId) : null,
+})).digest('hex')
+
+const duplicateKeyIncludes = (error: any, field: string) => Number(error?.code) === 11000 && Boolean(
+  error?.keyPattern?.[field] || Object.prototype.hasOwnProperty.call(error?.keyValue || {}, field),
+)
 const actorObjectId = (actorId: string) => {
   if (!mongoose.isValidObjectId(actorId)) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid authenticated user')
   return new mongoose.Types.ObjectId(actorId)
@@ -444,6 +478,40 @@ const applyInvoiceTax = async (organizationId: string, amounts: ReturnType<typeo
   }
 }
 
+const invoiceAccountingConfigurationError = (error: unknown): never => {
+  if (error instanceof ApiError && [
+    FINANCE_ERROR_CODES.invalidAccountMapping,
+    FINANCE_ERROR_CODES.notInitialized,
+    FINANCE_ERROR_CODES.migrationRequired,
+  ].includes(error.code as any)) {
+    throw new ApiError(
+      httpStatus.CONFLICT,
+      'This invoice can be saved as a draft, but it cannot be sent until Advanced Accounting account mappings are complete.',
+      '',
+      FINANCE_ERROR_CODES.invoiceAccountMappingRequired,
+      { causeCode: error.code || null },
+    )
+  }
+  throw error
+}
+
+const postInvoiceRevenueWithContract = async (organizationId: string, actor: FinanceActorContext, invoice: any, version: number, session: ClientSession) => {
+  try {
+    return await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
+  } catch (error) {
+    return invoiceAccountingConfigurationError(error)
+  }
+}
+
+const taxAccountingUnavailable = () => new ApiError(
+  httpStatus.CONFLICT,
+  'Tax/VAT cannot be applied until Advanced Accounting is initialized and mapped. Choose No tax or finish accounting setup.',
+  '',
+  FINANCE_ERROR_CODES.invoiceAccountMappingRequired,
+  { required: ['accountsReceivable', 'commissionRevenue', 'outputTax'] },
+  { taxCodeId: ['Tax/VAT requires initialized Advanced Accounting. Choose No tax or finish accounting setup.'] },
+)
+
 const resolveFinanceBankAccountId = async (organizationId: string, bankAccountId: unknown, session?: ClientSession) => {
   if (!bankAccountId) return undefined
   if (!mongoose.isValidObjectId(String(bankAccountId))) throw financeFieldError('bankAccountId', 'Select a valid finance bank account')
@@ -630,11 +698,14 @@ const removeBillingProfile = async (organizationId: string, actor: FinanceActorC
   return getBillingProfile(organizationId)
 }
 
-const propertyAuditMetadata = (property: any) => property ? {
-  propertyId: String(property._id),
-  propertyTitle: property.title || '',
-  propertyReference: property.slug || '',
-} : { propertyId: null }
+const propertyAuditMetadata = (property: any) => {
+  const propertyId = property?._id || property
+  return propertyId ? {
+    propertyId: String(propertyId),
+    propertyTitle: property?.title || '',
+    propertyReference: property?.slug || '',
+  } : { propertyId: null }
+}
 
 const createCustomerFinanceBookingInvoice = async (
   organizationId: string,
@@ -708,51 +779,114 @@ const createCustomerFinanceBookingInvoice = async (
   return invoice
 }
 
-const createInvoice = async (organizationId: string, actor: FinanceActorContext, payload: Partial<IFinanceInvoice>) => {
+const createInvoice = async (
+  organizationId: string,
+  actor: FinanceActorContext,
+  payload: Partial<IFinanceInvoice>,
+  options: { idempotencyKey?: string } = {},
+) => {
+  const idempotencyKey = normalizeInvoiceIdempotencyKey(options.idempotencyKey)
+  const requestHash = idempotencyKey ? invoiceRequestHash(payload) : undefined
+
+  const replayExisting = async () => {
+    if (!idempotencyKey) return null
+    const existing: any = await FinanceInvoice.findOne({ organizationId, creationIdempotencyKey: idempotencyKey })
+      .select('+creationRequestHash')
+      .lean()
+    if (!existing) return null
+    if (existing.creationRequestHash !== requestHash) {
+      throw new ApiError(
+        httpStatus.CONFLICT,
+        'This invoice idempotency key was already used for a different invoice request.',
+        '',
+        FINANCE_ERROR_CODES.invoiceIdempotencyConflict,
+      )
+    }
+    return getInvoiceById(organizationId, String(existing._id))
+  }
+
+  const replay = await replayExisting()
+  if (replay) return replay
+
   const baseAmounts = calculateInvoiceAmounts(organizationId, payload.lineItems || [], Number(payload.discount || 0))
   const issueDate = asDate(payload.issueDate)
-  const dueDate = payload.dueDate ? asDate(payload.dueDate) : undefined
+  const dueDate = payload.dueDate ? asDate(payload.dueDate) : null
   validateInvoiceDates(issueDate, dueDate)
   const property = await resolveInvoiceProperty(organizationId, payload.propertyId)
-  if (payload.leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, payload.leadId)
+  const leadId = cleanOptionalId(payload.leadId)
+  if (leadId) await TenantReferenceService.assertLeadBelongsToOrganization(organizationId, leadId)
 
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
-    const issuerSnapshot = await currentIssuerSnapshot(organizationId, session)
-    if (payload.taxCodeId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Tax/VAT accounting requires Advanced Accounting')
-    const amounts = await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId, session)
-    const rows = await FinanceInvoice.create([{
-      ...payload,
-      ...amounts,
-      issuerSnapshot,
-      propertyId: property?._id,
-      leadId: cleanOptionalId(payload.leadId),
-      dueDate,
-      issueDate,
-      invoiceNumber: makeNumber('INV'),
-      paidAmount: 0,
-      payments: [],
-      currency: 'BDT',
-      status: payload.status || 'draft',
-      organizationId,
-      createdBy: actorObjectId(invoiceActorId(actor)),
-    }], session ? { session } : undefined)
-    const invoice: any = rows[0]
-    if (accountingReady && invoice.status === 'sent' && Number(invoice.total || 0) > 0) {
-      const version = 1
-      const journal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), invoice, version, session)
-      if (journal?._id) {
-        invoice.accountingVersion = version
-        invoice.revenueJournalId = journal._id
-        await invoice.save(session ? { session } : undefined)
+  let result: any
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      result = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+        const issuerSnapshot = await currentIssuerSnapshot(organizationId, session)
+        if (payload.taxCodeId && !accountingReady) throw taxAccountingUnavailable()
+        const amounts = await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId, session)
+        const rows = await FinanceInvoice.create([{
+          clientName: asString(payload.clientName),
+          clientPhone: asString(payload.clientPhone),
+          clientEmail: asString(payload.clientEmail).toLowerCase(),
+          ...amounts,
+          issuerSnapshot,
+          propertyId: property?._id || null,
+          leadId: leadId || null,
+          dueDate,
+          issueDate,
+          invoiceNumber: makeNumber('INV'),
+          paidAmount: 0,
+          payments: [],
+          currency: 'BDT',
+          status: payload.status || 'draft',
+          notes: asString(payload.notes),
+          organizationId,
+          createdBy: actorObjectId(invoiceActorId(actor)),
+          ...(idempotencyKey ? { creationIdempotencyKey: idempotencyKey, creationRequestHash: requestHash } : {}),
+        }], { session })
+        const invoice: any = rows[0]
+        if (accountingReady && invoice.status === 'sent' && Number(invoice.total || 0) > 0) {
+          const version = 1
+          const journal: any = await postInvoiceRevenueWithContract(organizationId, actor, invoice, version, session)
+          if (journal?._id) {
+            invoice.accountingVersion = version
+            invoice.revenueJournalId = journal._id
+            await invoice.save({ session })
+          }
+        }
+
+        await invoiceAudit(
+          organizationId,
+          actor,
+          'finance.invoice.created',
+          invoice._id.toString(),
+          'Invoice created',
+          { invoiceNumber: invoice.invoiceNumber, status: invoice.status, total: invoice.total, currency: invoice.currency, ...propertyAuditMetadata(property) },
+          session,
+        )
+        const eventInput = {
+          organizationId,
+          actorId: actor.id,
+          aggregateType: 'finance_invoice',
+          aggregateId: invoice._id.toString(),
+          eventType: 'finance.invoice.created',
+          requestId: actor.requestId,
+          payload: { summary: `Invoice ${invoice.invoiceNumber} created for ${invoice.clientName}` },
+        }
+        await TransactionalOutbox.emit(eventInput, session)
+        return invoice
+      })
+      break
+    } catch (error: any) {
+      if (idempotencyKey && duplicateKeyIncludes(error, 'creationIdempotencyKey')) {
+        const concurrentReplay = await replayExisting()
+        if (concurrentReplay) return concurrentReplay
       }
+      if (duplicateKeyIncludes(error, 'invoiceNumber') && attempt < 2) continue
+      throw error
     }
-    return invoice
-  })
+  }
 
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', result._id.toString(), 'finance.invoice.created', `Invoice ${result.invoiceNumber} created for ${result.clientName}`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.created', result._id.toString(), 'Invoice created', { invoiceNumber: result.invoiceNumber, status: result.status, total: result.total, currency: result.currency, ...propertyAuditMetadata(property) }),
-  ])
+  if (!result) throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Invoice creation did not complete', '', 'INVOICE_CREATE_INCOMPLETE')
   emitProductionEvent('invoice_created', { organizationId, invoiceId: result._id.toString(), status: result.status, propertyLinked: Boolean(property) })
   if (property) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: result._id.toString(), propertyId: String(property._id), action: 'created' })
   return invoicePopulate(FinanceInvoice.findOne({ _id: result._id, organizationId }), organizationId).lean()
@@ -787,7 +921,7 @@ const paidInvoiceMetadataFields = new Set(['clientPhone', 'clientEmail', 'notes'
 
 const updateInvoice = async (organizationId: string, actor: FinanceActorContext, id: string, payload: Partial<IFinanceInvoice>) => {
   let linkedProperty: any = undefined
-  const result: any = await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
+  await withOptionalAutomaticAccounting(organizationId, async (session, accountingReady) => {
     const existing: any = await querySession(FinanceInvoice.findOne({ _id: id, organizationId, archivedAt: null }), session)
     if (!existing) throw new ApiError(httpStatus.NOT_FOUND, 'Invoice not found')
     if (existing.bookingId) throw new ApiError(httpStatus.CONFLICT, 'Customer Finance booking invoices are system-managed and cannot be edited from Finance')
@@ -803,7 +937,7 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
 
     const update: any = { ...payload, updatedBy: actorObjectId(actor.id) }
     const amountFieldsChanged = payload.lineItems !== undefined || payload.discount !== undefined || payload.taxCodeId !== undefined
-    if (payload.taxCodeId && !accountingReady) throw new ApiError(httpStatus.FORBIDDEN, 'Tax/VAT accounting requires Advanced Accounting')
+    if (payload.taxCodeId && !accountingReady) throw taxAccountingUnavailable()
     if (amountFieldsChanged) {
       const baseAmounts = calculateInvoiceAmounts(organizationId, payload.lineItems || existing.lineItems, Number(payload.discount ?? existing.discount))
       Object.assign(update, await applyInvoiceTax(organizationId, baseAmounts, payload.taxCodeId !== undefined ? payload.taxCodeId : existing.taxCodeId, session))
@@ -842,22 +976,36 @@ const updateInvoice = async (organizationId: string, actor: FinanceActorContext,
       && (!existing.revenueJournalId || accountingChanged)
     if (needsRevenueJournal) {
       const version = Number(existing.accountingVersion || 0) + 1
-      const journal: any = await FinanceGlIntegrationService.postInvoiceRevenue(organizationId, financeAccountingActor(actor), updated, version, session)
+      const journal: any = await postInvoiceRevenueWithContract(organizationId, actor, updated, version, session)
       if (journal?._id) {
         updated.accountingVersion = version
         updated.revenueJournalId = journal._id
         await updated.save(session ? { session } : undefined)
       }
     }
+    const auditProperty = 'propertyId' in payload ? linkedProperty : updated.propertyId
+    await invoiceAudit(
+      organizationId,
+      actor,
+      'finance.invoice.updated',
+      id,
+      'Invoice updated',
+      { invoiceNumber: updated.invoiceNumber || id, fields: Object.keys(payload), financialFieldsChanged: amountFieldsChanged, ...propertyAuditMetadata(auditProperty) },
+      session,
+    )
+    await TransactionalOutbox.emit({
+      organizationId,
+      actorId: actor.id,
+      aggregateType: 'finance_invoice',
+      aggregateId: id,
+      eventType: 'finance.invoice.updated',
+      requestId: actor.requestId,
+      payload: { summary: `Invoice ${updated.invoiceNumber || id} updated` },
+    }, session)
     return updated
   })
 
   const populated: any = await getInvoiceById(organizationId, id)
-  const auditProperty = 'propertyId' in payload ? linkedProperty : populated?.propertyId
-  await Promise.all([
-    emitFinanceEvent(organizationId, actor.id, 'finance_invoice', id, 'finance.invoice.updated', `Invoice ${result?.invoiceNumber || id} updated`),
-    invoiceAudit(organizationId, actor, 'finance.invoice.updated', id, 'Invoice updated', { invoiceNumber: result?.invoiceNumber || id, fields: Object.keys(payload), financialFieldsChanged: payload.lineItems !== undefined || payload.discount !== undefined, ...propertyAuditMetadata(auditProperty) }),
-  ])
   if ('propertyId' in payload && linkedProperty) emitProductionEvent('invoice_property_linked', { organizationId, invoiceId: id, propertyId: String(linkedProperty._id), action: 'updated' })
   return populated
 }
