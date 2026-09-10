@@ -61,6 +61,14 @@ export const csrfProtection = (req: Request, _res: Response, next: NextFunction)
     return next(new ApiError(403, 'Origin is not allowed'))
   }
 
+  const referer = req.get('referer')
+  if (!origin && referer && !isPublicCorsRequest(req)) {
+    try {
+      if (!isTrustedApplicationOrigin(new URL(referer).origin)) return next(new ApiError(403, 'Referer is not allowed'))
+    } catch {
+      return next(new ApiError(403, 'Referer is not allowed'))
+    }
+  }
 
   if (SAFE_METHODS.has(req.method.toUpperCase()) || isCsrfExemptRequest(req)) return next()
 
@@ -68,6 +76,10 @@ export const csrfProtection = (req: Request, _res: Response, next: NextFunction)
     req.cookies?.[config.security.access_cookie_name] || req.cookies?.[config.security.refresh_cookie_name],
   )
   if (!cookieAuth) return next()
+
+  if (req.get('sec-fetch-site') === 'cross-site') {
+    return next(new ApiError(403, 'Cross-site authenticated request is not allowed'))
+  }
 
   const cookieToken = req.cookies?.[config.security.csrf_cookie_name]
   const headerToken = req.get('x-csrf-token')

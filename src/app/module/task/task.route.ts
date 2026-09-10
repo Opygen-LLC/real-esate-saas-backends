@@ -16,6 +16,7 @@ router.get(
 router.get(
   '/',
   authMiddlewares.requirePermission('tasks.read'),
+  validateRequest(TaskValidation.listTasksZodSchema),
   TaskController.getAllTasks
 )
 
@@ -36,12 +37,14 @@ router.patch(
 router.delete(
   '/:id',
   authMiddlewares.requirePermission('tasks.write'),
+  validateRequest(TaskValidation.taskIdZodSchema),
   TaskController.deleteTask
 )
 
 router.patch(
   '/:id/approve',
   authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin'),
+  validateRequest(TaskValidation.approveTaskZodSchema),
   TaskController.approveTask
 )
 

@@ -263,10 +263,12 @@ const updateBody = z.object({ ...optionalFields, propertyDraftSessionId: z.strin
 
 export const PropertyValidation = {
   presignDocumentZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid(), category: z.enum(PROPERTY_DOCUMENT_TYPES), originalName: z.string().trim().min(1).max(255), mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']), size: z.number().int().positive().max(20 * 1024 * 1024) }).strict() }),
-  completeDocumentZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }), body: z.object({ uploadSessionId: z.string().uuid() }).strict() }),
-  documentAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
-  deleteDraftDocumentZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
-  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().min(1).max(255), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
+  completeDocumentZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict(), body: z.object({ uploadSessionId: z.string().uuid() }).strict() }),
+  documentAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
+  imageAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
+  deleteDraftDocumentZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
+  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().trim().min(1).max(255).refine((value) => !/[\/\\\u0000]/.test(value), 'Invalid filename'), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
+  uploadImageZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),
   propertyIdZodSchema: z.object({ params: z.object({ id: recordId }).strict() }),
@@ -275,8 +277,8 @@ export const PropertyValidation = {
   updateQuotaAccessZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: z.object({ active: z.boolean() }).strict() }),
   reorderImagesZodSchema: z.object({ params: z.object({ id: recordId }).strict(), body: z.object({ images: propertyImages }).strict() }),
   importImageUrlZodSchema: z.object({ body: z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith('https://'), 'Image URL must use HTTPS'), altText: z.string().trim().max(200).optional(), uploadSessionId: z.string().uuid().optional() }).strict() }),
-  draftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),
-  cleanupDraftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }) }),
-  deleteDraftAssetZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }) }),
+  draftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }).strict() }),
+  cleanupDraftSessionZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid() }).strict() }),
+  deleteDraftAssetZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
   confirmImportZodSchema: z.object({ body: z.object({ importSessionId: z.string().uuid() }).strict() }),
 }

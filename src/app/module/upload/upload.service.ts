@@ -16,7 +16,7 @@ const MAX_DIMENSION = 1920
 const sanitizeImage = async (buffer: Buffer, mimetype: string): Promise<{ buffer: Buffer; contentType: string; extension: string }> => {
   const normalizedType = mimetype.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimetype.toLowerCase()
   try {
-    const image = sharp(buffer, { failOn: 'error' })
+    const image = sharp(buffer, { failOn: 'error', limitInputPixels: 40_000_000 })
       .rotate()
       .resize(MAX_DIMENSION, MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
 

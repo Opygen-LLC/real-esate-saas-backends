@@ -13,7 +13,10 @@ const validateRequest =
       })
       if (parsed.body !== undefined) req.body = parsed.body
       if (parsed.query && typeof parsed.query === 'object') req.query = parsed.query
-      if (parsed.params && typeof parsed.params === 'object') Object.assign(req.params, parsed.params)
+      if (parsed.params && typeof parsed.params === 'object') {
+        for (const key of Object.keys(req.params)) delete req.params[key]
+        Object.assign(req.params, parsed.params)
+      }
       if (parsed.cookies && typeof parsed.cookies === 'object') req.cookies = parsed.cookies
       return next()
     } catch (error) {

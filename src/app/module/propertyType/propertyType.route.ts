@@ -1,10 +1,12 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { PropertyTypeController } from './propertyType.controller'
+import validateRequest from '../../middlewares/validateRequest'
+import { PropertyTypeValidation } from './propertyType.validation'
 
 const router = express.Router()
 
-router.get('/public/:organizationId', PropertyTypeController.getAllPropertyTypes)
+router.get('/public/:organizationId', validateRequest(PropertyTypeValidation.publicList), PropertyTypeController.getAllPropertyTypes)
 
 router.get(
   '/',
@@ -15,12 +17,14 @@ router.get(
 router.post(
   '/',
   authMiddlewares.requirePermission('organization.manage'),
+  validateRequest(PropertyTypeValidation.create),
   PropertyTypeController.createPropertyType
 )
 
 router.delete(
   '/:id',
   authMiddlewares.requirePermission('organization.manage'),
+  validateRequest(PropertyTypeValidation.id),
   PropertyTypeController.deletePropertyType
 )
 

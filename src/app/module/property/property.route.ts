@@ -8,6 +8,7 @@ import { propertyImportUpload } from './propertyImport.middleware'
 import { propertyImageUpload } from './propertyMedia.middleware'
 import { PropertyOwnershipController } from './propertyOwnership.controller'
 import { PropertyOwnershipValidation } from './propertyOwnership.validation'
+import { validateUploadedFiles } from '../../middlewares/requestInputGuard'
 
 const router = express.Router()
 
@@ -34,14 +35,14 @@ router.delete('/documents/session/:sessionId/:assetId', authMiddlewares.requireP
 
 // Property media uses property permissions while reusing the hardened storage pipeline.
 router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
-router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, propertyImageUpload, PropertyController.uploadPropertyImage)
+router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, propertyImageUpload, validateUploadedFiles, validateRequest(PropertyValidation.uploadImageZodSchema), PropertyController.uploadPropertyImage)
 router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
 router.post('/assets/import-url', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, validateRequest(PropertyValidation.importImageUrlZodSchema), PropertyController.importPropertyImageUrl)
 router.get('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.getPropertyDraftSession)
 router.post('/assets/session/:sessionId/touch', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.touchPropertyDraftSession)
 router.delete('/assets/session/:sessionId/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.deleteDraftAssetZodSchema), PropertyController.deletePropertyDraftAsset)
 router.delete('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.cleanupDraftSessionZodSchema), PropertyController.cleanupPropertyDraftSession)
-router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.write'), PropertyController.getPropertyImageAsset)
+router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.imageAssetZodSchema), PropertyController.getPropertyImageAsset)
 
 router.get('/', authMiddlewares.requirePermission('properties.read'), PropertyController.getAllProperties)
 router.post('/', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.createPropertyZodSchema), PropertyController.createProperty)

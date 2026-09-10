@@ -41,11 +41,15 @@ import {
 import catchAsync from "./shared/catchAsync";
 import { authMiddlewares } from "./app/middlewares/auth";
 import { parseTrustedProxy } from "./shared/trustedProxy";
+import { requestInputGuard } from "./app/middlewares/requestInputGuard";
 
 const app: Application = express();
 const startedAt = Date.now();
 
 app.disable("x-powered-by");
+// Use Node's simple query parser so bracket notation cannot materialize nested
+// Mongo-style selector objects before validation (for example filter[$ne]).
+app.set("query parser", "simple");
 app.set("trust proxy", parseTrustedProxy(process.env.TRUST_PROXY));
 
 app.use(cors(corsOptionsDelegate));
@@ -96,7 +100,8 @@ app.use(cookieParser());
 app.use("/api/v1/organization/website", express.json({ limit: "5mb" }));
 app.use("/api/v1/observability/client-error", express.json({ limit: "32kb" }));
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "256kb" }));
+app.use(express.urlencoded({ extended: false, limit: "256kb", parameterLimit: 200 }));
+app.use(requestInputGuard);
 app.use(csrfProtection);
 
 app.get("/", (_req: Request, res: Response) => {

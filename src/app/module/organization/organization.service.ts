@@ -548,8 +548,14 @@ const getAllOrganizations = async (filters: IOrganizationFilter, paginationOptio
   if (Object.keys(filterData).length) andConditions.push({ $and: Object.entries(filterData).map(([field, value]) => ({ [field]: value })) })
   const whereConditions = andConditions.length > 0 ? { $and: andConditions } : {}
   const { page, limit, skip, sortBy, sortOrder } = paginationHelper.calculatePagination(paginationOptions)
+  const sort = paginationHelper.buildAllowedStableSort(
+    sortBy,
+    sortOrder,
+    new Set(['agencyName', 'email', 'city', 'organizationId', 'status', 'createdAt', 'updatedAt']),
+    'createdAt',
+  )
   const [result, total] = await Promise.all([
-    Organization.find(whereConditions).sort({ [sortBy]: sortOrder, _id: sortOrder }).skip(skip).limit(limit),
+    Organization.find(whereConditions).sort(sort).skip(skip).limit(limit),
     Organization.countDocuments(whereConditions),
   ])
   return { meta: { page, limit, total }, data: result }

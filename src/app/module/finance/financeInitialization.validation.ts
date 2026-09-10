@@ -7,7 +7,7 @@ const signedMinor = z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MA
 const nonNegativeMinor = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 
 export const FinanceInitializationValidation = {
-  preview: z.object({ query: z.object({ startDate: dateValue }).passthrough() }),
+  preview: z.object({ query: z.object({ startDate: dateValue }).strict() }),
   paymentMapping: z.object({ body: z.object({ paymentMethod, bankAccountId: objectId }).strict() }),
   activate: z.object({ body: z.object({
     accountingStartDate: dateValue,

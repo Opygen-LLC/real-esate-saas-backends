@@ -7,12 +7,14 @@ import { VisitorLog } from './visitorLogs.model'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { requireTenant } from '../../middlewares/auth'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 
 const logVisitor = catchAsync(async (req: Request, res: Response) => {
   const { organizationId, urlPath, referrer, device, browser, os } = req.body
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress
+  const ip = req.ip
 
   if (organizationId) {
+    await TenantAccessService.assertPublicWebsiteAccess(organizationId)
     await TenantPurgeBarrier.assertTenantWritable(organizationId)
     await EntitlementService.consumeVisitor(organizationId)
     await VisitorLog.create({

@@ -20,13 +20,13 @@ const commonQuery = z.object({
   includeZero: z.enum(['true', 'false']).optional(),
   page: z.coerce.number().int().min(1).max(100000).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
-}).passthrough()
+}).strict()
 
 export const FinanceReportingValidation = {
   common: z.object({ query: commonQuery }),
-  drilldown: z.object({ query: commonQuery.extend({ accountId: objectId.optional(), journalEntryId: objectId.optional() }).passthrough() }),
+  drilldown: z.object({ query: commonQuery.extend({ accountId: objectId.optional(), journalEntryId: objectId.optional() }).strict() }),
   export: z.object({
     params: z.object({ report }),
-    query: commonQuery.extend({ format: z.enum(['pdf', 'csv', 'xlsx']) }).passthrough(),
+    query: commonQuery.extend({ format: z.enum(['pdf', 'csv', 'xlsx']) }).strict(),
   }),
 }

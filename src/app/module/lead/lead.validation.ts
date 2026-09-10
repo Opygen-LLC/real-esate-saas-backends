@@ -138,7 +138,8 @@ const assignLeadAgentZodSchema = z.object({
   }).strict(),
 })
 const confirmImportZodSchema = z.object({ body: z.object({ importSessionId: z.string().uuid('Invalid import session') }).strict() })
+const leadIdZodSchema = z.object({ params: z.object({ id: objectIdSchema }).strict() })
 
-export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, manageLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, completeLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema }
+export const LeadValidation = { createLeadZodSchema, publicCaptureZodSchema, updateLeadZodSchema, manageLeadZodSchema, updateLeadStatusZodSchema, scheduleLeadFollowUpZodSchema, completeLeadFollowUpZodSchema, reengageLeadZodSchema, assignLeadAgentZodSchema, confirmImportZodSchema, leadIdZodSchema }
 export type PublicLeadCaptureInput = z.infer<typeof publicCaptureZodSchema>['body']
 export type ManageLeadInput = z.infer<typeof manageLeadBody>

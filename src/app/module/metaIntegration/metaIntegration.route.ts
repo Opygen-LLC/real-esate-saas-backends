@@ -7,6 +7,7 @@ import { generalApiRateLimiter } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
 const eventNames = z.enum(['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'])
+const mongoId = z.string().regex(/^[0-9a-fA-F]{24}$/)
 
 router.get('/public/:identifier/config', MetaIntegrationController.publicConfig)
 router.post('/public/:identifier/events', generalApiRateLimiter, validateRequest(z.object({ body: z.object({
@@ -22,9 +23,9 @@ router.post('/public/:identifier/events', generalApiRateLimiter, validateRequest
     lastName: z.string().max(80).optional(),
     fbp: z.string().max(255).optional(),
     fbc: z.string().max(255).optional(),
-  }).optional(),
-  customData: z.record(z.any()).optional(),
-}) })), MetaIntegrationController.capture)
+  }).strict().optional(),
+  customData: z.record(z.unknown()).optional(),
+}).strict() })), MetaIntegrationController.capture)
 
 router.get('/', authMiddlewares.requirePermission('website.write'), MetaIntegrationController.get)
 router.put('/', authMiddlewares.requirePermission('website.write'), validateRequest(z.object({ body: z.object({
@@ -35,14 +36,12 @@ router.put('/', authMiddlewares.requirePermission('website.write'), validateRequ
   testEventCode: z.string().max(100).optional(),
   consentRequired: z.boolean().optional(),
   enableSchedule: z.boolean().optional(),
-}).refine((body) => Object.keys(body).length > 0, { message: 'At least one Meta setting is required' }) })), MetaIntegrationController.save)
+}).strict().refine((body) => Object.keys(body).length > 0, { message: 'At least one Meta setting is required' }) })), MetaIntegrationController.save)
 
-// The server resolves the canonical public website URL. A permissive body keeps
-// old dashboard builds compatible during rolling deployments while ignoring the
-// old client-supplied dashboard origin.
-router.post('/test', authMiddlewares.requirePermission('website.write'), validateRequest(z.object({ body: z.object({}).passthrough().optional() })), MetaIntegrationController.test)
+// The server resolves the canonical public website URL; client-controlled origins are never accepted.
+router.post('/test', authMiddlewares.requirePermission('website.write'), validateRequest(z.object({ body: z.object({}).strict().optional() })), MetaIntegrationController.test)
 router.get('/diagnostics', authMiddlewares.requirePermission('website.write'), MetaIntegrationController.diagnostics)
 router.get('/dead-letters', authMiddlewares.requirePermission('website.write'), MetaIntegrationController.deadLetters)
-router.post('/dead-letters/:id/retry', authMiddlewares.requirePermission('website.write'), MetaIntegrationController.retryDead)
+router.post('/dead-letters/:id/retry', authMiddlewares.requirePermission('website.write'), validateRequest(z.object({ params: z.object({ id: mongoId }).strict() })), MetaIntegrationController.retryDead)
 
 export const MetaIntegrationRoute = router

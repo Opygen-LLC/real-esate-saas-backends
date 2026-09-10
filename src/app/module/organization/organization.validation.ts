@@ -140,6 +140,17 @@ const onboardingWebsiteSettings = z.object({
 
 
 export const OrganizationValidation = {
+
+  listAll: z.object({ query: z.object({
+    searchTerm: z.string().trim().max(120).optional(),
+    agencyType: agencyType.optional(),
+    status: z.enum(['active', 'suspended', 'archived', 'pending_deletion']).optional(),
+    page: z.coerce.number().int().min(1).max(1_000_000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    sortBy: z.enum(['agencyName', 'email', 'city', 'organizationId', 'status', 'createdAt', 'updatedAt']).optional(),
+    sortOrder: z.enum(['asc', 'desc']).optional(),
+  }).strict() }),
+
   updateProfile: z.object({ body: z.object({
     agencyName: z.string().trim().min(2).max(120).optional(), agencyType: agencyType.optional(),
     email: emailSchema.optional(), phone: bangladeshPhoneSchema.optional(),
@@ -182,7 +193,7 @@ export const OrganizationValidation = {
     websiteSettings: onboardingWebsiteSettings.optional(), socialLinks: websiteSocialLinksSchema.optional(),
   }).strict() }),
 
-  platformUpdate: z.object({ body: z.object({ reason: z.string().trim().min(10).max(500),
+  platformUpdate: z.object({ params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid organization id') }).strict(), body: z.object({ reason: z.string().trim().min(10).max(500),
     subscription: z.object({ status: z.enum(['trialing', 'active', 'past_due', 'grace', 'cancel_at_period_end', 'expired']).optional(),
       currentPeriodEnd: z.coerce.date().optional(), gracePeriodEnd: z.coerce.date().nullable().optional() }).strict().optional() }).strict()
       .refine((value) => value.subscription && Object.keys(value.subscription).length > 0, 'Subscription change is required') }),

@@ -16,8 +16,8 @@ const vendorBillLine = z.object({
 
 export const FinanceOperationsValidation = {
   initialize: z.object({ body: z.object({}).strict().optional() }),
-  receivables: z.object({ query: z.object({ asOf: dateValue.optional(), search: z.string().trim().max(160).optional(), includeSettled: z.enum(['true', 'false']).optional() }).passthrough() }),
-  payables: z.object({ query: z.object({ asOf: dateValue.optional(), includeSettled: z.enum(['true', 'false']).optional() }).passthrough() }),
+  receivables: z.object({ query: z.object({ asOf: dateValue.optional(), search: z.string().trim().max(160).optional(), includeSettled: z.enum(['true', 'false']).optional() }).strict() }),
+  payables: z.object({ query: z.object({ asOf: dateValue.optional(), includeSettled: z.enum(['true', 'false']).optional() }).strict() }),
 
   createTaxCode: z.object({ body: z.object({
     code: z.string().trim().min(1).max(40), name: z.string().trim().min(1).max(160),
@@ -51,7 +51,7 @@ export const FinanceOperationsValidation = {
     lines: z.array(vendorBillLine).min(1).max(100).optional(), taxCodeId: optionalObjectId, notes: z.string().trim().max(2000).optional(), propertyId: optionalObjectId,
   }).strict().refine((body) => Object.keys(body).length > 0, { message: 'At least one vendor bill field must be provided' }) }),
   vendorBillId: z.object({ params: z.object({ id: objectId }) }),
-  vendorBillList: z.object({ query: z.object({ status: z.enum(['DRAFT', 'APPROVED', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'VOID']).optional(), vendorId: objectId.optional() }).passthrough() }),
+  vendorBillList: z.object({ query: z.object({ status: z.enum(['DRAFT', 'APPROVED', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'VOID']).optional(), vendorId: objectId.optional() }).strict() }),
   payVendorBill: z.object({ params: z.object({ id: objectId }), body: z.object({ amount: money, paidAt: dateValue, bankAccountId: objectId, reference: z.string().trim().max(200).optional(), notes: z.string().trim().max(500).optional() }).strict() }),
   voidVendorBill: z.object({ params: z.object({ id: objectId }), body: z.object({ reason: z.string().trim().min(5).max(500) }).strict() }),
 
@@ -61,14 +61,14 @@ export const FinanceOperationsValidation = {
     leadId: optionalObjectId, propertyId: optionalObjectId, bankAccountId: objectId, amount: money, receivedAt: dateValue,
     reference: z.string().trim().max(200).optional(), notes: z.string().trim().max(2000).optional(),
   }).strict() }),
-  depositList: z.object({ query: z.object({ status: z.enum(['OPEN', 'PARTIALLY_APPLIED', 'APPLIED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'CANCELLED']).optional(), type: z.enum(['BOOKING_DEPOSIT', 'SECURITY_DEPOSIT', 'ADVANCE', 'CLIENT_MONEY']).optional() }).passthrough() }),
+  depositList: z.object({ query: z.object({ status: z.enum(['OPEN', 'PARTIALLY_APPLIED', 'APPLIED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'CANCELLED']).optional(), type: z.enum(['BOOKING_DEPOSIT', 'SECURITY_DEPOSIT', 'ADVANCE', 'CLIENT_MONEY']).optional() }).strict() }),
   applyDeposit: z.object({ params: z.object({ id: objectId }), body: z.object({ invoiceId: objectId, amount: money, appliedAt: dateValue.optional() }).strict() }),
   refundDeposit: z.object({ params: z.object({ id: objectId }), body: z.object({ amount: money, refundedAt: dateValue.optional(), bankAccountId: objectId.optional(), reference: z.string().trim().max(200).optional() }).strict() }),
 
-  bankStatementBody: z.object({ body: z.object({ bankAccountId: objectId, statementNumber: z.string().trim().max(100).optional(), startDate: dateValue, endDate: dateValue, openingBalance: optionalMoney.default(0), closingBalance: optionalMoney.default(0) }).passthrough() }),
+  bankStatementBody: z.object({ body: z.object({ bankAccountId: objectId, statementNumber: z.string().trim().max(100).optional(), startDate: dateValue, endDate: dateValue, openingBalance: optionalMoney.default(0), closingBalance: optionalMoney.default(0) }).strict() }),
   statementId: z.object({ params: z.object({ id: objectId }) }),
-  statementList: z.object({ query: z.object({ bankAccountId: objectId.optional(), status: z.enum(['OPEN', 'RECONCILED']).optional() }).passthrough() }),
+  statementList: z.object({ query: z.object({ bankAccountId: objectId.optional(), status: z.enum(['OPEN', 'RECONCILED']).optional() }).strict() }),
   matchStatementLine: z.object({ params: z.object({ id: objectId, lineId: objectId }), body: z.object({ journalLineIds: z.array(objectId).min(1).max(100) }).strict() }),
   excludeStatementLine: z.object({ params: z.object({ id: objectId, lineId: objectId }), body: z.object({ reason: z.string().trim().min(3).max(500) }).strict() }),
-  ledgerCandidates: z.object({ params: z.object({ id: objectId }), query: z.object({ startDate: dateValue.optional(), endDate: dateValue.optional() }).passthrough() }),
+  ledgerCandidates: z.object({ params: z.object({ id: objectId }), query: z.object({ startDate: dateValue.optional(), endDate: dateValue.optional() }).strict() }),
 }

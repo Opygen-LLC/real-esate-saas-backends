@@ -75,6 +75,7 @@ router.patch(
 router.get(
   '/all',
   authMiddlewares.authSuperAdmin,
+  validateRequest(OrganizationValidation.listAll),
   OrganizationController.getAllOrganizations
 )
 

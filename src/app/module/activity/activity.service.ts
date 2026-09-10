@@ -83,9 +83,9 @@ const createActivity = async (
     contactId: payload.contactId ? String(payload.contactId) : undefined,
     actorId,
     payload: {
+      ...(payload.metadata || {}),
       summary: payload.content || payload.title || 'CRM activity',
       title: payload.title || '',
-      ...(payload.metadata || {}),
     },
   })
 

@@ -11,7 +11,6 @@ const fileFilter = (
 ) => {
   const allowedMimeTypes = [
     'image/jpeg',
-    'image/jpg',
     'image/png',
   ]
 
@@ -28,7 +27,13 @@ const fileFilter = (
 
 const multerInstance = multer({
   storage,
-  limits: { fileSize: MAX_FILE_SIZE },
+  limits: {
+    fileSize: MAX_FILE_SIZE,
+    files: 10,
+    fields: 0,
+    parts: 10,
+    fieldNameSize: 80,
+  },
   fileFilter,
 })
 

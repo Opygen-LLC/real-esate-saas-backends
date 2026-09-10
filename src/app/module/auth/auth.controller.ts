@@ -14,11 +14,15 @@ const cookieBase: CookieOptions = {
   secure: config.cookie_secure,
   sameSite: config.cookie_same_site,
   domain: config.cookie_domain,
-  path: '/',
 }
+const accessCookieOptions: CookieOptions = { ...cookieBase, path: '/', httpOnly: true, priority: 'high' }
+const refreshCookiePaths = ['/api/v1/auth', '/backend-api/auth'] as const
+const refreshCookieOptions = (path: string): CookieOptions => ({ ...cookieBase, path, httpOnly: true, priority: 'high' })
 const csrfCookieOptions: CookieOptions = {
   ...cookieBase,
+  path: '/',
   httpOnly: false,
+  priority: 'medium',
   maxAge: 30 * 24 * 60 * 60 * 1000,
 }
 
@@ -30,34 +34,35 @@ const issueCsrfToken = (res: Response): string => {
   return token
 }
 
-const clearCookieVariants = (res: Response, name: string, httpOnly: boolean) => {
-  // Current auth cookies are host-only. Also clear the old domain-scoped variant
-  // when COOKIE_DOMAIN is still present in the deployment environment so users
-  // migrate cleanly without duplicate access/refresh cookies.
-  res.clearCookie(name, { ...cookieBase, domain: undefined, httpOnly })
-  if (config.legacy_cookie_domain) {
-    res.clearCookie(name, { ...cookieBase, domain: config.legacy_cookie_domain, httpOnly })
+const clearCookieVariants = (res: Response, name: string, httpOnly: boolean, paths: string[]) => {
+  // Current auth cookies are host-only. Clear both current path-scoped variants
+  // and legacy broad/domain-scoped cookies during the migration window.
+  for (const path of paths) {
+    res.clearCookie(name, { ...cookieBase, path, domain: undefined, httpOnly })
+    if (config.legacy_cookie_domain) {
+      res.clearCookie(name, { ...cookieBase, path, domain: config.legacy_cookie_domain, httpOnly })
+    }
   }
 }
 
 const clearAuthCookies = (res: Response) => {
-  clearCookieVariants(res, config.security.access_cookie_name, true)
-  clearCookieVariants(res, config.security.refresh_cookie_name, true)
-  clearCookieVariants(res, config.security.csrf_cookie_name, false)
+  clearCookieVariants(res, config.security.access_cookie_name, true, ['/'])
+  clearCookieVariants(res, config.security.refresh_cookie_name, true, [...refreshCookiePaths, '/'])
+  clearCookieVariants(res, config.security.csrf_cookie_name, false, ['/'])
 }
 
 const setAuthCookies = (res: Response, result: AuthResult) => {
   clearAuthCookies(res)
   res.cookie(config.security.access_cookie_name, result.accessToken, {
-    ...cookieBase,
-    httpOnly: true,
+    ...accessCookieOptions,
     maxAge: 15 * 60 * 1000,
   })
-  res.cookie(config.security.refresh_cookie_name, result.refreshToken, {
-    ...cookieBase,
-    httpOnly: true,
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  })
+  for (const path of refreshCookiePaths) {
+    res.cookie(config.security.refresh_cookie_name, result.refreshToken, {
+      ...refreshCookieOptions(path),
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    })
+  }
   issueCsrfToken(res)
 }
 

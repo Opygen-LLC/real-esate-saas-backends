@@ -107,8 +107,6 @@ const allowedOrigins = Array.from(
   )
 )
 
-
-
 // Authentication verification is email-first. SMS remains an optional CRM channel.
 
 const rawCookieDomain = process.env.COOKIE_DOMAIN?.trim() || ''
@@ -222,9 +220,34 @@ if (domainProvider === 'generic' && isProduction && (!domainATarget || !domainCn
 }
 if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
 
+const assertProductionDatabaseUrl = (value: string): void => {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new Error('DATABASE_URL must be a valid MongoDB connection URI')
+  }
+  if (!['mongodb:', 'mongodb+srv:'].includes(parsed.protocol)) throw new Error('DATABASE_URL must use mongodb:// or mongodb+srv://')
+  if (!parsed.username || !parsed.password) throw new Error('DATABASE_URL must authenticate with a dedicated application database user in production')
+  const username = decodeURIComponent(parsed.username).trim().toLowerCase()
+  if (['root', 'admin', 'administrator'].includes(username)) {
+    throw new Error('DATABASE_URL must not use an obvious administrative MongoDB account; use a dedicated least-privilege application user')
+  }
+  const databaseName = decodeURIComponent(parsed.pathname.replace(/^\//, '')).trim()
+  if (!databaseName) throw new Error('DATABASE_URL must include the application database name')
+  const insecureTls = ['tls', 'ssl'].some((key) => parsed.searchParams.get(key)?.toLowerCase() === 'false')
+  if (insecureTls || parsed.searchParams.get('tlsInsecure')?.toLowerCase() === 'true' || parsed.searchParams.get('tlsAllowInvalidCertificates')?.toLowerCase() === 'true') {
+    throw new Error('DATABASE_URL must not disable TLS or certificate verification in production')
+  }
+  if (parsed.protocol === 'mongodb:' && !['true', '1'].includes((parsed.searchParams.get('tls') || parsed.searchParams.get('ssl') || '').toLowerCase())) {
+    throw new Error('mongodb:// DATABASE_URL must explicitly enable TLS in production; mongodb+srv:// enables TLS by default')
+  }
+}
+
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
   requiredUrls.forEach((name) => requiredInProduction(name))
+  assertProductionDatabaseUrl(String(process.env.DATABASE_URL))
   requiredInProduction('PUBLIC_SITE_ORIGIN')
   if (publicApi.protocol !== 'https:') throw new Error('PUBLIC_API_URL must use https:// in production')
   const publicSite = new URL(publicSiteOrigin)

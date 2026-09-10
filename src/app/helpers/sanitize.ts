@@ -1,9 +1,25 @@
 import sanitizeHtml from 'sanitize-html'
 
-export const sanitizeRichText = (value: string): string => sanitizeHtml(value, {
+export const sanitizeRichText = (value: string): string => sanitizeHtml(String(value || '').slice(0, 100_000), {
   allowedTags: ['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'h2', 'h3', 'blockquote', 'a'],
-  allowedAttributes: { a: ['href', 'target', 'rel'] }, allowedSchemes: ['http', 'https'],
-  transformTags: { a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }) },
+  allowedAttributes: { a: ['href', 'target', 'rel'] },
+  allowedSchemes: ['http', 'https'],
+  allowProtocolRelative: false,
+  disallowedTagsMode: 'discard',
+  nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript'],
+  transformTags: {
+    a: (_tagName, attributes) => {
+      const target = attributes.target === '_blank' ? '_blank' : undefined
+      return {
+        tagName: 'a',
+        attribs: {
+          ...(attributes.href ? { href: attributes.href } : {}),
+          ...(target ? { target } : {}),
+          rel: 'noopener noreferrer',
+        },
+      }
+    },
+  },
 })
 
 export const sanitizeCustomCss = (value: string): string => {

@@ -9,11 +9,12 @@ const ALLOWED_PROPERTY_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.we
 
 const propertyImageUploader = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES },
+  limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES, fields: 1, parts: 2, fieldNameSize: 80, fieldSize: 128 },
   fileFilter: (_req, file, callback) => {
     const mimeType = String(file.mimetype || '').toLowerCase()
     const extension = path.extname(String(file.originalname || '')).toLowerCase()
-    if (!ALLOWED_PROPERTY_IMAGE_TYPES.has(mimeType) && !ALLOWED_PROPERTY_IMAGE_EXTENSIONS.has(extension)) {
+    const cleanName = path.posix.basename(path.win32.basename(String(file.originalname || '').replace(/\0/g, '').trim()))
+    if (!cleanName || cleanName.length > 255 || !ALLOWED_PROPERTY_IMAGE_TYPES.has(mimeType) || !ALLOWED_PROPERTY_IMAGE_EXTENSIONS.has(extension)) {
       callback(new ApiError(400, 'Property photos must be JPEG, PNG, WebP, or AVIF images') as any)
       return
     }

@@ -8,6 +8,7 @@ import { startPhase3Worker } from './app/module/cron/phase3.worker'
 import { RedisClient } from './shared/redisClient'
 import { verifyEmailProvider } from './app/helpers/sendEmail'
 import { closeRealtimeServer, initializeRealtimeServer } from './app/module/realtime/realtime.server'
+import { assertMongoRuntimeSecurity } from './app/db/databaseSecurity'
 
 let server: Server | undefined
 let stopWorker: (() => void) | undefined
@@ -59,6 +60,7 @@ async function bootstrap() {
       socketTimeoutMS: config.mongo.socket_timeout_ms,
       waitQueueTimeoutMS: config.mongo.wait_queue_timeout_ms,
     })
+    await assertMongoRuntimeSecurity()
     logger.info('database_connected', { maxPoolSize: config.mongo.max_pool_size, minPoolSize: config.mongo.min_pool_size })
     const transactionReady = await mongoSupportsTransactions()
     if (!transactionReady && config.isProduction) throw new Error('Production requires a MongoDB replica set or mongos for transactional safety')

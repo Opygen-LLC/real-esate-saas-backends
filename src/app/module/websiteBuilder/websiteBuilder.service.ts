@@ -417,7 +417,7 @@ const uploadAssetBuffer = async (
 
   let metadata: Metadata
   try {
-    metadata = await sharp(file.buffer, { failOn: 'error', limitInputPixels: 80_000_000 }).metadata()
+    metadata = await sharp(file.buffer, { failOn: 'error', limitInputPixels: 40_000_000 }).metadata()
   } catch {
     throw new ApiError(400, 'The uploaded file is not a valid image')
   }

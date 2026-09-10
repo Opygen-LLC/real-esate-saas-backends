@@ -1,6 +1,7 @@
 import cors from 'cors'
 import { Request } from 'express'
 import config from '../../config'
+import { DomainRecord } from '../module/domain/domain.model'
 
 const PUBLIC_EXACT_PATHS = new Set([
   '/api/v1/platform-settings/public',
@@ -28,6 +29,7 @@ const PUBLIC_PATH_PREFIXES = [
   '/api/v1/domain/resolve-subdomain/',
 ]
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const normalizeOrigin = (origin: string): string => origin.trim().replace(/\/$/, '')
 const normalizePath = (value: string): string => (value.split('?')[0] || '/').replace(/\/+$/, '') || '/'
 
@@ -44,7 +46,6 @@ export const isTrustedApplicationOrigin = (origin: string): boolean => {
   try {
     const candidate = new URL(normalized)
     const platform = new URL(config.domains.public_site_origin)
-    // Accept same-host or any subdomain of the platform origin
     return candidate.protocol === platform.protocol
       && (candidate.hostname === platform.hostname || candidate.hostname.endsWith(`.${platform.hostname}`))
   } catch {
@@ -52,14 +53,30 @@ export const isTrustedApplicationOrigin = (origin: string): boolean => {
   }
 }
 
-// FIX: Preflight (OPTIONS) requests from browsers on cross-origin uploads
-// (e.g. property image POST) were being rejected because the incoming OPTIONS
-// request carries no credentials — only the actual POST does. The previous
-// implementation sent `credentials: false` for public paths and `origin: false`
-// for untrusted origins, which causes the browser to block the subsequent
-// credentialed POST. We now explicitly trust preflight requests from known
-// origins and always respond with the full CORS headers so the browser
-// proceeds to the actual request.
+const isVerifiedTenantOrigin = async (origin: string): Promise<boolean> => {
+  if (isTrustedApplicationOrigin(origin)) return true
+  let parsed: URL
+  try {
+    parsed = new URL(normalizeOrigin(origin))
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.pathname !== '/' || parsed.search || parsed.hash) return false
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
+  if (!host) return false
+  try {
+    return Boolean(await DomainRecord.exists({
+      domain: host,
+      status: 'verified',
+      tlsStatus: 'active',
+      entitlementStatus: { $ne: 'suspended' },
+    }).maxTimeMS(Math.min(config.mongo.query_timeout_ms, 2_000)))
+  } catch {
+    // CORS must fail closed when domain verification is unavailable.
+    return false
+  }
+}
+
 const sharedOptions: Pick<cors.CorsOptions, 'methods' | 'allowedHeaders' | 'exposedHeaders' | 'maxAge'> = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
@@ -80,35 +97,34 @@ const sharedOptions: Pick<cors.CorsOptions, 'methods' | 'allowedHeaders' | 'expo
 export const corsOptionsDelegate: cors.CorsOptionsDelegate<Request> = (req, callback) => {
   const origin = req.get('origin')
 
-  // Server-to-server or same-origin requests carry no Origin header.
-  // Allow them unconditionally (Next.js same-origin proxy hits this path).
+  // Same-origin and server-to-server requests do not carry Origin. Authentication
+  // and CSRF still apply independently to private mutations.
   if (!origin) {
     callback(null, { ...sharedOptions, origin: true, credentials: true })
     return
   }
 
-  // Public website endpoints are intentionally credential-less. They may be
-  // called from verified custom domains or third-party portals, so they
-  // reflect the requesting origin without enabling credentialed access.
   if (isPublicCorsRequest(req)) {
-    callback(null, { ...sharedOptions, origin: true, credentials: false })
+    // Public reads expose public data only and never allow credentials, so broad
+    // cross-origin reads are safe. Public writes are more sensitive: only the
+    // app/platform or a currently verified tenant custom domain may use browser CORS.
+    const requestedMethod = req.method.toUpperCase() === 'OPTIONS'
+      ? String(req.get('access-control-request-method') || 'GET').toUpperCase()
+      : req.method.toUpperCase()
+    if (SAFE_METHODS.has(requestedMethod)) {
+      callback(null, { ...sharedOptions, origin: true, credentials: false })
+      return
+    }
+    void isVerifiedTenantOrigin(origin).then((trusted) => {
+      callback(null, { ...sharedOptions, origin: trusted, credentials: false })
+    })
     return
   }
 
-  // FIX: For preflight (OPTIONS) requests, we check the Origin header against
-  // our trusted list but still allow the preflight through so the browser can
-  // issue the real credentialed request. Without this, browsers that send
-  // OPTIONS before POST (e.g. for /property) get a CORS rejection, which the
-  // gateway then surfaces as a 502 because the upstream request never arrives.
   const trusted = isTrustedApplicationOrigin(origin)
-
-  if (!trusted) {
-    // Reject credentialed requests from unknown origins, but log for debugging.
-    // This prevents cookie leakage while making it easy to spot misconfigured
-    // ALLOWED_ORIGINS in production logs.
-    callback(null, { ...sharedOptions, origin: false, credentials: false })
-    return
-  }
-
-  callback(null, { ...sharedOptions, origin: true, credentials: true })
+  callback(null, {
+    ...sharedOptions,
+    origin: trusted,
+    credentials: trusted,
+  })
 }

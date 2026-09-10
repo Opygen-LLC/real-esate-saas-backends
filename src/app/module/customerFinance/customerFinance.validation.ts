@@ -36,12 +36,12 @@ const listCustomers = z.object({
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     searchTerm: z.string().trim().max(160).optional(),
-  }).passthrough(),
+  }).strict(),
 })
 
 const listBookings = z.object({
   params: z.object({ contactId: objectId }),
-  query: z.object({ page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).passthrough(),
+  query: z.object({ page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).strict(),
 })
 
 const voidPayment = z.object({

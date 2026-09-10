@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { TASK_TYPE_VALUES } from './taskType.contract'
+import { objectIdSchema, paginationQuerySchema } from '../../helpers/inputSecurity'
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Due date must use YYYY-MM-DD')
 const timeOnly = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Due time must use HH:mm')
@@ -14,9 +15,9 @@ const createTaskBody = z.object({
   taskType: taskTypeSchema.optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   status: z.enum(['Pending', 'InProgress', 'Completed', 'Overdue', 'Cancelled']).optional(),
-  assignedAgent: z.string().optional(),
-  linkedLead: z.string().optional(),
-  linkedProperty: z.string().optional(),
+  assignedAgent: objectIdSchema.optional(),
+  linkedLead: objectIdSchema.optional(),
+  linkedProperty: objectIdSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   if (!value.dueAt && !value.dueDate) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dueAt'], message: 'dueAt or dueDate is required' })
@@ -38,15 +39,38 @@ const updateTaskBody = z.object({
   taskType: taskTypeSchema.optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   status: z.enum(['Pending', 'InProgress', 'Completed', 'Overdue', 'Cancelled']).optional(),
-  assignedAgent: z.string().optional(),
-  linkedLead: z.string().optional(),
-  linkedProperty: z.string().optional(),
+  assignedAgent: objectIdSchema.optional(),
+  linkedLead: objectIdSchema.optional(),
+  linkedProperty: objectIdSchema.optional(),
 }).strict()
 
+const taskIdParams = z.object({ id: objectIdSchema }).strict()
 const createTaskZodSchema = z.object({ body: createTaskBody })
-const updateTaskZodSchema = z.object({ body: updateTaskBody })
+const updateTaskZodSchema = z.object({ params: taskIdParams, body: updateTaskBody })
+const taskIdZodSchema = z.object({ params: taskIdParams })
+const approveTaskZodSchema = z.object({ params: taskIdParams, body: z.object({ approvalStatus: z.enum(['approved', 'rejected']).default('approved') }).strict().default({ approvalStatus: 'approved' }) })
+const listTasksZodSchema = z.object({ query: paginationQuerySchema.extend({
+  sortBy: z.enum(['createdAt', 'updatedAt', 'dueAt', 'priority', 'status', 'approvalStatus', 'title']).optional(),
+  searchTerm: z.string().trim().max(200).optional(),
+  status: z.enum(['Pending', 'InProgress', 'Completed', 'Overdue', 'Cancelled']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+  taskType: taskTypeSchema.optional(),
+  assignedAgent: objectIdSchema.optional(),
+  linkedLead: objectIdSchema.optional(),
+  linkedProperty: objectIdSchema.optional(),
+  dueDate: dateOnly.optional(),
+  dueFrom: dateOnly.optional(),
+  dueTo: dateOnly.optional(),
+  overdue: z.enum(['true', 'false']).optional(),
+  approvalStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+  scope: z.enum(['mine', 'team', 'all']).optional(),
+}).strict() })
 
 export const TaskValidation = {
   createTaskZodSchema,
   updateTaskZodSchema,
+  taskIdZodSchema,
+  approveTaskZodSchema,
+  listTasksZodSchema,
 }
+
