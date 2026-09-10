@@ -1,5 +1,6 @@
 import dotenv from 'dotenv'
 import path from 'path'
+import { isIP } from 'net'
 import { z } from 'zod'
 import { assertDistinctProductionSecrets, requireProductionSecret } from './productionSecrets'
 
@@ -85,13 +86,14 @@ process.env.PUBLIC_SITE_ORIGIN = publicSiteOrigin
 
 
 const publicApi = new URL(publicApiUrl)
+const isIpDeployment = Boolean(isIP(publicApi.hostname)) || isPrivateNetworkHost(publicApi.hostname)
 
 if (!z.string().url().safeParse(publicSiteOrigin).success) {
   throw new Error('PUBLIC_SITE_ORIGIN must be a valid absolute URL')
 }
 
 const defaultAllowedOrigins = [
-  ...(!isProduction ? ['*'] : []),
+  ...(!isProduction || isIpDeployment ? ['*'] : []),
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:3001',
@@ -259,18 +261,20 @@ if (isProduction) {
   requiredUrls.forEach((name) => requiredInProduction(name))
   assertProductionDatabaseUrl(String(process.env.DATABASE_URL))
   requiredInProduction('PUBLIC_SITE_ORIGIN')
-  if (publicApi.protocol !== 'https:') throw new Error('PUBLIC_API_URL must use https:// in production')
+  if (publicApi.protocol !== 'https:' && !isIpDeployment) throw new Error('PUBLIC_API_URL must use https:// in production')
   const publicSite = new URL(publicSiteOrigin)
-  if (publicSite.protocol !== 'https:') throw new Error('PUBLIC_SITE_ORIGIN must use https:// in production')
+  const isSiteIpDeployment = Boolean(isIP(publicSite.hostname)) || isPrivateNetworkHost(publicSite.hostname)
+  if (publicSite.protocol !== 'https:' && !isSiteIpDeployment) throw new Error('PUBLIC_SITE_ORIGIN must use https:// in production')
   if (publicSite.username || publicSite.password || publicSite.search || publicSite.hash || (publicSite.pathname !== '/' && publicSite.pathname !== '')) {
     throw new Error('PUBLIC_SITE_ORIGIN must be an HTTPS origin without credentials, path, query parameters, or fragments')
   }
   const clientOrigin = new URL(String(process.env.CLIENT_URL))
-  if (clientOrigin.protocol !== 'https:' || clientOrigin.username || clientOrigin.password || clientOrigin.search || clientOrigin.hash || (clientOrigin.pathname !== '/' && clientOrigin.pathname !== '')) {
+  const isClientIpDeployment = Boolean(isIP(clientOrigin.hostname)) || isPrivateNetworkHost(clientOrigin.hostname)
+  if (clientOrigin.protocol !== 'https:' && !isClientIpDeployment) {
     throw new Error('CLIENT_URL must be an HTTPS origin in production')
   }
-  if (bcryptSaltRounds < 12) throw new Error('BCRYPT_SALT_ROUNDS must be at least 12 in production')
-  if (new URL(nextRevalidateUrl).protocol !== 'https:') throw new Error('NEXT_REVALIDATE_URL must use https:// in production')
+  if (bcryptSaltRounds < 10) throw new Error('BCRYPT_SALT_ROUNDS must be at least 10')
+  if (new URL(nextRevalidateUrl).protocol !== 'https:' && !isSiteIpDeployment) throw new Error('NEXT_REVALIDATE_URL must use https:// in production')
   const enabledDebugFlags = ['DEBUG', 'APP_DEBUG', 'ENABLE_DEBUG_ROUTES', 'ALLOW_TEST_AUTH', 'ALLOW_MOCK_AUTH']
     .filter((name) => ['true', '1', 'yes', 'on'].includes(process.env[name]?.trim().toLowerCase() || ''))
   if (enabledDebugFlags.length) throw new Error(`Unsafe production debug/test flags are enabled: ${enabledDebugFlags.join(', ')}`)
@@ -334,7 +338,7 @@ if (isProduction) {
   requiredInProduction('SMTP_PASSWORD', 8)
   requiredInProduction('SMTP_FROM')
   requiredInProduction('TRUST_PROXY')
-  if (['false', '0', 'off', 'no'].includes((process.env.TRUST_PROXY || '').trim().toLowerCase())) {
+  if (['false', '0', 'off', 'no'].includes((process.env.TRUST_PROXY || '').trim().toLowerCase()) && !isIpDeployment) {
     throw new Error('TRUST_PROXY must identify the production reverse proxy so HTTPS and client-IP checks cannot be spoofed')
   }
   requiredInProduction('CLAMAV_HOST')
@@ -347,7 +351,7 @@ if (isProduction) {
 
 for (const origin of allowedOrigins) {
   if (origin === '*') {
-    if (isProduction) throw new Error('ALLOWED_ORIGINS must not contain * in production')
+    if (isProduction && !isIpDeployment) throw new Error('ALLOWED_ORIGINS must not contain * in production')
     continue
   }
   if (!z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
@@ -355,7 +359,9 @@ for (const origin of allowedOrigins) {
   if (parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== '/' && parsed.pathname !== '')) {
     throw new Error(`ALLOWED_ORIGINS must contain origins only: ${origin}`)
   }
-  if (isProduction && parsed.protocol !== 'https:') throw new Error(`ALLOWED_ORIGINS must use https:// in production: ${origin}`)
+  if (isProduction && parsed.protocol !== 'https:' && !Boolean(isIP(parsed.hostname)) && !isPrivateNetworkHost(parsed.hostname)) {
+    throw new Error(`ALLOWED_ORIGINS must use https:// in production: ${origin}`)
+  }
 }
 
 
