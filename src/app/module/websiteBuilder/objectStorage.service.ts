@@ -6,13 +6,14 @@
  * Why GCS instead of S3/MinIO?
  * The project already has @google-cloud/storage installed and a working GCS
  * bucket (realestate-saas). This service replaces the previous S3-presigned-URL
- * implementation so that property photos, website-builder media, and support
- * attachments all flow through the same GCS bucket — no MinIO or S3 credentials
- * needed.
+ * implementation so public media uses the configured public GCS bucket while
+ * private property documents, supplier invoices, and support attachments use a
+ * dedicated non-public GCS bucket. No MinIO or S3 credentials are needed.
  *
  * Canonical environment variables:
  *   GCP_PROJECT_ID                         — GCS project
- *   GCP_BUCKET_NAME                        — GCS bucket (e.g. realestate-saas)
+ *   GCP_BUCKET_NAME                        — public media GCS bucket
+ *   GCP_PRIVATE_BUCKET_NAME                — private documents/attachments bucket
  *   GCP_KEY_FILE                           — optional path to service-account JSON key
  * Legacy PROJECTS_ID / BUCKET_NAME / KEYFILENAME aliases are normalized once in config.
  *   OBJECT_STORAGE_PUBLIC_BASE_URL      — public URL prefix for stored objects
@@ -52,7 +53,54 @@ const buildGcsClient = () => {
 let _gcs: Storage | null = null
 const gcs = () => { if (!_gcs) _gcs = buildGcsClient(); return _gcs }
 
-const bucketName = () => config.assets.gcp_bucket_name
+const publicBucketName = () => config.assets.gcp_bucket_name
+const privateBucketName = () => config.assets.gcp_private_bucket_name || publicBucketName()
+
+const PRIVATE_KEY_PATTERNS = [
+  /^support\//,
+  /^tenants\/[^/]+\/properties\/documents\//,
+  /^tenants\/[^/]+\/suppliers\/invoices\//,
+]
+
+const normalizeObjectKey = (value: string): string => {
+  const key = String(value || '').trim().replace(/^\/+/, '')
+  if (!key || key.includes('\\') || key.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new ApiError(400, 'Invalid object storage key')
+  }
+  return key
+}
+
+const isPrivateKey = (value: string): boolean => {
+  const key = normalizeObjectKey(value)
+  return PRIVATE_KEY_PATTERNS.some((pattern) => pattern.test(key))
+}
+
+const writeBucketNameForKey = (key: string): string => isPrivateKey(key) ? privateBucketName() : publicBucketName()
+
+const candidateBucketNamesForKey = (key: string): string[] => {
+  const primary = writeBucketNameForKey(key)
+  // During the private-bucket rollout, reads/deletes can still find historical
+  // private objects in the old public bucket. New writes always target the
+  // private bucket, and the migration script removes these legacy copies.
+  return isPrivateKey(key) && primary !== publicBucketName()
+    ? [primary, publicBucketName()]
+    : [primary]
+}
+
+const isNotFound = (error: any): boolean => (error?.code ?? error?.response?.status) === 404
+
+const resolveExistingBucketName = async (key: string): Promise<string> => {
+  for (const name of candidateBucketNamesForKey(key)) {
+    try {
+      const [present] = await gcs().bucket(name).file(normalizeObjectKey(key)).exists()
+      if (present) return name
+    } catch (error: any) {
+      const code = error?.code ?? error?.response?.status
+      if (code === 401 || code === 403) throw error
+    }
+  }
+  return writeBucketNameForKey(key)
+}
 
 // ─── Configuration status ─────────────────────────────────────────────────────
 
@@ -60,11 +108,13 @@ const configurationStatus = () => {
   const missing: string[] = []
   const projectId = config.assets.gcp_project_id
   const keyFileRaw = config.assets.gcp_key_file
-  const bucket = bucketName()
+  const bucket = publicBucketName()
+  const privateBucket = privateBucketName()
   const publicBase = config.assets.public_base_url
 
   if (!projectId) missing.push('GCP_PROJECT_ID')
   if (!bucket) missing.push('GCP_BUCKET_NAME')
+  if (config.isProduction && !config.assets.gcp_private_bucket_name) missing.push('GCP_PRIVATE_BUCKET_NAME')
   if (!publicBase) missing.push('OBJECT_STORAGE_PUBLIC_BASE_URL')
 
   if (keyFileRaw) {
@@ -85,6 +135,7 @@ const configurationStatus = () => {
     missing,
     projectId,
     bucket,
+    privateBucket,
     authMode: keyFileRaw ? 'service-account-key' as const : 'application-default-credentials' as const,
   }
 }
@@ -112,7 +163,9 @@ const encodePath = (value: string) =>
 
 const publicUrl = (key: string): string => {
   assertConfigured()
-  return `${config.assets.public_base_url}/${encodePath(key)}`
+  const normalized = normalizeObjectKey(key)
+  if (isPrivateKey(normalized)) throw new ApiError(400, 'Private media cannot be exposed through a public object URL')
+  return `${config.assets.public_base_url}/${encodePath(normalized)}`
 }
 
 
@@ -130,7 +183,7 @@ const keyFromReference = (value: string): string | null => {
     return key && !key.includes('\\') ? key : null
   }
 
-  const bucket = bucketName()
+  const bucket = publicBucketName()
   if (!bucket) return null
   try {
     const parsed = new URL(raw)
@@ -174,7 +227,9 @@ const presign = async (
   }
 
   try {
-    const [url] = await gcs().bucket(bucketName()).file(key).getSignedUrl(options)
+    const normalized = normalizeObjectKey(key)
+    const bucket = method === 'PUT' ? writeBucketNameForKey(normalized) : await resolveExistingBucketName(normalized)
+    const [url] = await gcs().bucket(bucket).file(normalized).getSignedUrl(options)
     return url
   } catch (error: any) {
     throw unavailableError('Could not generate upload URL from Google Cloud Storage', {
@@ -195,7 +250,7 @@ const presignUpload = (key: string, contentType?: string) => {
   // to the browser), we return a thunk-based object. However, the existing
   // callers destructure `{ uploadUrl, key, publicUrl }` — all synchronous
   // fields. We keep those and add an async `getUploadUrl()`.
-  const pub = publicUrl(key)
+  const pub = isPrivateKey(key) ? '' : publicUrl(key)
   return {
     key,
     publicUrl: pub,
@@ -208,15 +263,34 @@ const presignUpload = (key: string, contentType?: string) => {
   }
 }
 
-const presignDownload = (key: string, expiresInSeconds = 120) =>
-  presign('GET', key, expiresInSeconds)
+const presignDownload = async (key: string, expiresInSeconds = 120) => {
+  assertConfigured()
+  try {
+    const normalized = normalizeObjectKey(key)
+    const bucket = await resolveExistingBucketName(normalized)
+    const [url] = await gcs().bucket(bucket).file(normalized).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + Math.min(Math.max(30, expiresInSeconds), 300) * 1000,
+      responseDisposition: 'attachment',
+      responseType: 'application/octet-stream',
+    })
+    return url
+  } catch (error: any) {
+    throw unavailableError('Could not generate private download URL from Google Cloud Storage', {
+      operation: 'GET',
+      reason: String(error?.message || 'gcs_signing_failed').slice(0, 200),
+    })
+  }
+}
 
 // ─── Direct server-side operations ───────────────────────────────────────────
 
 const putBuffer = async (key: string, body: Buffer, contentType: string): Promise<void> => {
   assertConfigured()
   try {
-    const file = gcs().bucket(bucketName()).file(key)
+    const normalized = normalizeObjectKey(key)
+    const file = gcs().bucket(writeBucketNameForKey(normalized)).file(normalized)
     await file.save(body, {
       contentType,
       resumable: false,
@@ -233,18 +307,27 @@ const putBuffer = async (key: string, body: Buffer, contentType: string): Promis
 
 const readBuffer = async (key: string, maxBytes = 25 * 1024 * 1024): Promise<Buffer> => {
   assertConfigured()
+  const normalized = normalizeObjectKey(key)
   try {
-    const file = gcs().bucket(bucketName()).file(key)
-    const [metadata] = await file.getMetadata()
-    const declaredSize = Number(metadata.size || 0)
-    if (declaredSize > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
-    const [body] = await file.download()
-    if (body.length > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
-    return body
+    for (const bucket of candidateBucketNamesForKey(normalized)) {
+      const file = gcs().bucket(bucket).file(normalized)
+      try {
+        const [metadata] = await file.getMetadata()
+        const declaredSize = Number(metadata.size || 0)
+        if (declaredSize > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
+        const [body] = await file.download()
+        if (body.length > maxBytes) throw new ApiError(413, 'Stored media exceeds the safe processing size limit')
+        return body
+      } catch (error: any) {
+        if (error instanceof ApiError) throw error
+        if (isNotFound(error)) continue
+        throw error
+      }
+    }
+    throw new ApiError(409, 'Uploaded object is not available (404)')
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     const code = error?.code ?? error?.response?.status
-    if (code === 404) throw new ApiError(409, 'Uploaded object is not available (404)')
     if (code === 403 || code === 401) throw unavailableError('Google Cloud Storage rejected the media read request', { operation: 'read', status: code })
     throw unavailableError('Google Cloud Storage media read failed', {
       operation: 'read',
@@ -255,17 +338,25 @@ const readBuffer = async (key: string, maxBytes = 25 * 1024 * 1024): Promise<Buf
 
 const head = async (key: string) => {
   assertConfigured()
+  const normalized = normalizeObjectKey(key)
   try {
-    const [metadata] = await gcs().bucket(bucketName()).file(key).getMetadata()
-    return {
-      size: Number(metadata.size || 0),
-      contentType: String(metadata.contentType || 'application/octet-stream'),
-      etag: String(metadata.etag || '').replace(/"/g, ''),
+    for (const bucket of candidateBucketNamesForKey(normalized)) {
+      try {
+        const [metadata] = await gcs().bucket(bucket).file(normalized).getMetadata()
+        return {
+          size: Number(metadata.size || 0),
+          contentType: String(metadata.contentType || 'application/octet-stream'),
+          etag: String(metadata.etag || '').replace(/"/g, ''),
+        }
+      } catch (error: any) {
+        if (isNotFound(error)) continue
+        throw error
+      }
     }
+    throw new ApiError(409, 'Uploaded object is not available (404)')
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     const code = error?.code ?? error?.response?.status
-    if (code === 404) throw new ApiError(409, 'Uploaded object is not available (404)')
     if (code === 403 || code === 401) throw unavailableError('Google Cloud Storage rejected the request', { operation: 'head', status: code })
     throw unavailableError('Google Cloud Storage could not be reached', {
       operation: 'head',
@@ -276,8 +367,11 @@ const head = async (key: string) => {
 
 const remove = async (key: string): Promise<void> => {
   assertConfigured()
+  const normalized = normalizeObjectKey(key)
   try {
-    await gcs().bucket(bucketName()).file(key).delete({ ignoreNotFound: true })
+    await Promise.all(candidateBucketNamesForKey(normalized).map((bucket) =>
+      gcs().bucket(bucket).file(normalized).delete({ ignoreNotFound: true })
+    ))
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     throw unavailableError('Google Cloud Storage delete failed', {
@@ -287,12 +381,15 @@ const remove = async (key: string): Promise<void> => {
   }
 }
 
-
 const exists = async (key: string): Promise<boolean> => {
   assertConfigured()
+  const normalized = normalizeObjectKey(key)
   try {
-    const [present] = await gcs().bucket(bucketName()).file(key).exists()
-    return Boolean(present)
+    for (const bucket of candidateBucketNamesForKey(normalized)) {
+      const [present] = await gcs().bucket(bucket).file(normalized).exists()
+      if (present) return true
+    }
+    return false
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     throw unavailableError('Google Cloud Storage object existence check failed', {
@@ -308,7 +405,8 @@ const removePrefix = async (prefix: string): Promise<void> => {
   const normalized = String(prefix || '').replace(/^\/+/, '')
   if (!normalized) throw new ApiError(400, 'Storage deletion prefix is required')
   try {
-    await gcs().bucket(bucketName()).deleteFiles({ prefix: normalized, force: true })
+    const buckets = [...new Set([publicBucketName(), privateBucketName()].filter(Boolean))]
+    await Promise.all(buckets.map((bucket) => gcs().bucket(bucket).deleteFiles({ prefix: normalized, force: true })))
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     throw unavailableError('Google Cloud Storage prefix deletion failed', {
@@ -324,8 +422,12 @@ const prefixHasObjects = async (prefix: string): Promise<boolean> => {
   const normalized = String(prefix || '').replace(/^\/+/, '')
   if (!normalized) return false
   try {
-    const [files] = await gcs().bucket(bucketName()).getFiles({ prefix: normalized, maxResults: 1, autoPaginate: false })
-    return files.length > 0
+    const buckets = [...new Set([publicBucketName(), privateBucketName()].filter(Boolean))]
+    for (const bucket of buckets) {
+      const [files] = await gcs().bucket(bucket).getFiles({ prefix: normalized, maxResults: 1, autoPaginate: false })
+      if (files.length > 0) return true
+    }
+    return false
   } catch (error: any) {
     if (error instanceof ApiError) throw error
     throw unavailableError('Google Cloud Storage prefix verification failed', {
@@ -341,7 +443,7 @@ const prefixHasObjects = async (prefix: string): Promise<boolean> => {
 const browserCorsHealth = async () => {
   assertConfigured()
   try {
-    const [meta] = await gcs().bucket(bucketName()).getMetadata()
+    const [meta] = await gcs().bucket(publicBucketName()).getMetadata()
     const cors: any[] = meta.cors || []
     const origin = config.assets.browser_origin
     const originAllowed = cors.some((rule: any) =>
@@ -371,6 +473,34 @@ const browserCorsHealth = async () => {
   }
 }
 
+const privateBucketSecurityHealth = async () => {
+  assertConfigured()
+  const bucket = privateBucketName()
+  try {
+    const [exists] = await gcs().bucket(bucket).exists()
+    if (!exists) return { healthy: false, bucket, detail: 'private_bucket_not_found' }
+    const [policy] = await gcs().bucket(bucket).iam.getPolicy()
+    const publicMembers = new Set(['allUsers', 'allAuthenticatedUsers'])
+    const publicBinding = (policy.bindings || []).find((binding: any) =>
+      Array.isArray(binding.members) && binding.members.some((member: string) => publicMembers.has(member))
+    )
+    if (publicBinding) {
+      return { healthy: false, bucket, detail: 'private_bucket_has_public_iam_binding', role: publicBinding.role }
+    }
+    const [metadata] = await gcs().bucket(bucket).getMetadata()
+    const cors: any[] = metadata.cors || []
+    const origin = config.assets.browser_origin
+    const corsRule = cors.find((rule: any) =>
+      Array.isArray(rule.origin) && rule.origin.includes(origin) && !rule.origin.includes('*') &&
+      Array.isArray(rule.method) && ['PUT', 'HEAD'].every((method) => rule.method.includes(method))
+    )
+    if (!corsRule) return { healthy: false, bucket, detail: 'private_bucket_cors_misconfigured', origin }
+    return { healthy: true, bucket, origin }
+  } catch (error: any) {
+    return { healthy: false, bucket, detail: `private_bucket_security_check_failed:${String(error?.message || 'unknown').slice(0, 160)}` }
+  }
+}
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 type StorageHealth = {
@@ -383,6 +513,7 @@ type StorageHealth = {
   missing?: string[]
   bucket?: string
   browserCors?: Awaited<ReturnType<typeof browserCorsHealth>>
+  privateBucket?: Awaited<ReturnType<typeof privateBucketSecurityHealth>>
 }
 
 let lastHealth: { at: number; value: StorageHealth } | null = null
@@ -396,22 +527,21 @@ const health = async (): Promise<StorageHealth> => {
   if (lastHealth && now - lastHealth.at < config.assets.health_cache_ms) return lastHealth.value
   const started = performance.now()
   try {
-    const [exists] = await gcs().bucket(bucketName()).exists()
-    const browserCors = await browserCorsHealth()
-    // Bucket reachability is a server-readiness dependency. Browser CORS is a
-    // direct-upload optimization: property media now has a hardened API upload
-    // fallback, so a bad CORS rule must not evict an otherwise healthy API
-    // instance from the load balancer.
-    const healthy = exists
+    const [exists] = await gcs().bucket(publicBucketName()).exists()
+    const [browserCors, privateBucket] = await Promise.all([browserCorsHealth(), privateBucketSecurityHealth()])
+    // Public bucket reachability and private-bucket IAM isolation are production
+    // readiness dependencies. Browser CORS is only a direct-upload optimization.
+    const healthy = exists && (!config.isProduction || privateBucket.healthy)
     const value: StorageHealth = {
       provider: 'gcs',
       configured: true,
       healthy,
       latencyMs: Math.round(performance.now() - started),
       projectId: configuration.projectId,
-      bucket: bucketName(),
+      bucket: publicBucketName(),
       browserCors,
-      ...(!exists ? { detail: 'bucket_not_found' } : !browserCors.healthy ? { detail: 'browser_cors_misconfigured' } : {}),
+      privateBucket,
+      ...(!exists ? { detail: 'bucket_not_found' } : !privateBucket.healthy ? { detail: privateBucket.detail } : !browserCors.healthy ? { detail: 'browser_cors_misconfigured' } : {}),
     }
     lastHealth = { at: now, value }
     return value
@@ -422,7 +552,7 @@ const health = async (): Promise<StorageHealth> => {
       healthy: false,
       latencyMs: Math.round(performance.now() - started),
       projectId: configuration.projectId,
-      bucket: bucketName(),
+      bucket: publicBucketName(),
       detail: String(error?.message || 'gcs_unreachable').slice(0, 200),
     }
     lastHealth = { at: now, value }
@@ -434,6 +564,7 @@ const health = async (): Promise<StorageHealth> => {
 
 export const ObjectStorageService = {
   configurationStatus,
+  isPrivateKey,
   presignUpload,
   presignDownload,
   head,
@@ -446,5 +577,6 @@ export const ObjectStorageService = {
   keyFromReference,
   publicUrl,
   browserCorsHealth,
+  privateBucketSecurityHealth,
   health,
 }

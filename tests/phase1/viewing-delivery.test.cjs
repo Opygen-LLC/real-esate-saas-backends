@@ -18,8 +18,9 @@ function limiterHarness() {
   }};
   class Schema {index() {}}
   const mongoose = {connection,Schema,model:()=>Counter,models:{PublicViewingRateCounter:Counter}};
-  const code = load('src/app/middlewares/publicViewingRateLimiter.ts', {'mongoose':mongoose,'../../errors/ApiError':errorDependency});
-  return {...code,connection,writes,setFail(value){fail=value;}};
+  const network = load('src/app/helpers/clientNetwork.ts');
+  const code = load('src/app/middlewares/publicViewingRateLimiter.ts', {'mongoose':mongoose,'../../errors/ApiError':errorDependency,'../helpers/clientNetwork':network});
+  return {...code,clientNetwork:network.clientNetwork,connection,writes,setFail(value){fail=value;}};
 }
 for(const [ip, expected] of [['192.0.2.10','192.0.2.10'],['::ffff:192.0.2.10','192.0.2.10'],['::ffff:c000:20a','192.0.2.10'],
  ['2001:db8:abcd:1234:1111:2222:3333:4444','2001:db8:abcd:1234::/64'],['2001:db8::1','2001:db8:0:0::/64'],['2001:0db8:0:0:ffff::1','2001:db8:0:0::/64'],['bad input','unknown']]) {

@@ -1,6 +1,6 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
-import { propertyImportRateLimiter, uploadRateLimiter } from '../../middlewares/rateLimiter'
+import { exportRateLimiter, generalApiRateLimiter, propertyImportRateLimiter, searchRateLimiter, uploadPresignRateLimiter, uploadRateLimiter } from '../../middlewares/rateLimiter'
 import validateRequest from '../../middlewares/validateRequest'
 import { PropertyController } from './property.controller'
 import { PropertyValidation } from './property.validation'
@@ -13,10 +13,10 @@ import { validateUploadedFiles } from '../../middlewares/requestInputGuard'
 const router = express.Router()
 
 // Public endpoints (no authentication required)
-router.get('/public-detail/:id', PropertyController.getPublicPropertyDetail)
-router.get('/public/:organizationId', PropertyController.getPublicProperties)
-router.get('/public/:organizationId/selection', PropertyController.getPublicPropertySelection)
-router.get('/public/:organizationId/slug/:slug', PropertyController.getPublicPropertyBySlug)
+router.get('/public-detail/:id', generalApiRateLimiter, PropertyController.getPublicPropertyDetail)
+router.get('/public/:organizationId', searchRateLimiter, PropertyController.getPublicProperties)
+router.get('/public/:organizationId/selection', searchRateLimiter, PropertyController.getPublicPropertySelection)
+router.get('/public/:organizationId/slug/:slug', generalApiRateLimiter, PropertyController.getPublicPropertyBySlug)
 
 // Authenticated import/export. Import is always preview -> confirm; there is no
 // direct spreadsheet-to-database route.
@@ -24,19 +24,19 @@ router.get('/import/template.csv', authMiddlewares.requirePermission('properties
 router.get('/import/template.xlsx', authMiddlewares.requirePermission('properties.write'), PropertyController.downloadImportXlsxTemplate)
 router.post('/import/preview', authMiddlewares.requirePermission('properties.write'), propertyImportRateLimiter, propertyImportUpload, PropertyController.previewImport)
 router.post('/import/confirm', authMiddlewares.requirePermission('properties.write'), propertyImportRateLimiter, validateRequest(PropertyValidation.confirmImportZodSchema), PropertyController.confirmImport)
-router.get('/export/csv', authMiddlewares.requirePermission('properties.read'), PropertyController.exportCsv)
-router.get('/export/xlsx', authMiddlewares.requirePermission('properties.read'), PropertyController.exportXlsx)
+router.get('/export/csv', authMiddlewares.requirePermission('properties.read'), exportRateLimiter, PropertyController.exportCsv)
+router.get('/export/xlsx', authMiddlewares.requirePermission('properties.read'), exportRateLimiter, PropertyController.exportXlsx)
 
 // Private property documents use signed object-storage URLs and are never exposed through public property DTOs.
-router.post('/documents/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignDocumentZodSchema), PropertyController.presignPropertyDocument)
-router.post('/documents/:assetId/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeDocumentZodSchema), PropertyController.completePropertyDocument)
+router.post('/documents/presign', authMiddlewares.requirePermission('properties.write'), uploadPresignRateLimiter, validateRequest(PropertyValidation.presignDocumentZodSchema), PropertyController.presignPropertyDocument)
+router.post('/documents/:assetId/complete', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, validateRequest(PropertyValidation.completeDocumentZodSchema), PropertyController.completePropertyDocument)
 router.get('/documents/:assetId/download', authMiddlewares.requirePermission('properties.read'), validateRequest(PropertyValidation.documentAssetZodSchema), PropertyController.downloadPropertyDocument)
 router.delete('/documents/session/:sessionId/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.deleteDraftDocumentZodSchema), PropertyController.deletePropertyDraftDocument)
 
 // Property media uses property permissions while reusing the hardened storage pipeline.
-router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
+router.post('/assets/presign', authMiddlewares.requirePermission('properties.write'), uploadPresignRateLimiter, validateRequest(PropertyValidation.presignImageZodSchema), PropertyController.presignPropertyImage)
 router.post('/assets/upload', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, propertyImageUpload, validateUploadedFiles, validateRequest(PropertyValidation.uploadImageZodSchema), PropertyController.uploadPropertyImage)
-router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
+router.post('/assets/complete', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, validateRequest(PropertyValidation.completeImageZodSchema), PropertyController.completePropertyImage)
 router.post('/assets/import-url', authMiddlewares.requirePermission('properties.write'), uploadRateLimiter, validateRequest(PropertyValidation.importImageUrlZodSchema), PropertyController.importPropertyImageUrl)
 router.get('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.getPropertyDraftSession)
 router.post('/assets/session/:sessionId/touch', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.draftSessionZodSchema), PropertyController.touchPropertyDraftSession)
@@ -44,7 +44,7 @@ router.delete('/assets/session/:sessionId/:assetId', authMiddlewares.requirePerm
 router.delete('/assets/session/:sessionId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.cleanupDraftSessionZodSchema), PropertyController.cleanupPropertyDraftSession)
 router.get('/assets/:assetId', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.imageAssetZodSchema), PropertyController.getPropertyImageAsset)
 
-router.get('/', authMiddlewares.requirePermission('properties.read'), PropertyController.getAllProperties)
+router.get('/', authMiddlewares.requirePermission('properties.read'), searchRateLimiter, PropertyController.getAllProperties)
 router.post('/', authMiddlewares.requirePermission('properties.write'), validateRequest(PropertyValidation.createPropertyZodSchema), PropertyController.createProperty)
 
 // Property ownership and investor accounting are intentionally separate from company shareholders.

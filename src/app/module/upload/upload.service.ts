@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import httpStatus from 'http-status'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 export interface IUploadResult {
   publicUrl: string
@@ -43,6 +44,7 @@ const uploadFile = async (organizationId: string, file: Express.Multer.File): Pr
   if (!tenantId) throw new ApiError(httpStatus.BAD_REQUEST, 'Organization id is required for uploads')
   const originalStem = (file.originalname || 'image').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100) || 'image'
   const objectKey = `tenants/${tenantId}/uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${originalStem}.${sanitized.extension}`
+  await UsageBudgetService.reserveUploadBytes(tenantId, sanitized.buffer.length)
   await ObjectStorageService.putBuffer(objectKey, sanitized.buffer, sanitized.contentType)
   return {
     publicUrl: ObjectStorageService.publicUrl(objectKey),

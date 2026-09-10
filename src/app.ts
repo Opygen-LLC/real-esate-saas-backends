@@ -10,7 +10,10 @@ import routes from "./app/routes/index";
 import { sendResponse } from "./shared/customResponse";
 import config from "./config";
 import {
+  apiSecurityHeaders,
   csrfProtection,
+  enforceHttps,
+  privateResponseCacheControl,
   requestContext,
   verifyCronSignature,
 } from "./app/middlewares/security";
@@ -61,11 +64,16 @@ app.use(
       directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
     },
     hsts: config.isProduction
-      ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+      ? { maxAge: 31536000, includeSubDomains: false, preload: false }
       : false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    frameguard: { action: 'deny' },
+    noSniff: true,
   }),
 );
 app.use(requestContext);
+app.use(apiSecurityHeaders);
+app.use(enforceHttps);
 app.use((req: Request, res: Response, next: NextFunction) => {
   const started = performance.now();
   res.locals.requestStartedAtMs = started;
@@ -97,6 +105,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 app.use(cookieParser());
+app.use(privateResponseCacheControl);
 app.use("/api/v1/organization/website", express.json({ limit: "5mb" }));
 app.use("/api/v1/observability/client-error", express.json({ limit: "32kb" }));
 app.use(express.json({ limit: "1mb" }));

@@ -1,11 +1,11 @@
 import express from 'express'
-import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import validateRequest from '../../middlewares/validateRequest'
 import { ObservabilityController } from './observability.controller'
+import { distributedRateLimit } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
-const limiter = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false })
+const limiter = distributedRateLimit({ name: 'client-observability', message: 'Too many client telemetry requests.', rules: [{ name: 'network', max: 30, windowMs: 60_000, key: (req) => `network:${req.ip || 'unknown'}` }] })
 const schema = z.object({ body: z.object({
   name: z.string().max(80).optional(),
   message: z.string().min(1).max(1000),

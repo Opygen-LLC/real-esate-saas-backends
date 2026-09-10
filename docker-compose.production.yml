@@ -31,9 +31,13 @@ services:
       # GCS media storage
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}
       GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:?GCP_BUCKET_NAME is required}
-      GCP_KEY_FILE: ${GCP_KEY_FILE:-/app/opy-realestate-505614-d4e3b5e9f13d.json}
+      GCP_PRIVATE_BUCKET_NAME: ${GCP_PRIVATE_BUCKET_NAME:?GCP_PRIVATE_BUCKET_NAME is required}
+      # Prefer Application Default Credentials/workload identity. If an external host
+      # must use a JSON key, mount it from a deployment secret outside the repository
+      # and set GCP_KEY_FILE to that in-container path.
+      GCP_KEY_FILE: ${GCP_KEY_FILE:-}
       OBJECT_STORAGE_BROWSER_ORIGIN: ${OBJECT_STORAGE_BROWSER_ORIGIN:-https://realestate.opygen.com}
-      CLAMAV_HOST: ${CLAMAV_HOST:-}
+      CLAMAV_HOST: ${CLAMAV_HOST:?CLAMAV_HOST is required in production}
       CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       # MongoDB pool
       MONGO_MIN_POOL_SIZE: ${MONGO_MIN_POOL_SIZE:-1}
@@ -48,11 +52,9 @@ services:
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required in production}
       REDIS_TLS: ${REDIS_TLS:-false}
       REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
-    volumes:
-      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
     # Do NOT expose port 5000 directly to the host in production —
     # only Caddy (the reverse proxy) should reach the API container.
     expose:
@@ -72,13 +74,15 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required in production}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --save 60 1 --loglevel warning --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - redis_data:/data
     networks:
       - app_network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -110,15 +114,18 @@ services:
       BACKUP_GCS_PROTECTION_MODE: ${BACKUP_GCS_PROTECTION_MODE:-warn}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
       GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:-}
-      GCP_KEY_FILE: ${GCP_KEY_FILE:-/app/opy-realestate-505614-d4e3b5e9f13d.json}
-    volumes:
-      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
+      # Prefer Application Default Credentials/workload identity. If an external host
+      # must use a JSON key, mount it from a deployment secret outside the repository
+      # and set GCP_KEY_FILE to that in-container path.
+      GCP_KEY_FILE: ${GCP_KEY_FILE:-}
     networks:
       - app_network
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?Set the public API hostname, for example api.example.com}
     ports:
       - "80:80"
       - "443:443"

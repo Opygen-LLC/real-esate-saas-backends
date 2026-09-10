@@ -112,3 +112,49 @@ export const verifyCronSignature = (req: Request, _res: Response, next: NextFunc
   }
   next()
 }
+
+/**
+ * Production API traffic is only accepted over HTTPS. The redirect target is
+ * built from the configured canonical API origin, never from the Host header,
+ * so an untrusted Host cannot influence Location.
+ *
+ * Health probes intentionally stay available on the private container network.
+ */
+export const enforceHttps = (req: Request, res: Response, next: NextFunction): void => {
+  if (!config.isProduction) return next()
+  const path = normalizePath(req.originalUrl)
+  if (path === '/health' || path === '/ready') return next()
+  if (req.secure) return next()
+
+  const rawTarget = String(req.originalUrl || '/')
+  const safeTarget = `/${rawTarget.replace(/^\/+/, '')}`
+  const destination = `${config.public_api_url}${safeTarget}`
+  res.setHeader('Cache-Control', 'no-store')
+  res.redirect(308, destination)
+}
+
+/** Prevent authenticated/private API responses from being retained by browsers,
+ * shared proxies or CDNs. Public website/cache endpoints remain cacheable. */
+export const privateResponseCacheControl = (req: Request, res: Response, next: NextFunction): void => {
+  const hasAuthorization = Boolean(req.get('authorization'))
+  const hasSessionCookie = Boolean(
+    req.cookies?.[config.security.access_cookie_name]
+      || req.cookies?.[config.security.refresh_cookie_name],
+  )
+  const privateNamespace = /^\/api\/v1\/(?:auth|platform-admin|support|billing|finance|compliance)(?:\/|$)/.test(normalizePath(req.originalUrl))
+  if (hasAuthorization || hasSessionCookie || privateNamespace) {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.vary('Authorization')
+    res.vary('Cookie')
+  }
+  next()
+}
+
+/** Headers not covered by the API Helmet policy or requiring explicit policy. */
+export const apiSecurityHeaders = (_req: Request, res: Response, next: NextFunction): void => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), payment=()')
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none')
+  next()
+}
+

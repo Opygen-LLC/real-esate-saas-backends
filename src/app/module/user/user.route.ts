@@ -1,6 +1,7 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { UserController } from './user.controller'
+import { adminNetworkRateLimiter, adminOperationRateLimiter, exportRateLimiter } from '../../middlewares/rateLimiter'
 import validateRequest from '../../middlewares/validateRequest'
 import { UserValidation } from './user.validation'
 
@@ -12,7 +13,7 @@ router.get('/public-agent/:id', UserController.getPublicAgentDetail)
 
 // Authenticated endpoints
 router.get('/me/access', authMiddlewares.auth(), UserController.getMyAccess)
-router.get('/me/export', authMiddlewares.auth(), UserController.exportMyData)
+router.get('/me/export', authMiddlewares.auth(), exportRateLimiter, UserController.exportMyData)
 router.get('/me/profile', authMiddlewares.auth(), UserController.getMyProfile)
 router.patch('/me/profile', authMiddlewares.auth(), validateRequest(UserValidation.selfProfile), UserController.updateMyProfile)
 
@@ -42,7 +43,7 @@ router.get(
   UserController.getAgentLeaderboard
 )
 
-router.get('/export.csv', authMiddlewares.requirePermission('users.read'), UserController.exportTeamMembersCsv)
+router.get('/export.csv', authMiddlewares.requirePermission('users.read'), exportRateLimiter, UserController.exportTeamMembersCsv)
 
 router.get(
   '/',
@@ -67,12 +68,12 @@ router.patch(
 )
 
 // Platform routes must be explicit and declared before tenant `/:id` routes.
-router.get('/super-admin/summary', authMiddlewares.authSuperAdmin, UserController.getSuperAdminUserSummary)
-router.get('/super-admin/export.csv', authMiddlewares.authSuperAdmin, UserController.exportUsersSuperAdminCsv)
-router.get('/super-admin/all', authMiddlewares.authSuperAdmin, UserController.getAllUsersSuperAdmin)
-router.patch('/super-admin/:id/role', authMiddlewares.authSuperAdmin,
+router.get('/super-admin/summary', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter, UserController.getSuperAdminUserSummary)
+router.get('/super-admin/export.csv', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter, exportRateLimiter, UserController.exportUsersSuperAdminCsv)
+router.get('/super-admin/all', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter, UserController.getAllUsersSuperAdmin)
+router.patch('/super-admin/:id/role', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(UserValidation.platformRole), UserController.updateUserRoleSuperAdmin)
-router.patch('/super-admin/:id/verify', authMiddlewares.authSuperAdmin,
+router.patch('/super-admin/:id/verify', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(UserValidation.manualVerification), UserController.verifyUserSuperAdmin)
 
 router.get(

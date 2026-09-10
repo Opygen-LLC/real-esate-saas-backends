@@ -32,8 +32,10 @@ import { WebsiteDesignService } from './websiteDesign.service'
 import { WebsiteCache } from './websiteCache'
 import { WebsitePublicationService } from './websitePublication.service'
 import { ObjectStorageService } from './objectStorage.service'
+import { StoredFileSecurityService } from './storedFileSecurity.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { buildDefaultWebsiteDocument } from './defaultWebsiteDocument'
@@ -331,9 +333,11 @@ const assetKey = (organizationId: string, filename: string, suffix = '', options
 const presignAsset = async (organizationId: string, payload: any, options: AssetLifecycleOptions = {}) => {
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
+  StoredFileSecurityService.assertSafeUploadFilename(payload.filename, payload.mimeType)
   const size = Number(payload.size)
   if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
   await EntitlementService.assertStorage(organizationId, size)
+  await UsageBudgetService.reserveUploadBytes(organizationId, size)
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
@@ -435,6 +439,7 @@ const uploadAssetBuffer = async (
   // optimizes the original at delivery time.
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   await EntitlementService.assertStorage(organizationId, file.buffer.length)
+  await UsageBudgetService.reserveUploadBytes(organizationId, file.buffer.length)
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })

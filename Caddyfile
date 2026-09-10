@@ -1,5 +1,19 @@
-:80 {
+# Caddy manages and renews TLS automatically for CADDY_SITE_ADDRESS.
+# HTTP -> HTTPS redirects are enabled by Caddy's default automatic HTTPS behavior.
+
+{$CADDY_SITE_ADDRESS} {
+    encode zstd gzip
+
+    header {
+        -Server
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
     reverse_proxy api:5000 {
+        # Never forward browser-supplied forwarding headers as authoritative
+        # values. The application trusts only this proxy/network.
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}

@@ -1,6 +1,6 @@
 import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
-import { leadImportRateLimiter, publicLeadRateLimiter } from '../../middlewares/rateLimiter'
+import { exportRateLimiter, leadImportRateLimiter, publicLeadRateLimiter } from '../../middlewares/rateLimiter'
 import validateRequest from '../../middlewares/validateRequest'
 import { LeadController } from './lead.controller'
 import { LeadValidation } from './lead.validation'
@@ -13,8 +13,8 @@ router.get('/import/template.csv',authMiddlewares.requirePermission('leads.write
 router.get('/import/template.xlsx',authMiddlewares.requirePermission('leads.write'),LeadController.downloadImportXlsxTemplate)
 router.post('/import/preview',authMiddlewares.requirePermission('leads.write'),leadImportRateLimiter,leadImportUpload,LeadController.previewImport)
 router.post('/import/confirm',authMiddlewares.requirePermission('leads.write'),leadImportRateLimiter,validateRequest(LeadValidation.confirmImportZodSchema),LeadController.confirmImport)
-router.get('/export/csv',authMiddlewares.requirePermission('leads.read'),authMiddlewares.requirePermission('crm.export'),LeadController.exportCsv)
-router.get('/export/xlsx',authMiddlewares.requirePermission('leads.read'),authMiddlewares.requirePermission('crm.export'),LeadController.exportXlsx)
+router.get('/export/csv',authMiddlewares.requirePermission('leads.read'),authMiddlewares.requirePermission('crm.export'),exportRateLimiter,LeadController.exportCsv)
+router.get('/export/xlsx',authMiddlewares.requirePermission('leads.read'),authMiddlewares.requirePermission('crm.export'),exportRateLimiter,LeadController.exportXlsx)
 router.get('/today-followups',authMiddlewares.requirePermission('leads.read'),LeadController.getTodayFollowUps)
 router.get('/',authMiddlewares.requirePermission('leads.read'),LeadController.getAllLeads)
 router.post('/',authMiddlewares.requirePermission('leads.write'),validateRequest(LeadValidation.createLeadZodSchema),LeadController.createLead)

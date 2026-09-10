@@ -1,6 +1,8 @@
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import sendEmail from '../../helpers/sendEmail'
+import config from '../../../config'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 const escapeHtml = (value: string) => value
   .replace(/&/g, '&amp;')
@@ -26,6 +28,7 @@ const shell = (heading: string, intro: string, code: string, footer: string) => 
   </div>`
 
 const deliver = async (to: string, subject: string, html: string, text?: string): Promise<void> => {
+  await UsageBudgetService.reserveEmail('auth-identity-email', 1, config.abuse.email_auth_daily_limit)
   const sent = await sendEmail(to, subject, html, text)
   if (!sent) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Verification email could not be delivered. Please try again shortly.', '', 'EMAIL_DELIVERY_UNAVAILABLE')
 }

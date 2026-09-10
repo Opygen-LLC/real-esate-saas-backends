@@ -46,6 +46,16 @@ const RESET_TOKEN_TTL_MS = 10 * 60 * 1000
 const REGISTRATION_CONTINUATION_TTL_MS = 30 * 60 * 1000
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
+const authenticationDelay = (failures: number) => new Promise((resolve) => {
+  const delayMs = Math.min(2_000, 200 * (2 ** Math.max(0, failures - 1)))
+  setTimeout(resolve, delayMs)
+})
+
+// Burn a real bcrypt comparison for unknown identities so login timing does not
+// become an account-discovery oracle. The value is generated once at startup
+// and never corresponds to a real account credential.
+const dummyPasswordHash = bcrypt.hashSync('not-a-real-account-password', Math.max(10, Number(config.bcrypt_salt_rounds)))
+
 export type OtpState = { expiresAt: Date; consumedAt?: Date | null; attempts: number; maxAttempts: number }
 export const validateOtpChallengeState = (challenge: OtpState, now = new Date()): void => {
   if (challenge.consumedAt) throw new ApiError(httpStatus.UNAUTHORIZED, 'Verification code has already been used')
@@ -444,7 +454,11 @@ const loginUser = async (payload: ILoginUser, meta: RequestMeta): Promise<AuthRe
     throw new ApiError(400, (error as Error).message)
   }
   const user = await User.findOne(query)
-  if (!user) throw new ApiError(401, 'Invalid credentials')
+  if (!user) {
+    await bcrypt.compare(payload.password, dummyPasswordHash)
+    logger.warn('auth_login_failed', { event: 'auth_login_failed', reason: 'unknown_identity', requestId: meta.requestId })
+    throw new ApiError(401, 'Invalid credentials')
+  }
   const credential: any = await AccountCredential.findOne({ userId: user._id }).select('+passwordHash')
   if (!credential) throw new ApiError(401, 'Invalid credentials')
   if (credential.lockedUntil && credential.lockedUntil > new Date()) {
@@ -458,6 +472,14 @@ const loginUser = async (payload: ILoginUser, meta: RequestMeta): Promise<AuthRe
       { _id: credential._id },
       { $set: { failedLoginCount: lockUntil ? 0 : nextFailures, lockedUntil: lockUntil } },
     )
+    logger.warn('auth_login_failed', {
+      event: 'auth_login_failed',
+      userId: user._id.toString(),
+      failureCount: nextFailures,
+      accountLocked: Boolean(lockUntil),
+      requestId: meta.requestId,
+    })
+    await authenticationDelay(nextFailures)
     throw new ApiError(401, 'Invalid credentials')
   }
   if (user.status === 'blocked') throw new ApiError(403, 'Account is blocked')
@@ -474,7 +496,15 @@ const consumeOtp = async (email: string, code: string, purpose: OtpPurpose) => {
   if (!challenge) throw new ApiError(401, 'Invalid or expired verification code')
   validateOtpChallengeState(challenge)
   if (!safeEqual(challenge.codeHash, hashOtp(challenge._id.toString(), code))) {
+    const nextAttempts = Number(challenge.attempts || 0) + 1
     await OtpChallenge.updateOne({ _id: challenge._id, consumedAt: null }, { $inc: { attempts: 1 }, $set: { lastAttemptAt: new Date() } })
+    logger.warn('auth_otp_failed', {
+      event: 'auth_otp_failed',
+      purpose,
+      userId: challenge.userId ? String(challenge.userId) : undefined,
+      attempt: nextAttempts,
+      exhausted: nextAttempts >= challenge.maxAttempts,
+    })
     throw new ApiError(401, 'Invalid or expired verification code')
   }
   const consumed = await OtpChallenge.findOneAndUpdate(

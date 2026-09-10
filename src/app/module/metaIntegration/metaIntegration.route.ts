@@ -3,14 +3,14 @@ import { z } from 'zod'
 import validateRequest from '../../middlewares/validateRequest'
 import { authMiddlewares } from '../../middlewares/auth'
 import { MetaIntegrationController } from './metaIntegration.controller'
-import { generalApiRateLimiter } from '../../middlewares/rateLimiter'
+import { publicEventRateLimiter } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
 const eventNames = z.enum(['PageView', 'ViewContent', 'Search', 'Lead', 'Contact', 'Schedule'])
 const mongoId = z.string().regex(/^[0-9a-fA-F]{24}$/)
 
 router.get('/public/:identifier/config', MetaIntegrationController.publicConfig)
-router.post('/public/:identifier/events', generalApiRateLimiter, validateRequest(z.object({ body: z.object({
+router.post('/public/:identifier/events', publicEventRateLimiter, validateRequest(z.object({ body: z.object({
   eventName: eventNames,
   eventId: z.string().min(8).max(120),
   eventSourceUrl: z.string().url().max(2048),

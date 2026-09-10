@@ -8,6 +8,7 @@ import { LeadService } from '../lead/lead.service'
 import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import { SmsMessage, SmsOptOut, SmsTemplate } from './sms.model'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 const provider = config.sms.provider_name || 'generic-bd-http'
 export const interpolateSmsTemplate = (body: string, variables: Record<string, string>) => body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key) => variables[key] ?? '')
@@ -58,6 +59,7 @@ export const mapSmsDeliveryStatus = (value: unknown): 'sent' | 'delivered' | 'fa
 const deliverPrepared = async (organizationId: string, input: PreparedSms) => {
   await EntitlementService.assertFeature(organizationId, 'smsAutomation')
   if (await SmsOptOut.exists({ organizationId, phone: input.phone })) throw new ApiError(409, 'Recipient opted out before queued SMS delivery')
+  await UsageBudgetService.reserveSms(organizationId)
   const response = await Resilience.fetch('sms-provider', config.sms.api_url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.sms.api_token}` },

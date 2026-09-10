@@ -48,6 +48,15 @@ const envBoolean = (name: string, fallback: boolean): boolean => {
   throw new Error(`${name} must be true or false`)
 }
 
+const envInteger = (name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number => {
+  const raw = process.env[name]?.trim()
+  const value = raw ? Number(raw) : fallback
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
+  }
+  return value
+}
+
 const requiredInProduction = (name: string, minimum = 1): string => {
   const value = process.env[name]?.trim()
   if (isProduction && (!value || value.length < minimum)) {
@@ -198,6 +207,7 @@ const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduc
 // should use the canonical GCP_* names below.
 const gcpProjectId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
 const gcpBucketName = process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
+const gcpPrivateBucketName = process.env.GCP_PRIVATE_BUCKET_NAME?.trim() || ''
 const gcpKeyFile = process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || ''
 const defaultGcsPublicBaseUrl = gcpBucketName ? `https://storage.googleapis.com/${gcpBucketName}` : ''
 const objectStoragePublicBaseUrl = normalizeStorageUrl(
@@ -293,11 +303,17 @@ if (isProduction) {
   // key or Application Default Credentials on Google-managed runtimes.
   if (!gcpProjectId) throw new Error('GCP_PROJECT_ID is required in production for Google Cloud Storage')
   if (!gcpBucketName) throw new Error('GCP_BUCKET_NAME is required in production for Google Cloud Storage')
+  if (!gcpPrivateBucketName) throw new Error('GCP_PRIVATE_BUCKET_NAME is required in production for private documents and support attachments')
+  if (gcpPrivateBucketName === gcpBucketName) throw new Error('GCP_PRIVATE_BUCKET_NAME must be different from the public GCP_BUCKET_NAME in production')
   if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production (or set GCP_BUCKET_NAME to auto-derive it)')
   if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcpBucketName)) throw new Error('GCP_BUCKET_NAME contains unsupported characters or length')
+  if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcpPrivateBucketName)) throw new Error('GCP_PRIVATE_BUCKET_NAME contains unsupported characters or length')
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
-  if (realtimeEnabled && !redisEnabled) throw new Error('REDIS_ENABLED/REDIS_HOST is required when realtime is enabled in production')
+  // Distributed rate limits and application spend guards depend on Redis even
+  // when realtime is disabled. Production must fail closed rather than falling
+  // back to per-process counters that can be bypassed across replicas.
+  if (!redisEnabled) throw new Error('REDIS_ENABLED/REDIS_HOST is required in production for distributed abuse protection and usage budgets')
   if (redisEnabled) {
     if (process.env.REDIS_PASSWORD?.trim() || !redisAllowInsecurePrivateNetwork) {
       requiredInProduction('REDIS_PASSWORD', 8)
@@ -316,6 +332,11 @@ if (isProduction) {
   requiredInProduction('SMTP_USER')
   requiredInProduction('SMTP_PASSWORD', 8)
   requiredInProduction('SMTP_FROM')
+  requiredInProduction('TRUST_PROXY')
+  if (['false', '0', 'off', 'no'].includes((process.env.TRUST_PROXY || '').trim().toLowerCase())) {
+    throw new Error('TRUST_PROXY must identify the production reverse proxy so HTTPS and client-IP checks cannot be spoofed')
+  }
+  requiredInProduction('CLAMAV_HOST')
   if (smsEnabled) {
     const requiredSms = ['SMS_API_URL', 'SMS_API_TOKEN', 'SMS_SENDER_ID', 'SMS_WEBHOOK_SECRET']
     requiredSms.forEach((name) => requiredInProduction(name))
@@ -466,10 +487,24 @@ export default {
     cache_namespace: process.env.REDIS_CACHE_NAMESPACE || 'cache',
     queue_namespace: process.env.REDIS_QUEUE_NAMESPACE || 'queue',
   },
+  abuse: {
+    email_global_daily_limit: envInteger('EMAIL_GLOBAL_DAILY_LIMIT', 20_000, 1, 10_000_000),
+    email_tenant_daily_limit: envInteger('EMAIL_TENANT_DAILY_LIMIT', 1_000, 1, 1_000_000),
+    email_auth_daily_limit: envInteger('EMAIL_AUTH_DAILY_LIMIT', 5_000, 1, 1_000_000),
+    sms_global_daily_limit: envInteger('SMS_GLOBAL_DAILY_LIMIT', 5_000, 1, 10_000_000),
+    sms_tenant_daily_limit: envInteger('SMS_TENANT_DAILY_LIMIT', 500, 1, 1_000_000),
+    whatsapp_global_daily_limit: envInteger('WHATSAPP_GLOBAL_DAILY_LIMIT', 5_000, 1, 10_000_000),
+    whatsapp_tenant_daily_limit: envInteger('WHATSAPP_TENANT_DAILY_LIMIT', 500, 1, 1_000_000),
+    meta_global_daily_limit: envInteger('META_GLOBAL_DAILY_LIMIT', 500_000, 1, 100_000_000),
+    meta_tenant_daily_limit: envInteger('META_TENANT_DAILY_LIMIT', 25_000, 1, 10_000_000),
+    upload_global_daily_bytes: envInteger('UPLOAD_GLOBAL_DAILY_BYTES', 50 * 1024 * 1024 * 1024, 1024 * 1024),
+    upload_tenant_daily_bytes: envInteger('UPLOAD_TENANT_DAILY_BYTES', 2 * 1024 * 1024 * 1024, 1024 * 1024),
+  },
   assets: {
     provider: 'gcs' as const,
     gcp_project_id: gcpProjectId,
     gcp_bucket_name: gcpBucketName,
+    gcp_private_bucket_name: gcpPrivateBucketName,
     gcp_key_file: gcpKeyFile,
     // `bucket` remains as a non-provider-specific alias for existing internal callers.
     bucket: gcpBucketName,

@@ -9,6 +9,8 @@ import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { scanStoredObject } from '../websiteBuilder/virusScan.service'
 import { MaterialPurchase } from './materialPurchase.model'
 import { SupplierInvoiceAsset } from './supplierInvoiceAsset.model'
+import { UsageBudgetService } from '../../security/usageBudget.service'
+import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
 
 const MAX_SIZE = 10 * 1024 * 1024
 const ALLOWED_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
@@ -29,12 +31,14 @@ const presign = async (organizationId: string, purchaseId: string, actorId: stri
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!mongoose.isValidObjectId(purchaseId)) throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid purchase id')
   if (!ALLOWED_MIME.has(input.mimeType)) throw new ApiError(httpStatus.BAD_REQUEST, 'Use PDF, JPG, PNG or WebP invoice attachments')
+  StoredFileSecurityService.assertSafeUploadFilename(input.originalName, input.mimeType)
   if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Invoice attachment must be 10 MB or smaller')
   const purchase = await MaterialPurchase.findOne({ _id: purchaseId, organizationId }).select('_id status').lean()
   if (!purchase) throw new ApiError(httpStatus.NOT_FOUND, 'Material purchase not found')
   if (purchase.status === 'Cancelled') throw new ApiError(httpStatus.CONFLICT, 'Cancelled purchases cannot receive new invoice attachments')
   if (await SupplierInvoiceAsset.exists({ organizationId, purchaseId, active: true })) throw new ApiError(httpStatus.CONFLICT, 'This purchase already has an invoice attachment. Remove it before uploading another.')
   await EntitlementService.assertStorage(organizationId, input.size)
+  await UsageBudgetService.reserveUploadBytes(organizationId, input.size)
 
   const assetId = new mongoose.Types.ObjectId()
   const key = `tenants/${organizationId}/suppliers/invoices/${purchaseId}/${assetId}-${randomUUID()}-${safeFilename(input.originalName)}`
@@ -72,6 +76,7 @@ const complete = async (organizationId: string, purchaseId: string, assetId: str
     const actualMime = String(object.contentType || '').split(';')[0].trim().toLowerCase()
     if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== asset.mimeType) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded invoice type does not match the signed upload')
     if (object.size < 1 || object.size > MAX_SIZE || object.size > Number(asset.declaredSize || 0) + 4096) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded invoice size does not match the declared file')
+    await StoredFileSecurityService.validateStoredFile(asset.key, asset.mimeType, MAX_SIZE)
     const scan = await scanStoredObject(asset.key)
 
     // Completing an upload must be idempotent under retries/concurrent requests.

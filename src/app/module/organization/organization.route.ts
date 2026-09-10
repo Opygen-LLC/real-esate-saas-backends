@@ -2,6 +2,7 @@ import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import { OrganizationController } from './organization.controller'
 import validateRequest from '../../middlewares/validateRequest'
+import { adminNetworkRateLimiter, adminOperationRateLimiter } from '../../middlewares/rateLimiter'
 import { OrganizationValidation } from './organization.validation'
 
 const router = express.Router()
@@ -74,14 +75,14 @@ router.patch(
 // Super admin endpoints
 router.get(
   '/all',
-  authMiddlewares.authSuperAdmin,
+  adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(OrganizationValidation.listAll),
   OrganizationController.getAllOrganizations
 )
 
 router.patch(
   '/:id',
-  authMiddlewares.authSuperAdmin,
+  adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(OrganizationValidation.platformUpdate),
   OrganizationController.updateOrganizationBySuperAdmin
 )

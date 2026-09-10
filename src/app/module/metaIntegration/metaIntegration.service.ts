@@ -9,6 +9,7 @@ import { DomainRecord } from '../domain/domain.model'
 import { MetaIntegration } from './metaIntegration.model'
 import { MetaEvent } from './metaEvent.model'
 import { Resilience } from '../../../shared/resilience'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
@@ -303,6 +304,7 @@ const sendEvent = async (event: any) => {
   const body = buildMetaCapiBody(event, userData)
 
   try {
+    await UsageBudgetService.reserveMeta(String(event.organizationId))
     // Keep the tenant's Meta credential out of URLs. Query-string tokens can leak
     // through reverse-proxy/access logs and error telemetry even when the value is
     // encrypted at rest. Meta Graph API accepts the standard Bearer header.

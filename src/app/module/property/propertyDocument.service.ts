@@ -10,6 +10,8 @@ import { scanStoredObject } from '../websiteBuilder/virusScan.service'
 import { allowedDocumentTypesForProperty, type PropertyDocumentType, type PropertyType } from './property.constants'
 import type { IPropertyDocument } from './property.interface'
 import { PropertyDocumentAsset } from './propertyDocumentAsset.model'
+import { UsageBudgetService } from '../../security/usageBudget.service'
+import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
 
 const MAX_DOCUMENT_SIZE = 20 * 1024 * 1024
 const MAX_DOCUMENTS = 20
@@ -37,8 +39,10 @@ const presign = async (organizationId: string, input: { uploadSessionId: string;
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   const uploadSessionId = assertDraftSessionId(input.uploadSessionId)
   if (!ALLOWED_DOCUMENT_MIME_TYPES.has(input.mimeType)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported property document type')
+  StoredFileSecurityService.assertSafeUploadFilename(input.originalName, input.mimeType)
   if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_DOCUMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Property document must be between 1 byte and 20 MB')
   await EntitlementService.assertStorage(organizationId, input.size)
+  await UsageBudgetService.reserveUploadBytes(organizationId, input.size)
   const currentCount = await PropertyDocumentAsset.countDocuments({ organizationId, uploadSessionId, status: { $in: ['pending', 'ready'] }, claimed: false })
   if (currentCount >= MAX_DOCUMENTS) throw new ApiError(httpStatus.BAD_REQUEST, `A property can have up to ${MAX_DOCUMENTS} private documents`)
 
@@ -75,6 +79,7 @@ const complete = async (organizationId: string, assetId: string, uploadSessionId
     const actualMime = String(object.contentType || '').split(';')[0].trim().toLowerCase()
     if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== asset.mimeType) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded document type does not match the signed upload')
     if (object.size < 1 || object.size > MAX_DOCUMENT_SIZE || object.size > Number(asset.declaredSize || 0) + 4096) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded document size does not match the declared file')
+    await StoredFileSecurityService.validateStoredFile(asset.key, asset.mimeType, MAX_DOCUMENT_SIZE)
     const scan = await scanStoredObject(asset.key)
     asset.size = object.size
     asset.scanStatus = scan.status

@@ -14,6 +14,7 @@ import { effectivePermissionsForUser, normalizeCustomPermissions, permissionsFor
 import { deleteUserCompanionRecords, ensureUserProfile, getUserAccessControl, syncRoleProfile } from '../user/userProfile.service'
 import { TeamInvitation } from './teamInvitation.model'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 const tokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
 const inviteExpiryMs = 48 * 60 * 60 * 1000
@@ -101,6 +102,7 @@ const createInvitation = async (
   const agencyName = escapeHtml(String(org?.agencyName || 'an Opygen Real Estate agency'))
   const inviteeName = escapeHtml(payload.name.trim())
   const acceptUrl = `${config.client_url.replace(/\/$/, '')}/invite/accept?token=${encodeURIComponent(prepared.token)}`
+  await UsageBudgetService.reserveEmail(organizationId)
   const delivered = await sendEmail(email, `You're invited to join ${String(org?.agencyName || 'an Opygen Real Estate agency')}`, `
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#18181b">
       <h2 style="margin-bottom:8px">Join ${agencyName}</h2>

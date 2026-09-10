@@ -3,6 +3,7 @@ import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
 import { SupplierManagementController } from './supplierManagement.controller'
 import { SupplierManagementValidation } from './supplierManagement.validation'
+import { uploadPresignRateLimiter, uploadRateLimiter } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
 const materialsInventory = authMiddlewares.requireEntitlement('MATERIALS_INVENTORY')
@@ -18,8 +19,8 @@ router.post('/purchases/:purchaseId/receive', materialsInventory, authMiddleware
 router.post('/purchases/:purchaseId/payments', authMiddlewares.requirePermission('supplierPayments.manage'), validateRequest(SupplierManagementValidation.recordPayment), SupplierManagementController.recordPayment)
 router.post('/purchases/:purchaseId/payments/:paymentId/void', authMiddlewares.requirePermission('supplierPayments.manage'), validateRequest(SupplierManagementValidation.voidPayment), SupplierManagementController.voidPayment)
 router.post('/purchases/:purchaseId/cancel', authMiddlewares.requirePermission('suppliers.manage'), validateRequest(SupplierManagementValidation.cancelPurchase), SupplierManagementController.cancelPurchase)
-router.post('/purchases/:purchaseId/invoice-attachment/presign', authMiddlewares.requirePermission('suppliers.manage'), validateRequest(SupplierManagementValidation.presignInvoice), SupplierManagementController.presignInvoice)
-router.post('/purchases/:purchaseId/invoice-attachment/:assetId/complete', authMiddlewares.requirePermission('suppliers.manage'), validateRequest(SupplierManagementValidation.completeInvoice), SupplierManagementController.completeInvoice)
+router.post('/purchases/:purchaseId/invoice-attachment/presign', authMiddlewares.requirePermission('suppliers.manage'), uploadPresignRateLimiter, validateRequest(SupplierManagementValidation.presignInvoice), SupplierManagementController.presignInvoice)
+router.post('/purchases/:purchaseId/invoice-attachment/:assetId/complete', authMiddlewares.requirePermission('suppliers.manage'), uploadRateLimiter, validateRequest(SupplierManagementValidation.completeInvoice), SupplierManagementController.completeInvoice)
 router.get('/purchases/:purchaseId/invoice-attachment/download', authMiddlewares.requirePermission('suppliers.read'), validateRequest(SupplierManagementValidation.purchaseId), SupplierManagementController.downloadInvoice)
 router.delete('/purchases/:purchaseId/invoice-attachment', authMiddlewares.requirePermission('suppliers.manage'), validateRequest(SupplierManagementValidation.purchaseId), SupplierManagementController.removeInvoice)
 router.get('/materials/:materialId/latest-prices', authMiddlewares.requirePermission('suppliers.read'), validateRequest(SupplierManagementValidation.latestPrices), SupplierManagementController.latestPrices)

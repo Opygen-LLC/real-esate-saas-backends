@@ -3,31 +3,32 @@ import { SubscriptionPlanController } from './subscriptionPlan.controller'
 
 import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
+import { adminNetworkRateLimiter, adminOperationRateLimiter } from '../../middlewares/rateLimiter'
 import { SubscriptionPlanValidation } from './subscriptionPlan.validation'
 
 const router = express.Router()
 
 router.get('/', SubscriptionPlanController.getAllPlans)
 router.get('/plans', SubscriptionPlanController.getAllPlans)
-router.get('/admin/versions', authMiddlewares.authSuperAdmin, SubscriptionPlanController.getAllPlanVersions)
+router.get('/admin/versions', adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter, SubscriptionPlanController.getAllPlanVersions)
 
 router.post(
   '/',
-  authMiddlewares.authSuperAdmin,
+  adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(SubscriptionPlanValidation.create),
   SubscriptionPlanController.createPlan
 )
 
 router.patch(
   '/:id',
-  authMiddlewares.authSuperAdmin,
+  adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(SubscriptionPlanValidation.update),
   SubscriptionPlanController.updatePlan
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.authSuperAdmin,
+  adminNetworkRateLimiter, authMiddlewares.authSuperAdmin, adminOperationRateLimiter,
   validateRequest(SubscriptionPlanValidation.archive),
   SubscriptionPlanController.deletePlan
 )

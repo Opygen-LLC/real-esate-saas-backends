@@ -1,5 +1,6 @@
 import multer, { FileFilterCallback } from 'multer'
 import { Request } from 'express'
+import path from 'path'
 
 const storage = multer.memoryStorage()
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB limit
@@ -9,12 +10,14 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: FileFilterCallback
 ) => {
-  const allowedMimeTypes = [
-    'image/jpeg',
-    'image/png',
-  ]
+  const allowedMimeTypes = new Set(['image/jpeg', 'image/png'])
+  const allowedExtensions = new Set(['.jpg', '.jpeg', '.png'])
+  const originalName = String(file.originalname || '').replace(/\0/g, '').trim()
+  const cleanName = path.posix.basename(path.win32.basename(originalName))
+  const extension = path.extname(cleanName).toLowerCase()
 
-  if (allowedMimeTypes.includes(file.mimetype.toLowerCase())) {
+  if (cleanName && cleanName.length <= 255 && allowedMimeTypes.has(file.mimetype.toLowerCase()) && allowedExtensions.has(extension)) {
+    file.originalname = cleanName
     cb(null, true)
   } else {
     cb(

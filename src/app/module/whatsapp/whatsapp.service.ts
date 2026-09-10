@@ -9,6 +9,7 @@ import { LeadService } from '../lead/lead.service'
 import { LeadLifecycleService } from '../lead/leadLifecycle.service'
 import type { CrmAccessContext } from '../crm/crmAccess'
 import { WhatsAppIntegration } from './whatsapp.model'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 const publicShape = (doc: any) => ({ organizationId: doc.organizationId, status: doc.status, entitlementStatus: doc.entitlementStatus || 'active', businessAccountId: doc.businessAccountId, phoneNumberId: doc.phoneNumberId, displayPhoneNumber: doc.displayPhoneNumber, hasAccessToken: Boolean(doc.encryptedAccessToken), lastTestAt: doc.lastTestAt, lastError: doc.lastError, diagnostics: doc.diagnostics || {}, updatedAt: doc.updatedAt })
 const get = async (organizationId: string) => { const doc: any = await WhatsAppIntegration.findOne({ organizationId }).select('+encryptedAccessToken').lean(); return doc ? publicShape(doc) : { organizationId, status: 'disabled', hasAccessToken: false } }
@@ -55,6 +56,7 @@ const sendTemplate = async (organizationId: string, input: { phone: string; temp
   if (!integration || integration.status !== 'connected' || !integration.phoneNumberId || !integration.encryptedAccessToken) throw new ApiError(409, 'Official WhatsApp Business integration is not connected')
   const token = decryptField(integration.encryptedAccessToken)
   const phone = normalizeBangladeshPhone(input.phone).replace(/^\+/, '')
+  await UsageBudgetService.reserveWhatsApp(organizationId)
   const response = await Resilience.fetch('whatsapp', `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: input.templateName, language: { code: input.languageCode || 'en' }, ...(input.components?.length ? { components: input.components } : {}) } }) }, { timeoutMs: config.meta.timeout_ms })
   const body: any = await response.json().catch(() => ({}))
   if (!response.ok) { await WhatsAppIntegration.updateOne({ _id: integration._id }, { $set: { status: 'error', lastError: `Graph API ${response.status}`, lastTestAt: new Date() } }); throw new ApiError(502, 'WhatsApp Business provider rejected the message') }

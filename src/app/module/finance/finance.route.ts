@@ -20,6 +20,7 @@ import { FinanceCloseController } from './financeClose.controller'
 import { FinanceCloseValidation } from './financeClose.validation'
 import type { FinancePermission } from './finance.contract'
 import { requireInvoicePaymentPermission } from './financeInvoicePaymentAccess.middleware'
+import { exportRateLimiter, reportRateLimiter, uploadRateLimiter } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
 const read = [authMiddlewares.auth(), authMiddlewares.requirePermission('finance.read')] as const
@@ -73,19 +74,19 @@ router.post('/accounting/fiscal-years/:id/year-end-close', ...advancedWrite('fin
 router.get('/accounting/audit', ...advancedRead('finance.audit.read'), validateRequest(FinanceCloseValidation.audit), FinanceCloseController.auditLog)
 
 // Phase 6 GL financial statements and advanced reporting
-router.get('/accounting/reports/trial-balance', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.trialBalance)
-router.get('/accounting/reports/balance-sheet', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.balanceSheet)
-router.get('/accounting/reports/profit-loss', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.profitLoss)
-router.get('/accounting/reports/cash-flow', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.cashFlow)
-router.get('/accounting/reports/statement-of-equity', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.statementOfEquity)
-router.get('/accounting/reports/general-ledger', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.generalLedger)
-router.get('/accounting/reports/ar-aging', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.arAging)
-router.get('/accounting/reports/ap-aging', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.apAging)
-router.get('/accounting/reports/property-profitability', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.propertyProfitability)
-router.get('/accounting/reports/tax', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.tax)
-router.get('/accounting/reports/budget-vs-actual', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.common), FinanceReportingController.budgetVsActual)
-router.get('/accounting/reports/drilldown', ...advancedRead('finance.reports.read'), validateRequest(FinanceReportingValidation.drilldown), FinanceReportingController.drilldown)
-router.get('/accounting/reports/export/:report', ...advancedRead('finance.reports.export'), validateRequest(FinanceReportingValidation.export), FinanceReportingController.exportReport)
+router.get('/accounting/reports/trial-balance', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.trialBalance)
+router.get('/accounting/reports/balance-sheet', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.balanceSheet)
+router.get('/accounting/reports/profit-loss', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.profitLoss)
+router.get('/accounting/reports/cash-flow', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.cashFlow)
+router.get('/accounting/reports/statement-of-equity', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.statementOfEquity)
+router.get('/accounting/reports/general-ledger', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.generalLedger)
+router.get('/accounting/reports/ar-aging', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.arAging)
+router.get('/accounting/reports/ap-aging', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.apAging)
+router.get('/accounting/reports/property-profitability', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.propertyProfitability)
+router.get('/accounting/reports/tax', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.tax)
+router.get('/accounting/reports/budget-vs-actual', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.common), FinanceReportingController.budgetVsActual)
+router.get('/accounting/reports/drilldown', ...advancedRead('finance.reports.read'), reportRateLimiter, validateRequest(FinanceReportingValidation.drilldown), FinanceReportingController.drilldown)
+router.get('/accounting/reports/export/:report', ...advancedRead('finance.reports.export'), exportRateLimiter, validateRequest(FinanceReportingValidation.export), FinanceReportingController.exportReport)
 
 
 // Phase 4 operational accounting
@@ -118,7 +119,7 @@ router.post('/accounting/client-deposits/:id/apply', ...advancedWrite('finance.r
 router.post('/accounting/client-deposits/:id/refund', ...advancedWrite('finance.receivables.manage'), validateRequest(FinanceOperationsValidation.refundDeposit), FinanceOperationsController.refundDeposit)
 
 router.get('/accounting/bank-statements', ...advancedRead(), validateRequest(FinanceOperationsValidation.statementList), FinanceOperationsController.listStatements)
-router.post('/accounting/bank-statements/import', ...advancedWrite('finance.bank.reconcile'), financeBankStatementUpload, validateRequest(FinanceOperationsValidation.bankStatementBody), FinanceOperationsController.importStatement)
+router.post('/accounting/bank-statements/import', ...advancedWrite('finance.bank.reconcile'), uploadRateLimiter, financeBankStatementUpload, validateRequest(FinanceOperationsValidation.bankStatementBody), FinanceOperationsController.importStatement)
 router.get('/accounting/bank-statements/:id', ...advancedRead(), validateRequest(FinanceOperationsValidation.statementId), FinanceOperationsController.getStatement)
 router.get('/accounting/bank-statements/:id/ledger-candidates', ...advancedRead(), validateRequest(FinanceOperationsValidation.ledgerCandidates), FinanceOperationsController.ledgerCandidates)
 router.post('/accounting/bank-statements/:id/lines/:lineId/match', ...advancedWrite('finance.bank.reconcile'), validateRequest(FinanceOperationsValidation.matchStatementLine), FinanceOperationsController.matchStatementLine)
@@ -150,8 +151,8 @@ router.put('/billing-profile', ...write, validateRequest(FinanceValidation.updat
 router.delete('/billing-profile', ...remove, validateRequest(FinanceValidation.removeBillingProfile), FinanceController.removeBillingProfile)
 
 router.get('/overview', ...read, FinanceController.getOverview)
-router.get('/reports', ...read, FinanceController.getReports)
-router.get('/reports/transactions.csv', ...read, FinanceController.exportTransactions)
+router.get('/reports', ...read, reportRateLimiter, FinanceController.getReports)
+router.get('/reports/transactions.csv', ...read, exportRateLimiter, FinanceController.exportTransactions)
 
 router.get('/transactions', ...read, FinanceController.listTransactions)
 router.post('/transactions', ...write, validateRequest(FinanceValidation.createTransaction), FinanceController.createTransaction)

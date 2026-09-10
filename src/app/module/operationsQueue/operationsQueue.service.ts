@@ -26,6 +26,7 @@ import { SmsService } from '../sms/sms.service'
 import { WebsiteAssetProcessor } from '../websiteBuilder/websiteAssetProcessor.service'
 import sendEmail from '../../helpers/sendEmail'
 import { OperationsJob, OperationsJobType } from './operationsJob.model'
+import { UsageBudgetService } from '../../security/usageBudget.service'
 
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`
 let assetFinalizeFailuresSinceStart = 0
@@ -168,6 +169,7 @@ const deliver = async (job: any) => {
   if (job.type === 'support_email') {
     const { to, subject, html } = job.payload || {}
     if (to && subject && html) {
+      await UsageBudgetService.reserveEmail(job.organizationId)
       await sendEmail(to, subject, html)
     }
     return

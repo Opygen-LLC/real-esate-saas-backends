@@ -5,6 +5,7 @@ import { ObjectStorageService } from './objectStorage.service'
 import { scanStoredObject } from './virusScan.service'
 import { WebsiteAsset } from './websiteAsset.model'
 import { WebsiteUploadIntent } from './websiteUploadIntent.model'
+import { StoredFileSecurityService } from './storedFileSecurity.service'
 
 const finalize = async (organizationId: string, assetId: string, payload: any) => {
   const asset: any = await WebsiteAsset.findOne({ _id: assetId, organizationId })
@@ -14,19 +15,27 @@ const finalize = async (organizationId: string, assetId: string, payload: any) =
   if (!intent) throw new ApiError(409, 'Upload intent expired before asset processing completed')
 
   try {
-    const original = await ObjectStorageService.head(asset.key)
+    let original = await ObjectStorageService.head(asset.key)
     const actualMime = original.contentType.split(';')[0].trim().toLowerCase()
     if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== asset.mimeType) throw new ApiError(400, 'Uploaded object content type does not match its signed upload')
+    await StoredFileSecurityService.validateStoredFile(asset.key, asset.mimeType, Math.max(25 * 1024 * 1024, Number(intent.declaredSize || 0) + 4096))
     const scan = await scanStoredObject(asset.key)
+    if (String(asset.mimeType).startsWith('image/')) {
+      await StoredFileSecurityService.sanitizeStoredPublicImage(asset.key, asset.mimeType, { maxBytes: Math.max(25 * 1024 * 1024, Number(intent.declaredSize || 0) + 4096) })
+      original = await ObjectStorageService.head(asset.key)
+    }
     const variants: any[] = []
     for (const variant of payload.variants || []) {
       if (!String(variant.key).startsWith(`${asset.key}.`) || !intent.objectKeys.includes(String(variant.key))) throw new ApiError(400, 'Invalid asset variant key')
-      const meta = await ObjectStorageService.head(variant.key)
+      let meta = await ObjectStorageService.head(variant.key)
       const expectedMime = `image/${variant.format}`
       const variantMime = meta.contentType.split(';')[0].trim().toLowerCase()
       if (variantMime && variantMime !== 'application/octet-stream' && variantMime !== expectedMime) throw new ApiError(400, `Asset variant content type must be ${expectedMime}`)
+      await StoredFileSecurityService.validateStoredFile(variant.key, expectedMime, 20 * 1024 * 1024)
       await scanStoredObject(variant.key)
-      variants.push({ key: variant.key, url: ObjectStorageService.publicUrl(variant.key), format: variant.format, width: Number(variant.width), height: variant.height ? Number(variant.height) : undefined, size: meta.size })
+      const sanitizedVariant = await StoredFileSecurityService.sanitizeStoredPublicImage(variant.key, expectedMime, { maxWidth: Number(variant.width) || 1280, maxHeight: Number(variant.width) || 1280, maxBytes: 20 * 1024 * 1024 })
+      meta = await ObjectStorageService.head(variant.key)
+      variants.push({ key: variant.key, url: ObjectStorageService.publicUrl(variant.key), format: variant.format, width: sanitizedVariant.width || Number(variant.width), height: sanitizedVariant.height, size: meta.size })
     }
     const totalSize = original.size + variants.reduce((sum: number, variant: any) => sum + variant.size, 0)
     const previousSize = Number(asset.size || 0)
@@ -45,8 +54,12 @@ const finalize = async (organizationId: string, assetId: string, payload: any) =
     await intent.deleteOne()
     return asset
   } catch (error: any) {
-    if (error?.statusCode === 422) {
-      asset.status = 'rejected'; asset.scanStatus = 'infected'; await asset.save()
+    const statusCode = Number(error?.statusCode || error?.status || 0)
+    const securityRejected = statusCode >= 400 && statusCode < 500
+    if (securityRejected) {
+      asset.status = 'rejected'
+      asset.scanStatus = statusCode === 422 ? 'infected' : 'failed'
+      await asset.save()
       await Promise.allSettled(intent.objectKeys.map((key: string) => ObjectStorageService.remove(key)))
       await intent.deleteOne()
     }

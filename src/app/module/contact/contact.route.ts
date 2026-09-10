@@ -2,6 +2,7 @@ import express from 'express'
 import { authMiddlewares } from '../../middlewares/auth'
 import validateRequest from '../../middlewares/validateRequest'
 import { ContactController } from './contact.controller'
+import { exportRateLimiter } from '../../middlewares/rateLimiter'
 import { ContactValidation } from './contact.validation'
 import { ActivityValidation } from '../activity/activity.validation'
 
@@ -24,6 +25,7 @@ router.get(
   '/export/csv',
   authMiddlewares.requirePermission('contacts.read'),
   authMiddlewares.requirePermission('crm.export'),
+  exportRateLimiter,
   ContactController.exportCsv
 )
 
@@ -31,6 +33,7 @@ router.get(
   '/export/xlsx',
   authMiddlewares.requirePermission('contacts.read'),
   authMiddlewares.requirePermission('crm.export'),
+  exportRateLimiter,
   ContactController.exportXlsx
 )
 

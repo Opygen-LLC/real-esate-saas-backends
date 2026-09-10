@@ -10,6 +10,9 @@ import { scanStoredObject } from '../websiteBuilder/virusScan.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { SupportPriority, SupportStatus, SupportTicket } from './support.model'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
+import { UsageBudgetService } from '../../security/usageBudget.service'
+import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
+import { EntitlementService } from '../entitlement/entitlement.service'
 
 const SLA_HOURS: Record<SupportPriority, { firstResponse: number; resolution: number }> = {
   urgent: { firstResponse: 1, resolution: 8 },
@@ -167,10 +170,13 @@ const createAttachmentUpload = async (id: string, input: { originalName: string;
   await TenantPurgeBarrier.assertTenantWritable(ticket.organizationId)
   if (input.visibility === 'internal' && actor.role !== 'super-admin') throw new ApiError(httpStatus.FORBIDDEN, 'Internal attachments are support-only')
   if (!ALLOWED_ATTACHMENT_TYPES.has(input.mimeType)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported attachment type')
+  StoredFileSecurityService.assertSafeUploadFilename(input.originalName, input.mimeType)
   if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_ATTACHMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Attachment must be between 1 byte and 10 MB')
+  await EntitlementService.assertStorage(ticket.organizationId, input.size)
+  await UsageBudgetService.reserveUploadBytes(ticket.organizationId, input.size)
   const attachmentId = new mongoose.Types.ObjectId()
   const key = `support/${ticket.organizationId}/${ticket.ticketId}/${attachmentId.toString()}-${safeFilename(input.originalName)}`
-  const signedRef = ObjectStorageService.presignUpload(key)
+  const signedRef = ObjectStorageService.presignUpload(key, input.mimeType)
   const uploadUrl = await signedRef.getUploadUrl()
   ticket.attachments.push({ _id: attachmentId, key, url: '', originalName: input.originalName, mimeType: input.mimeType, declaredSize: input.size, size: 0, visibility: input.visibility, status: 'pending', scanStatus: 'pending', uploadedBy: actor.id, createdAt: new Date() })
   await ticket.save()
@@ -185,12 +191,16 @@ const completeAttachmentUpload = async (id: string, attachmentId: string, actor:
   if (attachment.status === 'ready') return presentTicket(ticket, actor.role === 'super-admin')
   try {
     const object = await ObjectStorageService.head(attachment.key)
+    const actualMime = String(object.contentType || '').split(';')[0].trim().toLowerCase()
+    if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== attachment.mimeType) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded attachment type does not match the signed upload')
     if (object.size < 1 || object.size > MAX_ATTACHMENT_SIZE || object.size > attachment.declaredSize + 4096) throw new ApiError(httpStatus.BAD_REQUEST, 'Uploaded attachment size does not match the declared file')
+    await StoredFileSecurityService.validateStoredFile(attachment.key, attachment.mimeType, MAX_ATTACHMENT_SIZE)
     const scan = await scanStoredObject(attachment.key)
     attachment.size = object.size
     attachment.scanStatus = scan.status
     attachment.status = 'ready'
     await ticket.save()
+    await Organization.updateOne({ organizationId: ticket.organizationId }, { $inc: { storageUsedBytes: object.size } })
     return presentTicket(ticket, actor.role === 'super-admin')
   } catch (error) {
     attachment.status = 'rejected'
@@ -212,7 +222,7 @@ const getAttachmentDownload = async (id: string, attachmentId: string, actor: { 
   if (attachment.status !== 'ready' || !['clean', 'skipped'].includes(attachment.scanStatus)) {
     throw new ApiError(httpStatus.CONFLICT, 'Support attachment is not ready for download')
   }
-  return { url: ObjectStorageService.presignDownload(attachment.key, 120), expiresIn: 120, name: attachment.originalName, mimeType: attachment.mimeType }
+  return { url: await ObjectStorageService.presignDownload(attachment.key, 120), expiresIn: 120, name: attachment.originalName, mimeType: attachment.mimeType }
 }
 
 const markSlaBreaches = async () => {
