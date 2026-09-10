@@ -8,19 +8,19 @@ router.get('/public/:organizationId', PropertyTypeController.getAllPropertyTypes
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.requirePermission('properties.read'),
   PropertyTypeController.getAllPropertyTypes
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   PropertyTypeController.createPropertyType
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   PropertyTypeController.deletePropertyType
 )
 

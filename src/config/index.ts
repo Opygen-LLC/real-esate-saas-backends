@@ -7,7 +7,11 @@ dotenv.config({
   path: path.join(process.cwd(), '.env'),
 })
 
-const isProduction = process.env.NODE_ENV === 'production'
+const environment = (process.env.NODE_ENV?.trim().toLowerCase() || 'development')
+if (!['development', 'test', 'production'].includes(environment)) {
+  throw new Error('NODE_ENV must be one of: development, test, production')
+}
+const isProduction = environment === 'production'
 
 const normalizeApiOrigin = (value: string): string => {
   let parsed: URL
@@ -17,6 +21,8 @@ const normalizeApiOrigin = (value: string): string => {
     throw new Error('PUBLIC_API_URL must be a valid absolute URL')
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('PUBLIC_API_URL must use http:// or https://')
+  if (parsed.username || parsed.password) throw new Error('PUBLIC_API_URL must not contain embedded credentials')
+  if (parsed.search || parsed.hash) throw new Error('PUBLIC_API_URL must not contain query parameters or fragments')
   const pathname = parsed.pathname.replace(/\/$/, '')
   if (pathname && pathname !== '/api/v1') {
     throw new Error('PUBLIC_API_URL must be the API origin only (for example https://api.faysaldev.com)')
@@ -133,7 +139,7 @@ const rawSameSite = process.env.COOKIE_SAME_SITE?.trim().toLowerCase()
 if (rawSameSite && !['lax', 'strict', 'none'].includes(rawSameSite)) {
   throw new Error('COOKIE_SAME_SITE must be one of: lax, strict, none')
 }
-const cookieSameSite = (rawSameSite || (cookieSecure ? 'none' : 'lax')) as 'lax' | 'strict' | 'none'
+const cookieSameSite = (rawSameSite || 'lax') as 'lax' | 'strict' | 'none'
 if (cookieSameSite === 'none' && !cookieSecure) {
   throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true')
 }
@@ -141,6 +147,10 @@ if (cookieSameSite === 'none' && !cookieSecure) {
 const smsDevelopmentMode = envBoolean('SMS_DEV_MODE', !isProduction)
 const smsEnabled = envBoolean('SMS_ENABLED', false)
 const emailDevelopmentMode = envBoolean('EMAIL_DEV_MODE', !isProduction)
+const bcryptSaltRounds = Number(process.env.BCRYPT_SALT_ROUNDS || 12)
+if (!Number.isInteger(bcryptSaltRounds) || bcryptSaltRounds < 10 || bcryptSaltRounds > 15) {
+  throw new Error('BCRYPT_SALT_ROUNDS must be an integer between 10 and 15')
+}
 const redisEnabled = envBoolean('REDIS_ENABLED', Boolean(process.env.REDIS_HOST))
 const redisTls = envBoolean('REDIS_TLS', false)
 const redisAllowInsecurePrivateNetwork = envBoolean('REDIS_ALLOW_INSECURE_PRIVATE_NETWORK', false)
@@ -215,6 +225,26 @@ if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).su
 if (isProduction) {
   const requiredUrls = ['DATABASE_URL', 'PUBLIC_API_URL', 'CLIENT_URL', 'ALLOWED_ORIGINS']
   requiredUrls.forEach((name) => requiredInProduction(name))
+  requiredInProduction('PUBLIC_SITE_ORIGIN')
+  if (publicApi.protocol !== 'https:') throw new Error('PUBLIC_API_URL must use https:// in production')
+  const publicSite = new URL(publicSiteOrigin)
+  if (publicSite.protocol !== 'https:') throw new Error('PUBLIC_SITE_ORIGIN must use https:// in production')
+  if (publicSite.username || publicSite.password || publicSite.search || publicSite.hash || (publicSite.pathname !== '/' && publicSite.pathname !== '')) {
+    throw new Error('PUBLIC_SITE_ORIGIN must be an HTTPS origin without credentials, path, query parameters, or fragments')
+  }
+  const clientOrigin = new URL(String(process.env.CLIENT_URL))
+  if (clientOrigin.protocol !== 'https:' || clientOrigin.username || clientOrigin.password || clientOrigin.search || clientOrigin.hash || (clientOrigin.pathname !== '/' && clientOrigin.pathname !== '')) {
+    throw new Error('CLIENT_URL must be an HTTPS origin in production')
+  }
+  if (bcryptSaltRounds < 12) throw new Error('BCRYPT_SALT_ROUNDS must be at least 12 in production')
+  if (new URL(nextRevalidateUrl).protocol !== 'https:') throw new Error('NEXT_REVALIDATE_URL must use https:// in production')
+  const enabledDebugFlags = ['DEBUG', 'APP_DEBUG', 'ENABLE_DEBUG_ROUTES', 'ALLOW_TEST_AUTH', 'ALLOW_MOCK_AUTH']
+    .filter((name) => ['true', '1', 'yes', 'on'].includes(process.env[name]?.trim().toLowerCase() || ''))
+  if (enabledDebugFlags.length) throw new Error(`Unsafe production debug/test flags are enabled: ${enabledDebugFlags.join(', ')}`)
+  const productionLogLevel = process.env.LOG_LEVEL?.trim().toLowerCase() || 'info'
+  if (['debug', 'trace', 'silly', 'verbose'].includes(productionLogLevel)) {
+    throw new Error('LOG_LEVEL must not enable debug/trace logging in production')
+  }
   const securitySecrets: Array<[string, string]> = [
     ['JWT_SECRET', requireProductionSecret(process.env, 'JWT_SECRET', 32)],
     ['JWT_REFRESH_SECRET', requireProductionSecret(process.env, 'JWT_REFRESH_SECRET', 32)],
@@ -224,7 +254,6 @@ if (isProduction) {
     ['NEXT_REVALIDATE_SECRET', requireProductionSecret(process.env, 'NEXT_REVALIDATE_SECRET', 32)],
   ]
   assertDistinctProductionSecrets(securitySecrets)
-  requiredInProduction('PUBLIC_SITE_ORIGIN')
   requiredInProduction('DOMAIN_PROVIDER')
   if (domainProvider === 'vercel') {
     requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
@@ -272,7 +301,16 @@ if (isProduction) {
 
 
 for (const origin of allowedOrigins) {
-  if (origin !== '*' && !z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
+  if (origin === '*') {
+    if (isProduction) throw new Error('ALLOWED_ORIGINS must not contain * in production')
+    continue
+  }
+  if (!z.string().url().safeParse(origin).success) throw new Error(`Invalid ALLOWED_ORIGINS entry: ${origin}`)
+  const parsed = new URL(origin)
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== '/' && parsed.pathname !== '')) {
+    throw new Error(`ALLOWED_ORIGINS must contain origins only: ${origin}`)
+  }
+  if (isProduction && parsed.protocol !== 'https:') throw new Error(`ALLOWED_ORIGINS must use https:// in production: ${origin}`)
 }
 
 
@@ -292,7 +330,7 @@ if (smsApiUrl && !z.string().url().safeParse(smsApiUrl).success) {
 }
 
 export default {
-  env: process.env.NODE_ENV || 'development',
+  env: environment,
   isProduction,
   port: Number(process.env.PORT || 5000),
   public_api_url: publicApiUrl,
@@ -319,7 +357,7 @@ export default {
     wait_queue_timeout_ms: Math.max(1000, Number(process.env.MONGO_WAIT_QUEUE_TIMEOUT_MS || 5000)),
     query_timeout_ms: Math.max(500, Number(process.env.MONGO_QUERY_TIMEOUT_MS || 10000)),
   },
-  bcrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS || '12',
+  bcrypt_salt_rounds: String(bcryptSaltRounds),
   app_email: process.env.APP_EMAIL,
   app_password: process.env.APP_PASSWORD,
   email: {

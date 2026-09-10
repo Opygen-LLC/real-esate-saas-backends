@@ -32,7 +32,7 @@ const createPropertyType = catchAsync(async (req: Request, res: Response) => {
 })
 
 const deletePropertyType = catchAsync(async (req: Request, res: Response) => {
-  const organizationId = (req.user?.organizationId || req.user?.storeId) as string
+  const organizationId = requireTenant(req)
   const { id } = req.params
   const result = await PropertyTypeService.deletePropertyType(organizationId, id)
 

@@ -55,18 +55,29 @@ export const validateOtpChallengeState = (challenge: OtpState, now = new Date())
 
 const publicUser = (user: any) => toAuthUserDto(user)
 
-const accessTokenFor = (user: any): string => jwtHelpers.createToken({
+type SessionTokenState = {
+  sessionId: string
+  sessionVersion: number
+  authorizationVersion: number
+}
+
+const accessTokenFor = (user: any, session: SessionTokenState): string => jwtHelpers.createToken({
+  typ: 'access',
   _id: user._id.toString(),
-  phoneNumber: user.phoneNumber,
-  email: user.email,
   userRole: user.userRole,
   organizationId: user.organizationId,
+  sessionId: session.sessionId,
+  sessionVersion: session.sessionVersion,
+  authorizationVersion: session.authorizationVersion,
 }, config.jwt.secret as Secret, config.jwt.expires_in)
 
 const createSession = async (user: any, meta: RequestMeta, familyId = randomToken(18)): Promise<AuthResult> => {
   const sessionId = new Types.ObjectId()
+  const sessionVersion = 1
+  const authorizationVersion = 1
   const jti = randomToken(18)
   const refreshToken = jwtHelpers.createToken({
+    typ: 'refresh',
     _id: user._id.toString(),
     sessionId: sessionId.toString(),
     familyId,
@@ -83,6 +94,8 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     createdIp: meta.ip || '',
     lastUsedIp: meta.ip || '',
     userAgent: meta.userAgent || '',
+    sessionVersion,
+    authorizationVersion,
   })
   try {
     const [projectedUser, organization, verifiedDomain] = await Promise.all([
@@ -92,7 +105,7 @@ const createSession = async (user: any, meta: RequestMeta, familyId = randomToke
     ])
     const onboarding = normalizeOnboardingState(organization?.onboarding)
     return {
-      accessToken: accessTokenFor(user),
+      accessToken: accessTokenFor(user, { sessionId: sessionId.toString(), sessionVersion, authorizationVersion }),
       refreshToken,
       userRole: user.userRole,
       organizationId: user.organizationId,
@@ -744,7 +757,10 @@ const currentSessionIdentity = (
   } catch {
     return null
   }
+  if (payload?.typ && payload.typ !== 'refresh') return null
   if (!payload?.sessionId || String(payload._id || '') !== userId) return null
+  // Legacy refresh tokens created before token typing are accepted only after the
+  // owned server-side AuthSession is validated. Every newly issued token is typed.
   // Phase-1 sessions always carry organizationId. Pre-migration refresh tokens may not;
   // an explicit tenant mismatch is still rejected, while an absent legacy claim is
   // validated against the owned AuthSession record below.
@@ -881,9 +897,10 @@ const resolveRoutingSession = async (token?: string): Promise<{ authenticated: t
     throw new ApiError(401, 'Invalid or expired refresh token')
   }
 
+  if (verified?.typ && verified.typ !== 'refresh') throw new ApiError(401, 'Invalid refresh token type')
   if (!verified?.sessionId || !verified?._id) throw new ApiError(401, 'Session is unavailable')
 
-  const authSession: any = await AuthSession.findById(verified.sessionId).select('+refreshTokenHash +tokenHash userId organizationId revokedAt expiresAt')
+  const authSession: any = await AuthSession.findById(verified.sessionId).select('+refreshTokenHash +tokenHash userId organizationId familyId revokedAt expiresAt')
   const storedRefreshHash = authSession?.refreshTokenHash || authSession?.tokenHash
   if (
     !authSession ||
@@ -891,7 +908,8 @@ const resolveRoutingSession = async (token?: string): Promise<{ authenticated: t
     authSession.expiresAt <= new Date() ||
     !storedRefreshHash ||
     !safeEqual(storedRefreshHash, sha256(token)) ||
-    String(authSession.userId || '') !== String(verified._id)
+    String(authSession.userId || '') !== String(verified._id) ||
+    (verified.familyId && String(authSession.familyId || '') !== String(verified.familyId))
   ) {
     throw new ApiError(401, 'Session is unavailable')
   }
@@ -921,26 +939,59 @@ const refreshToken = async (token: string, meta: RequestMeta = {}): Promise<Auth
   } catch {
     throw new ApiError(401, 'Invalid refresh token')
   }
-  const authSession: any = await AuthSession.findById(verified.sessionId).select('+refreshTokenHash +tokenHash')
+  if (verified?.typ && verified.typ !== 'refresh') throw new ApiError(401, 'Invalid refresh token type')
+  if (!verified?.sessionId || !verified?._id || !verified?.familyId) throw new ApiError(401, 'Session is unavailable')
+
+  const authSession: any = await AuthSession.findById(verified.sessionId)
+    .select('+refreshTokenHash +tokenHash userId organizationId familyId sessionVersion authorizationVersion lastUsedIp revokedAt expiresAt')
   if (!authSession || authSession.revokedAt || authSession.expiresAt <= new Date()) throw new ApiError(401, 'Session has expired')
+  if (
+    String(authSession.userId || '') !== String(verified._id) ||
+    String(authSession.familyId || '') !== String(verified.familyId) ||
+    (verified.organizationId && String(authSession.organizationId || '') !== String(verified.organizationId))
+  ) {
+    throw new ApiError(401, 'Session identity mismatch')
+  }
+
   const storedRefreshHash = authSession.refreshTokenHash || authSession.tokenHash
   if (!storedRefreshHash || !safeEqual(storedRefreshHash, sha256(token))) {
     await AuthSession.updateMany({ familyId: verified.familyId, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'refresh_token_reuse' })
     RealtimeService.emitSessionChanged({ userId: String(verified._id || ''), organizationId: String(verified.organizationId || ''), forceLogout: true, reason: 'refresh_token_reuse' })
     throw new ApiError(401, 'Refresh token reuse detected; session family revoked')
   }
+
   const user = await User.findById(verified._id)
   if (!user || !user.isVerified || user.status !== 'active') throw new ApiError(401, 'Account is unavailable')
+  if (authSession.organizationId && String(user.organizationId || '') !== String(authSession.organizationId)) {
+    throw new ApiError(401, 'Session tenant mismatch')
+  }
+
+  const currentSessionVersion = Math.max(1, Number(authSession.sessionVersion || 1))
+  const authorizationVersion = Math.max(1, Number(authSession.authorizationVersion || 1))
+  const nextSessionVersion = currentSessionVersion + 1
   const jti = randomToken(18)
   const nextRefresh = jwtHelpers.createToken({
+    typ: 'refresh',
     _id: user._id.toString(),
     sessionId: authSession._id.toString(),
     familyId: authSession.familyId,
     jti,
     organizationId: user.organizationId,
   }, config.jwt.refresh_secret as Secret, config.jwt.refresh_expires_in)
-  await AuthSession.updateOne(
-    { _id: authSession._id, revokedAt: null },
+
+  // Legacy sessions may not have the version field stored even though Mongoose
+  // exposes the schema default while hydrating the document. Accept an absent/null
+  // version only for this first rotation; once written, concurrent refreshes must
+  // match the exact current version.
+  const versionFilter = {
+    $or: [
+      { sessionVersion: currentSessionVersion },
+      { sessionVersion: { $exists: false } },
+      { sessionVersion: null },
+    ],
+  }
+  const rotation = await AuthSession.updateOne(
+    { _id: authSession._id, revokedAt: null, ...versionFilter },
     {
       $set: {
         refreshTokenHash: sha256(nextRefresh),
@@ -948,14 +999,25 @@ const refreshToken = async (token: string, meta: RequestMeta = {}): Promise<Auth
         lastUsedIp: meta.ip || authSession.lastUsedIp || '',
         rotatedAt: new Date(),
         expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+        sessionVersion: nextSessionVersion,
+        authorizationVersion,
       },
       $unset: { tokenHash: '' },
-      $inc: { sessionVersion: 1 },
     },
   )
+  if (rotation.modifiedCount !== 1) {
+    await AuthSession.updateMany({ familyId: verified.familyId, revokedAt: null }, { revokedAt: new Date(), revokeReason: 'concurrent_refresh_detected' })
+    RealtimeService.emitSessionChanged({ userId: user._id.toString(), organizationId: user.organizationId, forceLogout: true, reason: 'concurrent_refresh_detected' })
+    throw new ApiError(401, 'Session was refreshed concurrently; please sign in again')
+  }
+
   const projectedUser = await findUserWithProfiles({ _id: user._id })
   return {
-    accessToken: accessTokenFor(user),
+    accessToken: accessTokenFor(user, {
+      sessionId: authSession._id.toString(),
+      sessionVersion: nextSessionVersion,
+      authorizationVersion,
+    }),
     refreshToken: nextRefresh,
     userRole: user.userRole,
     organizationId: user.organizationId,
@@ -968,7 +1030,15 @@ const logout = async (token?: string): Promise<void> => {
   if (!token) return
   try {
     const payload: any = jwtHelpers.verifyToken(token, config.jwt.refresh_secret as Secret)
-    await AuthSession.updateOne({ _id: payload.sessionId }, { revokedAt: new Date(), revokeReason: 'logout' })
+    if (payload?.typ && payload.typ !== 'refresh') return
+    if (!payload?.sessionId || !payload?._id || !payload?.familyId) return
+    await AuthSession.updateOne({
+      _id: payload.sessionId,
+      userId: payload._id,
+      familyId: payload.familyId,
+      ...(payload.organizationId ? { organizationId: payload.organizationId } : {}),
+      revokedAt: null,
+    }, { revokedAt: new Date(), revokeReason: 'logout' })
     RealtimeService.emitSessionChanged({ userId: String(payload._id || ''), organizationId: String(payload.organizationId || ''), forceLogout: true, reason: 'logout' })
   } catch {
     return

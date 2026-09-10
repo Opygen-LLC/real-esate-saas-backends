@@ -303,10 +303,17 @@ const sendEvent = async (event: any) => {
   const body = buildMetaCapiBody(event, userData)
 
   try {
+    // Keep the tenant's Meta credential out of URLs. Query-string tokens can leak
+    // through reverse-proxy/access logs and error telemetry even when the value is
+    // encrypted at rest. Meta Graph API accepts the standard Bearer header.
     const response = await Resilience.fetch(
       'meta-capi',
-      `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events?access_token=${encodeURIComponent(accessToken)}`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+      `${config.meta.graph_base_url}/${config.meta.graph_version}/${integration.pixelId}/events`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
       { timeoutMs: config.meta.timeout_ms },
     )
     const responsePayload = parseMetaCapiResponse(response.ok, response.status, await response.json().catch(() => ({})))

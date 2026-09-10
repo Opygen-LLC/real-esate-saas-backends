@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import jwt from 'jsonwebtoken'
 import { hashOtp } from '../../helpers/crypto'
+import { jwtHelpers } from '../../helpers/jwtHelpers'
 import { normalizeBangladeshPhone } from '../../helpers/identity'
 import { validateOtpChallengeState } from './auth.services'
 import { AuthValidation } from './auth.validation'
@@ -10,6 +12,16 @@ import { isCsrfExemptRequest } from '../../middlewares/security'
 const valid = () => ({ expiresAt: new Date(Date.now() + 60_000), consumedAt: null, attempts: 0, maxAttempts: 5 })
 
 describe('OTP and reset security', () => {
+
+  it('pins JWT signing and verification to HS256', () => {
+    const secret = 'unit-test-only-secret-with-sufficient-length-1234567890'
+    const token = jwtHelpers.createToken({ typ: 'access', _id: 'user-1' }, secret, '5m')
+    const decoded = jwt.decode(token, { complete: true })
+    expect(decoded?.header.alg).toBe('HS256')
+
+    const wrongAlgorithmToken = jwt.sign({ typ: 'access', _id: 'user-1' }, secret, { algorithm: 'HS384', expiresIn: '5m' })
+    expect(() => jwtHelpers.verifyToken(wrongAlgorithmToken, secret)).toThrow()
+  })
 
   it('keeps public authentication flows usable when stale auth cookies are present', () => {
     expect(isCsrfExemptRequest({ method: 'POST', originalUrl: '/api/v1/auth/login' })).toBe(true)

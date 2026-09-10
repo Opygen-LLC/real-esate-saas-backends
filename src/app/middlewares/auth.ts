@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { Secret } from 'jsonwebtoken'
+import { Types } from 'mongoose'
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
 import { jwtHelpers } from '../helpers/jwtHelpers'
@@ -16,6 +17,7 @@ import { EntitlementService } from '../module/entitlement/entitlement.service'
 import { ENTITLEMENT_CAPABILITIES, ENTITLEMENT_PUBLIC_KEYS, type EntitlementCapability } from '../module/entitlement/entitlement.types'
 import { FinanceAccountingSettings } from '../module/finance/financeAccountingSettings.model'
 import { FinanceAccountingInitialization } from '../module/finance/financeInitialization.model'
+import { AuthSession } from '../module/auth/authSession.model'
 import { FINANCE_ERROR_CODES } from '../module/finance/finance.contract'
 
 const authenticate = async (req: Request): Promise<void> => {
@@ -23,12 +25,45 @@ const authenticate = async (req: Request): Promise<void> => {
   if (!token) throw new ApiError(401, 'Authentication required')
   let payload: any
   try { payload = jwtHelpers.verifyToken(token, config.jwt.secret as Secret) } catch { throw new ApiError(401, 'Invalid or expired access token') }
+  // Tokens signed for realtime/support contexts must never be accepted as normal
+  // API access tokens. Legacy untyped access tokens are forced through refresh in
+  // production so they are upgraded to a server-session-bound token.
+  if (payload?.typ && payload.typ !== 'access') throw new ApiError(401, 'Invalid access token type')
+  const hasSessionClaims = Boolean(payload?.sessionId && payload?.sessionVersion && payload?.authorizationVersion)
+  if (config.isProduction && !hasSessionClaims) throw new ApiError(401, 'Access token must be refreshed')
   const userId = asUserObjectId(String(payload._id))
   const user: any = userId ? await findUserWithProfiles({ _id: userId }) : null
   if (!user) throw new ApiError(401, 'Account is unavailable')
   if (user.status === 'blocked') throw new ApiError(403, 'Your account has been suspended', '', 'USER_SUSPENDED')
   if (user.status !== 'active' || !user.isVerified) throw new ApiError(401, 'Account is unavailable')
   if (payload.organizationId !== user.organizationId) throw new ApiError(401, 'Token tenant mismatch')
+
+  if (hasSessionClaims) {
+    if (!Types.ObjectId.isValid(String(payload.sessionId))) throw new ApiError(401, 'Session is unavailable')
+    const session: any = await AuthSession.findOne({
+      _id: payload.sessionId,
+      userId: user._id,
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+      // Migration compatibility: older sessions may predate the tenant field. The
+      // session is still bound to the authenticated user, while an explicit tenant
+      // mismatch is never accepted. Newly issued sessions always store organizationId.
+      $or: [
+        { organizationId: user.organizationId },
+        { organizationId: { $exists: false } },
+        { organizationId: '' },
+        { organizationId: null },
+      ],
+    }).select('sessionVersion authorizationVersion').lean()
+    if (!session) throw new ApiError(401, 'Session has been revoked')
+    if (Number(payload.sessionVersion) !== Math.max(1, Number(session.sessionVersion || 1))) {
+      throw new ApiError(401, 'Access token has been superseded')
+    }
+    if (Number(payload.authorizationVersion) !== Math.max(1, Number(session.authorizationVersion || 1))) {
+      throw new ApiError(401, 'Access permissions changed; refresh required')
+    }
+  }
+
   if (user.userRole !== 'super-admin') {
     const organization: any = await Organization.findOne({ organizationId: user.organizationId })
       .select('organizationId isBlocked platformAccess.status websiteStatus subscription')

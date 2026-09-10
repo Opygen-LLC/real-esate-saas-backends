@@ -8,19 +8,19 @@ router.get('/public/:organizationId', AmenityController.getAllAmenities)
 
 router.get(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'agent', 'viewer', 'super-admin', 'admin', 'client', 'staff'),
+  authMiddlewares.requirePermission('properties.read'),
   AmenityController.getAllAmenities
 )
 
 router.post(
   '/',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   AmenityController.createAmenity
 )
 
 router.delete(
   '/:id',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'client', 'super-admin'),
+  authMiddlewares.requirePermission('organization.manage'),
   AmenityController.deleteAmenity
 )
 

@@ -41,7 +41,7 @@ router.delete(
 
 router.patch(
   '/:id/approve',
-  authMiddlewares.auth('agency_owner', 'agency_admin', 'admin', 'super-admin'),
+  authMiddlewares.auth('agency_owner', 'agency_admin', 'super-admin'),
   TaskController.approveTask
 )
 
