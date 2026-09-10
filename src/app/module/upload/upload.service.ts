@@ -5,6 +5,8 @@ import ApiError from '../../../errors/ApiError'
 import httpStatus from 'http-status'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { UsageBudgetService } from '../../security/usageBudget.service'
+import { recordUploadSuccess } from '../../../shared/securityObservability'
+import { logger } from '../../../shared/logger'
 
 export interface IUploadResult {
   publicUrl: string
@@ -46,6 +48,8 @@ const uploadFile = async (organizationId: string, file: Express.Multer.File): Pr
   const objectKey = `tenants/${tenantId}/uploads/${Date.now()}-${randomBytes(4).toString('hex')}-${originalStem}.${sanitized.extension}`
   await UsageBudgetService.reserveUploadBytes(tenantId, sanitized.buffer.length)
   await ObjectStorageService.putBuffer(objectKey, sanitized.buffer, sanitized.contentType)
+  recordUploadSuccess({ kind: 'public-image', bytes: sanitized.buffer.length })
+  logger.info('file_upload_completed', { event: 'file_upload_completed', kind: 'public-image', organizationId: tenantId, sizeBytes: sanitized.buffer.length })
   return {
     publicUrl: ObjectStorageService.publicUrl(objectKey),
     sizeBytes: sanitized.buffer.length,

@@ -13,6 +13,7 @@ import { errorLogger } from '../../shared/logger'
 import { httpErrorEvent, httpLogLevelForStatus, isUnexpectedServerError, requestRoute } from '../../shared/httpObservability'
 import { classifyInvoiceFailure } from '../../shared/invoiceFailureTelemetry'
 import { emitProductionEvent } from '../../shared/productionEvents'
+import { recordSecurityRejection } from '../../shared/securityObservability'
 
 const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   let statusCode = 500
@@ -59,6 +60,8 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   const event = expectedPublicWebsiteLock ? 'request_rejected' : httpErrorEvent(statusCode)
   const level = expectedPublicWebsiteLock ? 'info' : httpLogLevelForStatus(statusCode, code)
   const route = requestRoute(req)
+  recordSecurityRejection({ req, statusCode, errorCode: code })
+
   const commonLogMeta = {
     event,
     requestId: req.requestId,

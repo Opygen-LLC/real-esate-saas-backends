@@ -3,15 +3,23 @@ import 'winston-daily-rotate-file'
 import path from 'path'
 import { RequestContext } from './requestContext'
 
-const sensitiveKey = /^(ip|ipAddress|clientIp)$|(?:authorization|cookie|password|secret|token|otp|access.?token|refresh.?token|payerAccount|nid|tin|bin)/i
+const sensitiveKey = /^(ip|ipAddress|clientIp)$|(?:authorization|cookie|set.?cookie|password|secret|token|otp|access.?token|refresh.?token|api.?key|credential|signature|payerAccount|nid|tin|bin)/i
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
 const phonePattern = /(?:\+?880|0)1[3-9]\d{8}\b/g
 const jwtPattern = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+const mongoCredentialPattern = /mongodb(?:\+srv)?:\/\/[^@\s/]+(?::[^@\s]*)?@/gi
+const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+\/-]{12,}=*/gi
+const namedSecretPattern = /\b(authorization|cookie|set-cookie|password|passwd|secret|token|otp|api[-_]?key|client[-_]?secret|refresh[-_]?token|access[-_]?token)\s*[:=]\s*([^\s,;]+)/gi
+const querySecretPattern = /([?&](?:token|access_token|refresh_token|api_key|apikey|key|secret|signature|x-goog-signature|x-goog-credential|x-amz-signature|x-amz-credential)=)[^&#\s]*/gi
 
 const scrubString = (value: string): string => value
   .replace(emailPattern, '[redacted-email]')
   .replace(phonePattern, '[redacted-phone]')
   .replace(jwtPattern, '[redacted-token]')
+  .replace(mongoCredentialPattern, 'mongodb://[redacted]@')
+  .replace(bearerPattern, 'Bearer [redacted]')
+  .replace(namedSecretPattern, (_match, name: string) => `${name}=[redacted]`)
+  .replace(querySecretPattern, '$1[redacted]')
   .slice(0, 12000)
 
 const scrub = (value: unknown, depth = 0): unknown => {

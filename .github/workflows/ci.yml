@@ -15,7 +15,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,7 +31,11 @@ jobs:
       - name: Scan full Git history for exposed secrets
         run: node scripts/security/scan-secrets.mjs --history --require-history
       - run: pnpm install --frozen-lockfile
+      - run: pnpm security:package-scripts
+      - run: pnpm security:privileged-routes
       - run: pnpm verify:phase3-security-hardening
+      - run: pnpm verify:phase4-security-release
+      - run: pnpm test:phase4-security:source
       - run: pnpm verify:phase4-release
       - run: pnpm format:check
       - run: pnpm lint
@@ -49,11 +53,47 @@ jobs:
         env:
           TEST_DATABASE_URL: mongodb://127.0.0.1:27017/phase4_release?replicaSet=rs0
         run: pnpm test:phase4-release:integration
+      - name: Phase 4 security four-scenario and tenant-isolation regression
+        env:
+          TEST_DATABASE_URL: mongodb://127.0.0.1:27017/phase4_release?replicaSet=rs0
+        run: pnpm test:phase4-security:integration
       - name: Stop Phase 4 MongoDB
         if: always()
         run: docker compose -f docker-compose.ci.yml down -v
       - run: pnpm build
       - run: pnpm audit --prod --audit-level=high
+      - name: Build API production image
+        run: docker build --target api-runtime -t real-estate-backend-api:${{ github.sha }} .
+      - name: Scan API production image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: real-estate-backend-api:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Build backup production image
+        run: docker build --target backup-runtime -t real-estate-backend-backup:${{ github.sha }} .
+      - name: Scan backup production image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: real-estate-backend-backup:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan Redis runtime image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: redis:7-alpine
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan Caddy runtime image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: caddy:2-alpine
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
       - name: Scan repository for secrets
         uses: gitleaks/gitleaks-action@v2
         env:

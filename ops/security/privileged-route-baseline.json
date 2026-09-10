@@ -1,0 +1,4699 @@
+{
+  "version": 1,
+  "generatedFrom": "central-auth-route-inventory",
+  "routes": [
+    {
+      "key": "src/app/module/activity/activity.route.ts:POST:/",
+      "file": "src/app/module/activity/activity.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/activity/activity.route.ts:GET:/lead/:leadId",
+      "file": "src/app/module/activity/activity.route.ts",
+      "method": "GET",
+      "path": "/lead/:leadId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/amenity/amenity.route.ts:GET:/",
+      "file": "src/app/module/amenity/amenity.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/amenity/amenity.route.ts:POST:/",
+      "file": "src/app/module/amenity/amenity.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/amenity/amenity.route.ts:DELETE:/:id",
+      "file": "src/app/module/amenity/amenity.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:GET:/session",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "GET",
+      "path": "/session",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:GET:/sessions",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "GET",
+      "path": "/sessions",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:DELETE:/sessions/:sessionId",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "DELETE",
+      "path": "/sessions/:sessionId",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:POST:/sessions/revoke-others",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "POST",
+      "path": "/sessions/revoke-others",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:GET:/realtime-ticket",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "GET",
+      "path": "/realtime-ticket",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/auth/auth.route.ts:POST:/change-password",
+      "file": "src/app/module/auth/auth.route.ts",
+      "method": "POST",
+      "path": "/change-password",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/banner/banner.route.ts:POST:/",
+      "file": "src/app/module/banner/banner.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/banner/banner.route.ts:GET:/",
+      "file": "src/app/module/banner/banner.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/banner/banner.route.ts:PATCH:/:id",
+      "file": "src/app/module/banner/banner.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/banner/banner.route.ts:DELETE:/:id",
+      "file": "src/app/module/banner/banner.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:GET:/usage",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "GET",
+      "path": "/usage",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:GET:/history",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "GET",
+      "path": "/history",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:GET:/unacknowledged-confirmation",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "GET",
+      "path": "/unacknowledged-confirmation",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:PATCH:/history/:paymentNumber/acknowledge",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "PATCH",
+      "path": "/history/:paymentNumber/acknowledge",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:GET:/change-requests",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "GET",
+      "path": "/change-requests",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:POST:/quote",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "POST",
+      "path": "/quote",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:POST:/change-plan",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "POST",
+      "path": "/change-plan",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:POST:/change-requests/:id/cancel",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "POST",
+      "path": "/change-requests/:id/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:POST:/scheduled-change/cancel",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "POST",
+      "path": "/scheduled-change/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:POST:/cancel",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "POST",
+      "path": "/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/billing/billing.route.ts:GET:/history/:id/receipt",
+      "file": "src/app/module/billing/billing.route.ts",
+      "method": "GET",
+      "path": "/history/:id/receipt",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/bkashPayment/bkashPayment.route.ts:POST:/create",
+      "file": "src/app/module/bkashPayment/bkashPayment.route.ts",
+      "method": "POST",
+      "path": "/create",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/bkashPayment/bkashPayment.route.ts:GET:/status/:paymentId",
+      "file": "src/app/module/bkashPayment/bkashPayment.route.ts",
+      "method": "GET",
+      "path": "/status/:paymentId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/bkashPayment/bkashPayment.route.ts:GET:/admin/search",
+      "file": "src/app/module/bkashPayment/bkashPayment.route.ts",
+      "method": "GET",
+      "path": "/admin/search",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/bkashPayment/bkashPayment.route.ts:POST:/admin/:paymentId/reconcile",
+      "file": "src/app/module/bkashPayment/bkashPayment.route.ts",
+      "method": "POST",
+      "path": "/admin/:paymentId/reconcile",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:GET:/profile",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "GET",
+      "path": "/profile",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:PATCH:/profile",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "PATCH",
+      "path": "/profile",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:POST:/consents",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "POST",
+      "path": "/consents",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:GET:/data-requests",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "GET",
+      "path": "/data-requests",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:POST:/data-requests",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "POST",
+      "path": "/data-requests",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:GET:/data-requests/:id/export",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "GET",
+      "path": "/data-requests/:id/export",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:GET:/admin/profiles",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "GET",
+      "path": "/admin/profiles",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:GET:/admin/data-requests",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "GET",
+      "path": "/admin/data-requests",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:PATCH:/admin/profiles/:organizationId",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "PATCH",
+      "path": "/admin/profiles/:organizationId",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/compliance/compliance.route.ts:PATCH:/admin/data-requests/:id",
+      "file": "src/app/module/compliance/compliance.route.ts",
+      "method": "PATCH",
+      "path": "/admin/data-requests/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:GET:/",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:POST:/",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:GET:/export/csv",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "GET",
+      "path": "/export/csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:GET:/export/xlsx",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "GET",
+      "path": "/export/xlsx",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:GET:/:id/history",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "GET",
+      "path": "/:id/history",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:POST:/:id/notes",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "POST",
+      "path": "/:id/notes",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:GET:/:id",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:PATCH:/:id",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/contact/contact.route.ts:DELETE:/:id",
+      "file": "src/app/module/contact/contact.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/crm/crm.route.ts:GET:/assignees",
+      "file": "src/app/module/crm/crm.route.ts",
+      "method": "GET",
+      "path": "/assignees",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/crm/crm.route.ts:GET:/config",
+      "file": "src/app/module/crm/crm.route.ts",
+      "method": "GET",
+      "path": "/config",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/crm/crm.route.ts:PATCH:/config",
+      "file": "src/app/module/crm/crm.route.ts",
+      "method": "PATCH",
+      "path": "/config",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/crm/crm.route.ts:GET:/assignment-history/:leadId",
+      "file": "src/app/module/crm/crm.route.ts",
+      "method": "GET",
+      "path": "/assignment-history/:leadId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:GET:/",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:GET:/:contactId/profile",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "GET",
+      "path": "/:contactId/profile",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:GET:/:contactId/bookings",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "GET",
+      "path": "/:contactId/bookings",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:POST:/:contactId/bookings",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "POST",
+      "path": "/:contactId/bookings",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:GET:/bookings/:bookingId",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "GET",
+      "path": "/bookings/:bookingId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:POST:/bookings/:bookingId/payments",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "POST",
+      "path": "/bookings/:bookingId/payments",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/customerFinance/customerFinance.route.ts:POST:/bookings/:bookingId/payments/:paymentId/void",
+      "file": "src/app/module/customerFinance/customerFinance.route.ts",
+      "method": "POST",
+      "path": "/bookings/:bookingId/payments/:paymentId/void",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/search",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/search",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/overview",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/overview",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/analytics",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/analytics",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/analytics/brokers",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/analytics/brokers",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/analytics/brokers/export.csv",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/analytics/brokers/export.csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/dashboard/dashboard.route.ts:GET:/super-admin-overview",
+      "file": "src/app/module/dashboard/dashboard.route.ts",
+      "method": "GET",
+      "path": "/super-admin-overview",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:GET:/subdomain/availability/:value",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "GET",
+      "path": "/subdomain/availability/:value",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:PATCH:/subdomain",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "PATCH",
+      "path": "/subdomain",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:GET:/status",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "GET",
+      "path": "/status",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:GET:/health",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "GET",
+      "path": "/health",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:POST:/add",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "POST",
+      "path": "/add",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/domain/domain.route.ts:POST:/verify",
+      "file": "src/app/module/domain/domain.route.ts",
+      "method": "POST",
+      "path": "/verify",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/finance/finance.route.ts:POST:/invoices/:id/payments",
+      "file": "src/app/module/finance/finance.route.ts",
+      "method": "POST",
+      "path": "/invoices/:id/payments",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/finance/finance.route.ts:DELETE:/invoices/:id",
+      "file": "src/app/module/finance/finance.route.ts",
+      "method": "DELETE",
+      "path": "/invoices/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/landingPage/landingPage.route.ts:POST:/",
+      "file": "src/app/module/landingPage/landingPage.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/landingPage/landingPage.route.ts:GET:/",
+      "file": "src/app/module/landingPage/landingPage.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/landingPage/landingPage.route.ts:PATCH:/:id",
+      "file": "src/app/module/landingPage/landingPage.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/landingPage/landingPage.route.ts:DELETE:/:id",
+      "file": "src/app/module/landingPage/landingPage.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/import/template.csv",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/import/template.csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/import/template.xlsx",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/import/template.xlsx",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/import/preview",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/import/preview",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/import/confirm",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/import/confirm",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/export/csv",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/export/csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/export/xlsx",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/export/xlsx",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/today-followups",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/today-followups",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/:id/history",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/:id/history",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/:id/notes",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/:id/notes",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:GET:/:id",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:PATCH:/:id",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:PATCH:/:id/manage",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "PATCH",
+      "path": "/:id/manage",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:PATCH:/:id/status",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "PATCH",
+      "path": "/:id/status",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:PATCH:/:id/assign",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "PATCH",
+      "path": "/:id/assign",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:PATCH:/:id/follow-up",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "PATCH",
+      "path": "/:id/follow-up",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/:id/follow-up/complete",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/:id/follow-up/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/:id/reengage",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/:id/reengage",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:POST:/:id/response",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "POST",
+      "path": "/:id/response",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/lead/lead.route.ts:DELETE:/:id",
+      "file": "src/app/module/lead/lead.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts:GET:/catalog",
+      "file": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts",
+      "method": "GET",
+      "path": "/catalog",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts:GET:/admin",
+      "file": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts",
+      "method": "GET",
+      "path": "/admin",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts:POST:/admin",
+      "file": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts",
+      "method": "POST",
+      "path": "/admin",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts:PATCH:/admin/:id",
+      "file": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts",
+      "method": "PATCH",
+      "path": "/admin/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts:DELETE:/admin/:id",
+      "file": "src/app/module/leadAddonDefinition/leadAddonDefinition.route.ts",
+      "method": "DELETE",
+      "path": "/admin/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:POST:/quote",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "POST",
+      "path": "/quote",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:POST:/subscribe",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "POST",
+      "path": "/subscribe",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:GET:/subscriptions",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "GET",
+      "path": "/subscriptions",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:POST:/subscriptions/:id/cancel",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "POST",
+      "path": "/subscriptions/:id/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:GET:/admin/subscriptions",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "GET",
+      "path": "/admin/subscriptions",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts:PATCH:/admin/subscriptions/:id/decision",
+      "file": "src/app/module/leadAddonSubscription/leadAddonSubscription.route.ts",
+      "method": "PATCH",
+      "path": "/admin/subscriptions/:id/decision",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts:GET:/",
+      "file": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts:POST:/",
+      "file": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts:POST:/:id/cancel",
+      "file": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts",
+      "method": "POST",
+      "path": "/:id/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts:GET:/admin/all",
+      "file": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts",
+      "method": "GET",
+      "path": "/admin/all",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts:PATCH:/admin/:id/decision",
+      "file": "src/app/module/leadPurchaseRequest/leadPurchaseRequest.route.ts",
+      "method": "PATCH",
+      "path": "/admin/:id/decision",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts:GET:/active",
+      "file": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts",
+      "method": "GET",
+      "path": "/active",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts:GET:/admin",
+      "file": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts",
+      "method": "GET",
+      "path": "/admin",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts:POST:/admin",
+      "file": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts",
+      "method": "POST",
+      "path": "/admin",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts:PATCH:/admin/:id",
+      "file": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts",
+      "method": "PATCH",
+      "path": "/admin/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts:DELETE:/admin/:id",
+      "file": "src/app/module/leadTopupPricing/leadTopupPricing.route.ts",
+      "method": "DELETE",
+      "path": "/admin/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:GET:/",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:POST:/",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:PATCH:/requirements/:requirementId",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "PATCH",
+      "path": "/requirements/:requirementId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:GET:/:materialId/movements",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "GET",
+      "path": "/:materialId/movements",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:POST:/:materialId/movements",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "POST",
+      "path": "/:materialId/movements",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:POST:/:materialId/requirements",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "POST",
+      "path": "/:materialId/requirements",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:GET:/:materialId",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "GET",
+      "path": "/:materialId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/materialInventory/materialInventory.route.ts:PATCH:/:materialId",
+      "file": "src/app/module/materialInventory/materialInventory.route.ts",
+      "method": "PATCH",
+      "path": "/:materialId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:GET:/",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:PUT:/",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "PUT",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:POST:/test",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "POST",
+      "path": "/test",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:GET:/diagnostics",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "GET",
+      "path": "/diagnostics",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:GET:/dead-letters",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "GET",
+      "path": "/dead-letters",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/metaIntegration/metaIntegration.route.ts:POST:/dead-letters/:id/retry",
+      "file": "src/app/module/metaIntegration/metaIntegration.route.ts",
+      "method": "POST",
+      "path": "/dead-letters/:id/retry",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/moderation/moderation.route.ts:GET:/admin/listings",
+      "file": "src/app/module/moderation/moderation.route.ts",
+      "method": "GET",
+      "path": "/admin/listings",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/moderation/moderation.route.ts:PATCH:/admin/listings/:id",
+      "file": "src/app/module/moderation/moderation.route.ts",
+      "method": "PATCH",
+      "path": "/admin/listings/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/moderation/moderation.route.ts:GET:/admin/fraud-reports",
+      "file": "src/app/module/moderation/moderation.route.ts",
+      "method": "GET",
+      "path": "/admin/fraud-reports",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/moderation/moderation.route.ts:PATCH:/admin/fraud-reports/:id",
+      "file": "src/app/module/moderation/moderation.route.ts",
+      "method": "PATCH",
+      "path": "/admin/fraud-reports/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/moderation/moderation.route.ts:GET:/admin/audit-history",
+      "file": "src/app/module/moderation/moderation.route.ts",
+      "method": "GET",
+      "path": "/admin/audit-history",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/notification/notification.route.ts:GET:/",
+      "file": "src/app/module/notification/notification.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/notification/notification.route.ts:PATCH:/read-all",
+      "file": "src/app/module/notification/notification.route.ts",
+      "method": "PATCH",
+      "path": "/read-all",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/notification/notification.route.ts:PATCH:/:id/read",
+      "file": "src/app/module/notification/notification.route.ts",
+      "method": "PATCH",
+      "path": "/:id/read",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/notification/notification.route.ts:DELETE:/:id",
+      "file": "src/app/module/notification/notification.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/branding",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/branding",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/invoice-branding",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/invoice-branding",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/website-settings",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/website-settings",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/onboarding",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/onboarding",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:POST:/onboarding/complete",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "POST",
+      "path": "/onboarding/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:POST:/onboarding/skip",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "POST",
+      "path": "/onboarding/skip",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:GET:/",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:POST:/",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/update",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/update",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:GET:/all",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "GET",
+      "path": "/all",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/organization/organization.route.ts:PATCH:/:id",
+      "file": "src/app/module/organization/organization.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/search",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/search",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/notifications",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/notifications",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/subscriptions/summary",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/subscriptions/summary",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/subscription",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/subscription",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/trial",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/trial",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/subscription-payments/:paymentNumber/dates",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/subscription-payments/:paymentNumber/dates",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/subscription/admin-override",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/subscription/admin-override",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/subscription/schedule-downgrade",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/subscription/schedule-downgrade",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/subscription/cancel-scheduled-change",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/subscription/cancel-scheduled-change",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/subscription/cancellation",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/subscription/cancellation",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/subscription/recurring-addon",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/subscription/recurring-addon",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/:organizationId/entitlement-overrides",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/:organizationId/entitlement-overrides",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/entitlement-overrides",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/entitlement-overrides",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/entitlement-overrides/revoke",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/entitlement-overrides/revoke",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/health",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/health",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/:organizationId",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/:organizationId",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/profile",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/profile",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/owner",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/owner",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/archive",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/archive",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/restore",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/restore",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/:organizationId/deletion-preview",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/:organizationId/deletion-preview",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/hard-delete",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/hard-delete",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/suspend",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/suspend",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/reactivate",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/reactivate",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/:organizationId/notes",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/:organizationId/notes",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/tenants/:organizationId/notes",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/tenants/:organizationId/notes",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/notes/:noteId",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/notes/:noteId",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:DELETE:/tenants/:organizationId/notes/:noteId",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "DELETE",
+      "path": "/tenants/:organizationId/notes/:noteId",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/subscription-requests",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/subscription-requests",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/payments",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/payments",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/benefit-periods",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/benefit-periods",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/tenants/:organizationId/lead-entitlement",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/tenants/:organizationId/lead-entitlement",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/tenants/:organizationId/renewal-streak",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/tenants/:organizationId/renewal-streak",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:POST:/payments",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "POST",
+      "path": "/payments",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:PATCH:/payments/:paymentId/decision",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "PATCH",
+      "path": "/payments/:paymentId/decision",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/revenue",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/revenue",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformAdmin/platformAdmin.route.ts:GET:/audit",
+      "file": "src/app/module/platformAdmin/platformAdmin.route.ts",
+      "method": "GET",
+      "path": "/audit",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformSettings/platformSettings.route.ts:GET:/",
+      "file": "src/app/module/platformSettings/platformSettings.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/platformSettings/platformSettings.route.ts:PATCH:/",
+      "file": "src/app/module/platformSettings/platformSettings.route.ts",
+      "method": "PATCH",
+      "path": "/",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/import/template.csv",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/import/template.csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/import/template.xlsx",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/import/template.xlsx",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/import/preview",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/import/preview",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/import/confirm",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/import/confirm",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/export/csv",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/export/csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/export/xlsx",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/export/xlsx",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/documents/presign",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/documents/presign",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/documents/:assetId/complete",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/documents/:assetId/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/documents/:assetId/download",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/documents/:assetId/download",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:DELETE:/documents/session/:sessionId/:assetId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "DELETE",
+      "path": "/documents/session/:sessionId/:assetId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/assets/presign",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/assets/presign",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/assets/upload",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/assets/upload",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/assets/complete",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/assets/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/assets/import-url",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/assets/import-url",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/assets/session/:sessionId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/assets/session/:sessionId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/assets/session/:sessionId/touch",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/assets/session/:sessionId/touch",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:DELETE:/assets/session/:sessionId/:assetId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "DELETE",
+      "path": "/assets/session/:sessionId/:assetId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:DELETE:/assets/session/:sessionId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "DELETE",
+      "path": "/assets/session/:sessionId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/assets/:assetId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/assets/:assetId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/:id/ownership",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/:id/ownership",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/ownership",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/ownership",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/owners",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/owners",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/ownership/owners/:ownerId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/ownership/owners/:ownerId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:DELETE:/:id/ownership/owners/:ownerId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "DELETE",
+      "path": "/:id/ownership/owners/:ownerId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/investors",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/investors",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/ownership/investors/:investorId",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/ownership/investors/:investorId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/investors/:investorId/contributions",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/investors/:investorId/contributions",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/investors/:investorId/distributions",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/investors/:investorId/distributions",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/investors/:investorId/contributions/:investmentId/reverse",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/investors/:investorId/contributions/:investmentId/reverse",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:POST:/:id/ownership/investors/:investorId/distributions/:distributionId/reverse",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "POST",
+      "path": "/:id/ownership/investors/:investorId/distributions/:distributionId/reverse",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/:id/activity",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/:id/activity",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:GET:/:id",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/status",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/status",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/quota-access",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/quota-access",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:PATCH:/:id/images/reorder",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "PATCH",
+      "path": "/:id/images/reorder",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/property/property.route.ts:DELETE:/:id",
+      "file": "src/app/module/property/property.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/propertyType/propertyType.route.ts:GET:/",
+      "file": "src/app/module/propertyType/propertyType.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/propertyType/propertyType.route.ts:POST:/",
+      "file": "src/app/module/propertyType/propertyType.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/propertyType/propertyType.route.ts:DELETE:/:id",
+      "file": "src/app/module/propertyType/propertyType.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/review/review.route.ts:GET:/",
+      "file": "src/app/module/review/review.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/review/review.route.ts:POST:/invitations",
+      "file": "src/app/module/review/review.route.ts",
+      "method": "POST",
+      "path": "/invitations",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/review/review.route.ts:PATCH:/invitations/:id/revoke",
+      "file": "src/app/module/review/review.route.ts",
+      "method": "PATCH",
+      "path": "/invitations/:id/revoke",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/review/review.route.ts:PATCH:/:id",
+      "file": "src/app/module/review/review.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/review/review.route.ts:DELETE:/:id",
+      "file": "src/app/module/review/review.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/section/section.route.ts:POST:/",
+      "file": "src/app/module/section/section.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/section/section.route.ts:GET:/",
+      "file": "src/app/module/section/section.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/section/section.route.ts:PATCH:/:id",
+      "file": "src/app/module/section/section.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/section/section.route.ts:DELETE:/:id",
+      "file": "src/app/module/section/section.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:POST:/send",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "POST",
+      "path": "/send",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:GET:/templates",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "GET",
+      "path": "/templates",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:PUT:/templates",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "PUT",
+      "path": "/templates",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:POST:/opt-out",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "POST",
+      "path": "/opt-out",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:POST:/opt-in",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "POST",
+      "path": "/opt-in",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/sms/sms.route.ts:GET:/usage",
+      "file": "src/app/module/sms/sms.route.ts",
+      "method": "GET",
+      "path": "/usage",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts:GET:/admin/versions",
+      "file": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts",
+      "method": "GET",
+      "path": "/admin/versions",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts:POST:/",
+      "file": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts:PATCH:/:id",
+      "file": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts:DELETE:/:id",
+      "file": "src/app/module/subscriptionPlan/subscriptionPlan.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/available-vendors",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/available-vendors",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/material-options",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/material-options",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/purchases/cost-summary",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/purchases/cost-summary",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/purchases",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/purchases",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:PATCH:/purchases/:purchaseId",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "PATCH",
+      "path": "/purchases/:purchaseId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/receive",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/receive",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/payments",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/payments",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/payments/:paymentId/void",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/payments/:paymentId/void",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/cancel",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/cancel",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/invoice-attachment/presign",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/invoice-attachment/presign",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/purchases/:purchaseId/invoice-attachment/:assetId/complete",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/purchases/:purchaseId/invoice-attachment/:assetId/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/purchases/:purchaseId/invoice-attachment/download",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/purchases/:purchaseId/invoice-attachment/download",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:DELETE:/purchases/:purchaseId/invoice-attachment",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "DELETE",
+      "path": "/purchases/:purchaseId/invoice-attachment",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/materials/:materialId/latest-prices",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/materials/:materialId/latest-prices",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:POST:/",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:GET:/:supplierId",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "GET",
+      "path": "/:supplierId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/supplierManagement/supplierManagement.route.ts:PATCH:/:supplierId",
+      "file": "src/app/module/supplierManagement/supplierManagement.route.ts",
+      "method": "PATCH",
+      "path": "/:supplierId",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:GET:/all",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "GET",
+      "path": "/all",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:POST:/",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:GET:/",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:POST:/:id/reply",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "POST",
+      "path": "/:id/reply",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:PATCH:/:id/status",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "PATCH",
+      "path": "/:id/status",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:PATCH:/:id/owner",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "PATCH",
+      "path": "/:id/owner",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:POST:/:id/internal-notes",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "POST",
+      "path": "/:id/internal-notes",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:POST:/:id/attachments/presign",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "POST",
+      "path": "/:id/attachments/presign",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:GET:/:id/attachments/:attachmentId/download",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "GET",
+      "path": "/:id/attachments/:attachmentId/download",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/support/support.route.ts:POST:/:id/attachments/:attachmentId/complete",
+      "file": "src/app/module/support/support.route.ts",
+      "method": "POST",
+      "path": "/:id/attachments/:attachmentId/complete",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:GET:/summary",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "GET",
+      "path": "/summary",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:GET:/",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:POST:/",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:PATCH:/:id",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:DELETE:/:id",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/task/task.route.ts:PATCH:/:id/approve",
+      "file": "src/app/module/task/task.route.ts",
+      "method": "PATCH",
+      "path": "/:id/approve",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/teamInvitation/teamInvitation.route.ts:GET:/pending",
+      "file": "src/app/module/teamInvitation/teamInvitation.route.ts",
+      "method": "GET",
+      "path": "/pending",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/teamInvitation/teamInvitation.route.ts:DELETE:/:id",
+      "file": "src/app/module/teamInvitation/teamInvitation.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/teamInvitation/teamInvitation.route.ts:POST:/",
+      "file": "src/app/module/teamInvitation/teamInvitation.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/upload/upload.route.ts:POST:/single",
+      "file": "src/app/module/upload/upload.route.ts",
+      "method": "POST",
+      "path": "/single",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/upload/upload.route.ts:POST:/",
+      "file": "src/app/module/upload/upload.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/upload/upload.route.ts:POST:/multiple",
+      "file": "src/app/module/upload/upload.route.ts",
+      "method": "POST",
+      "path": "/multiple",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/me/access",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/me/access",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/me/export",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/me/export",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/me/profile",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/me/profile",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/me/profile",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/me/profile",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:POST:/",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:POST:/invite-agent",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "POST",
+      "path": "/invite-agent",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/team-summary",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/team-summary",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/leaderboard",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/leaderboard",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/export.csv",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/export.csv",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/:id/public-broker",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/:id/public-broker",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/:id/access",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/:id/access",
+      "guard": "authenticated",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/:id/seat-access",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/:id/seat-access",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/super-admin/summary",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/super-admin/summary",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/super-admin/export.csv",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/super-admin/export.csv",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/super-admin/all",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/super-admin/all",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/super-admin/:id/role",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/super-admin/:id/role",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/super-admin/:id/verify",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/super-admin/:id/verify",
+      "guard": "super-admin",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:GET:/:id",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:PATCH:/:id",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/user/user.route.ts:DELETE:/:id",
+      "file": "src/app/module/user/user.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:POST:/check-conflict",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "POST",
+      "path": "/check-conflict",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:GET:/calendar",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "GET",
+      "path": "/calendar",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:GET:/",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:POST:/",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "POST",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:GET:/:id",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:PATCH:/:id",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "PATCH",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/viewing/viewing.route.ts:DELETE:/:id",
+      "file": "src/app/module/viewing/viewing.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/visitorLogs/visitorLogs.route.ts:GET:/analytics",
+      "file": "src/app/module/visitorLogs/visitorLogs.route.ts",
+      "method": "GET",
+      "path": "/analytics",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/studio",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/studio",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:PUT:/studio/draft",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "PUT",
+      "path": "/studio/draft",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/studio/publish",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/studio/publish",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/studio/restore",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/studio/restore",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/studio/reset",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/studio/reset",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/studio/history",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/studio/history",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/studio/preview",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/studio/preview",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/studio/assets",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/studio/assets",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/assets/:id/usage",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/assets/:id/usage",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/design-registry",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/design-registry",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/design",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/design",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:PATCH:/design",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "PATCH",
+      "path": "/design",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/pages",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/pages",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/pages/:id",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/pages/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:PUT:/pages/:id/draft",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "PUT",
+      "path": "/pages/:id/draft",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/pages/:id/publish",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/pages/:id/publish",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/pages/:id/schedule",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/pages/:id/schedule",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/pages/:id/revisions",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/pages/:id/revisions",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/pages/:id/revisions/:version/restore",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/pages/:id/revisions/:version/restore",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/pages/:id/preview-token",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/pages/:id/preview-token",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:GET:/assets",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "GET",
+      "path": "/assets",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/assets/presign",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/assets/presign",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/assets/import-url",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/assets/import-url",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:POST:/assets/complete",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "POST",
+      "path": "/assets/complete",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteBuilder/websiteBuilder.route.ts:DELETE:/assets/:id",
+      "file": "src/app/module/websiteBuilder/websiteBuilder.route.ts",
+      "method": "DELETE",
+      "path": "/assets/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:GET:/",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "GET",
+      "path": "/",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:GET:/analytics/inquiry-purposes",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "GET",
+      "path": "/analytics/inquiry-purposes",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:GET:/:id",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "GET",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:DELETE:/:id",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "DELETE",
+      "path": "/:id",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:POST:/:id/move-to-crm",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "POST",
+      "path": "/:id/move-to-crm",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/websiteSubmission/websiteSubmission.route.ts:PATCH:/:id/status",
+      "file": "src/app/module/websiteSubmission/websiteSubmission.route.ts",
+      "method": "PATCH",
+      "path": "/:id/status",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:GET:/deep-link",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "GET",
+      "path": "/deep-link",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:GET:/integration",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "GET",
+      "path": "/integration",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:PUT:/integration",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "PUT",
+      "path": "/integration",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:POST:/integration/test",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "POST",
+      "path": "/integration/test",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:DELETE:/integration",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "DELETE",
+      "path": "/integration",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    },
+    {
+      "key": "src/app/module/whatsapp/whatsapp.route.ts:POST:/send-template",
+      "file": "src/app/module/whatsapp/whatsapp.route.ts",
+      "method": "POST",
+      "path": "/send-template",
+      "guard": "permission",
+      "requiredScenarios": [
+        "unauthenticated",
+        "authenticated-unauthorized",
+        "wrong-tenant",
+        "authorized"
+      ]
+    }
+  ]
+}

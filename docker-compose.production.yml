@@ -12,7 +12,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       WORKER_ENABLED: "true"
       TRUST_PROXY: ${TRUST_PROXY:?Set the trusted reverse-proxy CIDR or IP list}
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:?METRICS_TOKEN is required in production}
       DOMAIN_PROVIDER: ${DOMAIN_PROVIDER:?DOMAIN_PROVIDER is required}
       PUBLIC_SITE_ORIGIN: ${PUBLIC_SITE_ORIGIN:?PUBLIC_SITE_ORIGIN is required}
       # PUBLIC_API_URL must point to the HTTPS domain — this is what the backend
@@ -47,7 +47,9 @@ services:
       COOKIE_SAME_SITE: "none"
       # Worker
       WORKER_POLL_MS: ${WORKER_POLL_MS:-30000}
-      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_TO_FILE: "false"
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-1500}
       # Redis
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -59,6 +61,14 @@ services:
     # only Caddy (the reverse proxy) should reach the API container.
     expose:
       - "5000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=256m,nosuid,nodev
+      - /app/logs:size=64m,nosuid,nodev
     networks:
       - app_network
     depends_on:
@@ -118,6 +128,14 @@ services:
       # must use a JSON key, mount it from a deployment secret outside the repository
       # and set GCP_KEY_FILE to that in-container path.
       GCP_KEY_FILE: ${GCP_KEY_FILE:-}
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=512m,nosuid,nodev
+      - /app/logs:size=32m,nosuid,nodev
     networks:
       - app_network
 

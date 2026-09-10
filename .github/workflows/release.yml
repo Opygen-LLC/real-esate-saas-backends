@@ -1,0 +1,82 @@
+name: Backend Release
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        type: choice
+        required: true
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  staging:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.27.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Trigger staging deployment
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.STAGING_DEPLOY_WEBHOOK }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          test -n "$DEPLOY_WEBHOOK"
+          curl --fail --silent --show-error -X POST -H "X-Release-Sha: $RELEASE_SHA" "$DEPLOY_WEBHOOK"
+      - name: Production-like staging security smoke
+        env:
+          SECURITY_SMOKE_API_URL: ${{ vars.STAGING_API_URL }}
+          SECURITY_SMOKE_METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+          PROVIDER_BUDGETS_VERIFIED: ${{ vars.PROVIDER_BUDGETS_VERIFIED }}
+          BACKUP_MAX_AGE_HOURS: ${{ vars.BACKUP_MAX_AGE_HOURS }}
+        run: pnpm smoke:phase4-security:required
+
+  production:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.27.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Verify this commit passed Backend CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          conclusion=$(gh run list --workflow "Backend CI" --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion')
+          test "$conclusion" = "success"
+      - name: Trigger approved production deployment
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.PRODUCTION_DEPLOY_WEBHOOK }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          test -n "$DEPLOY_WEBHOOK"
+          curl --fail --silent --show-error -X POST -H "X-Release-Sha: $RELEASE_SHA" "$DEPLOY_WEBHOOK"
+      - name: Production security smoke and backup/restore gate
+        env:
+          SECURITY_SMOKE_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          SECURITY_SMOKE_METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+          PROVIDER_BUDGETS_VERIFIED: ${{ vars.PROVIDER_BUDGETS_VERIFIED }}
+          BACKUP_MAX_AGE_HOURS: ${{ vars.BACKUP_MAX_AGE_HOURS }}
+        run: pnpm smoke:phase4-security:required

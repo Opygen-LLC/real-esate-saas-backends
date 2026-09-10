@@ -241,7 +241,15 @@
     "test:phase4-release:source": "node --test tests/phase1/*.test.cjs tests/phase2/*.test.cjs tests/phase3-studio/*.test.cjs tests/phase4-templates/*.test.cjs tests/phase5-rollout/*.test.cjs",
     "security:secrets": "node scripts/security/scan-secrets.mjs",
     "security:secrets:history": "node scripts/security/scan-secrets.mjs --history --require-history",
-    "migrate:private-storage": "node scripts/migrate-private-storage.mjs"
+    "migrate:private-storage": "node scripts/migrate-private-storage.mjs",
+    "security:package-scripts": "node scripts/security/audit-package-scripts.mjs",
+    "verify:phase4-security-release": "node scripts/verify-phase4-security-release.mjs",
+    "test:phase4-security:source": "node --test tests/phase4-security/*.test.cjs",
+    "test:phase4-security:integration": "node scripts/require-env.mjs TEST_DATABASE_URL && vitest run --fileParallelism=false src/tests/integration/phase4SecurityRegression.integration.test.ts src/tests/integration/tenantIsolation.integration.test.ts",
+    "smoke:phase4-security": "node scripts/production-security-smoke.mjs",
+    "smoke:phase4-security:required": "node scripts/require-env.mjs SECURITY_SMOKE_API_URL SECURITY_SMOKE_METRICS_TOKEN PROVIDER_BUDGETS_VERIFIED && node scripts/production-security-smoke.mjs",
+    "gate:phase4-security-release": "pnpm security:secrets && pnpm security:package-scripts && pnpm security:privileged-routes && pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-security:source && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm verify:phase4-security-release && pnpm build && pnpm audit --prod --audit-level=high",
+    "security:privileged-routes": "node scripts/security/audit-privileged-routes.mjs"
   },
   "keywords": [
     "real-estate",
@@ -283,7 +291,6 @@
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "express": "^4.21.2",
-    "express-rate-limit": "^7.4.1",
     "helmet": "^8.3.0",
     "http-status": "^1.7.4",
     "jsonwebtoken": "^9.0.2",
@@ -305,5 +312,10 @@
   "engines": {
     "node": ">=22.16.0 <23",
     "pnpm": "10.27.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp"
+    ]
   }
 }

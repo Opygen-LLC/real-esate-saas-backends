@@ -285,6 +285,7 @@ if (isProduction) {
     ['CRON_SIGNING_SECRET', requireProductionSecret(process.env, 'CRON_SIGNING_SECRET', 32)],
     ['DATA_ENCRYPTION_KEY', requireProductionSecret(process.env, 'DATA_ENCRYPTION_KEY', 32)],
     ['NEXT_REVALIDATE_SECRET', requireProductionSecret(process.env, 'NEXT_REVALIDATE_SECRET', 32)],
+    ['METRICS_TOKEN', requireProductionSecret(process.env, 'METRICS_TOKEN', 32)],
   ]
   assertDistinctProductionSecrets(securitySecrets)
   requiredInProduction('DOMAIN_PROVIDER')
@@ -543,6 +544,7 @@ export default {
     metrics_token: process.env.METRICS_TOKEN?.trim() || '',
     client_error_reporting_url: process.env.CLIENT_ERROR_REPORTING_URL?.trim() || '',
     client_error_reporting_token: process.env.CLIENT_ERROR_REPORTING_TOKEN?.trim() || '',
+    slow_request_ms: envInteger('SLOW_REQUEST_MS', 1500, 100, 120000),
   },
 
   bkash: {

@@ -1,0 +1,81 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const root = path.resolve(__dirname, '../..')
+const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
+
+test('phase 4 release keeps authentication/session/replay protections wired', () => {
+  const auth = read('src/app/module/auth/auth.services.ts')
+  const middleware = read('src/app/middlewares/auth.ts')
+  for (const marker of ['refresh_token_reuse', 'Session tenant mismatch', 'USER_SUSPENDED', 'TENANT_SUSPENDED']) assert.match(auth + middleware, new RegExp(marker))
+  assert.match(auth, /lockedUntil/)
+  assert.match(auth, /OTP.*attempt|attempt.*OTP/i)
+  assert.match(read('src/app/module/auth/auth.route.ts'), /passwordResetRequestRateLimiter[\s\S]*password-reset\/request/)
+})
+
+test('phase 4 release keeps browser/database/input/upload defenses wired', () => {
+  const app = read('src/app.ts')
+  const security = read('src/app/middlewares/security.ts')
+  const cors = read('src/app/middlewares/corsPolicy.ts')
+  const input = read('src/app/middlewares/requestInputGuard.ts') + read('src/app/helpers/inputSecurity.ts')
+  const storedFile = read('src/app/module/websiteBuilder/storedFileSecurity.service.ts')
+  assert.match(app, /requestInputGuard/)
+  assert.match(security, /csrfProtection/)
+  assert.match(cors, /isVerifiedTenantOrigin/)
+  assert.match(input, /\$where|Mongo|operator/i)
+  assert.match(storedFile, /limitInputPixels/)
+  assert.match(storedFile, /polyglot/i)
+  assert.match(storedFile, /Active or embedded PDF content is not allowed/)
+})
+
+test('phase 4 release exposes scrubbed security telemetry and verified backup metrics', () => {
+  const logger = read('src/shared/logger.ts')
+  const app = read('src/app.ts')
+  const events = read('src/shared/securityObservability.ts')
+  assert.match(logger, /mongoCredentialPattern/)
+  assert.match(logger, /bearerPattern/)
+  assert.match(logger, /querySecretPattern/)
+  assert.match(events, /security_request_rejections_total/)
+  assert.match(events, /security_rate_limit_rejections_total/)
+  assert.match(events, /security_usage_budget_rejections_total/)
+  assert.match(app, /database_backup_restore_verified/)
+  assert.match(app, /http_slow_requests_total/)
+})
+
+test('phase 4 privileged mutations have a uniform body-free audit trail', () => {
+  const trail = read('src/app/middlewares/securityAuditTrail.ts')
+  for (const category of ['platform_admin', 'finance', 'identity_access', 'file_operation', 'account_recovery_session']) assert.match(trail, new RegExp(category))
+  assert.doesNotMatch(trail, /req\.(?:body|query|headers|cookies)/i)
+})
+
+test('phase 4 production release has CI, container, secret, dependency, monitoring and live-smoke gates', () => {
+  const ci = read('.github/workflows/ci.yml')
+  const securityWorkflow = read('.github/workflows/security.yml')
+  const compose = read('docker-compose.production.yml')
+  const alerts = read('ops/monitoring/security-alerts.yml')
+  const smoke = read('scripts/production-security-smoke.mjs')
+  assert.match(ci, /gitleaks/)
+  assert.match(ci, /trivy-action/)
+  assert.match(ci, /image-ref: redis:7-alpine/)
+  assert.match(ci, /image-ref: caddy:2-alpine/)
+  assert.match(ci, /pnpm audit --prod --audit-level=high/)
+  assert.match(securityWorkflow, /dependency-review-action/)
+  assert.match(securityWorkflow, /codeql-action/)
+  assert.match(compose, /read_only: true/)
+  assert.match(compose, /no-new-privileges:true/)
+  assert.match(alerts, /DatabaseRestoreVerificationFailed/)
+  assert.match(smoke, /PROVIDER_BUDGETS_VERIFIED/)
+})
+
+
+test('phase 4 privileged-route baseline covers every guarded route and four authorization scenarios', () => {
+  const audit = read('scripts/security/audit-privileged-routes.mjs')
+  const baseline = JSON.parse(read('ops/security/privileged-route-baseline.json'))
+  assert.match(audit, /New privileged routes require explicit baseline review/)
+  assert.ok(Array.isArray(baseline.routes) && baseline.routes.length >= 300)
+  for (const route of baseline.routes) {
+    assert.deepEqual(route.requiredScenarios, ['unauthenticated', 'authenticated-unauthorized', 'wrong-tenant', 'authorized'])
+  }
+  assert.match(read('.github/workflows/ci.yml'), /pnpm security:privileged-routes/)
+})

@@ -3,6 +3,7 @@ import config from '../../config'
 import ApiError from '../../errors/ApiError'
 import { logger } from '../../shared/logger'
 import { RedisClient } from '../../shared/redisClient'
+import { recordUsageBudgetRejection, recordUsageBudgetReservation } from '../../shared/securityObservability'
 
 type BudgetKind = 'email' | 'sms' | 'whatsapp' | 'meta' | 'upload-bytes'
 
@@ -64,9 +65,18 @@ const reserveDaily = async (input: DailyBudgetInput): Promise<void> => {
       units, input.scopeLimit, input.globalLimit, millisecondsUntilTomorrowUtc(),
     ])
     if (!Array.isArray(response) || response.length < 4) throw new Error('Invalid Redis usage-budget response')
-    if (asNumber(response[0]) === 1) return
+    if (asNumber(response[0]) === 1) {
+      recordUsageBudgetReservation({
+        kind: input.kind,
+        units,
+        globalUsed: asNumber(response[2]),
+        globalLimit: input.globalLimit,
+      })
+      return
+    }
 
     const reason = asNumber(response[3]) === 2 ? 'global' : 'scope'
+    recordUsageBudgetRejection({ kind: input.kind, reason })
     logger.warn('usage_budget_exceeded', {
       event: 'usage_budget_exceeded',
       kind: input.kind,
@@ -79,6 +89,7 @@ const reserveDaily = async (input: DailyBudgetInput): Promise<void> => {
     throw new ApiError(429, 'Daily usage limit reached. Please try again after the daily reset.', '', 'USAGE_BUDGET_EXCEEDED')
   } catch (error) {
     if (error instanceof ApiError) throw error
+    recordUsageBudgetRejection({ kind: input.kind, reason: 'store_unavailable' })
     logger.error('usage_budget_store_unavailable', {
       event: 'usage_budget_store_unavailable',
       kind: input.kind,

@@ -1,0 +1,81 @@
+groups:
+  - name: real-estate-api-security
+    rules:
+      - alert: AbnormalAuthenticationFailures
+        expr: sum(rate(security_request_rejections_total{kind="authentication"}[5m])) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Authentication failures are elevated
+      - alert: RepeatedForbiddenRequests
+        expr: sum(rate(security_request_rejections_total{kind="authorization"}[5m])) > 0.25
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Authorization failures are elevated
+      - alert: DistributedRateLimitAbuse
+        expr: sum(rate(security_rate_limit_rejections_total[5m])) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Replica-wide rate limit rejections are elevated
+      - alert: UsageBudgetBlocks
+        expr: sum(increase(security_usage_budget_rejections_total[15m])) > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: A metered provider/application budget blocked usage
+      - alert: ProviderUsageBudgetNearLimit
+        expr: max(security_usage_global_utilization_ratio) by (kind) > 0.8
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: Metered provider/application usage exceeded 80 percent of its daily global cap
+      - alert: ApiRequestSpike
+        expr: sum(rate(http_requests_total[5m])) > 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: API request rate is unusually high
+      - alert: ElevatedApi5xx
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: API 5xx error ratio exceeds 2 percent
+      - alert: SlowApiEndpoints
+        expr: sum(rate(http_slow_requests_total[10m])) by (route) > 0.2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: API endpoint is repeatedly exceeding the configured slow-request threshold
+      - alert: CriticalDependencyDown
+        expr: dependency_healthy{dependency=~"mongo|mongo_transactions|redis|object_storage|malware_scanner"} == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: A production security/runtime dependency is unhealthy
+      - alert: DatabaseBackupMissingOrStale
+        expr: database_backup_age_seconds < 0 or database_backup_age_seconds > 129600
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: Verified database backup is missing or older than 36 hours
+      - alert: DatabaseRestoreVerificationFailed
+        expr: database_backup_restore_verified != 1
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: Latest database backup has not passed restore verification
+      - alert: UnusualUploadVolume
+        expr: sum(rate(security_usage_reserved_units_total{kind="upload-bytes"}[15m])) > 1048576
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: Accepted upload volume exceeds 1 MiB/s for 15 minutes
+      - alert: DomainQueueFailures
+        expr: domain_queue_failed > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Domain lifecycle jobs are failing

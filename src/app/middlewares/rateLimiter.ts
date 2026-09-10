@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express'
 import config from '../../config'
 import ApiError from '../../errors/ApiError'
 import { logger } from '../../shared/logger'
+import { recordRateLimitRejection, hashSecurityIdentifier } from '../../shared/securityObservability'
 import { RedisClient } from '../../shared/redisClient'
 import { clientNetwork } from '../helpers/clientNetwork'
 
@@ -117,10 +118,11 @@ export const distributedRateLimit = (options: RateLimitOptions) => async (req: R
           rule: rule.name,
           requestId: req.requestId,
           route: req.originalUrl.split('?')[0],
-          network: requestNetwork(req),
+          networkHash: hashSecurityIdentifier(requestNetwork(req)),
           organizationId: requestTenantId(req) || undefined,
           userId: requestUserId(req) || undefined,
         })
+        recordRateLimitRejection({ limiter: options.name, rule: rule.name, route: req.originalUrl.split('?')[0] })
         throw new ApiError(429, options.message, '', options.code || 'RATE_LIMITED')
       }
     }

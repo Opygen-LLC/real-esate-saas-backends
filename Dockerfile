@@ -3,7 +3,7 @@
 # One shared build stage is used by both the API and the database-backup
 # runtime targets. This prevents Docker Compose from installing pnpm
 # dependencies and compiling TypeScript twice on normal deployments.
-FROM node:22-alpine AS build
+FROM node:22.16.0-alpine AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 ENV NODE_OPTIONS="--max-old-space-size=1536"
@@ -18,7 +18,7 @@ COPY src ./src
 RUN pnpm build && pnpm prune --prod
 
 
-FROM node:22-alpine AS api-runtime
+FROM node:22.16.0-alpine AS api-runtime
 ENV NODE_ENV=production
 ENV INVOICE_PDF_CHROMIUM_PATH=/usr/local/bin/invoice-chromium
 WORKDIR /app
@@ -40,7 +40,7 @@ CMD ["node", "--enable-source-maps", "dist/server.js"]
 # only for the scheduler heartbeat, overlap lock, and short-lived credential
 # config files; it is not a database-backup archive location and is not mounted
 # to a persistent Docker volume.
-FROM node:22-bookworm-slim AS backup-runtime
+FROM node:22.16.0-bookworm-slim AS backup-runtime
 ARG MONGODB_DATABASE_TOOLS_VERSION=100.18.0
 ARG TARGETARCH
 ENV NODE_ENV=production

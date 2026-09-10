@@ -45,6 +45,7 @@ import catchAsync from "./shared/catchAsync";
 import { authMiddlewares } from "./app/middlewares/auth";
 import { parseTrustedProxy } from "./shared/trustedProxy";
 import { requestInputGuard } from "./app/middlewares/requestInputGuard";
+import { securityAuditTrail } from "./app/middlewares/securityAuditTrail";
 
 const app: Application = express();
 const startedAt = Date.now();
@@ -74,6 +75,7 @@ app.use(
 app.use(requestContext);
 app.use(apiSecurityHeaders);
 app.use(enforceHttps);
+app.use(securityAuditTrail);
 app.use((req: Request, res: Response, next: NextFunction) => {
   const started = performance.now();
   res.locals.requestStartedAtMs = started;
@@ -90,6 +92,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       statusCode: res.statusCode,
       durationMs,
     });
+    if (durationMs >= config.observability.slow_request_ms) {
+      Metrics.inc("http_slow_requests_total", { method: req.method.toUpperCase(), route: Metrics.normalizeRoute(route), status: String(res.statusCode) });
+      logger.warn("slow_http_request", {
+        event: "slow_http_request",
+        requestId: req.requestId,
+        method: req.method,
+        route,
+        statusCode: res.statusCode,
+        durationMs: Math.round(durationMs * 10) / 10,
+        organizationId: req.tenant?.organizationId,
+      });
+    }
     const level = httpLogLevelForStatus(res.statusCode, errorCode);
     logger.log(level, "http_request", {
       event: "http_request",
@@ -196,6 +210,7 @@ const readinessHandler = async (req: Request, res: Response) => {
     privacy,
     domainProvider,
     domainQueue,
+    databaseBackup,
   ] = await Promise.all([
     mongo ? mongoSupportsTransactions() : Promise.resolve(false),
     RedisClient.ping(),
@@ -219,6 +234,17 @@ const readinessHandler = async (req: Request, res: Response) => {
           failed: 0,
           oldestPendingAt: null,
         }),
+    mongo
+      ? DatabaseBackupStatusStore.readCurrent().catch(() => ({
+          _id: "database_backup",
+          status: "unavailable",
+          updatedAt: "",
+        } as DatabaseBackupOperationStatus))
+      : Promise.resolve({
+          _id: "database_backup",
+          status: "unavailable",
+          updatedAt: "",
+        } as DatabaseBackupOperationStatus),
   ]);
   const worker = getWorkerHealth();
   const workerReady = !config.runtime.worker_enabled || worker.healthy;
@@ -237,6 +263,20 @@ const readinessHandler = async (req: Request, res: Response) => {
     domainWorkerOperational &&
     domainProvider.healthy &&
     domainQueue.failed === 0;
+  const backupTime = databaseBackup.lastDatabaseBackupAt ? new Date(databaseBackup.lastDatabaseBackupAt).getTime() : Number.NaN;
+  const backupAgeSeconds = Number.isFinite(backupTime) ? Math.max(0, (Date.now() - backupTime) / 1000) : -1;
+  Metrics.setGauge("dependency_healthy", mongo ? 1 : 0, { dependency: "mongo" });
+  Metrics.setGauge("dependency_healthy", transactionReady ? 1 : 0, { dependency: "mongo_transactions" });
+  Metrics.setGauge("dependency_healthy", redis ? 1 : 0, { dependency: "redis" });
+  Metrics.setGauge("dependency_healthy", emailReady ? 1 : 0, { dependency: "email" });
+  Metrics.setGauge("dependency_healthy", workerReady ? 1 : 0, { dependency: "worker" });
+  Metrics.setGauge("dependency_healthy", objectStorage.healthy ? 1 : 0, { dependency: "object_storage" });
+  Metrics.setGauge("dependency_healthy", clamav.healthy ? 1 : 0, { dependency: "malware_scanner" });
+  Metrics.setGauge("dependency_healthy", privacyReady ? 1 : 0, { dependency: "privacy_policy" });
+  Metrics.setGauge("domain_queue_failed", Number(domainQueue.failed || 0));
+  Metrics.setGauge("database_backup_age_seconds", backupAgeSeconds);
+  Metrics.setGauge("database_backup_restore_verified", databaseBackup.restoreVerified === true ? 1 : 0);
+
   const ready =
     mongo &&
     transactionReady &&
@@ -269,6 +309,12 @@ const readinessHandler = async (req: Request, res: Response) => {
         healthy: domainLifecycleHealthy,
         provider: domainProvider,
         queue: domainQueue,
+      },
+      databaseBackup: {
+        status: databaseBackup.status,
+        lastDatabaseBackupAt: databaseBackup.lastDatabaseBackupAt || null,
+        restoreVerified: databaseBackup.restoreVerified === true,
+        ageSeconds: backupAgeSeconds,
       },
     },
   });
