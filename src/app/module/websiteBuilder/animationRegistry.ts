@@ -70,4 +70,5 @@ export const AnimationRegistry = {
   get: (id: AnimationPreset): WebsiteAnimationDefinition | undefined => registryById.get(id),
   has: (id: string): id is AnimationPreset => (WEBSITE_ANIMATION_PRESETS as readonly string[]).includes(id),
   staggerCapableSlots: (): WebsiteComponentSlot[] => [...WEBSITE_STAGGER_CAPABLE_SLOTS],
+  isStaggerCapableSlot: (slot: WebsiteComponentSlot): boolean => (WEBSITE_STAGGER_CAPABLE_SLOTS as readonly string[]).includes(slot),
 }

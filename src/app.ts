@@ -201,6 +201,11 @@ const readinessHandler = async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
   const mongo = mongoose.connection.readyState === 1;
+  const unavailableDatabaseBackupStatus: DatabaseBackupOperationStatus = {
+    _id: "database_backup",
+    status: "unavailable",
+    updatedAt: "",
+  };
   const [
     transactions,
     redis,
@@ -235,16 +240,10 @@ const readinessHandler = async (req: Request, res: Response) => {
           oldestPendingAt: null,
         }),
     mongo
-      ? DatabaseBackupStatusStore.readCurrent().catch(() => ({
-          _id: "database_backup",
-          status: "unavailable",
-          updatedAt: "",
-        } as DatabaseBackupOperationStatus))
-      : Promise.resolve({
-          _id: "database_backup",
-          status: "unavailable",
-          updatedAt: "",
-        } as DatabaseBackupOperationStatus),
+      ? DatabaseBackupStatusStore.readCurrent().catch(
+          () => unavailableDatabaseBackupStatus,
+        )
+      : Promise.resolve(unavailableDatabaseBackupStatus),
   ]);
   const worker = getWorkerHealth();
   const workerReady = !config.runtime.worker_enabled || worker.healthy;

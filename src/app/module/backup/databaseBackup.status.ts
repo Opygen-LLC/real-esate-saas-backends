@@ -6,7 +6,7 @@ const DATABASE_BACKUP_STATUS_ID = 'database_backup'
 
 export type DatabaseBackupOperationStatus = {
   _id: string
-  status: 'never_run' | 'running' | 'success' | 'failed'
+  status: 'never_run' | 'running' | 'success' | 'failed' | 'unavailable'
   runId?: string
   backupDatabase?: string
   startedAt?: string

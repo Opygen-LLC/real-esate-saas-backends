@@ -23,6 +23,11 @@ describe('Website Animation Registry', () => {
       'home.featuredProperties',
       'home.agents',
       'home.reviews',
+      'about.values',
+      'properties.listing',
+      'properties.card',
+      'agents.listing',
+      'agents.card',
     ])
   })
 })
