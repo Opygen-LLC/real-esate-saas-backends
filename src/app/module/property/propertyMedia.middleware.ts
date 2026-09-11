@@ -9,7 +9,7 @@ const ALLOWED_PROPERTY_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.we
 
 const propertyImageUploader = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES, fields: 1, parts: 2, fieldNameSize: 80, fieldSize: 128 },
+  limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES, fields: 5, parts: 10, fieldNameSize: 80, fieldSize: 1024 },
   fileFilter: (_req, file, callback) => {
     const mimeType = String(file.mimetype || '').toLowerCase()
     const extension = path.extname(String(file.originalname || '')).toLowerCase()
