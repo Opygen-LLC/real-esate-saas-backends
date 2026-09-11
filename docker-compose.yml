@@ -14,7 +14,6 @@ services:
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       REDIS_HOST: redis
-    volumes:
     ports:
       - "127.0.0.1:5000:5000"
     depends_on:
