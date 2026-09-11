@@ -3,9 +3,14 @@ import { UploadController } from './upload.controller'
 import { uploadSingle, uploadMultiple } from './upload.middleware'
 import { authMiddlewares } from '../../middlewares/auth'
 import { validateUploadedFiles } from '../../middlewares/requestInputGuard'
-import { uploadRateLimiter } from '../../middlewares/rateLimiter'
+import { uploadPresignRateLimiter, uploadRateLimiter } from '../../middlewares/rateLimiter'
 
 const router = express.Router()
+
+// Primary Phase 3 flow: the API authorizes the upload, but image bytes travel
+// directly from the browser to Cloudflare R2 using the signed PUT URL.
+router.post('/presign', authMiddlewares.auth(), uploadPresignRateLimiter, UploadController.presignDirectUpload)
+router.post('/complete', authMiddlewares.auth(), uploadRateLimiter, UploadController.completeDirectUpload)
 
 // POST /upload or /upload/single - Upload single image
 router.post('/single', authMiddlewares.auth(), uploadRateLimiter, uploadSingle, validateUploadedFiles, UploadController.uploadSingle)

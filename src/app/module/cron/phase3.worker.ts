@@ -10,6 +10,7 @@ import { reconcileSubscriptions } from '../subscription/subscriptionLifecycle.se
 import { LeadAddonSubscriptionService } from '../leadAddonSubscription/leadAddonSubscription.service'
 import { TenantEntitlementOverrideService } from '../tenantEntitlementOverride/tenantEntitlementOverride.service'
 import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonitoring.service'
+import { DirectUploadService } from '../upload/upload.direct.service'
 
 let running = false
 let cleanupTick = 0
@@ -90,6 +91,9 @@ export const runPhase3Maintenance = async () => {
       const cleanupStarted = performance.now()
       try {
         propertyDraftAssets = await WebsiteBuilderService.cleanupAbandonedPropertyDraftAssets(100)
+        const directUploads = await DirectUploadService.cleanupExpired(100)
+        propertyDraftAssets.directUploadsIncompleteDeleted = Number(directUploads.incompleteDeleted || 0)
+        propertyDraftAssets.directUploadIntentsDeleted = Number(directUploads.completedIntentsDeleted || 0)
         lastPropertyDraftCleanupSuccessAt = Date.now()
         lastPropertyDraftCleanupDurationMs = performance.now() - cleanupStarted
         lastPropertyDraftCleanupError = ''
@@ -100,6 +104,8 @@ export const runPhase3Maintenance = async () => {
           reconciled: Number(propertyDraftAssets.reconciled || 0),
           bytesReleased: Number(propertyDraftAssets.bytesReleased || 0),
           incompleteUploadsDeleted: Number(propertyDraftAssets.incompleteUploadsDeleted || 0),
+          directUploadsIncompleteDeleted: Number(propertyDraftAssets.directUploadsIncompleteDeleted || 0),
+          directUploadIntentsDeleted: Number(propertyDraftAssets.directUploadIntentsDeleted || 0),
         }
         Metrics.setGauge('property_draft_cleanup_last_success_timestamp_seconds', lastPropertyDraftCleanupSuccessAt / 1000)
         Metrics.setGauge('property_draft_cleanup_last_duration_ms', lastPropertyDraftCleanupDurationMs)

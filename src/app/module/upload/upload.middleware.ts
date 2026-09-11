@@ -3,15 +3,12 @@ import multer, { FileFilterCallback } from 'multer'
 import path from 'path'
 import ApiError from '../../../errors/ApiError'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
+import { MAX_DIRECT_UPLOAD_BYTES, MAX_DIRECT_UPLOAD_FILES, normalizeUploadFolder } from './upload.contract'
 
 const storage = multer.memoryStorage()
-const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
-const MAX_MULTIPLE_FILES = 10
+const MAX_FILE_SIZE = MAX_DIRECT_UPLOAD_BYTES
+const MAX_MULTIPLE_FILES = MAX_DIRECT_UPLOAD_FILES
 const MAX_UPLOAD_FIELD_SIZE = 32
-
-export const ALLOWED_UPLOAD_FOLDERS = ['general', 'avatar', 'branding', 'website', 'property'] as const
-export type UploadFolder = (typeof ALLOWED_UPLOAD_FOLDERS)[number]
-const allowedUploadFolders = new Set<string>(ALLOWED_UPLOAD_FOLDERS)
 
 const fileFilter = (
   _req: Request,
@@ -107,22 +104,7 @@ const validateUploadMetadata = (req: Request): void => {
     )
   }
 
-  const rawFolder = body.folder
-  const folder = rawFolder === undefined || rawFolder === null || rawFolder === ''
-    ? 'general'
-    : String(rawFolder).trim().toLowerCase()
-
-  if (!allowedUploadFolders.has(folder)) {
-    throw new ApiError(
-      400,
-      `Invalid upload folder. Allowed values: ${ALLOWED_UPLOAD_FOLDERS.join(', ')}.`,
-      '',
-      API_ERROR_CODES.INVALID_UPLOAD_FOLDER,
-      undefined,
-      { folder: [`Choose one of: ${ALLOWED_UPLOAD_FOLDERS.join(', ')}.`] },
-    )
-  }
-
+  const folder = normalizeUploadFolder(body.folder)
   req.body = { ...body, folder }
 }
 

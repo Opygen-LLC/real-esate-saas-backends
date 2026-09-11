@@ -570,7 +570,9 @@ const health = async (): Promise<StorageHealth> => {
       config.assets.health_timeout_ms,
       'r2_storage_policy_health',
     )
-    const healthy = !config.isProduction || privateBucket.healthy
+    // Direct browser uploads are a production dependency in Phase 3, so a
+    // missing/incorrect public-bucket CORS policy must fail storage readiness.
+    const healthy = !config.isProduction || (privateBucket.healthy && browserCors.healthy)
     const value: StorageHealth = {
       provider: 'r2',
       configured: true,

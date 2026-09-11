@@ -97,6 +97,7 @@ export const TENANT_DELETION_COLLECTIONS = [
   'websitesubmissions',
   'websitepreviewtokens',
   'websiteuploadintents',
+  'uploadintents',
   'visitorlogs',
   'domainrecords',
   'domainevents',

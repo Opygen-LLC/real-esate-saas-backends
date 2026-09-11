@@ -7,6 +7,7 @@ import { Organization } from '../organization/organization.model'
 import httpStatus from 'http-status'
 import ApiError from '../../../errors/ApiError'
 import { logger } from '../../../shared/logger'
+import { DirectUploadService } from './upload.direct.service'
 
 const extractSingleFile = (req: Request): Express.Multer.File | undefined => {
   if (req.file) return req.file
@@ -77,6 +78,21 @@ const logUploadPerformance = (req: Request, res: Response, results: IUploadResul
   if (timingParts.length && typeof res.setHeader === 'function') res.setHeader('Server-Timing', timingParts.join(', '))
 }
 
+
+const directActorId = (req: Request): string => String(req.tenant?.userId || req.user?._id || req.user?.id || '')
+
+const presignDirectUpload = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const data = await DirectUploadService.presign(organizationId, directActorId(req), req.body || {})
+  res.status(httpStatus.OK).json(data)
+})
+
+const completeDirectUpload = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const data = await DirectUploadService.complete(organizationId, directActorId(req), req.body || {})
+  res.status(httpStatus.CREATED).json(data)
+})
+
 const uploadSingle = catchAsync(async (req: Request, res: Response) => {
   const file = extractSingleFile(req)
   if (!file) {
@@ -112,6 +128,8 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const UploadController = {
+  presignDirectUpload,
+  completeDirectUpload,
   uploadSingle,
   uploadMultiple,
 }
