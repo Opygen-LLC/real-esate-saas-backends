@@ -204,23 +204,29 @@ const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduc
   return raw.replace(/\/$/, '')
 }
 
-// Google Cloud Storage is the single media provider. Legacy PROJECTS_ID / BUCKET_NAME /
-// KEYFILENAME aliases remain readable for rolling deployments, but new deployments
-// should use the canonical GCP_* names below.
-const gcpProjectId = process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || ''
-const gcpBucketName = process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || ''
-const gcpPrivateBucketName = process.env.GCP_PRIVATE_BUCKET_NAME?.trim() || ''
-const gcpKeyFile = process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || ''
-const defaultGcsPublicBaseUrl = gcpBucketName ? `https://storage.googleapis.com/${gcpBucketName}` : ''
+// Cloudflare R2 is the canonical object-storage provider. Business modules use the
+// provider-neutral ObjectStorageService and never depend on S3/R2 credentials directly.
+const objectStorageProvider = (process.env.OBJECT_STORAGE_PROVIDER?.trim().toLowerCase() || 'r2')
+const r2AccountId = process.env.R2_ACCOUNT_ID?.trim() || ''
+const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID?.trim() || ''
+const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim() || ''
+const r2PublicBucketName = process.env.R2_PUBLIC_BUCKET_NAME?.trim() || ''
+const r2PrivateBucketName = process.env.R2_PRIVATE_BUCKET_NAME?.trim() || ''
+const defaultR2Endpoint = r2AccountId ? `https://${r2AccountId}.r2.cloudflarestorage.com` : ''
+const r2Endpoint = normalizeStorageUrl(
+  'R2_ENDPOINT',
+  process.env.R2_ENDPOINT?.trim() || defaultR2Endpoint,
+  { httpsInProduction: true, allowPath: false },
+)
 const objectStoragePublicBaseUrl = normalizeStorageUrl(
   'OBJECT_STORAGE_PUBLIC_BASE_URL',
-  process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || defaultGcsPublicBaseUrl,
-  { httpsInProduction: false },
+  process.env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || '',
+  { httpsInProduction: true },
 )
 const objectStorageBrowserOrigin = normalizeStorageUrl(
   'OBJECT_STORAGE_BROWSER_ORIGIN',
   process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin,
-  { httpsInProduction: false, allowPath: false },
+  { httpsInProduction: true, allowPath: false },
 )
 
 
@@ -304,15 +310,21 @@ if (isProduction) {
     requiredInProduction('DOMAIN_CNAME_TARGET')
   }
   if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
-  // Object storage: GCS is canonical. Authentication may use a mounted service-account
-  // key or Application Default Credentials on Google-managed runtimes.
-  if (!gcpProjectId) throw new Error('GCP_PROJECT_ID is required in production for Google Cloud Storage')
-  if (!gcpBucketName) throw new Error('GCP_BUCKET_NAME is required in production for Google Cloud Storage')
-  if (!gcpPrivateBucketName) throw new Error('GCP_PRIVATE_BUCKET_NAME is required in production for private documents and support attachments')
-  if (gcpPrivateBucketName === gcpBucketName) throw new Error('GCP_PRIVATE_BUCKET_NAME must be different from the public GCP_BUCKET_NAME in production')
-  if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production (or set GCP_BUCKET_NAME to auto-derive it)')
-  if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcpBucketName)) throw new Error('GCP_BUCKET_NAME contains unsupported characters or length')
-  if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcpPrivateBucketName)) throw new Error('GCP_PRIVATE_BUCKET_NAME contains unsupported characters or length')
+  // Object storage: Cloudflare R2 is canonical and production fails closed when
+  // credentials, endpoint, public delivery URL, or the dedicated private bucket are missing.
+  if (objectStorageProvider !== 'r2') throw new Error('OBJECT_STORAGE_PROVIDER must be r2 in production')
+  if (!r2AccountId) throw new Error('R2_ACCOUNT_ID is required in production for Cloudflare R2')
+  if (!r2AccessKeyId) throw new Error('R2_ACCESS_KEY_ID is required in production for Cloudflare R2')
+  if (!r2SecretAccessKey) throw new Error('R2_SECRET_ACCESS_KEY is required in production for Cloudflare R2')
+  if (!r2PublicBucketName) throw new Error('R2_PUBLIC_BUCKET_NAME is required in production for Cloudflare R2')
+  if (!r2PrivateBucketName) throw new Error('R2_PRIVATE_BUCKET_NAME is required in production for private documents and support attachments')
+  if (r2PrivateBucketName === r2PublicBucketName) throw new Error('R2_PRIVATE_BUCKET_NAME must be different from the public R2_PUBLIC_BUCKET_NAME in production')
+  if (!r2Endpoint) throw new Error('R2_ENDPOINT is required in production (or set R2_ACCOUNT_ID to derive it)')
+  if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production for public R2 media delivery')
+  const r2BucketPattern = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/
+  if (!r2BucketPattern.test(r2PublicBucketName)) throw new Error('R2_PUBLIC_BUCKET_NAME must be 3-63 chars using lowercase letters, numbers and hyphens')
+  if (!r2BucketPattern.test(r2PrivateBucketName)) throw new Error('R2_PRIVATE_BUCKET_NAME must be 3-63 chars using lowercase letters, numbers and hyphens')
+  if (!/^[a-f0-9]{32}$/i.test(r2AccountId)) throw new Error('R2_ACCOUNT_ID must be the 32-character Cloudflare account id')
 
   if (smsEnabled && smsDevelopmentMode) throw new Error('SMS_DEV_MODE must be false when SMS is enabled in production')
   // Distributed rate limits and application spend guards depend on Redis even
@@ -508,19 +520,21 @@ export default {
     upload_tenant_daily_bytes: envInteger('UPLOAD_TENANT_DAILY_BYTES', 2 * 1024 * 1024 * 1024, 1024 * 1024),
   },
   assets: {
-    provider: 'gcs' as const,
-    gcp_project_id: gcpProjectId,
-    gcp_bucket_name: gcpBucketName,
-    gcp_private_bucket_name: gcpPrivateBucketName,
-    gcp_key_file: gcpKeyFile,
-    // `bucket` remains as a non-provider-specific alias for existing internal callers.
-    bucket: gcpBucketName,
-    region: 'global',
+    provider: objectStorageProvider as 'r2',
+    r2_account_id: r2AccountId,
+    r2_access_key_id: r2AccessKeyId,
+    r2_secret_access_key: r2SecretAccessKey,
+    r2_public_bucket_name: r2PublicBucketName,
+    r2_private_bucket_name: r2PrivateBucketName,
+    r2_endpoint: r2Endpoint,
+    // Provider-neutral aliases retained for existing internal status/reporting callers.
+    bucket: r2PublicBucketName,
+    region: 'auto',
     public_base_url: objectStoragePublicBaseUrl,
     browser_origin: objectStorageBrowserOrigin,
-    signed_url_ttl_seconds: Math.max(60, Math.min(3600, Number(process.env.OBJECT_STORAGE_SIGNED_URL_TTL || 600))),
-    health_timeout_ms: Math.max(500, Math.min(15000, Number(process.env.OBJECT_STORAGE_HEALTH_TIMEOUT_MS || 3000))),
-    health_cache_ms: Math.max(1000, Math.min(60000, Number(process.env.OBJECT_STORAGE_HEALTH_CACHE_MS || 10000))),
+    signed_url_ttl_seconds: envInteger('OBJECT_STORAGE_SIGNED_URL_TTL', 600, 60, 3600),
+    health_timeout_ms: envInteger('OBJECT_STORAGE_HEALTH_TIMEOUT_MS', 3000, 500, 15000),
+    health_cache_ms: envInteger('OBJECT_STORAGE_HEALTH_CACHE_MS', 10000, 1000, 60000),
     property_draft_ttl_minutes: Math.max(60, Math.min(14 * 24 * 60, Number(process.env.PROPERTY_DRAFT_ASSET_TTL_MINUTES || 7 * 24 * 60))),
     property_draft_cleanup_interval_minutes: Math.max(5, Math.min(120, Number(process.env.PROPERTY_DRAFT_CLEANUP_INTERVAL_MINUTES || 15))),
     clamav_host: process.env.CLAMAV_HOST || '',

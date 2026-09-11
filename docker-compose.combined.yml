@@ -30,9 +30,14 @@ services:
       COOKIE_SAME_SITE: "none"
       REDIS_HOST: redis
       REDIS_ALLOW_INSECURE_PRIVATE_NETWORK: "true"
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID}
-      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME}
-      GCP_KEY_FILE: /app/opy-realestate-505614-d4e3b5e9f13d.json
+      OBJECT_STORAGE_PROVIDER: r2
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_PUBLIC_BUCKET_NAME: ${R2_PUBLIC_BUCKET_NAME}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL}
       OBJECT_STORAGE_BROWSER_ORIGIN: https://realestate.opygen.com
       NEXT_REVALIDATE_URL: https://realestate.opygen.com/api/revalidate
       NEXT_REVALIDATE_SECRET: ${NEXT_REVALIDATE_SECRET}
@@ -40,8 +45,6 @@ services:
       DOMAIN_A_TARGET: ${DOMAIN_A_TARGET:-64.29.17.65}
       DOMAIN_CNAME_TARGET: ${DOMAIN_CNAME_TARGET:-realestate.opygen.com}
       LOG_LEVEL: warn
-    volumes:
-      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
     expose:
       - "5000"
     networks:
@@ -117,11 +120,12 @@ services:
       BACKUP_CRON: "${BACKUP_CRON:-15 3 * * *}"
       BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Dhaka}
       BACKUP_WORK_DIR: /tmp/real-estate-db-backup
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
-      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:-}
-      GCP_KEY_FILE: /app/opy-realestate-505614-d4e3b5e9f13d.json
-    volumes:
-      - ./opy-realestate-505614-d4e3b5e9f13d.json:/app/opy-realestate-505614-d4e3b5e9f13d.json:ro
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_PUBLIC_BUCKET_NAME: ${R2_PUBLIC_BUCKET_NAME:-}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
     networks:
       - app_network
 

@@ -1,6 +1,6 @@
 import path from 'path'
 
-export type GcsProtectionMode = 'off' | 'warn' | 'require'
+export type ObjectStorageProtectionMode = 'off' | 'warn' | 'require'
 
 export type DatabaseBackupConfig = {
   nodeEnv: string
@@ -18,10 +18,13 @@ export type DatabaseBackupConfig = {
   lockStaleMs: number
   maxParallelCollections: number
   allowSameCluster: boolean
-  gcsProtectionMode: GcsProtectionMode
-  gcpProjectId: string
-  gcpBucketName: string
-  gcpKeyFile: string
+  objectStorageProtectionMode: ObjectStorageProtectionMode
+  r2AccountId: string
+  r2Endpoint: string
+  r2AccessKeyId: string
+  r2SecretAccessKey: string
+  r2PublicBucketName: string
+  r2PrivateBucketName: string
 }
 
 const envBoolean = (name: string, fallback: boolean): boolean => {
@@ -70,8 +73,6 @@ const validateDatabaseName = (name: string, label: string): string => {
 
 const validatePrefix = (value: string): string => {
   const normalized = value.trim()
-  // Atlas enforces a 38-byte limit on database names. The timestamp suffix is 18 bytes (_YYYY_MM_DD_HHMMSS).
-  // Thus prefix must be <= 20 chars to guarantee the total database name never exceeds 38 bytes.
   if (!/^[A-Za-z0-9_-]{1,20}$/.test(normalized)) {
     throw new Error('BACKUP_DATABASE_PREFIX must contain only letters, numbers, underscore or hyphen and be at most 20 characters to comply with MongoDB Atlas 38-byte database name limit')
   }
@@ -87,12 +88,13 @@ const validateTimezone = (value: string): string => {
   }
 }
 
-const parseGcsProtectionMode = (): GcsProtectionMode => {
-  const raw = (process.env.BACKUP_GCS_PROTECTION_MODE || 'warn').trim().toLowerCase()
+const parseObjectStorageProtectionMode = (): ObjectStorageProtectionMode => {
+  // Object-storage protection is provider-neutral; Phase 2 uses R2 for both buckets.
+  const raw = (process.env.BACKUP_OBJECT_STORAGE_PROTECTION_MODE || 'warn').trim().toLowerCase()
   if (!['off', 'warn', 'require'].includes(raw)) {
-    throw new Error('BACKUP_GCS_PROTECTION_MODE must be one of: off, warn, require')
+    throw new Error('BACKUP_OBJECT_STORAGE_PROTECTION_MODE must be one of: off, warn, require')
   }
-  return raw as GcsProtectionMode
+  return raw as ObjectStorageProtectionMode
 }
 
 export const mongoClusterIdentity = (uri: string): string => {
@@ -123,6 +125,7 @@ export const loadDatabaseBackupConfig = (): DatabaseBackupConfig => {
   const allowSameCluster = envBoolean('BACKUP_ALLOW_SAME_CLUSTER', false)
   const sourceCluster = mongoClusterIdentity(sourceDatabaseUrl)
   const backupCluster = mongoClusterIdentity(backupDatabaseUrl)
+  const r2AccountId = process.env.R2_ACCOUNT_ID?.trim() || ''
 
   if (!sourceCluster || !backupCluster) throw new Error('Could not determine MongoDB source/backup cluster identity')
   if (sourceCluster === backupCluster && (nodeEnv === 'production' || !allowSameCluster)) {
@@ -145,9 +148,12 @@ export const loadDatabaseBackupConfig = (): DatabaseBackupConfig => {
     lockStaleMs: envInteger('BACKUP_LOCK_STALE_MINUTES', 360, 30, 2880) * 60_000,
     maxParallelCollections: envInteger('BACKUP_MAX_PARALLEL_COLLECTIONS', 4, 1, 16),
     allowSameCluster,
-    gcsProtectionMode: parseGcsProtectionMode(),
-    gcpProjectId: process.env.GCP_PROJECT_ID?.trim() || process.env.PROJECTS_ID?.trim() || '',
-    gcpBucketName: process.env.GCP_BUCKET_NAME?.trim() || process.env.BUCKET_NAME?.trim() || '',
-    gcpKeyFile: process.env.GCP_KEY_FILE?.trim() || process.env.KEYFILENAME?.trim() || '',
+    objectStorageProtectionMode: parseObjectStorageProtectionMode(),
+    r2AccountId,
+    r2Endpoint: process.env.R2_ENDPOINT?.trim() || (r2AccountId ? `https://${r2AccountId}.r2.cloudflarestorage.com` : ''),
+    r2AccessKeyId: process.env.R2_ACCESS_KEY_ID?.trim() || '',
+    r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY?.trim() || '',
+    r2PublicBucketName: process.env.R2_PUBLIC_BUCKET_NAME?.trim() || '',
+    r2PrivateBucketName: process.env.R2_PRIVATE_BUCKET_NAME?.trim() || '',
   }
 }

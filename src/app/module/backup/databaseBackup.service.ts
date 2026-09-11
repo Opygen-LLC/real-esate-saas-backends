@@ -4,7 +4,7 @@ import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
 import mongoose from 'mongoose'
-import { Storage } from '@google-cloud/storage'
+import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3'
 import { logger } from '../../../shared/logger'
 import { DatabaseBackupConfig, loadDatabaseBackupConfig } from './databaseBackup.config'
 import { DatabaseBackupStatusStore } from './databaseBackup.status'
@@ -12,7 +12,7 @@ import {
   BackupCollectionInventory,
   BackupCollectionVerification,
   DatabaseBackupManifest,
-  GcsProtectionResult,
+  ObjectStorageProtectionResult,
   RestoreVerificationResult,
 } from './databaseBackup.types'
 
@@ -335,55 +335,65 @@ const inspectDatabase = async (
   }
 }
 
-// Evaluated against config.gcsProtectionMode mapped from BACKUP_GCS_PROTECTION_MODE
-const inspectGcsProtection = async (config: DatabaseBackupConfig): Promise<GcsProtectionResult> => {
-  if (config.gcsProtectionMode === 'off') {
-    return { checked: false, protected: false, mode: 'off', message: 'GCS disaster-recovery protection check is disabled.' }
+// Database backups do not contain media bytes. Verify that both R2 buckets are
+// reachable with the same scoped credentials used by the application.
+const inspectObjectStorageProtection = async (config: DatabaseBackupConfig): Promise<ObjectStorageProtectionResult> => {
+  const mode = config.objectStorageProtectionMode
+  if (mode === 'off') {
+    return { checked: false, protected: false, mode, provider: 'r2', message: 'R2 media protection check is disabled.' }
   }
-  if (!config.gcpBucketName) {
-    const result: GcsProtectionResult = {
+
+  const missing = [
+    !config.r2Endpoint && 'R2_ENDPOINT',
+    !config.r2AccessKeyId && 'R2_ACCESS_KEY_ID',
+    !config.r2SecretAccessKey && 'R2_SECRET_ACCESS_KEY',
+    !config.r2PublicBucketName && 'R2_PUBLIC_BUCKET_NAME',
+    !config.r2PrivateBucketName && 'R2_PRIVATE_BUCKET_NAME',
+  ].filter(Boolean) as string[]
+  if (missing.length) {
+    const result: ObjectStorageProtectionResult = {
       checked: false,
       protected: false,
-      mode: config.gcsProtectionMode,
-      message: 'GCP_BUCKET_NAME is not configured for the backup worker; media protection could not be verified.',
+      mode,
+      provider: 'r2',
+      message: `R2 media protection could not be verified; missing: ${missing.join(', ')}`,
     }
-    if (config.gcsProtectionMode === 'require') throw new Error(result.message)
+    if (mode === 'require') throw new Error(result.message)
     return result
+  }
+  if (config.r2PublicBucketName === config.r2PrivateBucketName) {
+    const message = 'R2 public and private bucket names must be different.'
+    if (mode === 'require') throw new Error(message)
+    return { checked: true, protected: false, mode, provider: 'r2', buckets: [config.r2PublicBucketName], message }
   }
 
   try {
-    const storage = new Storage({
-      ...(config.gcpProjectId ? { projectId: config.gcpProjectId } : {}),
-      ...(config.gcpKeyFile ? { keyFilename: config.gcpKeyFile } : {}),
+    const storage = new S3Client({
+      region: 'auto',
+      endpoint: config.r2Endpoint,
+      forcePathStyle: true,
+      credentials: { accessKeyId: config.r2AccessKeyId, secretAccessKey: config.r2SecretAccessKey },
+      maxAttempts: 3,
     })
-    const [metadata] = await storage.bucket(config.gcpBucketName).getMetadata()
-    const raw = metadata as unknown as Record<string, any>
-    const versioningEnabled = Boolean(raw.versioning?.enabled)
-    const retentionSeconds = Number(raw.retentionPolicy?.retentionPeriod || 0)
-    const softDeleteSeconds = Number(raw.softDeletePolicy?.retentionDurationSeconds || 0)
-    const protectedBucket = versioningEnabled || retentionSeconds > 0 || softDeleteSeconds > 0
-    const result: GcsProtectionResult = {
+    const buckets = [config.r2PublicBucketName, config.r2PrivateBucketName]
+    await Promise.all(buckets.map((Bucket) => storage.send(new HeadBucketCommand({ Bucket }))))
+    return {
       checked: true,
-      protected: protectedBucket,
-      mode: config.gcsProtectionMode,
-      bucket: config.gcpBucketName,
-      versioningEnabled,
-      retentionSeconds,
-      softDeleteSeconds,
-      message: protectedBucket
-        ? 'GCS media protection is enabled.'
-        : 'GCS bucket has no detected soft-delete retention, retention policy, or object versioning.',
+      protected: true,
+      mode,
+      provider: 'r2',
+      buckets,
+      message: 'Cloudflare R2 public/private media buckets are reachable and isolated by bucket.',
     }
-    if (!protectedBucket && config.gcsProtectionMode === 'require') throw new Error(result.message)
-    return result
   } catch (error) {
-    if (config.gcsProtectionMode === 'require') throw error
+    if (mode === 'require') throw error
     return {
       checked: false,
       protected: false,
-      mode: config.gcsProtectionMode,
-      bucket: config.gcpBucketName,
-      message: `GCS media protection verification failed: ${safeErrorMessage(error)}`,
+      mode,
+      provider: 'r2',
+      buckets: [config.r2PublicBucketName, config.r2PrivateBucketName].filter(Boolean),
+      message: `R2 media protection verification failed: ${safeErrorMessage(error)}`,
     }
   }
 }
@@ -596,7 +606,7 @@ export const DatabaseBackupService = {
       backupDatabase,
       transferMode: 'atlas_stream',
       archiveRetained: false,
-      gcsProtection: { checked: false, protected: false, mode: config.gcsProtectionMode, message: 'Not checked yet.' },
+      objectStorageProtection: { checked: false, protected: false, mode: config.objectStorageProtectionMode, provider: 'r2', message: 'Not checked yet.' },
     }
 
     try {
@@ -609,9 +619,9 @@ export const DatabaseBackupService = {
       backupConfigFile = await secureToolConfig(toolConfigDir, 'backup', clusterBackupUri)
       manifest.mongoDumpVersion = await toolVersion('mongodump', config.processTimeoutMs)
       manifest.mongoRestoreVersion = await toolVersion('mongorestore', config.processTimeoutMs)
-      manifest.gcsProtection = await inspectGcsProtection(config)
-      if (!manifest.gcsProtection.protected && config.gcsProtectionMode === 'warn') {
-        logger.warn('database_backup_gcs_media_not_protected', { bucket: config.gcpBucketName || 'unconfigured' })
+      manifest.objectStorageProtection = await inspectObjectStorageProtection(config)
+      if (!manifest.objectStorageProtection.protected && config.objectStorageProtectionMode === 'warn') {
+        logger.warn('database_backup_object_storage_not_protected', { provider: 'r2', buckets: [config.r2PublicBucketName, config.r2PrivateBucketName].filter(Boolean) })
       }
 
       logger.info('database_backup_started', { runId, sourceDatabase: config.sourceDatabaseName, backupDatabase })

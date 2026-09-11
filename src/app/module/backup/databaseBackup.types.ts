@@ -16,14 +16,12 @@ export type BackupCollectionVerification = {
   optionsMatch: boolean
 }
 
-export type GcsProtectionResult = {
+export type ObjectStorageProtectionResult = {
   checked: boolean
   protected: boolean
   mode: 'off' | 'warn' | 'require'
-  bucket?: string
-  versioningEnabled?: boolean
-  retentionSeconds?: number
-  softDeleteSeconds?: number
+  provider: 'r2'
+  buckets?: string[]
   message: string
 }
 
@@ -59,7 +57,7 @@ export type DatabaseBackupManifest = {
   sourceCollectionsBefore?: BackupCollectionInventory[]
   sourceCollectionsAfter?: BackupCollectionInventory[]
   restoreVerification?: RestoreVerificationResult
-  gcsProtection: GcsProtectionResult
+  objectStorageProtection: ObjectStorageProtectionResult
   retention?: {
     retentionDays: number
     minRecoveryPoints: number

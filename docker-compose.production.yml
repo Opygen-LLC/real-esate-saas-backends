@@ -28,14 +28,15 @@ services:
       VERCEL_REQUIRE_TEAM_ID: ${VERCEL_REQUIRE_TEAM_ID:-false}
       DOMAIN_REPLACEMENT_GRACE_HOURS: ${DOMAIN_REPLACEMENT_GRACE_HOURS:-168}
       INVOICE_PDF_CHROMIUM_PATH: /usr/local/bin/invoice-chromium
-      # GCS media storage
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}
-      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:?GCP_BUCKET_NAME is required}
-      GCP_PRIVATE_BUCKET_NAME: ${GCP_PRIVATE_BUCKET_NAME:?GCP_PRIVATE_BUCKET_NAME is required}
-      # Prefer Application Default Credentials/workload identity. If an external host
-      # must use a JSON key, mount it from a deployment secret outside the repository
-      # and set GCP_KEY_FILE to that in-container path.
-      GCP_KEY_FILE: ${GCP_KEY_FILE:-}
+      # Cloudflare R2 media storage
+      OBJECT_STORAGE_PROVIDER: r2
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?R2_ACCOUNT_ID is required}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is required}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is required}
+      R2_PUBLIC_BUCKET_NAME: ${R2_PUBLIC_BUCKET_NAME:?R2_PUBLIC_BUCKET_NAME is required}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:?R2_PRIVATE_BUCKET_NAME is required}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:?OBJECT_STORAGE_PUBLIC_BASE_URL is required}
       OBJECT_STORAGE_BROWSER_ORIGIN: ${OBJECT_STORAGE_BROWSER_ORIGIN:-https://realestate.opygen.com}
       CLAMAV_HOST: ${CLAMAV_HOST:?CLAMAV_HOST is required in production}
       CLAMAV_PORT: ${CLAMAV_PORT:-3310}
@@ -121,13 +122,13 @@ services:
       BACKUP_LOCK_STALE_MINUTES: ${BACKUP_LOCK_STALE_MINUTES:-360}
       BACKUP_MAX_PARALLEL_COLLECTIONS: ${BACKUP_MAX_PARALLEL_COLLECTIONS:-4}
       BACKUP_ALLOW_SAME_CLUSTER: "false"
-      BACKUP_GCS_PROTECTION_MODE: ${BACKUP_GCS_PROTECTION_MODE:-warn}
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
-      GCP_BUCKET_NAME: ${GCP_BUCKET_NAME:-}
-      # Prefer Application Default Credentials/workload identity. If an external host
-      # must use a JSON key, mount it from a deployment secret outside the repository
-      # and set GCP_KEY_FILE to that in-container path.
-      GCP_KEY_FILE: ${GCP_KEY_FILE:-}
+      BACKUP_OBJECT_STORAGE_PROTECTION_MODE: ${BACKUP_OBJECT_STORAGE_PROTECTION_MODE:-warn}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_PUBLIC_BUCKET_NAME: ${R2_PUBLIC_BUCKET_NAME:-}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
     read_only: true
     security_opt:
       - no-new-privileges:true

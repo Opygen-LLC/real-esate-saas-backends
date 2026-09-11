@@ -348,7 +348,7 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
     ? variantWidths.flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, key: `${key}.${width}.${format}` })))
     : []
 
-  // Generate all GCS signed upload URLs in parallel (async with GCS SDK)
+  // Generate all R2 signed upload URLs in parallel (async with the S3-compatible SDK)
   const [originalUploadUrl, ...variantUploadUrls] = await Promise.all([
     ObjectStorageService.presignUpload(key, payload.mimeType).getUploadUrl(),
     ...variantDefs.map((v) => ObjectStorageService.presignUpload(v.key, `image/${v.format}`).getUploadUrl()),

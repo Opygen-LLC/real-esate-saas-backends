@@ -19,31 +19,35 @@ describe('Phase 1 property media foundation contract', () => {
     expect(validation).toContain('propertyDraftSessionId')
   })
 
-  it('uses GCS as the single canonical production object-storage provider', () => {
+  it('uses Cloudflare R2 as the single canonical production object-storage provider', () => {
     const config = read('src/config/index.ts')
     const storage = read('src/app/module/websiteBuilder/objectStorage.service.ts')
     const productionCompose = read('docker-compose.production.yml')
     const ciCompose = read('docker-compose.ci.yml')
 
-    expect(config).toContain("provider: 'gcs' as const")
-    expect(config).toContain('gcp_project_id: gcpProjectId')
-    expect(config).toContain('gcp_bucket_name: gcpBucketName')
-    expect(config).toContain("GCP_PROJECT_ID is required in production for Google Cloud Storage")
-    expect(config).toContain("GCP_BUCKET_NAME is required in production for Google Cloud Storage")
+    expect(config).toContain("provider: objectStorageProvider as 'r2'")
+    expect(config).toContain('r2_account_id: r2AccountId')
+    expect(config).toContain('r2_public_bucket_name: r2PublicBucketName')
+    expect(config).toContain('r2_private_bucket_name: r2PrivateBucketName')
+    expect(config).toContain('R2_ACCOUNT_ID is required in production for Cloudflare R2')
+    expect(config).toContain('R2_PUBLIC_BUCKET_NAME is required in production for Cloudflare R2')
 
-    expect(storage).toContain("provider: 'gcs' as const")
-    expect(storage).toContain('new Storage(opts)')
-    expect(storage).toContain('config.assets.gcp_project_id')
-    expect(storage).toContain('config.assets.gcp_bucket_name')
+    expect(storage).toContain("provider: 'r2' as const")
+    expect(storage).toContain('new S3Client({')
+    expect(storage).toContain("region: 'auto'")
+    expect(storage).toContain('config.assets.r2_endpoint')
+    expect(storage).toContain('config.assets.r2_public_bucket_name')
 
-    expect(productionCompose).toContain('GCP_PROJECT_ID:')
-    expect(productionCompose).toContain('GCP_BUCKET_NAME:')
+    expect(productionCompose).toContain('OBJECT_STORAGE_PROVIDER: r2')
+    expect(productionCompose).toContain('R2_ACCOUNT_ID:')
+    expect(productionCompose).toContain('R2_PUBLIC_BUCKET_NAME:')
+    expect(productionCompose).toContain('R2_PRIVATE_BUCKET_NAME:')
     expect(productionCompose).not.toMatch(/^\s{2}minio:/m)
     expect(productionCompose).not.toContain('OBJECT_STORAGE_INTERNAL_ENDPOINT')
     expect(ciCompose).not.toMatch(/^\s{2}minio:/m)
   })
 
-  it('returns stable storage-specific errors and verifies the GCS bucket plus browser CORS', () => {
+  it('returns stable storage-specific errors and verifies the R2 bucket plus browser CORS', () => {
     const storage = read('src/app/module/websiteBuilder/objectStorage.service.ts')
     const contract = read('src/contracts/apiContract.ts')
     const app = read('src/app.ts')
@@ -51,8 +55,9 @@ describe('Phase 1 property media foundation contract', () => {
       expect(contract).toContain(code)
       expect(storage).toContain(`API_ERROR_CODES.${code}`)
     }
-    expect(storage).toContain("const methodsNeeded = ['PUT', 'GET', 'HEAD']")
+    expect(storage).toContain("const requiredMethods = ['PUT', 'GET', 'HEAD']")
     expect(storage).toContain("detail: 'browser_cors_misconfigured'")
+    expect(storage).toContain('new HeadBucketCommand')
     expect(app).toContain('ObjectStorageService.configurationStatus()')
     expect(app).toContain('ObjectStorageService.health()')
     expect(app).toContain('objectStorage.healthy && clamav.healthy')
@@ -87,14 +92,14 @@ describe('Phase 1 property media foundation contract', () => {
     expect(service).toContain('decrementStorageUsage')
   })
 
-  it('ships a GCS CORS policy and a GCS-aware media verifier', () => {
-    const cors = JSON.parse(read('ops/gcs-cors.json'))
+  it('ships an R2 CORS policy and an R2-aware media verifier', () => {
+    const cors = JSON.parse(read('ops/r2-cors.json'))
     const verify = read('scripts/verify-media-stack.mjs')
     expect(cors).toHaveLength(1)
-    expect(cors[0].origin).toContain('https://realestate.opygen.com')
-    for (const method of ['GET', 'HEAD', 'PUT']) expect(cors[0].method).toContain(method)
-    expect(cors[0].responseHeader).toContain('Content-Type')
-    expect(verify).toContain("storage?.provider === 'gcs'")
+    expect(cors[0].AllowedOrigins).toContain('https://realestate.opygen.com')
+    for (const method of ['GET', 'HEAD', 'PUT']) expect(cors[0].AllowedMethods).toContain(method)
+    expect(cors[0].AllowedHeaders).toContain('Content-Type')
+    expect(verify).toContain("storage?.provider === 'r2'")
     expect(verify).toContain('storage?.browserCors?.healthy === true')
     expect(verify).toContain("new Set(['PUT', 'GET', 'HEAD'])")
   })

@@ -96,7 +96,7 @@ describe('Phase 5 tenant hard-delete safety contracts', () => {
     expect(purge).toContain('purgeUserIds: userIds.map(String)')
   })
 
-  it('requires a strict zero-data scan across DB, sessions, jobs, GCS, domains, sockets and Redis', () => {
+  it('requires a strict zero-data scan across DB, sessions, jobs, R2, domains, sockets and Redis', () => {
     const purge = read('src/app/module/compliance/tenantPurge.service.ts')
     for (const token of [
       'remainingCollections',
@@ -105,7 +105,7 @@ describe('Phase 5 tenant hard-delete safety contracts', () => {
       'operationsJobs',
       'activeSockets',
       'redisKeys',
-      'gcsTenantObjects',
+      'objectStorageTenantObjects',
       'registeredTenantDomains',
       "'TENANT_PURGE_INCOMPLETE'",
     ]) expect(purge).toContain(token)
@@ -119,7 +119,7 @@ describe('Phase 5 tenant hard-delete safety contracts', () => {
 
   it('uses retry-safe/idempotent cleanup primitives', () => {
     expect(read('src/app/module/websiteBuilder/objectStorage.service.ts')).toContain('delete({ ignoreNotFound: true })')
-    expect(read('src/app/module/websiteBuilder/objectStorage.service.ts')).toContain('deleteFiles({ prefix: normalized, force: true })')
+    expect(read('src/app/module/websiteBuilder/objectStorage.service.ts')).toContain('new DeleteObjectsCommand')
     expect(read('src/app/module/domain/providers/vercelDomainProvider.ts')).toContain('Promise.allSettled([removeOne(domain), removeOne(`www.${domain}`)])')
     expect(read('src/app/module/operationsQueue/operationsQueue.service.ts')).toContain('const cancelOrganization = async')
     expect(read('src/app/module/compliance/tenantPurge.service.ts')).toContain('All operations below are intentionally idempotent')

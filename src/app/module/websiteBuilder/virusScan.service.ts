@@ -63,7 +63,7 @@ export const scanStoredObject = async (key: string): Promise<{ status: 'clean' |
     return { status: 'skipped', detail: 'CLAMAV_HOST is not configured in development' }
   }
 
-  // Read with the server's GCS credentials instead of creating another signed
+  // Read with the server's R2 credentials instead of creating another signed
   // URL. This keeps malware processing working on runtimes whose service
   // account can read/write the bucket but is not allowed to sign URLs.
   const body = await ObjectStorageService.readBuffer(key)

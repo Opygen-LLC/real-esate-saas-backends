@@ -32,8 +32,8 @@ services:
       timeout: 3s
       retries: 30
 
-  # Media integration uses the same GCS adapter as production. CI jobs that run
-  # live storage tests should inject a dedicated GCP project/bucket credential;
+  # Media integration uses the same Cloudflare R2 adapter as production. CI jobs
+  # that run live storage tests inject dedicated R2 test-bucket credentials;
   # unit/contract tests do not boot a second S3/MinIO implementation.
   clamav:
     image: clamav/clamav:1.4.4

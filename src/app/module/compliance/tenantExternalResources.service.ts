@@ -9,7 +9,7 @@ import { Organization } from '../organization/organization.model'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 
 /**
- * Collections that may contain tenant-owned GCS object references created by
+ * Collections that may contain tenant-owned object-storage references created by
  * legacy upload paths. Current managed media is deleted by tenant prefix, but
  * these references are collected before MongoDB deletion so old global
  * `uploads/...` objects can also be removed safely.
@@ -180,7 +180,7 @@ const deleteStorage = async (manifest: TenantExternalResourceManifest) => {
   if (!status.configured) {
     throw new ApiError(
       httpStatus.SERVICE_UNAVAILABLE,
-      'Tenant storage cannot be purged because Google Cloud Storage is not configured',
+      'Tenant storage cannot be purged because Cloudflare R2 is not configured',
       '',
       'TENANT_PURGE_STORAGE_FAILED',
       { missing: status.missing },
@@ -195,7 +195,7 @@ const deleteStorage = async (manifest: TenantExternalResourceManifest) => {
     logger.error('tenant_storage_purge_failed', { organizationId: manifest.organizationId, error })
     throw new ApiError(
       httpStatus.SERVICE_UNAVAILABLE,
-      'Tenant Google Cloud Storage cleanup failed',
+      'Tenant object-storage cleanup failed',
       '',
       'TENANT_PURGE_STORAGE_FAILED',
       { reason: error instanceof Error ? error.message : String(error) },

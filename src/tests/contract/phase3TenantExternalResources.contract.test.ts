@@ -6,7 +6,7 @@ const root = process.cwd()
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8')
 
 describe('Phase 3 tenant external-resource purge contracts', () => {
-  it('deletes and verifies both tenant-owned GCS prefixes plus referenced legacy uploads', () => {
+  it('deletes and verifies both tenant-owned R2 prefixes plus referenced legacy uploads', () => {
     const external = read('src/app/module/compliance/tenantExternalResources.service.ts')
     const storage = read('src/app/module/websiteBuilder/objectStorage.service.ts')
 
@@ -21,12 +21,12 @@ describe('Phase 3 tenant external-resource purge contracts', () => {
     expect(external).toContain("'TENANT_PURGE_EXTERNAL_CLEANUP_FAILED'")
 
     expect(storage).toContain('const removePrefix = async')
-    expect(storage).toContain('deleteFiles({ prefix: normalized, force: true })')
+    expect(storage).toContain('new DeleteObjectsCommand')
     expect(storage).toContain('const prefixHasObjects = async')
     expect(storage).toContain('const keyFromReference = (value: string)')
   })
 
-  it('moves legacy upload.service writes into the tenant GCS namespace', () => {
+  it('moves legacy upload.service writes into the tenant object-storage namespace', () => {
     const upload = read('src/app/module/upload/upload.service.ts')
     const controller = read('src/app/module/upload/upload.controller.ts')
 

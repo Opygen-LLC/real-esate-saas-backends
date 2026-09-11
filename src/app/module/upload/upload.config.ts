@@ -1,27 +1,28 @@
-import { Storage } from '@google-cloud/storage'
-import path from 'path'
-import fs from 'fs'
+import { S3Client } from '@aws-sdk/client-s3'
+import config from '../../../config'
 
-const projectId = process.env.PROJECTS_ID || process.env.GCP_PROJECT_ID || 'opy-realestate-505614'
-const bucketName = process.env.BUCKET_NAME || process.env.GCP_BUCKET_NAME || 'realestate-saas'
-const keyFileNameRaw = process.env.KEYFILENAME || process.env.GCP_KEY_FILE || 'opy-realestate-505614-d4e3b5e9f13d.json'
-
-let keyFilename = path.resolve(process.cwd(), keyFileNameRaw)
-if (!fs.existsSync(keyFilename)) {
-  const rootKey = path.resolve(process.cwd(), '..', keyFileNameRaw)
-  if (fs.existsSync(rootKey)) {
-    keyFilename = rootKey
-  }
-}
-
-const storageOptions: { projectId?: string; keyFilename?: string } = {}
-if (projectId) storageOptions.projectId = projectId
-if (fs.existsSync(keyFilename)) storageOptions.keyFilename = keyFilename
-
-export const storage = new Storage(storageOptions)
-export const bucket = storage.bucket(bucketName)
+/**
+ * Low-level R2 client export retained for legacy upload modules that import this
+ * file directly. New business code should use ObjectStorageService instead.
+ */
 export const storageConfig = {
-  projectId,
-  bucketName,
-  keyFilename,
+  provider: 'r2' as const,
+  region: 'auto' as const,
+  endpoint: config.assets.r2_endpoint,
+  publicBucketName: config.assets.r2_public_bucket_name,
+  privateBucketName: config.assets.r2_private_bucket_name,
 }
+
+export const storage = new S3Client({
+  region: storageConfig.region,
+  endpoint: storageConfig.endpoint,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: config.assets.r2_access_key_id,
+    secretAccessKey: config.assets.r2_secret_access_key,
+  },
+  maxAttempts: 3,
+})
+
+// Compatibility alias for old callers. This is now the configured public R2 bucket name.
+export const bucket = storageConfig.publicBucketName

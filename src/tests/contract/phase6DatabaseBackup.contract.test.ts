@@ -67,11 +67,19 @@ describe('Daily Atlas-to-Atlas database disaster-recovery backup', () => {
     expect(service).toContain('persistRemoteManifest')
   })
 
-  it('tracks GCS protection because database metadata does not contain media bytes', () => {
+  it('tracks R2 protection because database metadata does not contain media bytes', () => {
     const service = read('src/app/module/backup/databaseBackup.service.ts')
-    expect(service).toContain('softDeletePolicy')
-    expect(service).toContain('retentionPolicy')
-    expect(service).toContain('versioning')
-    expect(service).toContain('BACKUP_GCS_PROTECTION_MODE')
+    const backupConfig = read('src/app/module/backup/databaseBackup.config.ts')
+    const backupTypes = read('src/app/module/backup/databaseBackup.types.ts')
+
+    expect(service).toContain('inspectObjectStorageProtection')
+    expect(service).toContain('new HeadBucketCommand')
+    expect(service).toContain('R2_PUBLIC_BUCKET_NAME')
+    expect(service).toContain('R2_PRIVATE_BUCKET_NAME')
+    expect(backupConfig).toContain('BACKUP_OBJECT_STORAGE_PROTECTION_MODE')
+    expect(backupConfig).toContain('R2_ACCESS_KEY_ID')
+    expect(backupConfig).toContain('R2_SECRET_ACCESS_KEY')
+    expect(backupTypes).toContain("provider: 'r2'")
+    expect(backupTypes).toContain('objectStorageProtection: ObjectStorageProtectionResult')
   })
 })

@@ -298,7 +298,7 @@ const getZeroStateSnapshot = async (
     operationsJobs: Number(collectionCounts.operationsjobs || 0),
     activeSockets: organizationSockets + userSockets,
     redisKeys,
-    gcsTenantObjects: external.remainingStorageObjects,
+    objectStorageTenantObjects: external.remainingStorageObjects,
     registeredTenantDomains: external.remainingDomainRegistrations,
     external,
   }
@@ -318,7 +318,7 @@ const assertZeroState = async (
     || snapshot.operationsJobs > 0
     || snapshot.activeSockets > 0
     || snapshot.redisKeys > 0
-    || snapshot.gcsTenantObjects > 0
+    || snapshot.objectStorageTenantObjects > 0
     || snapshot.registeredTenantDomains > 0
 
   if (incomplete) {
@@ -438,7 +438,7 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
 
   await assertZeroState(organizationId, userIds, externalManifest, { organizationMustExist: true })
 
-  // Organization is deleted last, after MongoDB, GCS, domains, sessions,
+  // Organization is deleted last, after MongoDB, object storage, domains, sessions,
   // sockets, Redis and jobs have all converged to zero.
   await deleteOrganizationRoot(organizationId)
 
@@ -460,7 +460,7 @@ const purgeOrganization = async (rawOrganizationId: string, actor: { id: string;
     permanent: true,
     verification: {
       databaseRecords: verification.databaseRecords,
-      gcsTenantObjects: verification.gcsTenantObjects,
+      objectStorageTenantObjects: verification.objectStorageTenantObjects,
       registeredTenantDomains: verification.registeredTenantDomains,
       activeSessions: verification.activeSessions,
       activeSockets: verification.activeSockets,

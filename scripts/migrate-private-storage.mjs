@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-import { Storage } from '@google-cloud/storage'
-import fs from 'node:fs'
-import path from 'node:path'
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3'
 
 const arg = (name) => {
   const prefix = `--${name}=`
@@ -12,74 +17,65 @@ const applying = process.argv.includes('--apply')
 const tenant = arg('tenant').trim()
 const limit = Math.max(1, Math.min(100000, Number(arg('limit') || 100000)))
 const concurrency = Math.max(1, Math.min(20, Number(arg('concurrency') || 5)))
-const projectId = String(process.env.GCP_PROJECT_ID || '').trim()
-const publicBucketName = String(process.env.GCP_BUCKET_NAME || '').trim()
-const privateBucketName = String(process.env.GCP_PRIVATE_BUCKET_NAME || '').trim()
-const keyFilenameRaw = String(process.env.GCP_KEY_FILE || '').trim()
+const accountId = String(process.env.R2_ACCOUNT_ID || '').trim()
+const endpoint = String(process.env.R2_ENDPOINT || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '')).trim()
+const accessKeyId = String(process.env.R2_ACCESS_KEY_ID || '').trim()
+const secretAccessKey = String(process.env.R2_SECRET_ACCESS_KEY || '').trim()
+const publicBucketName = String(process.env.R2_PUBLIC_BUCKET_NAME || '').trim()
+const privateBucketName = String(process.env.R2_PRIVATE_BUCKET_NAME || '').trim()
 
 const fail = (message) => { console.error(`[private-storage-migration] ${message}`); process.exit(1) }
-if (!projectId) fail('GCP_PROJECT_ID is required')
-if (!publicBucketName) fail('GCP_BUCKET_NAME is required')
-if (!privateBucketName) fail('GCP_PRIVATE_BUCKET_NAME is required')
-if (publicBucketName === privateBucketName) fail('Public and private buckets must be different')
+if (!endpoint) fail('R2_ENDPOINT or R2_ACCOUNT_ID is required')
+if (!accessKeyId) fail('R2_ACCESS_KEY_ID is required')
+if (!secretAccessKey) fail('R2_SECRET_ACCESS_KEY is required')
+if (!publicBucketName) fail('R2_PUBLIC_BUCKET_NAME is required')
+if (!privateBucketName) fail('R2_PRIVATE_BUCKET_NAME is required')
+if (publicBucketName === privateBucketName) fail('Public and private R2 buckets must be different')
 if (applying && process.env.MIGRATE_PRIVATE_STORAGE_CONFIRM !== 'copy-and-delete-public-private-objects') {
   fail('Set MIGRATE_PRIVATE_STORAGE_CONFIRM=copy-and-delete-public-private-objects before using --apply')
 }
 
-const options = { projectId }
-if (keyFilenameRaw) {
-  const resolved = path.resolve(process.cwd(), keyFilenameRaw)
-  if (!fs.existsSync(resolved)) fail(`GCP_KEY_FILE does not exist: ${resolved}`)
-  options.keyFilename = resolved
-}
-const storage = new Storage(options)
-const publicBucket = storage.bucket(publicBucketName)
-const privateBucket = storage.bucket(privateBucketName)
-const publicPrincipals = new Set(['allUsers', 'allAuthenticatedUsers'])
-
-const [privateExists] = await privateBucket.exists()
-if (!privateExists) fail(`Private bucket does not exist: ${privateBucketName}`)
-const [privatePolicy] = await privateBucket.iam.getPolicy()
-const unsafeBinding = (privatePolicy.bindings || []).find((binding) =>
-  (binding.members || []).some((member) => publicPrincipals.has(member))
-)
-if (unsafeBinding) fail(`Private bucket has public IAM binding ${unsafeBinding.role}; remove it before migration`)
+const storage = new S3Client({
+  region: 'auto', endpoint, forcePathStyle: true,
+  credentials: { accessKeyId, secretAccessKey }, maxAttempts: 3,
+})
+await Promise.all([
+  storage.send(new HeadBucketCommand({ Bucket: publicBucketName })),
+  storage.send(new HeadBucketCommand({ Bucket: privateBucketName })),
+])
 
 const isPrivateObject = (name) => /^support\//.test(name)
   || /^tenants\/[^/]+\/properties\/documents\//.test(name)
   || /^tenants\/[^/]+\/suppliers\/invoices\//.test(name)
 
-const prefixes = tenant
-  ? [`support/${tenant}/`, `tenants/${tenant}/`]
-  : ['support/', 'tenants/']
-
+const prefixes = tenant ? [`support/${tenant}/`, `tenants/${tenant}/`] : ['support/', 'tenants/']
 const objects = []
 for (const prefix of prefixes) {
-  let pageToken
+  let continuationToken
   do {
-    const [files, , apiResponse] = await publicBucket.getFiles({ prefix, autoPaginate: false, maxResults: 1000, pageToken })
-    for (const file of files) {
-      if (isPrivateObject(file.name)) objects.push(file.name)
+    const page = await storage.send(new ListObjectsV2Command({
+      Bucket: publicBucketName, Prefix: prefix, MaxKeys: Math.min(1000, limit - objects.length),
+      ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+    }))
+    for (const object of page.Contents || []) {
+      if (object.Key && isPrivateObject(object.Key)) objects.push(object.Key)
       if (objects.length >= limit) break
     }
-    pageToken = apiResponse?.nextPageToken
-  } while (pageToken && objects.length < limit)
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (continuationToken && objects.length < limit)
   if (objects.length >= limit) break
 }
 
 console.log(JSON.stringify({
-  mode: applying ? 'apply' : 'dry-run',
-  publicBucket: publicBucketName,
-  privateBucket: privateBucketName,
-  tenant: tenant || 'all',
-  objectsFound: objects.length,
-  limit,
+  provider: 'r2', mode: applying ? 'apply' : 'dry-run', publicBucket: publicBucketName,
+  privateBucket: privateBucketName, tenant: tenant || 'all', objectsFound: objects.length, limit,
 }, null, 2))
 if (!applying) {
   console.log('Dry run only. Re-run with --apply and the explicit confirmation environment variable to migrate.')
   process.exit(0)
 }
 
+const copySource = (bucket, key) => encodeURIComponent(`${bucket}/${key}`).replace(/%2F/gi, '/')
 let copied = 0
 let deleted = 0
 let skipped = 0
@@ -89,24 +85,26 @@ const worker = async () => {
   while (true) {
     const index = cursor++
     if (index >= objects.length) return
-    const name = objects[index]
-    const source = publicBucket.file(name)
-    const destination = privateBucket.file(name)
+    const key = objects[index]
     try {
-      const [sourceMeta] = await source.getMetadata()
-      const [destinationExists] = await destination.exists()
-      if (!destinationExists) {
-        await source.copy(destination)
-        copied += 1
-      } else {
+      const source = await storage.send(new HeadObjectCommand({ Bucket: publicBucketName, Key: key }))
+      let destination
+      try {
+        destination = await storage.send(new HeadObjectCommand({ Bucket: privateBucketName, Key: key }))
         skipped += 1
+      } catch (error) {
+        if (Number(error?.$metadata?.httpStatusCode) !== 404 && !['NotFound', 'NoSuchKey'].includes(String(error?.name || ''))) throw error
+        await storage.send(new CopyObjectCommand({
+          Bucket: privateBucketName,
+          Key: key,
+          CopySource: copySource(publicBucketName, key),
+          ...(source.ContentType ? { ContentType: source.ContentType, MetadataDirective: 'REPLACE' } : {}),
+        }))
+        destination = await storage.send(new HeadObjectCommand({ Bucket: privateBucketName, Key: key }))
+        copied += 1
       }
-      const [destinationMeta] = await destination.getMetadata()
-      const sourceSize = Number(sourceMeta.size || 0)
-      const destinationSize = Number(destinationMeta.size || 0)
-      const checksumMatches = !sourceMeta.crc32c || !destinationMeta.crc32c || sourceMeta.crc32c === destinationMeta.crc32c
-      if (sourceSize !== destinationSize || !checksumMatches) throw new Error('destination verification failed')
-      await source.delete({ ignoreNotFound: true })
+      if (Number(source.ContentLength || 0) !== Number(destination.ContentLength || 0)) throw new Error('destination size verification failed')
+      await storage.send(new DeleteObjectCommand({ Bucket: publicBucketName, Key: key }))
       deleted += 1
     } catch (error) {
       failed += 1

@@ -67,10 +67,10 @@ for (const marker of ['assertSafeUploadFilename', 'validateStoredFile', 'sanitiz
 }
 assert(storedFile.includes('sharp(') && storedFile.includes('limitInputPixels'), 'images must be decoded with a pixel limit before acceptance')
 assert(processor.includes('scanStoredObject') && processor.includes('sanitizeStoredPublicImage'), 'website assets must be scanned and re-encoded before publication')
-assert(config.includes('GCP_PRIVATE_BUCKET_NAME') && config.includes('must be different from the public GCP_BUCKET_NAME'), 'production must require a dedicated private object bucket')
-assert(storage.includes('allUsers') && storage.includes('allAuthenticatedUsers'), 'private bucket readiness must reject public IAM principals')
-assert(storage.includes('privateBucketSecurityHealth') && storage.includes("responseDisposition: 'attachment'") && storage.includes("responseType: 'application/octet-stream'"), 'private downloads and readiness must be hardened')
-assert(migration.includes('copy-and-delete-public-private-objects') && migration.includes('crc32c') && migration.includes('delete'), 'private storage migration must verify then delete legacy public copies')
+assert(config.includes('R2_PRIVATE_BUCKET_NAME') && config.includes('must be different from R2_PUBLIC_BUCKET_NAME'), 'production must require a dedicated private R2 bucket')
+assert(storage.includes('privateBucketSecurityHealth') && storage.includes("accessModel: 'r2-private-by-default'"), 'private R2 bucket readiness must enforce the dedicated private-bucket model')
+assert(storage.includes('privateBucketSecurityHealth') && storage.includes("ResponseContentDisposition: 'attachment'") && storage.includes("ResponseContentType: 'application/octet-stream'"), 'private downloads and readiness must be hardened')
+assert(migration.includes('copy-and-delete-public-private-objects') && migration.includes('ContentLength') && migration.includes('DeleteObjectCommand'), 'private storage migration must verify size before deleting legacy public copies')
 
 // HTTPS/proxy/header/cache controls.
 assert(security.includes('export const enforceHttps') && security.includes('redirect(308') && security.includes('config.public_api_url'), 'production API must redirect HTTP to the canonical HTTPS origin')
@@ -81,7 +81,7 @@ assert(caddy.includes('{$CADDY_SITE_ADDRESS}') && caddy.includes('reverse_proxy 
 assert(caddy.includes('Strict-Transport-Security') && caddy.includes('X-Content-Type-Options'), 'edge must set baseline transport/content headers')
 assert(!/^\s*-\s*["']?5000:5000/m.test(compose), 'production compose must not publish API port 5000 to the host')
 assert(compose.includes('requirepass') && compose.includes('--appendonly') && compose.includes('CADDY_SITE_ADDRESS'), 'production compose must protect/persist Redis and require the TLS site address')
-assert(!compose.includes('opy-realestate-505614-d4e3b5e9f13d.json') && compose.includes('GCP_KEY_FILE: ${GCP_KEY_FILE:-}'), 'production compose must not bake a service-account key path into the deployment')
+assert(!compose.includes('opy-realestate-505614-d4e3b5e9f13d.json') && compose.includes('R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is required}'), 'production compose must require R2 credentials without baking secrets into the deployment')
 assert(config.includes('CLAMAV_HOST') && app.includes('virusScannerHealth'), 'production readiness must require malware scanning')
 
 // Every super-admin route must have an identity limiter close to its auth guard.
