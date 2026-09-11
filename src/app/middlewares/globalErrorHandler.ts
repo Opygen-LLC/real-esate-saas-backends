@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { ErrorRequestHandler } from 'express'
 import { ZodError } from 'zod'
-import config from '../../config'
+import multer from 'multer'
 import { API_ERROR_CODES, buildFieldErrors, defaultErrorCodeForStatus } from '../../contracts/apiContract'
 import ApiError from '../../errors/ApiError'
 import handleCastError from '../../errors/handleCastError'
@@ -51,9 +51,30 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     details = error.details
     fieldErrors = error.fieldErrors || {}
     errorMessages = error.message ? [{ path: '', message: error.message }] : []
+  } else if (error instanceof multer.MulterError) {
+    // Defense in depth: upload-specific middleware should normally translate
+    // Multer errors first, but no Multer validation failure may surface as 500.
+    statusCode = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400
+    const mapped = error.code === 'LIMIT_FILE_SIZE'
+      ? { code: API_ERROR_CODES.FILE_TOO_LARGE, message: 'Uploaded file is too large.' }
+      : error.code === 'LIMIT_FILE_COUNT'
+        ? { code: API_ERROR_CODES.TOO_MANY_FILES, message: 'Too many files were uploaded.' }
+        : error.code === 'LIMIT_FIELD_COUNT'
+          ? { code: API_ERROR_CODES.TOO_MANY_FIELDS, message: 'Too many upload metadata fields were sent.' }
+          : error.code === 'LIMIT_PART_COUNT'
+            ? { code: API_ERROR_CODES.TOO_MANY_PARTS, message: 'Too many multipart upload parts were sent.' }
+            : error.code === 'LIMIT_UNEXPECTED_FILE'
+              ? { code: API_ERROR_CODES.INVALID_UPLOAD_FIELD, message: 'Unexpected upload field.' }
+              : { code: API_ERROR_CODES.BAD_REQUEST, message: 'Invalid multipart upload.' }
+    code = mapped.code
+    message = mapped.message
+    errorMessages = [{ path: '', message }]
   } else if (error instanceof Error) {
-    message = config.env === 'production' ? 'Internal server error' : error.message
-    errorMessages = config.env === 'production' ? [] : [{ path: '', message: error.message }]
+    // Unknown errors are never reflected to clients. Full details stay in the
+    // structured server logs, which avoids stack/message leakage even when a
+    // deployment accidentally misconfigures NODE_ENV.
+    message = 'Internal server error'
+    errorMessages = []
   }
 
   const expectedPublicWebsiteLock = code === API_ERROR_CODES.PUBLIC_WEBSITE_UNAVAILABLE
@@ -175,7 +196,6 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
     errorMessages,
     details,
     requestId: req.requestId,
-    stack: config.env !== 'production' ? error?.stack : undefined,
   })
 }
 

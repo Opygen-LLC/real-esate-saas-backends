@@ -1,53 +1,161 @@
+import type { NextFunction, Request, Response } from 'express'
 import multer, { FileFilterCallback } from 'multer'
-import { Request } from 'express'
 import path from 'path'
+import ApiError from '../../../errors/ApiError'
+import { API_ERROR_CODES } from '../../../contracts/apiContract'
 
 const storage = multer.memoryStorage()
-const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB limit
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
+const MAX_MULTIPLE_FILES = 10
+const MAX_UPLOAD_FIELD_SIZE = 32
+
+export const ALLOWED_UPLOAD_FOLDERS = ['general', 'avatar', 'branding', 'website', 'property'] as const
+export type UploadFolder = (typeof ALLOWED_UPLOAD_FOLDERS)[number]
+const allowedUploadFolders = new Set<string>(ALLOWED_UPLOAD_FOLDERS)
 
 const fileFilter = (
   _req: Request,
   file: Express.Multer.File,
-  cb: FileFilterCallback
+  cb: FileFilterCallback,
 ) => {
   const allowedMimeTypes = new Set(['image/jpeg', 'image/png'])
   const allowedExtensions = new Set(['.jpg', '.jpeg', '.png'])
   const originalName = String(file.originalname || '').replace(/\0/g, '').trim()
   const cleanName = path.posix.basename(path.win32.basename(originalName))
   const extension = path.extname(cleanName).toLowerCase()
+  const mimeType = String(file.mimetype || '').toLowerCase()
 
-  if (cleanName && cleanName.length <= 255 && allowedMimeTypes.has(file.mimetype.toLowerCase()) && allowedExtensions.has(extension)) {
+  if (cleanName && cleanName.length <= 255 && allowedMimeTypes.has(mimeType) && allowedExtensions.has(extension)) {
     file.originalname = cleanName
     cb(null, true)
-  } else {
-    cb(
-      new Error(
-        `Invalid file type '${file.mimetype}'. Only JPEG, JPG, and PNG images are allowed.`
-      )
-    )
+    return
   }
+
+  cb(new ApiError(
+    400,
+    'Only JPEG, JPG, and PNG images are allowed.',
+    '',
+    'INVALID_UPLOAD_FILE_TYPE',
+  ))
 }
 
-const multerInstance = multer({
+const singleUploader = multer({
   storage,
   limits: {
     fileSize: MAX_FILE_SIZE,
-    files: 10,
-    fields: 0,
-    parts: 10,
+    files: 1,
+    fields: 1,
+    parts: 2,
     fieldNameSize: 80,
+    fieldSize: MAX_UPLOAD_FIELD_SIZE,
   },
   fileFilter,
-})
-
-export const uploadSingle = multerInstance.fields([
+}).fields([
   { name: 'file', maxCount: 1 },
   { name: 'image', maxCount: 1 },
   { name: 'avatar', maxCount: 1 },
   { name: 'logo', maxCount: 1 },
 ])
 
-export const uploadMultiple = multerInstance.fields([
-  { name: 'files', maxCount: 10 },
-  { name: 'images', maxCount: 10 },
+const multipleUploader = multer({
+  storage,
+  limits: {
+    fileSize: MAX_FILE_SIZE,
+    files: MAX_MULTIPLE_FILES,
+    fields: 1,
+    parts: MAX_MULTIPLE_FILES + 1,
+    fieldNameSize: 80,
+    fieldSize: MAX_UPLOAD_FIELD_SIZE,
+  },
+  fileFilter,
+}).fields([
+  { name: 'files', maxCount: MAX_MULTIPLE_FILES },
+  { name: 'images', maxCount: MAX_MULTIPLE_FILES },
 ])
+
+const multerErrorToApiError = (error: multer.MulterError): ApiError => {
+  switch (error.code) {
+    case 'LIMIT_FILE_SIZE':
+      return new ApiError(413, 'Image must be 5 MB or smaller.', '', API_ERROR_CODES.FILE_TOO_LARGE)
+    case 'LIMIT_FILE_COUNT':
+      return new ApiError(400, `You can upload up to ${MAX_MULTIPLE_FILES} images at a time.`, '', API_ERROR_CODES.TOO_MANY_FILES)
+    case 'LIMIT_FIELD_COUNT':
+      return new ApiError(400, "Only the 'folder' metadata field is allowed.", '', API_ERROR_CODES.TOO_MANY_FIELDS)
+    case 'LIMIT_PART_COUNT':
+      return new ApiError(400, 'The upload contains too many multipart parts.', '', API_ERROR_CODES.TOO_MANY_PARTS)
+    case 'LIMIT_UNEXPECTED_FILE':
+      return new ApiError(400, `Unexpected upload field '${String(error.field || '')}'.`, '', API_ERROR_CODES.INVALID_UPLOAD_FIELD)
+    case 'LIMIT_FIELD_KEY':
+    case 'LIMIT_FIELD_VALUE':
+      return new ApiError(400, 'Upload metadata is invalid or too large.', '', API_ERROR_CODES.INVALID_UPLOAD_FIELD)
+    default:
+      return new ApiError(400, error.message || 'Invalid multipart upload.', '', API_ERROR_CODES.BAD_REQUEST)
+  }
+}
+
+const validateUploadMetadata = (req: Request): void => {
+  const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {}
+  const unexpectedFields = Object.keys(body).filter((key) => key !== 'folder')
+  if (unexpectedFields.length) {
+    throw new ApiError(
+      400,
+      `Unexpected upload metadata field '${unexpectedFields[0]}'.`,
+      '',
+      API_ERROR_CODES.INVALID_UPLOAD_FIELD,
+      undefined,
+      { [unexpectedFields[0]]: ['This upload metadata field is not allowed.'] },
+    )
+  }
+
+  const rawFolder = body.folder
+  const folder = rawFolder === undefined || rawFolder === null || rawFolder === ''
+    ? 'general'
+    : String(rawFolder).trim().toLowerCase()
+
+  if (!allowedUploadFolders.has(folder)) {
+    throw new ApiError(
+      400,
+      `Invalid upload folder. Allowed values: ${ALLOWED_UPLOAD_FOLDERS.join(', ')}.`,
+      '',
+      API_ERROR_CODES.INVALID_UPLOAD_FOLDER,
+      undefined,
+      { folder: [`Choose one of: ${ALLOWED_UPLOAD_FOLDERS.join(', ')}.`] },
+    )
+  }
+
+  req.body = { ...body, folder }
+}
+
+type MulterRunner = (req: Request, res: Response, callback: (error?: any) => void) => void
+
+const wrapUploader = (uploader: MulterRunner) => (req: Request, res: Response, next: NextFunction): void => {
+  const startedAt = performance.now()
+  res.locals.uploadStartedAtMs = startedAt
+
+  uploader(req, res, (error?: any) => {
+    res.locals.uploadReceiveMs = Math.round((performance.now() - startedAt) * 10) / 10
+
+    if (error instanceof multer.MulterError) {
+      next(multerErrorToApiError(error))
+      return
+    }
+    if (error instanceof ApiError) {
+      next(error)
+      return
+    }
+    if (error) {
+      next(new ApiError(400, error?.message || 'Invalid multipart upload.', '', API_ERROR_CODES.BAD_REQUEST))
+      return
+    }
+
+    try {
+      validateUploadMetadata(req)
+      next()
+    } catch (metadataError) {
+      next(metadataError)
+    }
+  })
+}
+
+export const uploadSingle = wrapUploader(singleUploader)
+export const uploadMultiple = wrapUploader(multipleUploader)
