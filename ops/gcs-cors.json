@@ -1,9 +1,0 @@
-[
-  {
-    "AllowedOrigins": ["https://realestate.opygen.com"],
-    "AllowedMethods": ["GET", "HEAD", "PUT"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
