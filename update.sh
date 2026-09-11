@@ -35,6 +35,11 @@ if git status --porcelain -- \
   BACKUP_NEEDS_BUILD=1
 fi
 
+# Proactively clean up dangling images and old builder cache to prevent "no space left on device"
+echo "🧹 Ensuring Docker build disk space..."
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+
 echo "🏗️ Building API image..."
 docker compose build api
 
@@ -49,4 +54,5 @@ echo "🚀 Restarting production containers..."
 docker compose up -d --no-build
 
 echo "✅ Deployment update complete!"
+docker image prune -f >/dev/null 2>&1 || true
 docker compose ps
