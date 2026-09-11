@@ -3,7 +3,7 @@ import { request } from 'node:https'
 import { BlockList, isIP } from 'node:net'
 import ApiError from '../../errors/ApiError'
 
-const MAX_BYTES = 20 * 1024 * 1024
+const MAX_BYTES = 5 * 1024 * 1024
 const TIMEOUT_MS = 10_000
 const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
 const blocked = new BlockList()
@@ -74,12 +74,12 @@ const download = (target: Awaited<ReturnType<typeof resolveImageUrl>>): Promise<
     }
     const encoding = String(response.headers['content-encoding'] || 'identity').toLowerCase()
     if (encoding !== 'identity') { fail(new ApiError(400, 'Compressed HTTP image responses are not supported')); response.destroy(); return }
-    if (Number(response.headers['content-length'] || 0) > MAX_BYTES) { fail(new ApiError(413, 'Remote image exceeds the 20 MB limit')); response.destroy(); return }
+    if (Number(response.headers['content-length'] || 0) > MAX_BYTES) { fail(new ApiError(413, 'Remote image exceeds the 5 MB limit')); response.destroy(); return }
     const chunks: Buffer[] = []; let size = 0
     response.on('data', (chunk: Buffer) => {
       if (finished) return
       size += chunk.length
-      if (size > MAX_BYTES) { fail(new ApiError(413, 'Remote image exceeds the 20 MB limit')); response.destroy(); return }
+      if (size > MAX_BYTES) { fail(new ApiError(413, 'Remote image exceeds the 5 MB limit')); response.destroy(); return }
       chunks.push(chunk)
     })
     response.on('error', () => fail(new ApiError(400, 'Image response was interrupted')))

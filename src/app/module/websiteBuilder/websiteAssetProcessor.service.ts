@@ -46,7 +46,7 @@ const finalize = async (organizationId: string, assetId: string, payload: any) =
       throw new ApiError(400, 'Uploaded object content type does not match its signed upload', '', API_ERROR_CODES.UPLOAD_CONTENT_TYPE_MISMATCH)
     }
     const declaredSize = Number(intent.declaredSize || 0)
-    if (!Number.isSafeInteger(declaredSize) || declaredSize < 1 || declaredSize > 20 * 1024 * 1024) {
+    if (!Number.isSafeInteger(declaredSize) || declaredSize < 1 || declaredSize > 5 * 1024 * 1024) {
       throw new ApiError(400, 'Upload intent has an invalid declared size', '', API_ERROR_CODES.UPLOAD_SIZE_MISMATCH)
     }
     if (Number(source.size) !== declaredSize) {
@@ -126,7 +126,7 @@ const finalize = async (organizationId: string, assetId: string, payload: any) =
       const sanitizedVariant = await StoredFileSecurityService.sanitizeStoredPublicImage(variant.key, expectedMime, {
         maxWidth: Number(variant.width) || 1280,
         maxHeight: Number(variant.width) || 1280,
-        maxBytes: 20 * 1024 * 1024,
+        maxBytes: 5 * 1024 * 1024,
       })
       meta = await ObjectStorageService.head(variant.key)
       variants.push({

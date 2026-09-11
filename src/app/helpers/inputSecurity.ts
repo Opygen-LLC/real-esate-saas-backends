@@ -63,7 +63,7 @@ export const commonRequestHeadersSchema = z.object({
 export const uploadedFileMetadataSchema = z.object({
   originalname: z.string().trim().min(1).max(255).refine((value) => !/[\\/\u0000]/.test(value), 'Invalid filename'),
   mimetype: z.enum(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif', 'font/woff2']),
-  size: z.number().int().positive().max(20 * 1024 * 1024),
+  size: z.number().int().positive().max(5 * 1024 * 1024),
 }).passthrough()
 
 export const idParamSchema = (name = 'id') => z.object({ params: z.object({ [name]: objectIdSchema }).strict() })

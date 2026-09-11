@@ -355,7 +355,7 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
   } else {
     StoredFileSecurityService.assertSafeUploadFilename(payload.filename, payload.mimeType)
     size = Number(payload.size)
-    if (!Number.isSafeInteger(size) || size < 1 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
+    if (!Number.isSafeInteger(size) || size < 1 || size > 5 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
   }
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const refreshKey = String(payload.key || '').trim()

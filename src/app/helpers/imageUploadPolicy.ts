@@ -6,8 +6,8 @@ export type ImageUploadContext = 'property' | 'website' | 'avatar' | 'branding' 
 export type ImageUploadMimeType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/avif'
 
 export const IMAGE_UPLOAD_POLICY = {
-  property: { maxBytes: 20 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Property photos' },
-  website: { maxBytes: 20 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Website images' },
+  property: { maxBytes: 5 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Property photos' },
+  website: { maxBytes: 5 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Website images' },
   avatar: { maxBytes: 5 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Profile images' },
   branding: { maxBytes: 5 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Branding images' },
   general: { maxBytes: 5 * 1024 * 1024, maxPixels: 40_000_000, maxDimension: 12_000, label: 'Images' },

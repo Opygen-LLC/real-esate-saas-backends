@@ -18,8 +18,8 @@ const website = read('src/app/module/websiteBuilder/websiteBuilder.service.ts')
 const security = read('src/app/module/websiteBuilder/storedFileSecurity.service.ts')
 
 test('server policy mirrors browser limits and explicit image error codes', () => {
-  assert.match(policy, /property:\s*\{ maxBytes: 20 \* 1024 \* 1024, maxPixels: 40_000_000, maxDimension: 12_000/)
-  assert.match(policy, /website:\s*\{ maxBytes: 20 \* 1024 \* 1024, maxPixels: 40_000_000, maxDimension: 12_000/)
+  assert.match(policy, /property:\s*\{ maxBytes: 5 \* 1024 \* 1024, maxPixels: 40_000_000, maxDimension: 12_000/)
+  assert.match(policy, /website:\s*\{ maxBytes: 5 \* 1024 \* 1024, maxPixels: 40_000_000, maxDimension: 12_000/)
   assert.match(policy, /avatar:\s*\{ maxBytes: 5 \* 1024 \* 1024/)
   for (const code of ['IMAGE_TOO_LARGE', 'IMAGE_DIMENSIONS_TOO_LARGE', 'IMAGE_PIXEL_LIMIT_EXCEEDED', 'INVALID_IMAGE_TYPE', 'EMPTY_IMAGE', 'INVALID_IMAGE']) {
     assert.match(codes, new RegExp(`${code}: '${code}'`))
