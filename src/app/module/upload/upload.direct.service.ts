@@ -116,6 +116,7 @@ const presentPresign = async (intent: any) => {
     key: uploadKey,
     uploadUrl: await signed.getUploadUrl(),
     expiresIn: signed.expiresIn,
+    contentType: String(intent.mimeType || ''),
   }
 }
 

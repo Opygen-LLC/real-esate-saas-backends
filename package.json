@@ -251,6 +251,7 @@
     "gate:phase4-security-release": "pnpm security:secrets && pnpm security:package-scripts && pnpm security:privileged-routes && pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test:phase4-security:source && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm verify:phase4-security-release && pnpm build && pnpm audit --prod --audit-level=high",
     "security:privileged-routes": "node scripts/security/audit-privileged-routes.mjs",
     "storage:r2:cors": "node scripts/setup-r2-cors.mjs",
+    "storage:r2:verify-browser": "node scripts/verify-r2-browser-upload.mjs",
     "test:r2": "R2_INTEGRATION_TESTS=true vitest run src/tests/integration/objectStorage.r2.integration.test.ts",
     "storage:migration:inventory": "node scripts/storage-migration/inventory-gcs.mjs",
     "storage:migration:sippy": "node scripts/storage-migration/sippy.mjs",

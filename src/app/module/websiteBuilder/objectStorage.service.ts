@@ -113,6 +113,12 @@ const r2 = (): S3Client => {
         accessKeyId: config.assets.r2_access_key_id,
         secretAccessKey: config.assets.r2_secret_access_key,
       },
+      // R2 uses the S3-compatible protocol, but browser presigned PUTs do not
+      // have the request body available while the URL is being signed. Newer
+      // AWS SDK versions otherwise add a CRC32 checksum for an empty body to
+      // the presigned URL, which makes the real browser payload fail.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       maxAttempts: 3,
     })
   }
@@ -320,7 +326,15 @@ const presign = async (
         Key: normalized,
         ...(contentType ? { ContentType: contentType } : {}),
       })
-      return await getSignedUrl(r2(), command, { expiresIn })
+      const uploadUrl = await getSignedUrl(r2(), command, {
+        expiresIn,
+        ...(contentType ? { signableHeaders: new Set(['content-type']) } : {}),
+      })
+      const parsed = new URL(uploadUrl)
+      if (parsed.searchParams.has('x-amz-checksum-crc32') || parsed.searchParams.has('x-amz-sdk-checksum-algorithm')) {
+        throw new Error('r2_presign_contains_automatic_payload_checksum')
+      }
+      return uploadUrl
     }
 
     const bucket = await resolveExistingBucketName(normalized)
@@ -344,6 +358,7 @@ const presignUpload = (key: string, contentType?: string) => {
     uploadUrl: '',
     getUploadUrl: () => presign('PUT', normalized, config.assets.signed_url_ttl_seconds, contentType),
     expiresIn: config.assets.signed_url_ttl_seconds,
+    contentType: contentType || '',
   }
 }
 

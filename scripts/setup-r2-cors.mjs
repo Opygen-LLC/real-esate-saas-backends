@@ -49,6 +49,8 @@ const client = new S3Client({
   endpoint,
   forcePathStyle: true,
   credentials: { accessKeyId, secretAccessKey },
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
   maxAttempts: 3,
 })
 
@@ -60,9 +62,27 @@ const rules = [{
   MaxAgeSeconds: 3600,
 }]
 
+const normalized = (values = []) => values.map((value) => String(value).toLowerCase()).sort()
+const includesAll = (actual = [], expected = []) => {
+  const set = new Set(normalized(actual))
+  return normalized(expected).every((value) => set.has(value))
+}
+
+const assertBrowserCors = (bucket, corsRules) => {
+  const matching = (corsRules || []).find((rule) =>
+    includesAll(rule.AllowedOrigins, allowedOrigins)
+      && includesAll(rule.AllowedMethods, ['PUT', 'HEAD'])
+      && includesAll(rule.AllowedHeaders, ['Content-Type'])
+      && includesAll(rule.ExposeHeaders, ['ETag']))
+  if (!matching) {
+    fail(`${bucket} CORS verification failed: expected origins, PUT/HEAD, Content-Type and ETag`)
+  }
+}
+
 for (const bucket of [publicBucket, privateBucket]) {
   console.log(`[r2-cors] applying strict browser CORS to ${bucket}`)
   await client.send(new PutBucketCorsCommand({ Bucket: bucket, CORSConfiguration: { CORSRules: rules } }))
   const result = await client.send(new GetBucketCorsCommand({ Bucket: bucket }))
-  console.log(JSON.stringify({ bucket, origins: allowedOrigins, rules: result.CORSRules || [] }, null, 2))
+  assertBrowserCors(bucket, result.CORSRules || [])
+  console.log(JSON.stringify({ bucket, origins: allowedOrigins, verified: true, rules: result.CORSRules || [] }, null, 2))
 }

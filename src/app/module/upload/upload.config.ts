@@ -21,6 +21,8 @@ export const storage = new S3Client({
     accessKeyId: config.assets.r2_access_key_id,
     secretAccessKey: config.assets.r2_secret_access_key,
   },
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
   maxAttempts: 3,
 })
 

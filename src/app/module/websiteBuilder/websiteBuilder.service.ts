@@ -395,6 +395,7 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
         uploadUrl: await signed.getUploadUrl(),
         publicUrl: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(refreshKey) : ObjectStorageService.publicUrl(refreshKey),
         expiresIn: signed.expiresIn,
+        contentType: payload.mimeType,
       },
       requiredVariants: [],
       refreshed: true,
@@ -411,6 +412,7 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
     uploadUrl: await signed.getUploadUrl(),
     publicUrl: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(key) : ObjectStorageService.publicUrl(key),
     expiresIn: signed.expiresIn,
+    contentType: payload.mimeType,
   }
 
   // One canonical optimized WebP is stored after background verification.
