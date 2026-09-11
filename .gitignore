@@ -25,3 +25,7 @@ CICD_GUIDE.md
 DEPLOYMENT_FIX.md
 docs/
 /run
+
+# One-off storage migration output/secrets
+migration-reports/
+scripts/storage-migration/migration.env

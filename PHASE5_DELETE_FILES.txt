@@ -1,0 +1,3 @@
+# Remove these obsolete GCS-era files from an existing deployment checkout when applying this overlay.
+scripts/setup-gcs-cors.js
+ops/gcs-cors.json

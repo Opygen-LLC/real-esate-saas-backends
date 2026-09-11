@@ -147,6 +147,11 @@ const configurationStatus = () => {
       enabled: Boolean(config.assets.image_transformations_enabled),
       baseUrl: config.assets.image_transform_base_url || '',
     },
+    migration: {
+      mode: config.assets.migration_mode,
+      legacyGcsPublicBucket: config.assets.legacy_gcs_public_bucket_name || '',
+      legacyGcsPrivateBucket: config.assets.legacy_gcs_private_bucket_name || '',
+    },
   }
 }
 
@@ -200,6 +205,50 @@ const unwrapImageTransformationSource = (value: string): string => {
   }
 }
 
+const legacyGcsReferenceKey = (value: string): string | null => {
+  if (config.assets.migration_mode !== 'sippy') return null
+  const allowedBuckets = new Set([
+    config.assets.legacy_gcs_public_bucket_name,
+    config.assets.legacy_gcs_private_bucket_name,
+  ].filter(Boolean))
+  if (!allowedBuckets.size) return null
+
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  let bucket = ''
+  let key = ''
+
+  if (raw.startsWith('gs://')) {
+    const withoutScheme = raw.slice(5)
+    const slash = withoutScheme.indexOf('/')
+    if (slash <= 0) return null
+    bucket = withoutScheme.slice(0, slash)
+    key = withoutScheme.slice(slash + 1)
+  } else {
+    try {
+      const parsed = new URL(raw)
+      const host = parsed.hostname.toLowerCase()
+      const pathname = parsed.pathname.replace(/^\/+/, '')
+      if (host === 'storage.googleapis.com') {
+        const slash = pathname.indexOf('/')
+        if (slash <= 0) return null
+        bucket = decodeURIComponent(pathname.slice(0, slash))
+        key = decodeURIComponent(pathname.slice(slash + 1))
+      } else if (host.endsWith('.storage.googleapis.com')) {
+        bucket = host.slice(0, -'.storage.googleapis.com'.length)
+        key = decodeURIComponent(pathname)
+      } else {
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
+
+  if (!allowedBuckets.has(bucket) || !key) return null
+  try { return normalizeObjectKey(key) } catch { return null }
+}
+
 /**
  * Resolve an object key from either a raw key or a URL owned by this R2 setup.
  * Unknown/external URLs return null so tenant purge cannot delete third-party data.
@@ -207,6 +256,9 @@ const unwrapImageTransformationSource = (value: string): string => {
 const keyFromReference = (value: string): string | null => {
   const raw = unwrapImageTransformationSource(String(value || '').trim())
   if (!raw) return null
+
+  const legacyKey = legacyGcsReferenceKey(raw)
+  if (legacyKey) return legacyKey
 
   if (!/^https?:\/\//i.test(raw)) {
     try { return normalizeObjectKey(raw) } catch { return null }

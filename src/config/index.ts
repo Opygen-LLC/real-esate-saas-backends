@@ -207,6 +207,9 @@ const normalizeStorageUrl = (name: string, raw: string, options: { httpsInProduc
 // Cloudflare R2 is the canonical object-storage provider. Business modules use the
 // provider-neutral ObjectStorageService and never depend on S3/R2 credentials directly.
 const objectStorageProvider = (process.env.OBJECT_STORAGE_PROVIDER?.trim().toLowerCase() || 'r2')
+const objectStorageMigrationMode = (process.env.OBJECT_STORAGE_MIGRATION_MODE?.trim().toLowerCase() || 'off')
+const objectStorageLegacyGcsPublicBucketName = process.env.OBJECT_STORAGE_LEGACY_GCS_PUBLIC_BUCKET_NAME?.trim() || ''
+const objectStorageLegacyGcsPrivateBucketName = process.env.OBJECT_STORAGE_LEGACY_GCS_PRIVATE_BUCKET_NAME?.trim() || ''
 const r2AccountId = process.env.R2_ACCOUNT_ID?.trim() || ''
 const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID?.trim() || ''
 const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim() || ''
@@ -228,6 +231,7 @@ const objectStorageBrowserOrigin = normalizeStorageUrl(
   process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin,
   { httpsInProduction: true, allowPath: false },
 )
+if (!['off', 'sippy'].includes(objectStorageMigrationMode)) throw new Error('OBJECT_STORAGE_MIGRATION_MODE must be one of: off, sippy')
 const imageTransformationsEnabled = envBoolean('CLOUDFLARE_IMAGE_TRANSFORMATIONS_ENABLED', false)
 const imageTransformBaseUrl = normalizeStorageUrl(
   'CLOUDFLARE_IMAGE_TRANSFORM_BASE_URL',
@@ -327,6 +331,10 @@ if (isProduction) {
   if (r2PrivateBucketName === r2PublicBucketName) throw new Error('R2_PRIVATE_BUCKET_NAME must be different from the public R2_PUBLIC_BUCKET_NAME in production')
   if (!r2Endpoint) throw new Error('R2_ENDPOINT is required in production (or set R2_ACCOUNT_ID to derive it)')
   if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production for public R2 media delivery')
+  if (objectStorageMigrationMode === 'sippy') {
+    if (!objectStorageLegacyGcsPublicBucketName) throw new Error('OBJECT_STORAGE_LEGACY_GCS_PUBLIC_BUCKET_NAME is required while OBJECT_STORAGE_MIGRATION_MODE=sippy')
+    if (!objectStorageLegacyGcsPrivateBucketName) throw new Error('OBJECT_STORAGE_LEGACY_GCS_PRIVATE_BUCKET_NAME is required while OBJECT_STORAGE_MIGRATION_MODE=sippy')
+  }
   if (imageTransformationsEnabled && !imageTransformBaseUrl) throw new Error('CLOUDFLARE_IMAGE_TRANSFORM_BASE_URL is required when Cloudflare Image Transformations are enabled')
   const r2BucketPattern = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/
   if (!r2BucketPattern.test(r2PublicBucketName)) throw new Error('R2_PUBLIC_BUCKET_NAME must be 3-63 chars using lowercase letters, numbers and hyphens')
@@ -539,6 +547,9 @@ export default {
     region: 'auto',
     public_base_url: objectStoragePublicBaseUrl,
     browser_origin: objectStorageBrowserOrigin,
+    migration_mode: objectStorageMigrationMode as 'off' | 'sippy',
+    legacy_gcs_public_bucket_name: objectStorageLegacyGcsPublicBucketName,
+    legacy_gcs_private_bucket_name: objectStorageLegacyGcsPrivateBucketName,
     image_transformations_enabled: imageTransformationsEnabled,
     image_transform_base_url: imageTransformBaseUrl,
     signed_url_ttl_seconds: envInteger('OBJECT_STORAGE_SIGNED_URL_TTL', 600, 60, 3600),

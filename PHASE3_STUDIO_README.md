@@ -53,7 +53,7 @@ pnpm test:phase3-studio
 pnpm build
 ```
 
-Use the existing `.env.example` and your secret manager. In particular, configure `DATABASE_URL` for a replica set or mongos; preserve valid auth/CSRF/BFF settings; configure tenant object storage (`GCP_PROJECT_ID`, `GCP_BUCKET_NAME`, `GCP_KEY_FILE` or deployment identity, `OBJECT_STORAGE_PUBLIC_BASE_URL`, and allowed browser origin) and its existing CORS/scan settings. A standalone MongoDB is deliberately not accepted for Studio writes. No secrets are included.
+Use the existing `.env.example` and your secret manager. In particular, configure `DATABASE_URL` for a replica set or mongos; preserve valid auth/CSRF/BFF settings; configure tenant object storage (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BUCKET_NAME`, `R2_PRIVATE_BUCKET_NAME`, `OBJECT_STORAGE_PUBLIC_BASE_URL`, and the allowed browser origin) and its R2 CORS/scan settings. A standalone MongoDB is deliberately not accepted for Studio writes. No secrets are included.
 
 After a verified database backup and before accepting Studio writes, create the new additive collections/indexes:
 

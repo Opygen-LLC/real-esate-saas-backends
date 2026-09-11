@@ -27,7 +27,7 @@ vi.mock('../../app/module/organization/organization.model', () => ({
 describe('Upload Controller Unit Tests', () => {
   it('returns publicUrl only on uploadSingle success', async () => {
     vi.mocked(StorageService.uploadFile).mockResolvedValue({
-      publicUrl: 'https://storage.googleapis.com/realestate-saas/tenants/org-123/uploads/12345-test.jpg',
+      publicUrl: 'https://media.opygen.com/tenants/org-123/uploads/12345-test.jpg',
       sizeBytes: 1024,
     })
 
@@ -62,13 +62,13 @@ describe('Upload Controller Unit Tests', () => {
     expect(StorageService.uploadFile).toHaveBeenCalledWith('org-123', req.file)
     expect(statusCode).toBe(201)
     expect(responseBody).toHaveProperty('publicUrl')
-    expect(responseBody.publicUrl).toBe('https://storage.googleapis.com/realestate-saas/tenants/org-123/uploads/12345-test.jpg')
+    expect(responseBody.publicUrl).toBe('https://media.opygen.com/tenants/org-123/uploads/12345-test.jpg')
   })
 
   it('returns publicUrls array on uploadMultiple success', async () => {
     vi.mocked(StorageService.uploadMultipleFiles).mockResolvedValue([
       {
-        publicUrl: 'https://storage.googleapis.com/realestate-saas/tenants/org-123/uploads/12345-test1.jpg',
+        publicUrl: 'https://media.opygen.com/tenants/org-123/uploads/12345-test1.jpg',
         sizeBytes: 1024,
       },
     ])
@@ -106,6 +106,6 @@ describe('Upload Controller Unit Tests', () => {
     expect(StorageService.uploadMultipleFiles).toHaveBeenCalledWith('org-123', req.files)
     expect(statusCode).toBe(201)
     expect(responseBody).toHaveProperty('publicUrls')
-    expect(responseBody.publicUrls).toEqual(['https://storage.googleapis.com/realestate-saas/tenants/org-123/uploads/12345-test1.jpg'])
+    expect(responseBody.publicUrls).toEqual(['https://media.opygen.com/tenants/org-123/uploads/12345-test1.jpg'])
   })
 })

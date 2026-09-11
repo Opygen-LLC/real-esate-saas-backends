@@ -177,7 +177,7 @@ BACKUP_RETENTION_DAYS=30
 BACKUP_MIN_RECOVERY_POINTS=7
 ```
 
-Do not point `BACKUP_DATABASE_URL` at the production cluster. The production worker refuses a same-cluster target. See `docs/DATABASE_BACKUP_RUNBOOK.md` for deployment, manual smoke backup, recovery-drill, strict point-in-time consistency, and GCS media-protection guidance.
+Do not point `BACKUP_DATABASE_URL` at the production cluster. The production worker refuses a same-cluster target. See `docs/DATABASE_BACKUP_RUNBOOK.md` for deployment, manual smoke backup, recovery-drill, strict point-in-time consistency, and R2 media-protection and recovery guidance.
 
 
 
