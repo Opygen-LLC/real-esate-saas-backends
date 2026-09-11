@@ -12,10 +12,11 @@ import type { IPropertyDocument } from './property.interface'
 import { PropertyDocumentAsset } from './propertyDocumentAsset.model'
 import { UsageBudgetService } from '../../security/usageBudget.service'
 import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
+import { IMAGE_UPLOAD_MIME_TYPES, assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
 
 const MAX_DOCUMENT_SIZE = 20 * 1024 * 1024
 const MAX_DOCUMENTS = 20
-const ALLOWED_DOCUMENT_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+const ALLOWED_DOCUMENT_MIME_TYPES = new Set<string>(['application/pdf', ...IMAGE_UPLOAD_MIME_TYPES])
 
 const assertDraftSessionId = (value?: string) => {
   if (!value || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -39,8 +40,14 @@ const presign = async (organizationId: string, input: { uploadSessionId: string;
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   const uploadSessionId = assertDraftSessionId(input.uploadSessionId)
   if (!ALLOWED_DOCUMENT_MIME_TYPES.has(input.mimeType)) throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported property document type')
-  StoredFileSecurityService.assertSafeUploadFilename(input.originalName, input.mimeType)
-  if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_DOCUMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Property document must be between 1 byte and 20 MB')
+  if (String(input.mimeType).startsWith('image/')) {
+    const normalized = assertImageUploadFilename(input.originalName, input.mimeType)
+    input.mimeType = normalized.mimeType
+    assertImageUploadSize(input.size, 'property')
+  } else {
+    StoredFileSecurityService.assertSafeUploadFilename(input.originalName, input.mimeType)
+    if (!Number.isFinite(input.size) || input.size < 1 || input.size > MAX_DOCUMENT_SIZE) throw new ApiError(httpStatus.BAD_REQUEST, 'Property document must be between 1 byte and 20 MB')
+  }
   await EntitlementService.assertStorage(organizationId, input.size)
   await UsageBudgetService.reserveUploadBytes(organizationId, input.size)
   const currentCount = await PropertyDocumentAsset.countDocuments({ organizationId, uploadSessionId, status: { $in: ['pending', 'ready'] }, claimed: false })

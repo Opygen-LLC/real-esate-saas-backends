@@ -38,6 +38,7 @@ import { UsageBudgetService } from '../../security/usageBudget.service'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { buildDefaultWebsiteDocument } from './defaultWebsiteDocument'
+import { assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
 import { assertTemplateQuality } from './templateQa'
 
 const sanitizeDocument = (value: any, key = ''): any => {
@@ -337,12 +338,20 @@ const assetStagingKey = (organizationId: string, filename: string) => {
 const presignAsset = async (organizationId: string, payload: any, options: AssetLifecycleOptions = {}) => {
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
-  StoredFileSecurityService.assertSafeUploadFilename(payload.filename, payload.mimeType)
-  const size = Number(payload.size)
-  if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
+  const context = options.context || 'website'
+  const imageContext = context === 'property-draft' ? 'property' : 'website'
+  let size: number
+  if (String(payload.mimeType || '').startsWith('image/')) {
+    const normalized = assertImageUploadFilename(payload.filename, payload.mimeType)
+    payload = { ...payload, filename: normalized.filename, mimeType: normalized.mimeType }
+    size = assertImageUploadSize(payload.size, imageContext)
+  } else {
+    StoredFileSecurityService.assertSafeUploadFilename(payload.filename, payload.mimeType)
+    size = Number(payload.size)
+    if (!Number.isSafeInteger(size) || size < 1 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
+  }
   await EntitlementService.assertStorage(organizationId, size)
   await UsageBudgetService.reserveUploadBytes(organizationId, size)
-  const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
   const uploadKey = assetStagingKey(organizationId, payload.filename)
@@ -410,16 +419,23 @@ const uploadAssetBuffer = async (
   userId?: string,
   options: AssetLifecycleOptions = {},
 ) => {
-  const mimeType = String(file?.mimetype || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file?.mimetype || '').toLowerCase()
-  if (!file?.buffer?.length) throw new ApiError(400, 'No property photo was uploaded')
-  if (file.buffer.length > 20 * 1024 * 1024) throw new ApiError(413, 'Property photos must be 20 MB or smaller')
+  let mimeType = String(file?.mimetype || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file?.mimetype || '').toLowerCase()
+  const context = options.context || 'website'
+  const imageContext = context === 'property-draft' ? 'property' : 'website'
+  if (!file?.buffer?.length) throw new ApiError(400, 'No image was uploaded.', '', 'EMPTY_IMAGE', undefined, { image: ['Choose a non-empty image.'] })
   if (!ALLOWED_ASSET_MIME_TYPES.has(mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
-  StoredFileSecurityService.assertSafeUploadFilename(file.originalname || 'property-image.jpg', mimeType)
+  if (mimeType.startsWith('image/')) {
+    const normalized = assertImageUploadFilename(file.originalname || 'image.jpg', mimeType)
+    file.originalname = normalized.filename
+    mimeType = normalized.mimeType
+    assertImageUploadSize(file.buffer.length, imageContext)
+  } else {
+    StoredFileSecurityService.assertSafeUploadFilename(file.originalname || 'asset', mimeType)
+  }
 
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   await EntitlementService.assertStorage(organizationId, file.buffer.length)
   await UsageBudgetService.reserveUploadBytes(organizationId, file.buffer.length)
-  const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })
   const uploadKey = assetStagingKey(organizationId, file.originalname || 'property-image')

@@ -1,26 +1,26 @@
 import ApiError from '../../../errors/ApiError'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
+import { IMAGE_UPLOAD_MIME_TYPES, MAX_IMAGE_SOURCE_DIMENSION, MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_PIXELS, normalizeImageUploadMimeType } from '../../helpers/imageUploadPolicy'
 
-export const MAX_DIRECT_UPLOAD_BYTES = 5 * 1024 * 1024
+export const MAX_DIRECT_UPLOAD_BYTES = MAX_IMAGE_UPLOAD_BYTES
 export const MAX_DIRECT_UPLOAD_FILES = 10
 export const DIRECT_UPLOAD_INTENT_TTL_MS = 60 * 60 * 1000
 export const DIRECT_UPLOAD_COMPLETED_RETENTION_MS = 24 * 60 * 60 * 1000
 export const DIRECT_UPLOAD_COMPLETION_LOCK_MS = 60 * 1000
 export const DIRECT_UPLOAD_PROCESSING_LOCK_MS = 2 * 60 * 1000
-export const DIRECT_UPLOAD_MAX_PIXELS = 40_000_000
-export const DIRECT_UPLOAD_MAX_SOURCE_DIMENSION = 12_000
+export const DIRECT_UPLOAD_MAX_PIXELS = MAX_IMAGE_UPLOAD_PIXELS
+export const DIRECT_UPLOAD_MAX_SOURCE_DIMENSION = MAX_IMAGE_SOURCE_DIMENSION
 export const DIRECT_UPLOAD_MAX_STORED_DIMENSION = 4_096
 
 export const ALLOWED_UPLOAD_FOLDERS = ['general', 'avatar', 'branding', 'website', 'property'] as const
 export type UploadFolder = (typeof ALLOWED_UPLOAD_FOLDERS)[number]
 
-export const ALLOWED_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png'] as const
+export const ALLOWED_UPLOAD_MIME_TYPES = IMAGE_UPLOAD_MIME_TYPES
 export type UploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number]
 
 export type DirectUploadStatus = 'presigned' | 'uploaded' | 'verifying' | 'processing' | 'ready' | 'rejected'
 
 const allowedFolders = new Set<string>(ALLOWED_UPLOAD_FOLDERS)
-const allowedMimeTypes = new Set<string>(ALLOWED_UPLOAD_MIME_TYPES)
 
 export const normalizeUploadFolder = (value: unknown): UploadFolder => {
   const folder = String(value || 'general').trim().toLowerCase()
@@ -37,11 +37,5 @@ export const normalizeUploadFolder = (value: unknown): UploadFolder => {
   return folder as UploadFolder
 }
 
-export const normalizeUploadMimeType = (value: unknown): UploadMimeType => {
-  const raw = String(value || '').trim().toLowerCase()
-  const mimeType = raw === 'image/jpg' ? 'image/jpeg' : raw
-  if (!allowedMimeTypes.has(mimeType)) {
-    throw new ApiError(400, 'Only JPEG, JPG, and PNG images are allowed.', '', 'INVALID_UPLOAD_FILE_TYPE')
-  }
-  return mimeType as UploadMimeType
-}
+export const normalizeUploadMimeType = (value: unknown): UploadMimeType =>
+  normalizeImageUploadMimeType(value) as UploadMimeType

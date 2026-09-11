@@ -13,6 +13,7 @@ const route = read('src/app/module/upload/upload.route.ts')
 const controller = read('src/app/module/upload/upload.controller.ts')
 const storage = read('src/app/module/websiteBuilder/objectStorage.service.ts')
 const security = read('src/app/module/websiteBuilder/storedFileSecurity.service.ts')
+const imagePolicy = read('src/app/helpers/imageUploadPolicy.ts')
 const website = read('src/app/module/websiteBuilder/websiteBuilder.service.ts')
 const websiteProcessor = read('src/app/module/websiteBuilder/websiteAssetProcessor.service.ts')
 const app = read('src/app.ts')
@@ -49,7 +50,8 @@ test('worker verifies, scans, normalizes, promotes and accounts the clean origin
 
 test('image security validates bytes and dimensions and strips metadata by re-encoding', () => {
   assert.match(security, /limitInputPixels:\s*MAX_IMAGE_PIXELS/)
-  assert.match(security, /width \* height > MAX_IMAGE_PIXELS/)
+  assert.match(security, /assertImageDimensions\(width, height\)/)
+  assert.match(imagePolicy, /width \* height > MAX_IMAGE_UPLOAD_PIXELS/)
   assert.match(security, /Animated or multi-page images are not allowed/)
   assert.match(security, /\.rotate\(\)/)
   assert.match(security, /\.resize\(/)

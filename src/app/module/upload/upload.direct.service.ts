@@ -5,6 +5,7 @@ import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
+import { assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
 import {
   DIRECT_UPLOAD_COMPLETED_RETENTION_MS,
   DIRECT_UPLOAD_INTENT_TTL_MS,
@@ -42,7 +43,12 @@ const safeStem = (filename: string): string => {
   return stem || 'image'
 }
 
-const extensionForMime = (mimeType: UploadMimeType): string => mimeType === 'image/png' ? 'png' : 'jpg'
+const extensionForMime = (mimeType: UploadMimeType): string => {
+  if (mimeType === 'image/png') return 'png'
+  if (mimeType === 'image/webp') return 'webp'
+  if (mimeType === 'image/avif') return 'avif'
+  return 'jpg'
+}
 
 const finalKeyForUpload = (organizationId: string, folder: UploadFolder, filename: string, mimeType: UploadMimeType): string => {
   const now = new Date()
@@ -63,17 +69,8 @@ const validatePresignInput = (input: DirectUploadPresignInput) => {
   const folder = normalizeUploadFolder(input?.folder)
   const size = Number(input?.size)
 
-  StoredFileSecurityService.assertSafeUploadFilename(filename, mimeType)
-  if (!Number.isSafeInteger(size) || size < 1) {
-    throw new ApiError(400, 'Image size must be a positive integer.', '', 'INVALID_UPLOAD_SIZE', undefined, {
-      size: ['Choose a non-empty image.'],
-    })
-  }
-  if (size > MAX_DIRECT_UPLOAD_BYTES) {
-    throw new ApiError(413, 'Image must be 5 MB or smaller.', '', 'FILE_TOO_LARGE', undefined, {
-      size: ['Choose an image that is 5 MB or smaller.'],
-    })
-  }
+  assertImageUploadFilename(filename, mimeType)
+  assertImageUploadSize(size, folder)
 
   const uploadId = input?.uploadId ? String(input.uploadId).trim() : ''
   if (uploadId && !SAFE_UPLOAD_ID.test(uploadId)) {

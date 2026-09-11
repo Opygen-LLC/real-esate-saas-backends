@@ -1,6 +1,8 @@
 import sharp, { type Metadata } from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import { ObjectStorageService } from './objectStorage.service'
+import { API_ERROR_CODES } from '../../../contracts/apiContract'
+import { MAX_IMAGE_UPLOAD_PIXELS, assertImageDimensions, assertImageUploadFilename } from '../../helpers/imageUploadPolicy'
 
 const IMAGE_FORMAT_BY_MIME: Record<string, string[]> = {
   'image/jpeg': ['jpeg'],
@@ -19,11 +21,14 @@ const EXTENSIONS_BY_MIME: Record<string, string[]> = {
   'font/woff2': ['.woff2'],
 }
 
-const MAX_IMAGE_PIXELS = 40_000_000
-const MAX_SOURCE_DIMENSION = 12_000
+const MAX_IMAGE_PIXELS = MAX_IMAGE_UPLOAD_PIXELS
 const MAX_STORED_DIMENSION = 4_096
 
 const assertSafeUploadFilename = (originalName: string, expectedMime: string): void => {
+  if (expectedMime in IMAGE_FORMAT_BY_MIME) {
+    assertImageUploadFilename(originalName, expectedMime)
+    return
+  }
   const name = String(originalName || '').trim()
   if (!name || name.length > 255 || /[\/\\\u0000]/.test(name) || name === '.' || name === '..') {
     throw new ApiError(400, 'Invalid upload filename')
@@ -37,16 +42,13 @@ const assertSafeUploadFilename = (originalName: string, expectedMime: string): v
 
 const validateImageMetadata = (metadata: Metadata, expectedMime: string): Metadata => {
   if (!metadata.format || !IMAGE_FORMAT_BY_MIME[expectedMime]?.includes(metadata.format)) {
-    throw new ApiError(400, 'Uploaded image bytes do not match the declared file type')
+    throw new ApiError(400, 'Uploaded image bytes do not match the declared file type.', '', API_ERROR_CODES.INVALID_IMAGE_TYPE, undefined, {
+      image: ['The uploaded bytes must match the declared image type.'],
+    })
   }
   const width = Number(metadata.width || 0)
   const height = Number(metadata.height || 0)
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
-    throw new ApiError(400, 'Uploaded image has invalid dimensions')
-  }
-  if (width > MAX_SOURCE_DIMENSION || height > MAX_SOURCE_DIMENSION || width * height > MAX_IMAGE_PIXELS) {
-    throw new ApiError(413, 'Uploaded image dimensions are too large')
-  }
+  assertImageDimensions(width, height)
   if (Number(metadata.pages || 1) > 1) throw new ApiError(400, 'Animated or multi-page images are not allowed')
   return metadata
 }
@@ -57,7 +59,7 @@ const validateImage = async (body: Buffer, expectedMime: string) => {
     return validateImageMetadata(metadata, expectedMime)
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'Uploaded file is not a valid image')
+    throw new ApiError(400, 'Uploaded file is not a valid image.', '', API_ERROR_CODES.INVALID_IMAGE, undefined, { image: ['Choose a valid, decodable image.'] })
   }
 }
 
@@ -123,7 +125,7 @@ const sanitizeImageBuffer = async (
     else if (expectedMime === 'image/png') sanitized = await pipeline.png({ compressionLevel: 6 }).toBuffer()
     else if (expectedMime === 'image/webp') sanitized = await pipeline.webp({ quality: 84 }).toBuffer()
     else if (expectedMime === 'image/avif') sanitized = await pipeline.avif({ quality: 72 }).toBuffer()
-    else throw new ApiError(400, 'Unsupported public image format')
+    else throw new ApiError(400, 'Unsupported public image format.', '', API_ERROR_CODES.INVALID_IMAGE_TYPE, undefined, { image: ['Choose a supported image type.'] })
 
     const metadata = validateImageMetadata(
       await sharp(sanitized, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS }).metadata(),
@@ -132,7 +134,7 @@ const sanitizeImageBuffer = async (
     return { buffer: sanitized, size: sanitized.length, width: Number(metadata.width), height: Number(metadata.height) }
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'Uploaded image could not be safely normalized')
+    throw new ApiError(400, 'Uploaded image could not be safely normalized.', '', API_ERROR_CODES.INVALID_IMAGE, undefined, { image: ['Choose another valid image.'] })
   }
 }
 

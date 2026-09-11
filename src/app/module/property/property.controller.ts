@@ -181,7 +181,7 @@ const presignPropertyImage = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.CREATED, success: true, message: 'Property image upload prepared', data })
 })
 const uploadPropertyImage = catchAsync(async (req: Request, res: Response) => {
-  if (!req.file) throw new ApiError(httpStatus.BAD_REQUEST, 'No property photo was uploaded')
+  if (!req.file) throw new ApiError(httpStatus.BAD_REQUEST, 'No property photo was uploaded.', '', 'EMPTY_IMAGE', undefined, { image: ['Choose a property photo to upload.'] })
   const uploadSessionId = String(req.body?.uploadSessionId || '').trim()
   const data = await WebsiteBuilderService.uploadAssetBuffer(
     requireTenant(req),

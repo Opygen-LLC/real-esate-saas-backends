@@ -117,7 +117,7 @@ const propertyDocument = z.object({
   assetId: z.string().regex(/^[0-9a-fA-F]{24}$/),
   category: z.enum(PROPERTY_DOCUMENT_TYPES),
   originalName: z.string().trim().min(1).max(255),
-  mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+  mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/avif']),
   size: z.number().int().nonnegative().max(20 * 1024 * 1024),
   visibility: z.literal('private').optional(),
 }).strict()
@@ -262,12 +262,12 @@ const updateBody = z.object({ ...optionalFields, propertyDraftSessionId: z.strin
   .transform(canonicalizePostalCode)
 
 export const PropertyValidation = {
-  presignDocumentZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid(), category: z.enum(PROPERTY_DOCUMENT_TYPES), originalName: z.string().trim().min(1).max(255), mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']), size: z.number().int().positive().max(20 * 1024 * 1024) }).strict() }),
+  presignDocumentZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid(), category: z.enum(PROPERTY_DOCUMENT_TYPES), originalName: z.string().trim().min(1).max(255), mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/avif']), size: z.number().int().positive() }).strict() }),
   completeDocumentZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict(), body: z.object({ uploadSessionId: z.string().uuid() }).strict() }),
   documentAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
   imageAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
   deleteDraftDocumentZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
-  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().trim().min(1).max(255).refine((value) => !/[\/\\\u0000]/.test(value), 'Invalid filename'), mimeType: imageMime, size: z.number().int().positive().max(20 * 1024 * 1024), uploadSessionId: z.string().uuid().optional() }).strict() }),
+  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().trim().min(1).max(255).refine((value) => !/[\/\\\u0000]/.test(value), 'Invalid filename'), mimeType: imageMime, size: z.number().int().positive(), uploadSessionId: z.string().uuid().optional() }).strict() }),
   uploadImageZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),

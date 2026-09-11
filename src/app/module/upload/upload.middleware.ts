@@ -1,9 +1,9 @@
 import type { NextFunction, Request, Response } from 'express'
 import multer, { FileFilterCallback } from 'multer'
-import path from 'path'
 import ApiError from '../../../errors/ApiError'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import { MAX_DIRECT_UPLOAD_BYTES, MAX_DIRECT_UPLOAD_FILES, normalizeUploadFolder } from './upload.contract'
+import { assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
 
 const storage = multer.memoryStorage()
 const MAX_FILE_SIZE = MAX_DIRECT_UPLOAD_BYTES
@@ -15,26 +15,16 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: FileFilterCallback,
 ) => {
-  const allowedMimeTypes = new Set(['image/jpeg', 'image/png'])
-  const allowedExtensions = new Set(['.jpg', '.jpeg', '.png'])
-  const originalName = String(file.originalname || '').replace(/\0/g, '').trim()
-  const cleanName = path.posix.basename(path.win32.basename(originalName))
-  const extension = path.extname(cleanName).toLowerCase()
-  const mimeType = String(file.mimetype || '').toLowerCase()
-
-  if (cleanName && cleanName.length <= 255 && allowedMimeTypes.has(mimeType) && allowedExtensions.has(extension)) {
-    file.originalname = cleanName
+  try {
+    const normalized = assertImageUploadFilename(file.originalname, file.mimetype)
+    file.originalname = normalized.filename
+    file.mimetype = normalized.mimeType
     cb(null, true)
-    return
+  } catch (error) {
+    cb(error as Error)
   }
-
-  cb(new ApiError(
-    400,
-    'Only JPEG, JPG, and PNG images are allowed.',
-    '',
-    'INVALID_UPLOAD_FILE_TYPE',
-  ))
 }
+
 
 const singleUploader = multer({
   storage,
@@ -73,7 +63,7 @@ const multipleUploader = multer({
 const multerErrorToApiError = (error: multer.MulterError): ApiError => {
   switch (error.code) {
     case 'LIMIT_FILE_SIZE':
-      return new ApiError(413, 'Image must be 5 MB or smaller.', '', API_ERROR_CODES.FILE_TOO_LARGE)
+      return new ApiError(413, 'Image exceeds the maximum supported upload size.', '', API_ERROR_CODES.IMAGE_TOO_LARGE, undefined, { image: ['Choose a smaller image.'] })
     case 'LIMIT_FILE_COUNT':
       return new ApiError(400, `You can upload up to ${MAX_MULTIPLE_FILES} images at a time.`, '', API_ERROR_CODES.TOO_MANY_FILES)
     case 'LIMIT_FIELD_COUNT':
@@ -105,6 +95,13 @@ const validateUploadMetadata = (req: Request): void => {
   }
 
   const folder = normalizeUploadFolder(body.folder)
+  const files: Express.Multer.File[] = []
+  if (req.file) files.push(req.file)
+  if (Array.isArray(req.files)) files.push(...req.files)
+  else if (req.files && typeof req.files === 'object') {
+    for (const group of Object.values(req.files as Record<string, Express.Multer.File[]>)) files.push(...group)
+  }
+  for (const file of files) assertImageUploadSize(file.size, folder)
   req.body = { ...body, folder }
 }
 
