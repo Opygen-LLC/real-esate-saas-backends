@@ -10,7 +10,6 @@ export const DIRECT_UPLOAD_COMPLETION_LOCK_MS = 60 * 1000
 export const DIRECT_UPLOAD_PROCESSING_LOCK_MS = 2 * 60 * 1000
 export const DIRECT_UPLOAD_MAX_PIXELS = MAX_IMAGE_UPLOAD_PIXELS
 export const DIRECT_UPLOAD_MAX_SOURCE_DIMENSION = MAX_IMAGE_SOURCE_DIMENSION
-export const DIRECT_UPLOAD_MAX_STORED_DIMENSION = 4_096
 
 export const ALLOWED_UPLOAD_FOLDERS = ['general', 'avatar', 'branding', 'website', 'property'] as const
 export type UploadFolder = (typeof ALLOWED_UPLOAD_FOLDERS)[number]

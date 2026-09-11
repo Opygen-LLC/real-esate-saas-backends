@@ -38,8 +38,9 @@ test('new direct uploads are quarantined in the private R2 staging namespace', (
 
 test('worker verifies, scans, normalizes, promotes and accounts the clean original', () => {
   assert.match(processor, /scanStoredObject\(sourceKey\)/)
-  assert.match(processor, /prepareStoredPublicImage\(sourceKey/)
-  assert.match(processor, /ObjectStorageService\.putBuffer\(String\(intent\.key\), normalized\.buffer/)
+  assert.match(processor, /prepareCanonicalPublicImage\(/)
+  assert.match(processor, /ObjectStorageService\.putBuffer\(processingKey, normalized\.buffer, PROCESSING_MIME\)/)
+  assert.match(processor, /ObjectStorageService\.putBuffer\(finalKey, normalized\.buffer, normalized\.mimeType\)/)
   assert.match(processor, /status:\s*'ready'/)
   assert.match(processor, /storageUsedBytes/)
   assert.match(processor, /mongoSupportsTransactions/)
@@ -73,10 +74,11 @@ test('website/property assets upload one staging object and worker promotes one 
   assert.match(website, /requiredVariants:\s*any\[\]\s*=\s*\[\]/)
   assert.match(website, /presignUpload\(uploadKey/)
   assert.doesNotMatch(website, /\bsharp\s*\(/)
-  assert.match(websiteProcessor, /const sourceKey = String\(intent\.uploadKey \|\| asset\.key\)/)
+  assert.match(websiteProcessor, /const sourceKey = String\(intent\.uploadKey \|\| originalAssetKey\)/)
   assert.match(websiteProcessor, /Number\(source\.size\) !== declaredSize/)
-  assert.match(websiteProcessor, /prepareStoredPublicImage\(sourceKey/)
-  assert.match(websiteProcessor, /ObjectStorageService\.putBuffer\(asset\.key, prepared\.buffer/)
+  assert.match(websiteProcessor, /prepareCanonicalPublicImage\(/)
+  assert.match(websiteProcessor, /ObjectStorageService\.putBuffer\(processingKey, prepared\.buffer, PROCESSING_MIME\)/)
+  assert.match(websiteProcessor, /ObjectStorageService\.putBuffer\(finalKey, prepared\.buffer, prepared\.mimeType\)/)
 })
 
 test('Cloudflare delivery provides responsive breakpoints and modern format negotiation', () => {

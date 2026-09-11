@@ -24,7 +24,9 @@ export interface IWebsiteAsset {
   altText?: string
   status?: 'pending' | 'ready' | 'rejected'
   etag?: string
-  scanStatus?: 'pending' | 'clean' | 'skipped' | 'infected'
+  scanStatus?: 'pending' | 'clean' | 'skipped' | 'infected' | 'failed'
+  failureCode?: string
+  failureMessage?: string
   variants?: IWebsiteAssetVariant[]
   uploadedBy?: Types.ObjectId | string
   context?: WebsiteAssetContext

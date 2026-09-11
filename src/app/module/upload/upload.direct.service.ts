@@ -50,14 +50,14 @@ const extensionForMime = (mimeType: UploadMimeType): string => {
   return 'jpg'
 }
 
-const finalKeyForUpload = (organizationId: string, folder: UploadFolder, filename: string, mimeType: UploadMimeType): string => {
+const finalKeyForUpload = (organizationId: string, folder: UploadFolder, filename: string): string => {
   const now = new Date()
   const year = String(now.getUTCFullYear())
   const month = String(now.getUTCMonth() + 1).padStart(2, '0')
   const base = folder === 'property'
     ? `tenants/${organizationId}/properties/uploads/${year}/${month}`
     : `tenants/${organizationId}/uploads/${folder}/${year}/${month}`
-  return `${base}/${randomUUID()}-${safeStem(filename)}.${extensionForMime(mimeType)}`
+  return `${base}/${randomUUID()}-${safeStem(filename)}.webp`
 }
 
 const stagingKeyForUpload = (organizationId: string, filename: string, mimeType: UploadMimeType): string =>
@@ -97,6 +97,8 @@ const presentStatus = (intent: any) => {
     key: ready ? String(intent.key) : undefined,
     publicUrl: ready ? String(intent.publicUrl || ObjectStorageService.publicImageUrl(intent.key)) : undefined,
     sizeBytes: ready ? Number(intent.finalSize || intent.actualSize || intent.declaredSize || 0) : Number(intent.actualSize || intent.declaredSize || 0),
+    mimeType: ready ? String(intent.finalMimeType || 'image/webp') : String(intent.mimeType || ''),
+    etag: ready && intent.etag ? String(intent.etag) : undefined,
     width: ready && Number(intent.width || 0) > 0 ? Number(intent.width) : undefined,
     height: ready && Number(intent.height || 0) > 0 ? Number(intent.height) : undefined,
     error: status === 'rejected' ? {
@@ -145,7 +147,7 @@ const presign = async (organizationId: string, userId: string, input: DirectUplo
   await UsageBudgetService.reserveUploadBytes(organizationId, normalized.size)
 
   const uploadId = randomUUID()
-  const key = finalKeyForUpload(organizationId, normalized.folder, normalized.filename, normalized.mimeType)
+  const key = finalKeyForUpload(organizationId, normalized.folder, normalized.filename)
   const uploadKey = stagingKeyForUpload(organizationId, normalized.filename, normalized.mimeType)
   const intent = await UploadIntent.create({
     uploadId,

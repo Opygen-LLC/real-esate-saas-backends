@@ -2,7 +2,12 @@ import sharp, { type Metadata } from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import { ObjectStorageService } from './objectStorage.service'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
-import { MAX_IMAGE_UPLOAD_PIXELS, assertImageDimensions, assertImageUploadFilename } from '../../helpers/imageUploadPolicy'
+import {
+  MAX_IMAGE_UPLOAD_PIXELS,
+  assertImageDimensions,
+  assertImageUploadFilename,
+  type ImageUploadContext,
+} from '../../helpers/imageUploadPolicy'
 
 const IMAGE_FORMAT_BY_MIME: Record<string, string[]> = {
   'image/jpeg': ['jpeg'],
@@ -22,7 +27,17 @@ const EXTENSIONS_BY_MIME: Record<string, string[]> = {
 }
 
 const MAX_IMAGE_PIXELS = MAX_IMAGE_UPLOAD_PIXELS
-const MAX_STORED_DIMENSION = 4_096
+const MAX_LEGACY_STORED_DIMENSION = 4_096
+export const CANONICAL_PUBLIC_IMAGE_MIME = 'image/webp' as const
+export const CANONICAL_PUBLIC_IMAGE_EXTENSION = 'webp' as const
+
+export const PUBLIC_IMAGE_OPTIMIZATION_PROFILES: Record<ImageUploadContext, { maxDimension: number; quality: number; effort: number }> = {
+  property: { maxDimension: 1_920, quality: 80, effort: 4 },
+  website: { maxDimension: 1_920, quality: 80, effort: 4 },
+  avatar: { maxDimension: 512, quality: 80, effort: 4 },
+  branding: { maxDimension: 1_200, quality: 82, effort: 4 },
+  general: { maxDimension: 1_920, quality: 80, effort: 4 },
+}
 
 const assertSafeUploadFilename = (originalName: string, expectedMime: string): void => {
   if (expectedMime in IMAGE_FORMAT_BY_MIME) {
@@ -49,7 +64,9 @@ const validateImageMetadata = (metadata: Metadata, expectedMime: string): Metada
   const width = Number(metadata.width || 0)
   const height = Number(metadata.height || 0)
   assertImageDimensions(width, height)
-  if (Number(metadata.pages || 1) > 1) throw new ApiError(400, 'Animated or multi-page images are not allowed')
+  if (Number(metadata.pages || 1) > 1) {
+    throw new ApiError(400, 'Animated or multi-page images are not allowed', '', API_ERROR_CODES.INVALID_IMAGE_BYTES)
+  }
   return metadata
 }
 
@@ -59,7 +76,14 @@ const validateImage = async (body: Buffer, expectedMime: string) => {
     return validateImageMetadata(metadata, expectedMime)
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'Uploaded file is not a valid image.', '', API_ERROR_CODES.INVALID_IMAGE, undefined, { image: ['Choose a valid, decodable image.'] })
+    throw new ApiError(
+      400,
+      'Uploaded file is not a valid image.',
+      '',
+      API_ERROR_CODES.INVALID_IMAGE_BYTES,
+      undefined,
+      { image: ['Choose a valid, decodable image.'] },
+    )
   }
 }
 
@@ -102,10 +126,9 @@ const inspectStoredImage = async (key: string, expectedMime: string, maxBytes: n
 }
 
 /**
- * Decode and re-encode an image once after upload. No metadata is copied into
- * the output, which strips EXIF/location/profile payloads and trailing data.
- * Responsive delivery is handled by Cloudflare Image Transformations, so this
- * function produces one durable clean original rather than many stored sizes.
+ * Legacy same-format sanitizer retained for rolling-deploy compatibility with
+ * browser-created Phase 3 variants. New public images use
+ * prepareCanonicalPublicImage() below and are always stored as WebP.
  */
 const sanitizeImageBuffer = async (
   body: Buffer,
@@ -114,16 +137,16 @@ const sanitizeImageBuffer = async (
 ) => {
   try {
     await validateImage(body, expectedMime)
-    const maxWidth = Math.max(1, Math.min(MAX_STORED_DIMENSION, Math.floor(options.maxWidth || MAX_STORED_DIMENSION)))
-    const maxHeight = Math.max(1, Math.min(MAX_STORED_DIMENSION, Math.floor(options.maxHeight || MAX_STORED_DIMENSION)))
-    let pipeline = sharp(body, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS })
+    const maxWidth = Math.max(1, Math.min(MAX_LEGACY_STORED_DIMENSION, Math.floor(options.maxWidth || MAX_LEGACY_STORED_DIMENSION)))
+    const maxHeight = Math.max(1, Math.min(MAX_LEGACY_STORED_DIMENSION, Math.floor(options.maxHeight || MAX_LEGACY_STORED_DIMENSION)))
+    const pipeline = sharp(body, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS })
       .rotate()
       .resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true })
 
     let sanitized: Buffer
     if (expectedMime === 'image/jpeg') sanitized = await pipeline.jpeg({ quality: 86, mozjpeg: false }).toBuffer()
     else if (expectedMime === 'image/png') sanitized = await pipeline.png({ compressionLevel: 6 }).toBuffer()
-    else if (expectedMime === 'image/webp') sanitized = await pipeline.webp({ quality: 84 }).toBuffer()
+    else if (expectedMime === 'image/webp') sanitized = await pipeline.webp({ quality: 84, effort: 4 }).toBuffer()
     else if (expectedMime === 'image/avif') sanitized = await pipeline.avif({ quality: 72 }).toBuffer()
     else throw new ApiError(400, 'Unsupported public image format.', '', API_ERROR_CODES.INVALID_IMAGE_TYPE, undefined, { image: ['Choose a supported image type.'] })
 
@@ -134,10 +157,87 @@ const sanitizeImageBuffer = async (
     return { buffer: sanitized, size: sanitized.length, width: Number(metadata.width), height: Number(metadata.height) }
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'Uploaded image could not be safely normalized.', '', API_ERROR_CODES.INVALID_IMAGE, undefined, { image: ['Choose another valid image.'] })
+    throw new ApiError(422, 'Uploaded image could not be safely normalized.', '', API_ERROR_CODES.IMAGE_PROCESSING_FAILED, undefined, { image: ['Choose another valid image.'] })
   }
 }
 
+/**
+ * Canonical public-image normalization. The uploaded source remains in the
+ * private R2 staging namespace while this runs. The output contains no copied
+ * EXIF/profile metadata, is bounded by a context-specific dimension, and is
+ * always WebP so durable storage is small before Cloudflare edge transforms.
+ */
+const canonicalizeImageBuffer = async (
+  body: Buffer,
+  expectedMime: string,
+  context: ImageUploadContext,
+) => {
+  try {
+    await validateImage(body, expectedMime)
+    const profile = PUBLIC_IMAGE_OPTIMIZATION_PROFILES[context] || PUBLIC_IMAGE_OPTIMIZATION_PROFILES.general
+    const buffer = await sharp(body, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS })
+      .rotate()
+      .resize({
+        width: profile.maxDimension,
+        height: profile.maxDimension,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: profile.quality,
+        effort: profile.effort,
+        alphaQuality: 90,
+        smartSubsample: true,
+      })
+      .toBuffer()
+
+    const metadata = validateImageMetadata(
+      await sharp(buffer, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS }).metadata(),
+      CANONICAL_PUBLIC_IMAGE_MIME,
+    )
+    return {
+      buffer,
+      size: buffer.length,
+      width: Number(metadata.width),
+      height: Number(metadata.height),
+      mimeType: CANONICAL_PUBLIC_IMAGE_MIME,
+      extension: CANONICAL_PUBLIC_IMAGE_EXTENSION,
+      profile,
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError(
+      422,
+      'We could not safely process this image. Please choose another photo.',
+      '',
+      API_ERROR_CODES.IMAGE_PROCESSING_FAILED,
+      undefined,
+      { image: ['The image could not be converted into a safe optimized WebP.'] },
+    )
+  }
+}
+
+const canonicalPublicImageKey = (value: string): string => {
+  const key = String(value || '').trim()
+  if (!key) throw new ApiError(400, 'A public image key is required')
+  const slash = key.lastIndexOf('/')
+  const dot = key.lastIndexOf('.')
+  const stem = dot > slash ? key.slice(0, dot) : key
+  return `${stem}.${CANONICAL_PUBLIC_IMAGE_EXTENSION}`
+}
+
+const prepareCanonicalPublicImage = async (
+  key: string,
+  expectedMime: string,
+  context: ImageUploadContext,
+  options: { maxBytes?: number } = {},
+) => {
+  const maxBytes = options.maxBytes || 25 * 1024 * 1024
+  const { body } = await inspectStoredImage(key, expectedMime, maxBytes)
+  return canonicalizeImageBuffer(body, expectedMime, context)
+}
+
+/** Backward-compatible same-format helper for legacy callers. */
 const prepareStoredPublicImage = async (
   key: string,
   expectedMime: string,
@@ -148,7 +248,7 @@ const prepareStoredPublicImage = async (
   return sanitizeImageBuffer(body, expectedMime, options)
 }
 
-/** Backward-compatible in-place sanitizer for older callers. */
+/** Backward-compatible in-place sanitizer for older variant callers. */
 const sanitizeStoredPublicImage = async (
   key: string,
   expectedMime: string,
@@ -164,6 +264,9 @@ export const StoredFileSecurityService = {
   validateStoredFile,
   inspectStoredImage,
   sanitizeImageBuffer,
+  canonicalizeImageBuffer,
+  canonicalPublicImageKey,
+  prepareCanonicalPublicImage,
   prepareStoredPublicImage,
   sanitizeStoredPublicImage,
 }

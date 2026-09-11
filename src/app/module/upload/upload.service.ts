@@ -37,7 +37,7 @@ const sanitizeImage = async (
   buffer: Buffer,
   mimetype: string,
 ): Promise<{ buffer: Buffer; contentType: string; extension: string; decodeMs: number; resizeMs: number; encodeMs: number }> => {
-  const normalizedType = normalizeImageUploadMimeType(mimetype)
+  normalizeImageUploadMimeType(mimetype)
   try {
     const probeStartedAt = performance.now()
     const metadata = await sharp(buffer, { failOn: 'error', limitInputPixels: MAX_IMAGE_UPLOAD_PIXELS }).metadata()
@@ -65,30 +65,17 @@ const sanitizeImage = async (
     })
     const encodeStartedAt = performance.now()
 
-    let output: Buffer
-    let contentType: string
-    let extension: string
-    if (normalizedType === 'image/jpeg') {
-      // libjpeg is materially faster than mozjpeg for synchronous request-path
-      // uploads while keeping an appropriate web-image quality level.
-      output = await encoder.jpeg({ quality: 82, mozjpeg: false }).toBuffer()
-      contentType = 'image/jpeg'
-      extension = 'jpg'
-    } else if (normalizedType === 'image/png') {
-      output = await encoder.png({ compressionLevel: 6 }).toBuffer()
-      contentType = 'image/png'
-      extension = 'png'
-    } else if (normalizedType === 'image/webp') {
-      output = await encoder.webp({ quality: 82 }).toBuffer()
-      contentType = 'image/webp'
-      extension = 'webp'
-    } else if (normalizedType === 'image/avif') {
-      output = await encoder.avif({ quality: 72 }).toBuffer()
-      contentType = 'image/avif'
-      extension = 'avif'
-    } else {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported image format', '', API_ERROR_CODES.INVALID_IMAGE_TYPE)
-    }
+    // This endpoint is compatibility-only; normal traffic uses the async direct
+    // R2 worker. Keep even fallback storage canonical by writing WebP rather
+    // than preserving a larger JPEG/PNG/AVIF source format.
+    const output = await encoder.webp({
+      quality: 80,
+      effort: 4,
+      alphaQuality: 90,
+      smartSubsample: true,
+    }).toBuffer()
+    const contentType = 'image/webp'
+    const extension = 'webp'
 
     return {
       buffer: output,
@@ -100,7 +87,7 @@ const sanitizeImage = async (
     }
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError(httpStatus.BAD_REQUEST, 'The uploaded file is not a valid image.', '', API_ERROR_CODES.INVALID_IMAGE, undefined, { image: ['Choose a valid, decodable image.'] })
+    throw new ApiError(httpStatus.BAD_REQUEST, 'The uploaded file is not a valid image.', '', API_ERROR_CODES.INVALID_IMAGE_BYTES, undefined, { image: ['Choose a valid, decodable image.'] })
   }
 }
 
@@ -131,7 +118,7 @@ const uploadFile = async (organizationId: string, file: Express.Multer.File): Pr
   })
 
   return {
-    publicUrl: ObjectStorageService.publicUrl(objectKey),
+    publicUrl: ObjectStorageService.publicImageUrl(objectKey),
     sizeBytes: sanitized.buffer.length,
     telemetry: {
       imageDecodeMs: sanitized.decodeMs,

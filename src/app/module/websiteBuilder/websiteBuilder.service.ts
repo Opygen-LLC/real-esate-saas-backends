@@ -322,6 +322,12 @@ const touchPropertyDraftSession = async (
   }
 }
 
+const canonicalPublicAssetFilename = (filename: string, mimeType: string) => {
+  if (!String(mimeType || '').startsWith('image/')) return filename
+  const stem = String(filename || 'image').replace(/\.[^.]+$/, '') || 'image'
+  return `${stem}.webp`
+}
+
 const assetKey = (organizationId: string, filename: string, suffix = '', options: AssetLifecycleOptions = {}) => {
   const safe = filename.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').slice(-100)
   if (options.context === 'property-draft') {
@@ -397,7 +403,7 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
 
   await EntitlementService.assertStorage(organizationId, size)
   await UsageBudgetService.reserveUploadBytes(organizationId, size)
-  const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
+  const key = assetKey(organizationId, canonicalPublicAssetFilename(payload.filename, payload.mimeType), '', { context, uploadSessionId })
   const uploadKey = assetStagingKey(organizationId, payload.filename)
   const signed = ObjectStorageService.presignUpload(uploadKey, payload.mimeType)
   const original = {
@@ -407,8 +413,9 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
     expiresIn: signed.expiresIn,
   }
 
-  // Phase 4 stores one clean original. Responsive sizes/formats are generated
-  // at Cloudflare's edge rather than uploaded and stored as duplicate variants.
+  // One canonical optimized WebP is stored after background verification.
+  // Responsive sizes/formats are generated at Cloudflare's edge rather than
+  // uploaded and stored as duplicate variants.
   const requiredVariants: any[] = []
   await WebsiteUploadIntent.create({
     organizationId,
@@ -441,7 +448,7 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
   }
   const asset: any = await WebsiteAsset.findOneAndUpdate(
     { organizationId, key: payload.key },
-    { $set: { url: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(payload.key) : ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, context: intent.context || 'website', uploadSessionId: intent.uploadSessionId || '', claimed: intent.context === 'property-draft' ? false : true, claimedByPropertyId: null, claimedAt: intent.context === 'property-draft' ? null : new Date(), lastReferencedAt: new Date() } },
+    { $set: { url: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(payload.key) : ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', failureCode: '', failureMessage: '', uploadedBy: userId, context: intent.context || 'website', uploadSessionId: intent.uploadSessionId || '', claimed: intent.context === 'property-draft' ? false : true, claimedByPropertyId: null, claimedAt: intent.context === 'property-draft' ? null : new Date(), lastReferencedAt: new Date() } },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   )
   await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
@@ -481,7 +488,7 @@ const uploadAssetBuffer = async (
   await EntitlementService.assertStorage(organizationId, file.buffer.length)
   await UsageBudgetService.reserveUploadBytes(organizationId, file.buffer.length)
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
-  const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })
+  const originalKey = assetKey(organizationId, canonicalPublicAssetFilename(file.originalname || 'property-image', mimeType), '', { context, uploadSessionId })
   const uploadKey = assetStagingKey(organizationId, file.originalname || 'property-image')
   const objectKeys = [uploadKey, originalKey]
 

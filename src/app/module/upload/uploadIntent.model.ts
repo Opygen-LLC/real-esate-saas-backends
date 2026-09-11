@@ -10,13 +10,15 @@ const uploadIntentSchema = new Schema({
   uploadKey: { type: String, default: '', index: true },
   folder: { type: String, enum: ['general', 'avatar', 'branding', 'website', 'property'], required: true },
   originalName: { type: String, required: true },
-  mimeType: { type: String, enum: ['image/jpeg', 'image/png'], required: true },
+  mimeType: { type: String, enum: ['image/jpeg', 'image/png', 'image/webp', 'image/avif'], required: true },
+  finalMimeType: { type: String, enum: ['', 'image/webp'], default: '' },
   declaredSize: { type: Number, required: true },
   actualSize: { type: Number, default: 0 },
   finalSize: { type: Number, default: 0 },
   width: { type: Number, default: 0 },
   height: { type: Number, default: 0 },
   publicUrl: { type: String, default: '' },
+  etag: { type: String, default: '' },
   // pending/completing/completed are retained only so in-flight Phase 3
   // intents survive a rolling deployment. New uploads use the Phase 4 states.
   status: {
