@@ -35,10 +35,19 @@ if git status --porcelain -- \
   BACKUP_NEEDS_BUILD=1
 fi
 
-# Proactively clean up dangling images and old builder cache to prevent "no space left on device"
+# Proactively clean up dangling images, builder cache, and verify disk space
 echo "🧹 Ensuring Docker build disk space..."
 docker image prune -f >/dev/null 2>&1 || true
-docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+docker builder prune -a -f >/dev/null 2>&1 || true
+sudo truncate -s 0 /var/lib/docker/containers/*/*-json.log 2>/dev/null || true
+sudo journalctl --vacuum-size=50M 2>/dev/null || true
+
+# Check available disk space; if less than 3.5GB free, prune unused docker objects
+FREE_MB=$(df -m / 2>/dev/null | awk 'NR==2 {print $4}' || echo "9999")
+if [ "$FREE_MB" -lt 3584 ]; then
+  echo "⚠️ Low disk space detected (${FREE_MB}MB free). Running deeper Docker system prune..."
+  docker system prune -f >/dev/null 2>&1 || true
+fi
 
 echo "🏗️ Building API image..."
 docker compose build api
