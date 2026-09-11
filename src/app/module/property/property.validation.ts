@@ -267,7 +267,7 @@ export const PropertyValidation = {
   documentAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
   imageAssetZodSchema: z.object({ params: z.object({ assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
   deleteDraftDocumentZodSchema: z.object({ params: z.object({ sessionId: z.string().uuid(), assetId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict() }),
-  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().trim().min(1).max(255).refine((value) => !/[\/\\\u0000]/.test(value), 'Invalid filename'), mimeType: imageMime, size: z.number().int().positive(), uploadSessionId: z.string().uuid().optional() }).strict() }),
+  presignImageZodSchema: z.object({ body: z.object({ filename: z.string().trim().min(1).max(255).refine((value) => !/[\/\\\u0000]/.test(value), 'Invalid filename'), mimeType: imageMime, size: z.number().int().positive(), uploadSessionId: z.string().uuid().optional(), key: z.string().min(1).max(1024).optional() }).strict() }),
   uploadImageZodSchema: z.object({ body: z.object({ uploadSessionId: z.string().uuid().optional() }).strict() }),
   completeImageZodSchema: z.object({ body: z.object({ key: z.string().min(1).max(1024), originalName: z.string().max(255).optional(), mimeType: imageMime, width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), altText: z.string().max(300).optional(), variants: z.array(assetVariant).max(8).optional() }).strict() }),
   createPropertyZodSchema: z.object({ body: createBody }),

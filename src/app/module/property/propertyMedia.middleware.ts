@@ -2,14 +2,14 @@ import type { NextFunction, Request, Response } from 'express'
 import multer from 'multer'
 import ApiError from '../../../errors/ApiError'
 import { API_ERROR_CODES } from '../../../contracts/apiContract'
-import { IMAGE_UPLOAD_POLICY, assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
+import { assertImageUploadFilename, assertImageUploadSize } from '../../helpers/imageUploadPolicy'
 
-const MAX_PROPERTY_IMAGE_BYTES = IMAGE_UPLOAD_POLICY.property.maxBytes
+export const MAX_PROPERTY_FALLBACK_BYTES = 4 * 1024 * 1024
 
 
 const propertyImageUploader = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 1, fileSize: MAX_PROPERTY_IMAGE_BYTES, fields: 5, parts: 10, fieldNameSize: 80, fieldSize: 1024 },
+  limits: { files: 1, fileSize: MAX_PROPERTY_FALLBACK_BYTES, fields: 5, parts: 10, fieldNameSize: 80, fieldSize: 1024 },
   fileFilter: (_req, file, callback) => {
     try {
       const normalized = assertImageUploadFilename(file.originalname, file.mimetype)
@@ -39,7 +39,7 @@ export const propertyImageUpload = (req: Request, res: Response, next: NextFunct
       }
     }
     if (error instanceof multer.MulterError) {
-      if (error.code === 'LIMIT_FILE_SIZE') return next(new ApiError(413, 'Property photos must be 20 MB or smaller.', '', API_ERROR_CODES.IMAGE_TOO_LARGE, undefined, { image: ['Maximum file size is 20 MB.'] }))
+      if (error.code === 'LIMIT_FILE_SIZE') return next(new ApiError(413, 'This property photo must use direct R2 upload because it is larger than the 4 MB server fallback limit.', '', API_ERROR_CODES.DIRECT_UPLOAD_REQUIRED, { maxFallbackBytes: MAX_PROPERTY_FALLBACK_BYTES }, { image: ['Files larger than 4 MB must upload directly to Cloudflare R2.'] }))
       if (error.code === 'LIMIT_FILE_COUNT') return next(new ApiError(400, 'Upload one property photo at a time'))
       return next(new ApiError(400, error.message || 'Invalid property photo upload'))
     }

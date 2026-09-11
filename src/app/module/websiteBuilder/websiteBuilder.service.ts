@@ -1,4 +1,5 @@
 import { STUDIO_DEFAULT_PHOTOS } from '../../../contracts/websiteCatalog/photos'
+import { API_ERROR_CODES } from '../../../contracts/apiContract'
 import { WebsiteAssetUsageService } from './websiteAssetUsage.service'
 import { requiredTransaction } from '../../db/requiredTransaction'
 import { OperationsJob } from '../operationsQueue/operationsJob.model'
@@ -350,9 +351,52 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
     size = Number(payload.size)
     if (!Number.isSafeInteger(size) || size < 1 || size > 20 * 1024 * 1024) throw new ApiError(400, 'Invalid asset size')
   }
+  const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
+  const refreshKey = String(payload.key || '').trim()
+
+  // Refresh an existing pending intent instead of reserving storage again or
+  // creating orphaned upload intents when an R2 signature expires mid-upload.
+  if (refreshKey) {
+    if (!refreshKey.startsWith(`tenants/${organizationId}/`)) {
+      throw new ApiError(403, 'Asset key does not belong to this tenant', '', API_ERROR_CODES.UPLOAD_KEY_FORBIDDEN)
+    }
+    const intent: any = await WebsiteUploadIntent.findOne({
+      organizationId,
+      key: refreshKey,
+      context,
+      ...(context === 'property-draft' ? { uploadSessionId } : {}),
+    })
+    if (!intent) throw new ApiError(409, 'Upload intent was not found', '', API_ERROR_CODES.UPLOAD_INTENT_NOT_FOUND)
+    if (intent.status !== 'pending') throw new ApiError(409, 'Upload intent is no longer pending', '', API_ERROR_CODES.UPLOAD_INTENT_NOT_PENDING)
+    if (intent.expiresAt && new Date(intent.expiresAt).getTime() <= Date.now()) {
+      throw new ApiError(410, 'Upload intent has expired', '', API_ERROR_CODES.UPLOAD_INTENT_EXPIRED)
+    }
+    if (String(intent.mimeType) !== payload.mimeType || Number(intent.declaredSize) !== size) {
+      throw new ApiError(409, 'Upload metadata does not match the existing upload intent', '', API_ERROR_CODES.UPLOAD_INTENT_MISMATCH)
+    }
+    const uploadKey = String(intent.uploadKey || '').trim()
+    if (!uploadKey || !uploadKey.startsWith(`tenants/${organizationId}/upload-staging/`)) {
+      throw new ApiError(409, 'Upload staging key is invalid', '', API_ERROR_CODES.UPLOAD_INTENT_MISMATCH)
+    }
+    intent.lastReferencedAt = new Date()
+    intent.expiresAt = new Date(Date.now() + 60 * 60_000)
+    await intent.save()
+    const signed = ObjectStorageService.presignUpload(uploadKey, payload.mimeType)
+    if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
+    return {
+      original: {
+        key: refreshKey,
+        uploadUrl: await signed.getUploadUrl(),
+        publicUrl: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(refreshKey) : ObjectStorageService.publicUrl(refreshKey),
+        expiresIn: signed.expiresIn,
+      },
+      requiredVariants: [],
+      refreshed: true,
+    }
+  }
+
   await EntitlementService.assertStorage(organizationId, size)
   await UsageBudgetService.reserveUploadBytes(organizationId, size)
-  const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
   const uploadKey = assetStagingKey(organizationId, payload.filename)
   const signed = ObjectStorageService.presignUpload(uploadKey, payload.mimeType)
