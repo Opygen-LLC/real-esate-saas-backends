@@ -1,23 +1,17 @@
 import { randomUUID } from 'crypto'
-import mongoose from 'mongoose'
-import config from '../../../config'
 import ApiError from '../../../errors/ApiError'
-import { logger } from '../../../shared/logger'
-import { recordUploadSuccess } from '../../../shared/securityObservability'
-import { mongoSupportsTransactions } from '../../db/mongoCapabilities'
 import { UsageBudgetService } from '../../security/usageBudget.service'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { EntitlementService } from '../entitlement/entitlement.service'
-import { Organization } from '../organization/organization.model'
 import { ObjectStorageService } from '../websiteBuilder/objectStorage.service'
 import { StoredFileSecurityService } from '../websiteBuilder/storedFileSecurity.service'
 import {
   DIRECT_UPLOAD_COMPLETED_RETENTION_MS,
-  DIRECT_UPLOAD_COMPLETION_LOCK_MS,
   DIRECT_UPLOAD_INTENT_TTL_MS,
   MAX_DIRECT_UPLOAD_BYTES,
   normalizeUploadFolder,
   normalizeUploadMimeType,
+  type DirectUploadStatus,
   type UploadFolder,
   type UploadMimeType,
 } from './upload.contract'
@@ -50,7 +44,7 @@ const safeStem = (filename: string): string => {
 
 const extensionForMime = (mimeType: UploadMimeType): string => mimeType === 'image/png' ? 'png' : 'jpg'
 
-const keyForUpload = (organizationId: string, folder: UploadFolder, filename: string, mimeType: UploadMimeType): string => {
+const finalKeyForUpload = (organizationId: string, folder: UploadFolder, filename: string, mimeType: UploadMimeType): string => {
   const now = new Date()
   const year = String(now.getUTCFullYear())
   const month = String(now.getUTCMonth() + 1).padStart(2, '0')
@@ -59,6 +53,9 @@ const keyForUpload = (organizationId: string, folder: UploadFolder, filename: st
     : `tenants/${organizationId}/uploads/${folder}/${year}/${month}`
   return `${base}/${randomUUID()}-${safeStem(filename)}.${extensionForMime(mimeType)}`
 }
+
+const stagingKeyForUpload = (organizationId: string, filename: string, mimeType: UploadMimeType): string =>
+  `tenants/${organizationId}/upload-staging/generic/${randomUUID()}-${safeStem(filename)}.${extensionForMime(mimeType)}`
 
 const validatePresignInput = (input: DirectUploadPresignInput) => {
   const filename = String(input?.filename || '').trim()
@@ -86,11 +83,38 @@ const validatePresignInput = (input: DirectUploadPresignInput) => {
   return { filename, mimeType, folder, size, uploadId }
 }
 
-const presentPresign = async (intent: any) => {
-  const signed = ObjectStorageService.presignUpload(intent.key, intent.mimeType)
+const responseStatus = (raw: string): DirectUploadStatus => {
+  if (raw === 'pending') return 'presigned'
+  if (raw === 'completing') return 'verifying'
+  if (raw === 'completed') return 'ready'
+  if (['presigned', 'uploaded', 'verifying', 'processing', 'ready', 'rejected'].includes(raw)) return raw as DirectUploadStatus
+  return 'rejected'
+}
+
+const presentStatus = (intent: any) => {
+  const status = responseStatus(String(intent.status || ''))
+  const ready = status === 'ready'
   return {
     uploadId: String(intent.uploadId),
-    key: String(intent.key),
+    status,
+    key: ready ? String(intent.key) : undefined,
+    publicUrl: ready ? String(intent.publicUrl || ObjectStorageService.publicImageUrl(intent.key)) : undefined,
+    sizeBytes: ready ? Number(intent.finalSize || intent.actualSize || intent.declaredSize || 0) : Number(intent.actualSize || intent.declaredSize || 0),
+    width: ready && Number(intent.width || 0) > 0 ? Number(intent.width) : undefined,
+    height: ready && Number(intent.height || 0) > 0 ? Number(intent.height) : undefined,
+    error: status === 'rejected' ? {
+      code: String(intent.failureCode || 'IMAGE_PROCESSING_REJECTED'),
+      message: String(intent.failureMessage || 'The image could not be processed safely.'),
+    } : undefined,
+  }
+}
+
+const presentPresign = async (intent: any) => {
+  const uploadKey = String(intent.uploadKey || intent.key)
+  const signed = ObjectStorageService.presignUpload(uploadKey, intent.mimeType)
+  return {
+    uploadId: String(intent.uploadId),
+    key: uploadKey,
     uploadUrl: await signed.getUploadUrl(),
     expiresIn: signed.expiresIn,
   }
@@ -101,23 +125,11 @@ const presign = async (organizationId: string, userId: string, input: DirectUplo
   const normalized = validatePresignInput(input)
 
   if (normalized.uploadId) {
-    const existing: any = await UploadIntent.findOne({
-      uploadId: normalized.uploadId,
-      organizationId,
-      userId,
-    })
+    const existing: any = await UploadIntent.findOne({ uploadId: normalized.uploadId, organizationId, userId })
     if (!existing) throw new ApiError(404, 'Upload session was not found.', '', 'UPLOAD_INTENT_NOT_FOUND')
-    if (existing.status === 'completed') {
-      return {
-        uploadId: existing.uploadId,
-        key: existing.key,
-        uploadUrl: '',
-        publicUrl: existing.publicUrl || ObjectStorageService.publicUrl(existing.key),
-        expiresIn: 0,
-        completed: true,
-      }
-    }
-    if (existing.status !== 'pending') throw new ApiError(409, 'Upload session cannot be refreshed.', '', 'UPLOAD_INTENT_NOT_PENDING')
+    const status = responseStatus(String(existing.status || ''))
+    if (status === 'ready') return { ...presentStatus(existing), uploadUrl: '', expiresIn: 0, completed: true }
+    if (status !== 'presigned') throw new ApiError(409, 'Upload session cannot be refreshed after upload completion has started.', '', 'UPLOAD_INTENT_NOT_PRESIGNED')
     if (new Date(existing.expiresAt).getTime() <= Date.now()) {
       throw new ApiError(409, 'Upload session expired. Start the upload again.', '', 'UPLOAD_INTENT_EXPIRED')
     }
@@ -136,189 +148,125 @@ const presign = async (organizationId: string, userId: string, input: DirectUplo
   await UsageBudgetService.reserveUploadBytes(organizationId, normalized.size)
 
   const uploadId = randomUUID()
-  const key = keyForUpload(organizationId, normalized.folder, normalized.filename, normalized.mimeType)
+  const key = finalKeyForUpload(organizationId, normalized.folder, normalized.filename, normalized.mimeType)
+  const uploadKey = stagingKeyForUpload(organizationId, normalized.filename, normalized.mimeType)
   const intent = await UploadIntent.create({
     uploadId,
     organizationId,
     userId,
     key,
+    uploadKey,
     folder: normalized.folder,
     originalName: normalized.filename,
     mimeType: normalized.mimeType,
     declaredSize: normalized.size,
-    status: 'pending',
+    status: 'presigned',
     expiresAt: new Date(Date.now() + DIRECT_UPLOAD_INTENT_TTL_MS),
   })
 
   try {
     return await presentPresign(intent)
   } catch (error) {
-    await UploadIntent.deleteOne({ _id: intent._id, status: 'pending' }).catch(() => undefined)
+    await UploadIntent.deleteOne({ _id: intent._id, status: 'presigned' }).catch(() => undefined)
     throw error
   }
 }
 
-const completedResult = (intent: any) => ({
-  uploadId: String(intent.uploadId),
-  key: String(intent.key),
-  publicUrl: String(intent.publicUrl || ObjectStorageService.publicUrl(intent.key)),
-  sizeBytes: Number(intent.actualSize || intent.declaredSize || 0),
-})
-
-const rejectIntent = async (intent: any, error: ApiError): Promise<never> => {
+const rejectBeforeProcessing = async (intent: any, code: string, message: string, statusCode = 400): Promise<never> => {
   await Promise.allSettled([
-    ObjectStorageService.remove(intent.key),
+    ObjectStorageService.remove(String(intent.uploadKey || intent.key)),
+    intent.uploadKey && intent.uploadKey !== intent.key ? ObjectStorageService.remove(String(intent.key)) : Promise.resolve(),
     UploadIntent.updateOne(
-      { _id: intent._id, status: 'completing' },
-      { $set: { status: 'rejected', completionStartedAt: null } },
+      { _id: intent._id, status: { $in: ['presigned', 'pending'] } },
+      { $set: { status: 'rejected', failureCode: code, failureMessage: message, completedAt: new Date() } },
     ),
   ])
-  throw error
+  throw new ApiError(statusCode, message, '', code)
 }
 
+/**
+ * Completion deliberately performs only cheap object metadata checks. CPU-heavy
+ * decoding, malware scanning and normalization are performed by the dedicated
+ * image worker after this request returns.
+ */
 const complete = async (organizationId: string, userId: string, input: DirectUploadCompleteInput) => {
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   const uploadId = String(input?.uploadId || '').trim()
-  const key = String(input?.key || '').trim()
-  if (!SAFE_UPLOAD_ID.test(uploadId) || !key) throw new ApiError(400, 'uploadId and key are required.', '', 'INVALID_UPLOAD_COMPLETION')
-  if (!key.startsWith(`tenants/${organizationId}/`)) throw new ApiError(403, 'Upload key does not belong to this organization.', '', 'UPLOAD_KEY_FORBIDDEN')
+  const suppliedKey = String(input?.key || '').trim()
+  if (!SAFE_UPLOAD_ID.test(uploadId) || !suppliedKey) throw new ApiError(400, 'uploadId and key are required.', '', 'INVALID_UPLOAD_COMPLETION')
+  if (!suppliedKey.startsWith(`tenants/${organizationId}/`)) throw new ApiError(403, 'Upload key does not belong to this organization.', '', 'UPLOAD_KEY_FORBIDDEN')
 
-  const initial: any = await UploadIntent.findOne({ uploadId, organizationId, userId })
-  if (!initial) throw new ApiError(404, 'Upload session was not found.', '', 'UPLOAD_INTENT_NOT_FOUND')
-  if (initial.key !== key) throw new ApiError(409, 'Upload key does not match its upload session.', '', 'UPLOAD_INTENT_MISMATCH')
-  if (initial.status === 'completed') return completedResult(initial)
-  if (initial.status === 'rejected') throw new ApiError(409, 'This upload was rejected. Start a new upload.', '', 'UPLOAD_INTENT_REJECTED')
-  if (new Date(initial.expiresAt).getTime() <= Date.now()) throw new ApiError(409, 'Upload session expired. Start the upload again.', '', 'UPLOAD_INTENT_EXPIRED')
+  const intent: any = await UploadIntent.findOne({ uploadId, organizationId, userId })
+  if (!intent) throw new ApiError(404, 'Upload session was not found.', '', 'UPLOAD_INTENT_NOT_FOUND')
+  const expectedUploadKey = String(intent.uploadKey || intent.key)
+  if (expectedUploadKey !== suppliedKey) throw new ApiError(409, 'Upload key does not match its upload session.', '', 'UPLOAD_INTENT_MISMATCH')
+  const currentStatus = responseStatus(String(intent.status || ''))
+  if (currentStatus === 'ready' || ['uploaded', 'verifying', 'processing'].includes(currentStatus)) return presentStatus(intent)
+  if (currentStatus === 'rejected') throw new ApiError(409, 'This upload was rejected. Start a new upload.', '', 'UPLOAD_INTENT_REJECTED')
+  if (new Date(intent.expiresAt).getTime() <= Date.now()) throw new ApiError(409, 'Upload session expired. Start the upload again.', '', 'UPLOAD_INTENT_EXPIRED')
 
-  const transactionsSupported = await mongoSupportsTransactions()
-  if (config.isProduction && !transactionsSupported) {
-    throw new ApiError(503, 'Direct upload completion requires a transaction-capable MongoDB deployment.', '', 'UPLOAD_COMPLETION_UNAVAILABLE')
-  }
-
-  const completionStartedAt = new Date()
-  const staleCompletionBefore = new Date(Date.now() - DIRECT_UPLOAD_COMPLETION_LOCK_MS)
-  const locked: any = await UploadIntent.findOneAndUpdate(
-    {
-      _id: initial._id,
-      $or: [
-        { status: 'pending' },
-        { status: 'completing', completionStartedAt: { $lte: staleCompletionBefore } },
-      ],
-    },
-    { $set: { status: 'completing', completionStartedAt } },
-    { new: true },
-  )
-  if (!locked) {
-    const current: any = await UploadIntent.findById(initial._id)
-    if (current?.status === 'completed') return completedResult(current)
-    throw new ApiError(409, 'Upload completion is already in progress. Retry shortly.', '', 'UPLOAD_COMPLETION_IN_PROGRESS')
-  }
-
-  let object
+  let object: { size: number; contentType: string; etag?: string }
   try {
-    object = await ObjectStorageService.head(key)
+    object = await ObjectStorageService.head(expectedUploadKey)
   } catch (error: any) {
-    await UploadIntent.updateOne({ _id: locked._id, status: 'completing' }, { $set: { status: 'pending', completionStartedAt: null } })
-    if (error instanceof ApiError && error.statusCode === 409 && /not available/i.test(error.message)) {
+    if (error instanceof ApiError && (error.statusCode === 404 || error.statusCode === 409 || /not available/i.test(error.message))) {
       throw new ApiError(409, 'Uploaded object is not available yet.', '', 'UPLOAD_OBJECT_NOT_FOUND')
     }
     throw error
   }
 
   const actualMime = String(object.contentType || '').split(';')[0].trim().toLowerCase()
-  if (actualMime !== locked.mimeType) {
-    return rejectIntent(locked, new ApiError(400, 'Uploaded object type does not match the signed upload.', '', 'UPLOAD_CONTENT_TYPE_MISMATCH'))
+  if (actualMime && actualMime !== 'application/octet-stream' && actualMime !== intent.mimeType) {
+    return rejectBeforeProcessing(intent, 'UPLOAD_CONTENT_TYPE_MISMATCH', 'Uploaded object type does not match the signed upload.')
   }
-  if (Number(object.size) !== Number(locked.declaredSize) || Number(object.size) < 1 || Number(object.size) > MAX_DIRECT_UPLOAD_BYTES) {
-    return rejectIntent(locked, new ApiError(400, 'Uploaded object size does not match the declared file.', '', 'UPLOAD_SIZE_MISMATCH'))
-  }
-
-  try {
-    await EntitlementService.assertStorage(organizationId, Number(object.size))
-  } catch (error) {
-    if (error instanceof ApiError && error.statusCode < 500) {
-      return rejectIntent(locked, error)
-    }
-    await UploadIntent.updateOne(
-      { _id: locked._id, status: 'completing' },
-      { $set: { status: 'pending', completionStartedAt: null } },
-    ).catch(() => undefined)
-    throw error
+  if (Number(object.size) !== Number(intent.declaredSize) || Number(object.size) < 1 || Number(object.size) > MAX_DIRECT_UPLOAD_BYTES) {
+    return rejectBeforeProcessing(intent, 'UPLOAD_SIZE_MISMATCH', 'Uploaded object size does not match the declared file.')
   }
 
-  const publicUrl = ObjectStorageService.publicUrl(key)
-  const finishedAt = new Date()
-
-  const persist = async (session: mongoose.ClientSession | null) => {
-    const intentQuery = UploadIntent.findOne({ _id: locked._id, organizationId, status: 'completing' })
-    if (session) intentQuery.session(session)
-    const current: any = await intentQuery
-    if (!current) throw new ApiError(409, 'Upload completion state changed. Retry shortly.', '', 'UPLOAD_COMPLETION_IN_PROGRESS')
-
-    await Organization.updateOne(
-      { organizationId },
-      { $inc: { storageUsedBytes: Number(object.size) } },
-      session ? { session } : undefined,
-    )
-    await UploadIntent.updateOne(
-      { _id: current._id, status: 'completing' },
-      { $set: { status: 'completed', actualSize: Number(object.size), publicUrl, completedAt: finishedAt, completionStartedAt: null } },
-      session ? { session } : undefined,
-    )
-  }
-
-  if (transactionsSupported) {
-    const session = await mongoose.startSession()
-    try {
-      await session.withTransaction(() => persist(session))
-    } catch (error) {
-      await UploadIntent.updateOne({ _id: locked._id, status: 'completing' }, { $set: { status: 'pending', completionStartedAt: null } }).catch(() => undefined)
-      throw error
-    } finally {
-      await session.endSession()
-    }
-  } else {
-    try {
-      await persist(null)
-    } catch (error) {
-      await UploadIntent.updateOne({ _id: locked._id, status: 'completing' }, { $set: { status: 'pending', completionStartedAt: null } }).catch(() => undefined)
-      throw error
-    }
-  }
-
-  recordUploadSuccess({ kind: 'public-image', bytes: Number(object.size) })
-  logger.info('direct_upload_completed', {
-    event: 'direct_upload_completed',
-    organizationId,
-    uploadId,
-    folder: locked.folder,
-    sizeBytes: Number(object.size),
-  })
-
-  const completed: any = await UploadIntent.findById(locked._id)
-  return completedResult(completed || { ...locked.toObject(), status: 'completed', actualSize: object.size, publicUrl })
+  await EntitlementService.assertStorage(organizationId, Number(object.size))
+  const uploadedAt = new Date()
+  await UploadIntent.updateOne(
+    { _id: intent._id, status: { $in: ['presigned', 'pending'] } },
+    { $set: { status: 'uploaded', actualSize: Number(object.size), uploadedAt, nextProcessingAt: uploadedAt, lastProcessingError: '' } },
+  )
+  const updated: any = await UploadIntent.findById(intent._id)
+  return presentStatus(updated || { ...intent.toObject(), status: 'uploaded', actualSize: object.size })
 }
 
-
+const status = async (organizationId: string, userId: string, uploadId: string) => {
+  const normalized = String(uploadId || '').trim()
+  if (!SAFE_UPLOAD_ID.test(normalized)) throw new ApiError(400, 'Invalid upload id.', '', 'INVALID_UPLOAD_ID')
+  const intent: any = await UploadIntent.findOne({ uploadId: normalized, organizationId, userId })
+  if (!intent) throw new ApiError(404, 'Upload session was not found.', '', 'UPLOAD_INTENT_NOT_FOUND')
+  return presentStatus(intent)
+}
 
 const cleanupExpired = async (limit = 100) => {
   const now = new Date()
   const staleCompletedBefore = new Date(Date.now() - DIRECT_UPLOAD_COMPLETED_RETENTION_MS)
-  const [incomplete, completed] = await Promise.all([
-    UploadIntent.find({ status: { $in: ['pending', 'completing', 'rejected'] }, expiresAt: { $lte: now } }).sort({ expiresAt: 1 }).limit(limit),
-    UploadIntent.find({ status: 'completed', completedAt: { $lte: staleCompletedBefore } }).sort({ completedAt: 1 }).limit(limit),
-  ])
+  const incomplete: any[] = await UploadIntent.find({
+    status: { $in: ['pending', 'completing', 'presigned', 'uploaded', 'verifying', 'processing', 'rejected'] },
+    expiresAt: { $lte: now },
+  }).sort({ expiresAt: 1 }).limit(limit)
+  const completed: any[] = await UploadIntent.find({
+    status: { $in: ['completed', 'ready'] },
+    $or: [
+      { processedAt: { $lte: staleCompletedBefore } },
+      { completedAt: { $lte: staleCompletedBefore } },
+    ],
+  }).sort({ completedAt: 1 }).limit(limit)
 
   let incompleteDeleted = 0
   for (const intent of incomplete) {
-    await ObjectStorageService.remove(intent.key).catch(() => undefined)
+    const keys = Array.from(new Set([String(intent.uploadKey || ''), String(intent.key || '')].filter(Boolean)))
+    await Promise.allSettled(keys.map((key) => ObjectStorageService.remove(key)))
     await intent.deleteOne()
     incompleteDeleted += 1
   }
   if (completed.length) {
-    await UploadIntent.deleteMany({ _id: { $in: completed.map((intent) => intent._id) }, status: 'completed' })
+    await UploadIntent.deleteMany({ _id: { $in: completed.map((intent) => intent._id) }, status: { $in: ['completed', 'ready'] } })
   }
   return { incompleteDeleted, completedIntentsDeleted: completed.length }
 }
 
-export const DirectUploadService = { presign, complete, cleanupExpired }
+export const DirectUploadService = { presign, complete, status, cleanupExpired }

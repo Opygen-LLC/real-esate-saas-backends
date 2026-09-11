@@ -228,6 +228,12 @@ const objectStorageBrowserOrigin = normalizeStorageUrl(
   process.env.OBJECT_STORAGE_BROWSER_ORIGIN?.trim() || publicSiteOrigin,
   { httpsInProduction: true, allowPath: false },
 )
+const imageTransformationsEnabled = envBoolean('CLOUDFLARE_IMAGE_TRANSFORMATIONS_ENABLED', false)
+const imageTransformBaseUrl = normalizeStorageUrl(
+  'CLOUDFLARE_IMAGE_TRANSFORM_BASE_URL',
+  process.env.CLOUDFLARE_IMAGE_TRANSFORM_BASE_URL?.trim() || '',
+  { httpsInProduction: true, allowPath: false },
+)
 
 
 if (!['vercel', 'generic'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic')
@@ -321,6 +327,7 @@ if (isProduction) {
   if (r2PrivateBucketName === r2PublicBucketName) throw new Error('R2_PRIVATE_BUCKET_NAME must be different from the public R2_PUBLIC_BUCKET_NAME in production')
   if (!r2Endpoint) throw new Error('R2_ENDPOINT is required in production (or set R2_ACCOUNT_ID to derive it)')
   if (!objectStoragePublicBaseUrl) throw new Error('OBJECT_STORAGE_PUBLIC_BASE_URL is required in production for public R2 media delivery')
+  if (imageTransformationsEnabled && !imageTransformBaseUrl) throw new Error('CLOUDFLARE_IMAGE_TRANSFORM_BASE_URL is required when Cloudflare Image Transformations are enabled')
   const r2BucketPattern = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/
   if (!r2BucketPattern.test(r2PublicBucketName)) throw new Error('R2_PUBLIC_BUCKET_NAME must be 3-63 chars using lowercase letters, numbers and hyphens')
   if (!r2BucketPattern.test(r2PrivateBucketName)) throw new Error('R2_PRIVATE_BUCKET_NAME must be 3-63 chars using lowercase letters, numbers and hyphens')
@@ -532,7 +539,11 @@ export default {
     region: 'auto',
     public_base_url: objectStoragePublicBaseUrl,
     browser_origin: objectStorageBrowserOrigin,
+    image_transformations_enabled: imageTransformationsEnabled,
+    image_transform_base_url: imageTransformBaseUrl,
     signed_url_ttl_seconds: envInteger('OBJECT_STORAGE_SIGNED_URL_TTL', 600, 60, 3600),
+    image_processor_poll_ms: envInteger('IMAGE_PROCESSOR_POLL_MS', 1000, 250, 30000),
+    image_processor_batch_size: envInteger('IMAGE_PROCESSOR_BATCH_SIZE', 2, 1, 10),
     health_timeout_ms: envInteger('OBJECT_STORAGE_HEALTH_TIMEOUT_MS', 3000, 500, 15000),
     health_cache_ms: envInteger('OBJECT_STORAGE_HEALTH_CACHE_MS', 10000, 1000, 60000),
     property_draft_ttl_minutes: Math.max(60, Math.min(14 * 24 * 60, Number(process.env.PROPERTY_DRAFT_ASSET_TTL_MINUTES || 7 * 24 * 60))),

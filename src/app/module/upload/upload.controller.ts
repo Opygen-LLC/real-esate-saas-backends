@@ -90,7 +90,13 @@ const presignDirectUpload = catchAsync(async (req: Request, res: Response) => {
 const completeDirectUpload = catchAsync(async (req: Request, res: Response) => {
   const organizationId = requireTenant(req)
   const data = await DirectUploadService.complete(organizationId, directActorId(req), req.body || {})
-  res.status(httpStatus.CREATED).json(data)
+  res.status(httpStatus.ACCEPTED).json(data)
+})
+
+const directUploadStatus = catchAsync(async (req: Request, res: Response) => {
+  const organizationId = requireTenant(req)
+  const data = await DirectUploadService.status(organizationId, directActorId(req), String(req.params.uploadId || ''))
+  res.status(httpStatus.OK).json(data)
 })
 
 const uploadSingle = catchAsync(async (req: Request, res: Response) => {
@@ -130,6 +136,7 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
 export const UploadController = {
   presignDirectUpload,
   completeDirectUpload,
+  directUploadStatus,
   uploadSingle,
   uploadMultiple,
 }

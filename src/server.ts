@@ -5,6 +5,7 @@ import config from './config'
 import { errorLogger, logger } from './shared/logger'
 import { mongoSupportsTransactions } from './app/db/mongoCapabilities'
 import { startPhase3Worker } from './app/module/cron/phase3.worker'
+import { startUploadProcessingWorker } from './app/module/upload/uploadProcessing.worker'
 import { RedisClient } from './shared/redisClient'
 import { verifyEmailProvider } from './app/helpers/sendEmail'
 import { closeRealtimeServer, initializeRealtimeServer } from './app/module/realtime/realtime.server'
@@ -12,6 +13,7 @@ import { assertMongoRuntimeSecurity } from './app/db/databaseSecurity'
 
 let server: Server | undefined
 let stopWorker: (() => void) | undefined
+let stopUploadProcessingWorker: (() => void) | undefined
 let shuttingDown = false
 
 const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
@@ -19,6 +21,7 @@ const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
   shuttingDown = true
   logger.info('graceful_shutdown_started', { reason })
   stopWorker?.()
+  stopUploadProcessingWorker?.()
 
   const force = setTimeout(() => {
     errorLogger.error('graceful_shutdown_timeout', { reason })
@@ -72,6 +75,7 @@ async function bootstrap() {
       throw new Error('SMTP verification failed during startup. Check SMTP_HOST/PORT/SECURE/USER/PASSWORD/FROM and provider network access.')
     }
     stopWorker = startPhase3Worker()
+    stopUploadProcessingWorker = startUploadProcessingWorker()
     server = createServer(app)
     if (config.realtime.enabled) await initializeRealtimeServer(server)
     server.listen(config.port, () => logger.info('server_listening', { port: config.port, workerEnabled: config.runtime.worker_enabled, realtimeEnabled: config.realtime.enabled }))

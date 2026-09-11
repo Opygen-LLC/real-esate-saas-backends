@@ -11,6 +11,7 @@ const router = express.Router()
 // directly from the browser to Cloudflare R2 using the signed PUT URL.
 router.post('/presign', authMiddlewares.auth(), uploadPresignRateLimiter, UploadController.presignDirectUpload)
 router.post('/complete', authMiddlewares.auth(), uploadRateLimiter, UploadController.completeDirectUpload)
+router.get('/status/:uploadId', authMiddlewares.auth(), uploadPresignRateLimiter, UploadController.directUploadStatus)
 
 // POST /upload or /upload/single - Upload single image
 router.post('/single', authMiddlewares.auth(), uploadRateLimiter, uploadSingle, validateUploadedFiles, UploadController.uploadSingle)

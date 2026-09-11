@@ -39,6 +39,7 @@ const PRIVATE_KEY_PATTERNS = [
   /^support\//,
   /^tenants\/[^/]+\/properties\/documents\//,
   /^tenants\/[^/]+\/suppliers\/invoices\//,
+  /^tenants\/[^/]+\/upload-staging\//,
 ]
 
 const normalizeObjectKey = (value: string): string => {
@@ -142,6 +143,10 @@ const configurationStatus = () => {
     privateBucket: privateBucketName(),
     region: 'auto' as const,
     authMode: 'r2-api-token' as const,
+    imageTransformations: {
+      enabled: Boolean(config.assets.image_transformations_enabled),
+      baseUrl: config.assets.image_transform_base_url || '',
+    },
   }
 }
 
@@ -170,12 +175,37 @@ const publicUrl = (key: string): string => {
   return `${String(config.assets.public_base_url).replace(/\/+$/, '')}/${encodePath(normalized)}`
 }
 
+const publicImageUrl = (key: string): string => {
+  const source = publicUrl(key)
+  if (!config.assets.image_transformations_enabled || !config.assets.image_transform_base_url) return source
+  const base = String(config.assets.image_transform_base_url).replace(/\/+$/, '')
+  const options = 'width=auto,wbreakpoints=320;480;640;960;1280;1600;1920,quality=82,format=auto,fit=scale-down,metadata=none'
+  return `${base}/cdn-cgi/image/${options}/${source}`
+}
+
+const unwrapImageTransformationSource = (value: string): string => {
+  try {
+    const parsed = new URL(value)
+    const marker = '/cdn-cgi/image/'
+    const index = parsed.pathname.indexOf(marker)
+    if (index < 0) return value
+    const after = parsed.pathname.slice(index + marker.length)
+    const slash = after.indexOf('/')
+    if (slash < 0) return value
+    const encodedSource = after.slice(slash + 1)
+    if (!/^https?:\/\//i.test(encodedSource)) return value
+    return decodeURIComponent(encodedSource)
+  } catch {
+    return value
+  }
+}
+
 /**
  * Resolve an object key from either a raw key or a URL owned by this R2 setup.
  * Unknown/external URLs return null so tenant purge cannot delete third-party data.
  */
 const keyFromReference = (value: string): string | null => {
-  const raw = String(value || '').trim()
+  const raw = unwrapImageTransformationSource(String(value || '').trim())
   if (!raw) return null
 
   if (!/^https?:\/\//i.test(raw)) {
@@ -617,6 +647,7 @@ export const ObjectStorageService = {
   exists,
   keyFromReference,
   publicUrl,
+  publicImageUrl,
   browserCorsHealth,
   privateBucketSecurityHealth,
   health,

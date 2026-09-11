@@ -3,6 +3,7 @@ import { Schema, model } from 'mongoose'
 const websiteUploadIntentSchema = new Schema({
   organizationId: { type: String, required: true, index: true },
   key: { type: String, required: true, unique: true, index: true },
+  uploadKey: { type: String, default: '', index: true },
   objectKeys: { type: [String], default: [] },
   declaredSize: { type: Number, required: true },
   mimeType: { type: String, required: true },

@@ -6,12 +6,18 @@ export const MAX_DIRECT_UPLOAD_FILES = 10
 export const DIRECT_UPLOAD_INTENT_TTL_MS = 60 * 60 * 1000
 export const DIRECT_UPLOAD_COMPLETED_RETENTION_MS = 24 * 60 * 60 * 1000
 export const DIRECT_UPLOAD_COMPLETION_LOCK_MS = 60 * 1000
+export const DIRECT_UPLOAD_PROCESSING_LOCK_MS = 2 * 60 * 1000
+export const DIRECT_UPLOAD_MAX_PIXELS = 40_000_000
+export const DIRECT_UPLOAD_MAX_SOURCE_DIMENSION = 12_000
+export const DIRECT_UPLOAD_MAX_STORED_DIMENSION = 4_096
 
 export const ALLOWED_UPLOAD_FOLDERS = ['general', 'avatar', 'branding', 'website', 'property'] as const
 export type UploadFolder = (typeof ALLOWED_UPLOAD_FOLDERS)[number]
 
 export const ALLOWED_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png'] as const
 export type UploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number]
+
+export type DirectUploadStatus = 'presigned' | 'uploaded' | 'verifying' | 'processing' | 'ready' | 'rejected'
 
 const allowedFolders = new Set<string>(ALLOWED_UPLOAD_FOLDERS)
 const allowedMimeTypes = new Set<string>(ALLOWED_UPLOAD_MIME_TYPES)

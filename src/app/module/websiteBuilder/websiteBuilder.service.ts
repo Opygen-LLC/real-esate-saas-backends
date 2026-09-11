@@ -5,7 +5,6 @@ import { OperationsJob } from '../operationsQueue/operationsJob.model'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import httpStatus from 'http-status'
 import mongoose, { ClientSession, Types } from 'mongoose'
-import sharp, { type Metadata } from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import { readRemoteImage } from '../../helpers/remoteImage'
 import config from '../../../config'
@@ -330,6 +329,11 @@ const assetKey = (organizationId: string, filename: string, suffix = '', options
   return `tenants/${organizationId}/website/${new Date().toISOString().slice(0,10)}/${randomUUID()}${suffix}-${safe}`
 }
 
+const assetStagingKey = (organizationId: string, filename: string) => {
+  const safe = filename.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').slice(-100) || 'asset'
+  return `tenants/${organizationId}/upload-staging/website/${new Date().toISOString().slice(0,10)}/${randomUUID()}-${safe}`
+}
+
 const presignAsset = async (organizationId: string, payload: any, options: AssetLifecycleOptions = {}) => {
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   if (!ALLOWED_ASSET_MIME_TYPES.has(payload.mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
@@ -341,30 +345,30 @@ const presignAsset = async (organizationId: string, payload: any, options: Asset
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const key = assetKey(organizationId, payload.filename, '', { context, uploadSessionId })
+  const uploadKey = assetStagingKey(organizationId, payload.filename)
+  const signed = ObjectStorageService.presignUpload(uploadKey, payload.mimeType)
+  const original = {
+    key,
+    uploadUrl: await signed.getUploadUrl(),
+    publicUrl: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(key) : ObjectStorageService.publicUrl(key),
+    expiresIn: signed.expiresIn,
+  }
 
-  // Resolve variant keys first (synchronous)
-  const variantWidths = options.context === 'property-draft' ? [320, 640, 1280] : [640, 1280]
-  const variantDefs = payload.mimeType.startsWith('image/')
-    ? variantWidths.flatMap((width) => ['webp', 'avif'].map((format) => ({ width, format, key: `${key}.${width}.${format}` })))
-    : []
-
-  // Generate all R2 signed upload URLs in parallel (async with the S3-compatible SDK)
-  const [originalUploadUrl, ...variantUploadUrls] = await Promise.all([
-    ObjectStorageService.presignUpload(key, payload.mimeType).getUploadUrl(),
-    ...variantDefs.map((v) => ObjectStorageService.presignUpload(v.key, `image/${v.format}`).getUploadUrl()),
-  ])
-
-  const original = { key, uploadUrl: originalUploadUrl, publicUrl: ObjectStorageService.publicUrl(key), expiresIn: config.assets.signed_url_ttl_seconds }
-  const requiredVariants = variantDefs.map((v, i) => ({
-    width: v.width,
-    format: v.format,
-    key: v.key,
-    uploadUrl: variantUploadUrls[i],
-    publicUrl: ObjectStorageService.publicUrl(v.key),
-    expiresIn: config.assets.signed_url_ttl_seconds,
-  }))
-
-  await WebsiteUploadIntent.create({ organizationId, key, objectKeys: [key, ...variantDefs.map((v) => v.key)], declaredSize: size, mimeType: payload.mimeType, context, uploadSessionId, lastReferencedAt: new Date(), expiresAt: new Date(Date.now() + 60 * 60_000) })
+  // Phase 4 stores one clean original. Responsive sizes/formats are generated
+  // at Cloudflare's edge rather than uploaded and stored as duplicate variants.
+  const requiredVariants: any[] = []
+  await WebsiteUploadIntent.create({
+    organizationId,
+    key,
+    uploadKey,
+    objectKeys: [uploadKey, key],
+    declaredSize: size,
+    mimeType: payload.mimeType,
+    context,
+    uploadSessionId,
+    lastReferencedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60_000),
+  })
   if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
   return { original, requiredVariants }
 }
@@ -384,7 +388,7 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
   }
   const asset: any = await WebsiteAsset.findOneAndUpdate(
     { organizationId, key: payload.key },
-    { $set: { url: ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, context: intent.context || 'website', uploadSessionId: intent.uploadSessionId || '', claimed: intent.context === 'property-draft' ? false : true, claimedByPropertyId: null, claimedAt: intent.context === 'property-draft' ? null : new Date(), lastReferencedAt: new Date() } },
+    { $set: { url: payload.mimeType.startsWith('image/') ? ObjectStorageService.publicImageUrl(payload.key) : ObjectStorageService.publicUrl(payload.key), originalName: String(payload.originalName || '').slice(0, 255), mimeType: payload.mimeType, width: payload.width, height: payload.height, altText: String(payload.altText || '').slice(0, 300), status: 'pending', scanStatus: 'pending', uploadedBy: userId, context: intent.context || 'website', uploadSessionId: intent.uploadSessionId || '', claimed: intent.context === 'property-draft' ? false : true, claimedByPropertyId: null, claimedAt: intent.context === 'property-draft' ? null : new Date(), lastReferencedAt: new Date() } },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   )
   await OperationsQueueService.schedule({ organizationId, type: 'asset_finalize', entityId: asset._id.toString(), runAt: new Date(Date.now() + 250), payload: { variants: payload.variants || [] }, maxAttempts: 6 })
@@ -395,19 +399,10 @@ const completeAsset = async (organizationId: string, payload: any, userId?: stri
 }
 
 
-const MIME_FROM_SHARP_FORMAT: Record<string, string> = {
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  heif: 'image/avif',
-}
-
 /**
- * Server-proxied upload path for property media. This is intentionally part of
- * the WebsiteAsset/WebsiteUploadIntent lifecycle so ownership checks, storage
- * accounting, malware scanning, draft cleanup and create-time claiming stay
- * identical to presigned browser uploads.
+ * Server fallback for property/website media. Bytes are written to the same
+ * private staging bucket as direct browser uploads and are normalized by the
+ * asynchronous asset worker. No Sharp decode/re-encode runs in this request.
  */
 const uploadAssetBuffer = async (
   organizationId: string,
@@ -415,39 +410,25 @@ const uploadAssetBuffer = async (
   userId?: string,
   options: AssetLifecycleOptions = {},
 ) => {
-  const declaredMime = String(file?.mimetype || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file?.mimetype || '').toLowerCase()
+  const mimeType = String(file?.mimetype || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file?.mimetype || '').toLowerCase()
   if (!file?.buffer?.length) throw new ApiError(400, 'No property photo was uploaded')
   if (file.buffer.length > 20 * 1024 * 1024) throw new ApiError(413, 'Property photos must be 20 MB or smaller')
+  if (!ALLOWED_ASSET_MIME_TYPES.has(mimeType)) throw new ApiError(400, 'Asset file type is not allowed')
+  StoredFileSecurityService.assertSafeUploadFilename(file.originalname || 'property-image.jpg', mimeType)
 
-  let metadata: Metadata
-  try {
-    metadata = await sharp(file.buffer, { failOn: 'error', limitInputPixels: 40_000_000 }).metadata()
-  } catch {
-    throw new ApiError(400, 'The uploaded file is not a valid image')
-  }
-  const detectedMime = metadata.format ? MIME_FROM_SHARP_FORMAT[metadata.format] : undefined
-  if (!detectedMime || !ALLOWED_ASSET_MIME_TYPES.has(detectedMime)) throw new ApiError(400, 'Asset file type is not allowed')
-  if (ALLOWED_ASSET_MIME_TYPES.has(declaredMime) && declaredMime !== detectedMime) throw new ApiError(400, 'Uploaded image content does not match its file type')
-  const mimeType = detectedMime
-
-  // The server fallback is a reliability path, not an image-rendering worker.
-  // Keep it deliberately light: validate the image with Sharp, then store the
-  // original bytes only. Generating six WebP/AVIF renditions inline caused
-  // large CPU/RAM spikes when two fallback uploads ran concurrently and could
-  // restart a small API container immediately before POST /property. Browser
-  // direct uploads can still provide optimized renditions; Next/Image also
-  // optimizes the original at delivery time.
   await TenantPurgeBarrier.assertTenantWritable(organizationId)
   await EntitlementService.assertStorage(organizationId, file.buffer.length)
   await UsageBudgetService.reserveUploadBytes(organizationId, file.buffer.length)
   const context = options.context || 'website'
   const uploadSessionId = context === 'property-draft' ? assertDraftSessionId(options.uploadSessionId) : ''
   const originalKey = assetKey(organizationId, file.originalname || 'property-image', '', { context, uploadSessionId })
-  const objectKeys = [originalKey]
+  const uploadKey = assetStagingKey(organizationId, file.originalname || 'property-image')
+  const objectKeys = [uploadKey, originalKey]
 
   await WebsiteUploadIntent.create({
     organizationId,
     key: originalKey,
+    uploadKey,
     objectKeys,
     declaredSize: file.buffer.length,
     mimeType,
@@ -459,14 +440,12 @@ const uploadAssetBuffer = async (
   if (context === 'property-draft') await touchPropertyDraftSession(organizationId, uploadSessionId)
 
   try {
-    await ObjectStorageService.putBuffer(originalKey, file.buffer, mimeType)
+    await ObjectStorageService.putBuffer(uploadKey, file.buffer, mimeType)
     const fallbackAlt = String(file.originalname || 'Property photo').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').slice(0, 300)
     return await completeAsset(organizationId, {
       key: originalKey,
       originalName: file.originalname || 'property-image',
       mimeType,
-      width: metadata.width,
-      height: metadata.height,
       altText: String(options.altText || fallbackAlt).slice(0, 300),
       variants: [],
     }, userId)

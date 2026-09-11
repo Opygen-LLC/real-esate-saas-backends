@@ -1,4 +1,4 @@
-import sharp from 'sharp'
+import sharp, { type Metadata } from 'sharp'
 import ApiError from '../../../errors/ApiError'
 import { ObjectStorageService } from './objectStorage.service'
 
@@ -19,6 +19,10 @@ const EXTENSIONS_BY_MIME: Record<string, string[]> = {
   'font/woff2': ['.woff2'],
 }
 
+const MAX_IMAGE_PIXELS = 40_000_000
+const MAX_SOURCE_DIMENSION = 12_000
+const MAX_STORED_DIMENSION = 4_096
+
 const assertSafeUploadFilename = (originalName: string, expectedMime: string): void => {
   const name = String(originalName || '').trim()
   if (!name || name.length > 255 || /[\/\\\u0000]/.test(name) || name === '.' || name === '..') {
@@ -31,13 +35,26 @@ const assertSafeUploadFilename = (originalName: string, expectedMime: string): v
   }
 }
 
+const validateImageMetadata = (metadata: Metadata, expectedMime: string): Metadata => {
+  if (!metadata.format || !IMAGE_FORMAT_BY_MIME[expectedMime]?.includes(metadata.format)) {
+    throw new ApiError(400, 'Uploaded image bytes do not match the declared file type')
+  }
+  const width = Number(metadata.width || 0)
+  const height = Number(metadata.height || 0)
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    throw new ApiError(400, 'Uploaded image has invalid dimensions')
+  }
+  if (width > MAX_SOURCE_DIMENSION || height > MAX_SOURCE_DIMENSION || width * height > MAX_IMAGE_PIXELS) {
+    throw new ApiError(413, 'Uploaded image dimensions are too large')
+  }
+  if (Number(metadata.pages || 1) > 1) throw new ApiError(400, 'Animated or multi-page images are not allowed')
+  return metadata
+}
+
 const validateImage = async (body: Buffer, expectedMime: string) => {
   try {
-    const metadata = await sharp(body, { failOn: 'error', limitInputPixels: 40_000_000 }).metadata()
-    if (!metadata.format || !IMAGE_FORMAT_BY_MIME[expectedMime]?.includes(metadata.format)) {
-      throw new ApiError(400, 'Uploaded image bytes do not match the declared file type')
-    }
-    return metadata
+    const metadata = await sharp(body, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS }).metadata()
+    return validateImageMetadata(metadata, expectedMime)
   } catch (error) {
     if (error instanceof ApiError) throw error
     throw new ApiError(400, 'Uploaded file is not a valid image')
@@ -75,37 +92,76 @@ const validateStoredFile = async (key: string, expectedMime: string, maxBytes: n
   return { body, size: body.length }
 }
 
+const inspectStoredImage = async (key: string, expectedMime: string, maxBytes: number) => {
+  if (!(expectedMime in IMAGE_FORMAT_BY_MIME)) throw new ApiError(400, 'Stored object is not a supported image type')
+  const body = await ObjectStorageService.readBuffer(key, maxBytes)
+  const metadata = await validateImage(body, expectedMime)
+  return { body, size: body.length, metadata }
+}
+
 /**
- * Re-encode public images after scanning. Decoding + re-encoding removes EXIF,
- * embedded profiles and trailing/polyglot bytes while bounding dimensions.
+ * Decode and re-encode an image once after upload. No metadata is copied into
+ * the output, which strips EXIF/location/profile payloads and trailing data.
+ * Responsive delivery is handled by Cloudflare Image Transformations, so this
+ * function produces one durable clean original rather than many stored sizes.
  */
-const sanitizeStoredPublicImage = async (
-  key: string,
+const sanitizeImageBuffer = async (
+  body: Buffer,
   expectedMime: string,
-  options: { maxWidth?: number; maxHeight?: number; maxBytes?: number } = {},
+  options: { maxWidth?: number; maxHeight?: number } = {},
 ) => {
-  const maxBytes = options.maxBytes || 25 * 1024 * 1024
-  const { body } = await validateStoredFile(key, expectedMime, maxBytes)
   try {
-    let pipeline = sharp(body, { failOn: 'error', limitInputPixels: 40_000_000 }).rotate()
-    const maxWidth = Math.max(1, Math.min(4096, Math.floor(options.maxWidth || 4096)))
-    const maxHeight = Math.max(1, Math.min(4096, Math.floor(options.maxHeight || 4096)))
-    pipeline = pipeline.resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true })
+    await validateImage(body, expectedMime)
+    const maxWidth = Math.max(1, Math.min(MAX_STORED_DIMENSION, Math.floor(options.maxWidth || MAX_STORED_DIMENSION)))
+    const maxHeight = Math.max(1, Math.min(MAX_STORED_DIMENSION, Math.floor(options.maxHeight || MAX_STORED_DIMENSION)))
+    let pipeline = sharp(body, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS })
+      .rotate()
+      .resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true })
 
     let sanitized: Buffer
-    if (expectedMime === 'image/jpeg') sanitized = await pipeline.jpeg({ quality: 84, mozjpeg: true }).toBuffer()
-    else if (expectedMime === 'image/png') sanitized = await pipeline.png({ compressionLevel: 8 }).toBuffer()
+    if (expectedMime === 'image/jpeg') sanitized = await pipeline.jpeg({ quality: 86, mozjpeg: false }).toBuffer()
+    else if (expectedMime === 'image/png') sanitized = await pipeline.png({ compressionLevel: 6 }).toBuffer()
     else if (expectedMime === 'image/webp') sanitized = await pipeline.webp({ quality: 84 }).toBuffer()
     else if (expectedMime === 'image/avif') sanitized = await pipeline.avif({ quality: 72 }).toBuffer()
     else throw new ApiError(400, 'Unsupported public image format')
 
-    const metadata = await sharp(sanitized, { failOn: 'error', limitInputPixels: 40_000_000 }).metadata()
-    await ObjectStorageService.putBuffer(key, sanitized, expectedMime)
-    return { size: sanitized.length, width: metadata.width, height: metadata.height }
+    const metadata = validateImageMetadata(
+      await sharp(sanitized, { failOn: 'error', limitInputPixels: MAX_IMAGE_PIXELS }).metadata(),
+      expectedMime,
+    )
+    return { buffer: sanitized, size: sanitized.length, width: Number(metadata.width), height: Number(metadata.height) }
   } catch (error) {
     if (error instanceof ApiError) throw error
     throw new ApiError(400, 'Uploaded image could not be safely normalized')
   }
 }
 
-export const StoredFileSecurityService = { assertSafeUploadFilename, validateStoredFile, sanitizeStoredPublicImage }
+const prepareStoredPublicImage = async (
+  key: string,
+  expectedMime: string,
+  options: { maxWidth?: number; maxHeight?: number; maxBytes?: number } = {},
+) => {
+  const maxBytes = options.maxBytes || 25 * 1024 * 1024
+  const { body } = await inspectStoredImage(key, expectedMime, maxBytes)
+  return sanitizeImageBuffer(body, expectedMime, options)
+}
+
+/** Backward-compatible in-place sanitizer for older callers. */
+const sanitizeStoredPublicImage = async (
+  key: string,
+  expectedMime: string,
+  options: { maxWidth?: number; maxHeight?: number; maxBytes?: number } = {},
+) => {
+  const sanitized = await prepareStoredPublicImage(key, expectedMime, options)
+  await ObjectStorageService.putBuffer(key, sanitized.buffer, expectedMime)
+  return { size: sanitized.size, width: sanitized.width, height: sanitized.height }
+}
+
+export const StoredFileSecurityService = {
+  assertSafeUploadFilename,
+  validateStoredFile,
+  inspectStoredImage,
+  sanitizeImageBuffer,
+  prepareStoredPublicImage,
+  sanitizeStoredPublicImage,
+}

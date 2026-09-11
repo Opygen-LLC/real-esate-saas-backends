@@ -21,6 +21,7 @@ import { Metrics } from "./shared/metrics";
 import { RedisClient } from "./shared/redisClient";
 import { logger } from "./shared/logger";
 import { getWorkerHealth } from "./app/module/cron/phase3.worker";
+import { getUploadProcessingWorkerHealth } from "./app/module/upload/uploadProcessing.worker";
 import { mongoSupportsTransactions } from "./app/db/mongoCapabilities";
 import {
   emailProviderStatus,
@@ -148,6 +149,7 @@ app.get("/internal/health", authMiddlewares.authSuperAdmin, catchAsync(async (_r
   res.setHeader("Cache-Control", "no-store");
   const mongo = mongoose.connection.readyState === 1;
   const worker = getWorkerHealth();
+  const imageProcessor = getUploadProcessingWorkerHealth();
   const emptyDatabaseBackupStatus: DatabaseBackupOperationStatus = {
     _id: "database_backup",
     status: "never_run",
@@ -193,6 +195,7 @@ app.get("/internal/health", authMiddlewares.authSuperAdmin, catchAsync(async (_r
         lastError: databaseBackup.lastError || "",
       },
       propertyDraftCleanup: worker.propertyDraftCleanup,
+      imageProcessor,
       propertyMedia,
     },
   });
@@ -246,7 +249,8 @@ const readinessHandler = async (req: Request, res: Response) => {
       : Promise.resolve(unavailableDatabaseBackupStatus),
   ]);
   const worker = getWorkerHealth();
-  const workerReady = !config.runtime.worker_enabled || worker.healthy;
+  const imageProcessor = getUploadProcessingWorkerHealth();
+  const workerReady = !config.runtime.worker_enabled || (worker.healthy && imageProcessor.healthy);
   const transactionReady = transactions;
   const emailReady = !config.isProduction || email;
   const mediaReady =
@@ -269,6 +273,7 @@ const readinessHandler = async (req: Request, res: Response) => {
   Metrics.setGauge("dependency_healthy", redis ? 1 : 0, { dependency: "redis" });
   Metrics.setGauge("dependency_healthy", emailReady ? 1 : 0, { dependency: "email" });
   Metrics.setGauge("dependency_healthy", workerReady ? 1 : 0, { dependency: "worker" });
+  Metrics.setGauge("dependency_healthy", imageProcessor.healthy ? 1 : 0, { dependency: "image_processor" });
   Metrics.setGauge("dependency_healthy", objectStorage.healthy ? 1 : 0, { dependency: "object_storage" });
   Metrics.setGauge("dependency_healthy", clamav.healthy ? 1 : 0, { dependency: "malware_scanner" });
   Metrics.setGauge("dependency_healthy", privacyReady ? 1 : 0, { dependency: "privacy_policy" });
@@ -301,6 +306,7 @@ const readinessHandler = async (req: Request, res: Response) => {
         lastCheckedAt: emailStatus.lastCheckedAt,
       },
       worker: config.runtime.worker_enabled ? worker : "disabled",
+      imageProcessor: config.runtime.worker_enabled ? imageProcessor : "disabled",
       objectStorage,
       clamav,
       privacy: { ...privacy, healthy: privacyReady },
