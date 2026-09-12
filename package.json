@@ -259,7 +259,13 @@
     "storage:migration:rewrite-refs": "node scripts/storage-migration/rewrite-gcs-references.mjs",
     "storage:migration:verify": "node scripts/storage-migration/verify-gcs-r2.mjs",
     "storage:migration:finalize": "node scripts/storage-migration/finalize-cutover.mjs",
-    "test:phase2-cloudflare-domain": "node --test tests/phase2-cloudflare-domain/*.test.cjs"
+    "test:phase2-cloudflare-domain": "node --test tests/phase2-cloudflare-domain/*.test.cjs",
+    "cloudflare:phase3:plan": "node scripts/cloudflare-phase3.mjs plan",
+    "cloudflare:phase3:bootstrap": "node scripts/cloudflare-phase3.mjs bootstrap",
+    "cloudflare:phase3:cutover": "node scripts/cloudflare-phase3.mjs cutover",
+    "cloudflare:phase3:verify": "node scripts/cloudflare-phase3.mjs verify",
+    "test:phase3-cloudflare-platform": "node --test tests/phase3-cloudflare-platform/*.test.cjs",
+    "cloudflare:phase3:sync-routes": "node scripts/cloudflare-phase3.mjs bootstrap"
   },
   "keywords": [
     "real-estate",

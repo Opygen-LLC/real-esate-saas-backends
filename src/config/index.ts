@@ -187,6 +187,10 @@ const cloudflareApiToken = process.env.CLOUDFLARE_API_TOKEN?.trim() || ''
 const cloudflareApiBase = (process.env.CLOUDFLARE_API_BASE?.trim() || 'https://api.cloudflare.com/client/v4').replace(/\/$/, '')
 const cloudflareSaasFallbackOrigin = (process.env.CLOUDFLARE_SAAS_FALLBACK_ORIGIN?.trim() || '').replace(/\.$/, '').toLowerCase()
 const cloudflareSaasCnameTarget = (process.env.CLOUDFLARE_SAAS_CNAME_TARGET?.trim() || '').replace(/\.$/, '').toLowerCase()
+const cloudflareZoneName = (process.env.CLOUDFLARE_ZONE_NAME?.trim() || 'opygen.com').replace(/\.$/, '').toLowerCase()
+const cloudflareWorkerScriptName = process.env.CLOUDFLARE_WORKER_SCRIPT_NAME?.trim() || 'opygen-real-estate-frontend'
+const cloudflarePlatformRootDomain = (process.env.CLOUDFLARE_PLATFORM_ROOT_DOMAIN?.trim() || 'realestate.opygen.com').replace(/\.$/, '').toLowerCase()
+const cloudflareApexRoutingMode = (process.env.CLOUDFLARE_APEX_ROUTING_MODE?.trim() || 'optional').toLowerCase()
 const domainReplacementGraceHours = Math.max(1, Math.min(24 * 30, Number(process.env.DOMAIN_REPLACEMENT_GRACE_HOURS || 168)))
 const workerEnabled = envBoolean('WORKER_ENABLED', true)
 
@@ -256,6 +260,10 @@ if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).su
 if (domainProvider === 'cloudflare' && !z.string().url().safeParse(cloudflareApiBase).success) throw new Error('CLOUDFLARE_API_BASE must be a valid absolute URL')
 if (cloudflareSaasFallbackOrigin && (cloudflareSaasFallbackOrigin.includes('://') || cloudflareSaasFallbackOrigin.includes('/'))) throw new Error('CLOUDFLARE_SAAS_FALLBACK_ORIGIN must be a hostname only')
 if (cloudflareSaasCnameTarget && (cloudflareSaasCnameTarget.includes('://') || cloudflareSaasCnameTarget.includes('/'))) throw new Error('CLOUDFLARE_SAAS_CNAME_TARGET must be a hostname only')
+if (cloudflareZoneName && (cloudflareZoneName.includes('://') || cloudflareZoneName.includes('/'))) throw new Error('CLOUDFLARE_ZONE_NAME must be a hostname only')
+if (cloudflarePlatformRootDomain && (cloudflarePlatformRootDomain.includes('://') || cloudflarePlatformRootDomain.includes('/'))) throw new Error('CLOUDFLARE_PLATFORM_ROOT_DOMAIN must be a hostname only')
+if (!/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(cloudflareWorkerScriptName)) throw new Error('CLOUDFLARE_WORKER_SCRIPT_NAME contains unsupported characters')
+if (!['optional', 'required'].includes(cloudflareApexRoutingMode)) throw new Error('CLOUDFLARE_APEX_ROUTING_MODE must be optional or required')
 
 const assertProductionDatabaseUrl = (value: string): void => {
   let parsed: URL
@@ -334,6 +342,9 @@ if (isProduction) {
     requiredInProduction('CLOUDFLARE_API_TOKEN', 20)
     requiredInProduction('CLOUDFLARE_SAAS_FALLBACK_ORIGIN')
     requiredInProduction('CLOUDFLARE_SAAS_CNAME_TARGET')
+    requiredInProduction('CLOUDFLARE_ZONE_NAME')
+    requiredInProduction('CLOUDFLARE_WORKER_SCRIPT_NAME')
+    requiredInProduction('CLOUDFLARE_PLATFORM_ROOT_DOMAIN')
     if (!/^[a-f0-9]{32}$/i.test(cloudflareAccountId)) throw new Error('CLOUDFLARE_ACCOUNT_ID must be a 32-character Cloudflare account identifier')
     if (!/^[a-f0-9]{32}$/i.test(cloudflareZoneId)) throw new Error('CLOUDFLARE_ZONE_ID must be a 32-character Cloudflare zone identifier')
     if (/placeholder|change[-_ ]?me|default_20bytes/i.test(cloudflareApiToken)) throw new Error('CLOUDFLARE_API_TOKEN must be a real production API token, not a placeholder')
@@ -520,6 +531,10 @@ export default {
     cloudflare_api_base: cloudflareApiBase,
     cloudflare_saas_fallback_origin: cloudflareSaasFallbackOrigin,
     cloudflare_saas_cname_target: cloudflareSaasCnameTarget,
+    cloudflare_zone_name: cloudflareZoneName,
+    cloudflare_worker_script_name: cloudflareWorkerScriptName,
+    cloudflare_platform_root_domain: cloudflarePlatformRootDomain,
+    cloudflare_apex_routing_mode: cloudflareApexRoutingMode as 'optional' | 'required',
     replacement_grace_ms: domainReplacementGraceHours * 60 * 60_000,
   },
   realtime: {

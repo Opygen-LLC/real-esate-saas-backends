@@ -29,6 +29,8 @@ export type RequiredDnsRecord = {
   purpose: 'ownership' | 'routing' | 'provider_verification'
   source?: string
   rank?: number
+  required?: boolean
+  note?: string
 }
 
 export type DomainProviderInput = {
@@ -57,6 +59,8 @@ export type DomainRegistrationResult = {
 export type DomainRoutingResult = {
   apexOk: boolean
   wwwOk: boolean
+  routingReady?: boolean
+  canonicalHost?: string
   registered: boolean
   providerVerified: boolean
   diagnostics: DomainDiagnostic[]
@@ -65,12 +69,14 @@ export type DomainRoutingResult = {
 
 export type DomainTlsResult = {
   status: 'not_started' | 'provisioning' | 'active' | 'failed'
+  canonicalHost?: string
   diagnostics: DomainDiagnostic[]
   providerMetadata?: DomainProviderMetadata
 }
 
 export type DomainPublicRoutingResult = {
   active: boolean
+  canonicalHost?: string
   diagnostics: DomainDiagnostic[]
 }
 

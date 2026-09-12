@@ -26,6 +26,7 @@ const providerMetadataSchema = new Schema({
 
 const candidateDomainSchema = new Schema({
   domain: { type: String, required: true },
+  canonicalHost: { type: String, default: '' },
   ownershipToken: { type: String, required: true },
   lifecycleStatus: { type: String, enum: DOMAIN_LIFECYCLE_STATUSES, default: 'PENDING_DNS' },
   provider: { type: String, default: 'vercel' },
@@ -61,6 +62,7 @@ const retiredDomainSchema = new Schema({
 const domainRecordSchema = new Schema({
   organizationId: { type: String, required: true, unique: true, index: true },
   domain: { type: String, required: true, unique: true, index: true },
+  canonicalHost: { type: String, default: '' },
   ownershipToken: { type: String, required: true },
   entitlementStatus: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
   entitlementSuspendedAt: { type: Date, default: null },

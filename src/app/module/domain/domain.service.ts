@@ -167,8 +167,8 @@ const publicDomainStatus = (record: any) => {
   return {
     ...safe,
     lifecycleStatus,
-    canonicalHost: source.domain,
-    activeDomain: lifecycleStatus === 'ACTIVE' && source.tlsStatus === 'active' && source.publicRoutingStatus === 'active' ? source.domain : null,
+    canonicalHost: source.canonicalHost || source.domain,
+    activeDomain: lifecycleStatus === 'ACTIVE' && source.tlsStatus === 'active' && source.publicRoutingStatus === 'active' ? (source.canonicalHost || source.domain) : null,
     candidate,
     replacementInProgress: Boolean(candidate?.domain),
     replacementGraceHours: Math.round(config.domains.replacement_grace_ms / 3_600_000),
@@ -187,6 +187,7 @@ const newLifecycleState = (input: {
   requiredDns: unknown[]
 }) => ({
   domain: input.domain,
+  canonicalHost: input.domain,
   ownershipToken: input.ownershipToken,
   provider: input.provider,
   lifecycleStatus: 'PENDING_DNS' as DomainLifecycleStatus,
@@ -212,7 +213,7 @@ const newLifecycleState = (input: {
 
 const applyLifecycleResult = (target: any, result: any) => {
   const fields = [
-    'requiredDns', 'lifecycleStatus', 'provider', 'providerRegistrationStatus', 'providerRegisteredAt',
+    'requiredDns', 'canonicalHost', 'lifecycleStatus', 'provider', 'providerRegistrationStatus', 'providerRegisteredAt',
     'providerRequestId', 'providerMetadata',
     'publicRoutingStatus', 'status', 'tlsStatus', 'diagnostics', 'failureReason', 'failureCount',
     'lastCheckedAt', 'nextCheckAt', 'ownershipVerifiedAt', 'routingVerifiedAt', 'tlsActiveAt',
@@ -278,10 +279,12 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     // During provider cutover, stale routing records were already removed above.
   }
 
+  let canonicalHost = String(slot.canonicalHost || slot.domain)
   let routing
   try {
     routing = await provider.verifyRouting(input)
     if (routing.providerMetadata) providerMetadata = routing.providerMetadata
+    if (routing.canonicalHost) canonicalHost = routing.canonicalHost
   } catch (error) {
     routing = {
       apexOk: false,
@@ -312,6 +315,7 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
       try {
         routing = await provider.verifyRouting(input)
         if (routing.providerMetadata) providerMetadata = routing.providerMetadata
+        if (routing.canonicalHost) canonicalHost = routing.canonicalHost
       } catch { /* keep previous diagnostics and retry later */ }
     }
   }
@@ -334,7 +338,7 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     providerRegisteredAt = providerRegisteredAt || now
   }
 
-  const routingOk = routing.apexOk && routing.wwwOk && routing.registered && routing.providerVerified
+  const routingOk = (routing.routingReady ?? (routing.apexOk && routing.wwwOk)) && routing.registered && routing.providerVerified
   let lifecycleStatus: DomainLifecycleStatus = !ownership.ok
     ? 'PENDING_DNS'
     : !routingOk
@@ -366,11 +370,13 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     lifecycleStatus = 'TLS_PROVISIONING'
     const tls = await provider.provisionTls(input)
     if (tls.providerMetadata) providerMetadata = tls.providerMetadata
+    if (tls.canonicalHost) canonicalHost = tls.canonicalHost
     tlsStatus = tls.status
     tlsDiagnostics = tls.diagnostics
     if (tls.status === 'active') {
       const publicRouting = await provider.verifyPublicRouting(input)
       publicRoutingStatus = publicRouting.active ? 'active' : 'pending'
+      if (publicRouting.canonicalHost) canonicalHost = publicRouting.canonicalHost
       publicDiagnostics = publicRouting.diagnostics
       if (publicRouting.active) lifecycleStatus = 'ACTIVE'
     }
@@ -385,6 +391,7 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
 
   return {
     requiredDns,
+    canonicalHost,
     lifecycleStatus,
     provider: provider.name,
     providerRegistrationStatus,
@@ -700,7 +707,7 @@ const resolveVerifiedHost = async (host: string) => {
   if (!org) return null
   const access = await TenantAccessService.evaluate(org.organizationId)
   if (!access.publicWebsiteAllowed) TenantAccessMonitoringService.recordPublicDenied(access)
-  const canonicalHost = record.domain
+  const canonicalHost = record.canonicalHost || record.domain
   return {
     organizationId: org.organizationId,
     agencyName: org.agencyName,

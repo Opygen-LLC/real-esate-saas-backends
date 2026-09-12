@@ -32,6 +32,7 @@ const config = {
     cloudflare_api_base: API_BASE,
     cloudflare_saas_fallback_origin: FALLBACK_ORIGIN,
     cloudflare_saas_cname_target: CNAME_TARGET,
+    cloudflare_apex_routing_mode: 'optional',
   },
 }
 
@@ -62,6 +63,8 @@ const state = {
   createBodies: [],
   deletedIds: [],
   publicRouteActive: true,
+  apexRouted: true,
+  apexPublicActive: true,
 }
 
 const jsonResponse = (status, result, success = status >= 200 && status < 300) => new Response(JSON.stringify({
@@ -76,9 +79,10 @@ const providerApiFetch = async (_service, rawUrl, init = {}) => {
   const method = String(init.method || 'GET').toUpperCase()
 
   if (url.origin === 'https://example.com' || url.origin === 'https://www.example.com') {
+    const active = state.publicRouteActive && (url.origin !== 'https://example.com' || state.apexPublicActive)
     return new Response('{}', {
-      status: state.publicRouteActive ? 200 : 503,
-      headers: state.publicRouteActive ? { 'x-opygen-domain-check': 'real-estate-saas' } : {},
+      status: active ? 200 : 503,
+      headers: active ? { 'x-opygen-domain-check': 'real-estate-saas' } : {},
     })
   }
 
@@ -121,7 +125,8 @@ const providerApiFetch = async (_service, rawUrl, init = {}) => {
 
 const dnsMock = {
   resolveCname: async (hostname) => {
-    if (hostname === 'example.com' || hostname === 'www.example.com') return [CNAME_TARGET]
+    if (hostname === 'example.com') return state.apexRouted ? [CNAME_TARGET] : []
+    if (hostname === 'www.example.com') return [CNAME_TARGET]
     return []
   },
   resolve4: async (hostname) => hostname === CNAME_TARGET ? ['203.0.113.10'] : [],
@@ -155,6 +160,8 @@ test.beforeEach(() => {
   state.createBodies.length = 0
   state.deletedIds.length = 0
   state.publicRouteActive = true
+  state.apexRouted = true
+  state.apexPublicActive = true
 })
 
 test('registers apex and www as Cloudflare for SaaS Custom Hostnames with TXT DCV and metadata', async () => {
@@ -221,3 +228,37 @@ test('verifies the existing Opygen public-routing marker, health, idempotent reg
   assert.equal(state.hostnames.size, 0)
   assert.equal(state.deletedIds.length, 2)
 })
+
+test('cost-effective mode activates www when apex routing is unavailable and makes www canonical', async () => {
+  await CloudflareDomainProvider.registerDomain(input)
+  const apex = state.hostnames.get('example.com')
+  const www = state.hostnames.get('www.example.com')
+  apex.status = 'pending'
+  apex.ssl.status = 'pending_validation'
+  www.status = 'active'
+  www.ssl.status = 'active'
+  state.apexRouted = false
+  state.apexPublicActive = false
+
+  const records = await CloudflareDomainProvider.getRequiredDns(input)
+  const apexRouting = records.find((row) => row.source === 'cloudflare_routing' && row.host === '@')
+  const wwwRouting = records.find((row) => row.source === 'cloudflare_routing' && row.host === 'www')
+  assert.equal(apexRouting.required, false)
+  assert.equal(wwwRouting.required, true)
+
+  const routing = await CloudflareDomainProvider.verifyRouting(input)
+  assert.equal(routing.apexOk, false)
+  assert.equal(routing.wwwOk, true)
+  assert.equal(routing.routingReady, true)
+  assert.equal(routing.providerVerified, true)
+  assert.equal(routing.canonicalHost, 'www.example.com')
+
+  const tls = await CloudflareDomainProvider.getTlsStatus(input)
+  assert.equal(tls.status, 'active')
+  assert.equal(tls.canonicalHost, 'www.example.com')
+
+  const publicRouting = await CloudflareDomainProvider.verifyPublicRouting(input)
+  assert.equal(publicRouting.active, true)
+  assert.equal(publicRouting.canonicalHost, 'www.example.com')
+})
+
