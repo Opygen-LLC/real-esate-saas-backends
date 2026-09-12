@@ -11,7 +11,7 @@ import { CacheInvalidationService } from '../domainEvent/cacheInvalidation.servi
 import { normalizeSubdomain, RESERVED_SUBDOMAINS } from '../../helpers/identity'
 import { buildTenantWebsiteUrl } from '../../helpers/publicWebsiteUrl'
 import { SubdomainAlias } from './subdomainAlias.model'
-import { DomainProviderService, type DomainDiagnostic } from './providers'
+import { DomainProviderService, type DomainDiagnostic, type DomainProviderMetadata, type DomainRegistrationResult } from './providers'
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonitoring.service'
@@ -154,14 +154,14 @@ const ownershipDiagnostic = async (record: { domain: string; ownershipToken: str
 const publicLifecycleSlot = (source: any) => {
   if (!source) return null
   const raw = typeof source.toObject === 'function' ? source.toObject() : source
-  const { ownershipToken: _ownershipToken, ...safe } = raw
+  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, ...safe } = raw
   return { ...safe, lifecycleStatus: deriveLifecycle(raw) }
 }
 
 const publicDomainStatus = (record: any) => {
   if (!record) return null
   const source = typeof record.toObject === 'function' ? record.toObject() : record
-  const { ownershipToken: _ownershipToken, candidate: rawCandidate, ...safe } = source
+  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, candidate: rawCandidate, ...safe } = source
   const candidate = publicLifecycleSlot(rawCandidate)
   const lifecycleStatus = deriveLifecycle(source)
   return {
@@ -182,6 +182,7 @@ const newLifecycleState = (input: {
   ownershipToken: string
   provider: string
   providerRequestId?: string
+  providerMetadata?: DomainProviderMetadata
   registered: boolean
   requiredDns: unknown[]
 }) => ({
@@ -195,6 +196,7 @@ const newLifecycleState = (input: {
   status: 'pending' as const,
   tlsStatus: 'not_started' as const,
   providerRequestId: input.providerRequestId || '',
+  providerMetadata: input.providerMetadata || { hostnames: [] },
   requiredDns: input.requiredDns,
   diagnostics: [],
   failureReason: '',
@@ -211,6 +213,7 @@ const newLifecycleState = (input: {
 const applyLifecycleResult = (target: any, result: any) => {
   const fields = [
     'requiredDns', 'lifecycleStatus', 'provider', 'providerRegistrationStatus', 'providerRegisteredAt',
+    'providerRequestId', 'providerMetadata',
     'publicRoutingStatus', 'status', 'tlsStatus', 'diagnostics', 'failureReason', 'failureCount',
     'lastCheckedAt', 'nextCheckAt', 'ownershipVerifiedAt', 'routingVerifiedAt', 'tlsActiveAt',
     'activeAt', 'verifiedAt',
@@ -237,6 +240,10 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     ? 'pending'
     : (slot.providerRegistrationStatus || 'pending')
   let providerRegisteredAt = providerChanged ? null : slot.providerRegisteredAt
+  let providerRequestId = providerChanged ? '' : String(slot.providerRequestId || '')
+  let providerMetadata: DomainProviderMetadata = providerChanged
+    ? { hostnames: [] }
+    : (slot.providerMetadata?.hostnames ? { hostnames: Array.from(slot.providerMetadata.hostnames) } : { hostnames: [] })
   let registrationFailure: string | null = null
 
   const registerWithCurrentProvider = async () => {
@@ -245,7 +252,8 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
       if (registration.registered) {
         providerRegistrationStatus = 'registered'
         providerRegisteredAt = providerRegisteredAt || now
-        if (registration.providerRequestId) slot.providerRequestId = registration.providerRequestId
+        if (registration.providerRequestId) providerRequestId = registration.providerRequestId
+        if (registration.providerMetadata) providerMetadata = registration.providerMetadata
         registrationFailure = null
         return true
       }
@@ -273,6 +281,7 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   let routing
   try {
     routing = await provider.verifyRouting(input)
+    if (routing.providerMetadata) providerMetadata = routing.providerMetadata
   } catch (error) {
     routing = {
       apexOk: false,
@@ -300,7 +309,10 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     const registered = await registerWithCurrentProvider()
     if (registered) {
       try { requiredDns = await provider.getRequiredDns(input) } catch { /* retain last-known current-provider records */ }
-      try { routing = await provider.verifyRouting(input) } catch { /* keep previous diagnostics and retry later */ }
+      try {
+        routing = await provider.verifyRouting(input)
+        if (routing.providerMetadata) providerMetadata = routing.providerMetadata
+      } catch { /* keep previous diagnostics and retry later */ }
     }
   }
 
@@ -353,6 +365,7 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   if (routingOk) {
     lifecycleStatus = 'TLS_PROVISIONING'
     const tls = await provider.provisionTls(input)
+    if (tls.providerMetadata) providerMetadata = tls.providerMetadata
     tlsStatus = tls.status
     tlsDiagnostics = tls.diagnostics
     if (tls.status === 'active') {
@@ -376,6 +389,8 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     provider: provider.name,
     providerRegistrationStatus,
     providerRegisteredAt,
+    providerRequestId,
+    providerMetadata,
     publicRoutingStatus,
     status: active ? 'verified' : 'pending',
     tlsStatus,
@@ -441,6 +456,7 @@ const promoteCandidate = async (record: any, result: any) => {
   record.domain = candidate.domain
   record.ownershipToken = candidate.ownershipToken
   record.providerRequestId = candidate.providerRequestId || ''
+  record.providerMetadata = candidate.providerMetadata || { hostnames: [] }
   applyLifecycleResult(record, result)
   record.candidate = null
   queueProviderCleanup(record, previousDomain, retireAfter, now)
@@ -472,7 +488,7 @@ const add = async (organizationId: string, input: string) => {
   const ownershipToken = randomBytes(24).toString('base64url')
   const provider = DomainProviderService.current()
 
-  let providerRegistration: { registered: boolean; providerRequestId?: string }
+  let providerRegistration: DomainRegistrationResult
   let dnsRecords: unknown[]
   try {
     providerRegistration = await provider.registerDomain({ domain, organizationId, ownershipToken })
@@ -491,6 +507,7 @@ const add = async (organizationId: string, input: string) => {
     ownershipToken,
     provider: provider.name,
     providerRequestId: providerRegistration.providerRequestId,
+    providerMetadata: providerRegistration.providerMetadata,
     registered: providerRegistration.registered,
     requiredDns: dnsRecords,
   })

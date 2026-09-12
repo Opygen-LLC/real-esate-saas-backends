@@ -11,6 +11,16 @@ export type DomainDiagnostic = {
   checkedAt: Date
 }
 
+export type RequiredDnsSource =
+  | 'opygen_ownership'
+  | 'development_fallback'
+  | 'generic_routing'
+  | 'vercel_recommended'
+  | 'vercel_project_verification'
+  | 'cloudflare_routing'
+  | 'cloudflare_hostname_validation'
+  | 'cloudflare_ssl_validation'
+
 export type RequiredDnsRecord = {
   type: 'TXT' | 'A' | 'CNAME'
   name: string
@@ -27,17 +37,36 @@ export type DomainProviderInput = {
   ownershipToken: string
 }
 
+export type DomainProviderHostnameMetadata = {
+  hostname: string
+  providerId: string
+  status?: string
+  sslStatus?: string
+}
+
+export type DomainProviderMetadata = {
+  hostnames: DomainProviderHostnameMetadata[]
+}
+
+export type DomainRegistrationResult = {
+  registered: boolean
+  providerRequestId?: string
+  providerMetadata?: DomainProviderMetadata
+}
+
 export type DomainRoutingResult = {
   apexOk: boolean
   wwwOk: boolean
   registered: boolean
   providerVerified: boolean
   diagnostics: DomainDiagnostic[]
+  providerMetadata?: DomainProviderMetadata
 }
 
 export type DomainTlsResult = {
   status: 'not_started' | 'provisioning' | 'active' | 'failed'
   diagnostics: DomainDiagnostic[]
+  providerMetadata?: DomainProviderMetadata
 }
 
 export type DomainPublicRoutingResult = {
@@ -57,7 +86,7 @@ export type DomainProviderHealth = {
 export interface DomainProvider {
   readonly name: string
   getRequiredDns(input: DomainProviderInput): Promise<RequiredDnsRecord[]>
-  registerDomain(input: DomainProviderInput): Promise<{ registered: boolean; providerRequestId?: string }>
+  registerDomain(input: DomainProviderInput): Promise<DomainRegistrationResult>
   verifyRouting(input: DomainProviderInput): Promise<DomainRoutingResult>
   provisionTls(input: DomainProviderInput): Promise<DomainTlsResult>
   getTlsStatus(input: DomainProviderInput): Promise<DomainTlsResult>

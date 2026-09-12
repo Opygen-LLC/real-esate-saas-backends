@@ -258,7 +258,8 @@
     "storage:migration:slurper": "node scripts/storage-migration/super-slurper.mjs",
     "storage:migration:rewrite-refs": "node scripts/storage-migration/rewrite-gcs-references.mjs",
     "storage:migration:verify": "node scripts/storage-migration/verify-gcs-r2.mjs",
-    "storage:migration:finalize": "node scripts/storage-migration/finalize-cutover.mjs"
+    "storage:migration:finalize": "node scripts/storage-migration/finalize-cutover.mjs",
+    "test:phase2-cloudflare-domain": "node --test tests/phase2-cloudflare-domain/*.test.cjs"
   },
   "keywords": [
     "real-estate",

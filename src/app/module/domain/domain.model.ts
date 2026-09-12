@@ -12,6 +12,18 @@ export type DomainLifecycleStatus = typeof DOMAIN_LIFECYCLE_STATUSES[number]
 export type DomainStatus = 'pending' | 'verified' | 'failed'
 export type TlsStatus = 'not_started' | 'provisioning' | 'active' | 'failed'
 
+
+const providerHostnameMetadataSchema = new Schema({
+  hostname: { type: String, required: true },
+  providerId: { type: String, required: true },
+  status: { type: String, default: '', maxlength: 80 },
+  sslStatus: { type: String, default: '', maxlength: 80 },
+}, { _id: false })
+
+const providerMetadataSchema = new Schema({
+  hostnames: { type: [providerHostnameMetadataSchema], default: [] },
+}, { _id: false })
+
 const candidateDomainSchema = new Schema({
   domain: { type: String, required: true },
   ownershipToken: { type: String, required: true },
@@ -22,6 +34,7 @@ const candidateDomainSchema = new Schema({
   status: { type: String, enum: ['pending', 'verified', 'failed'], default: 'pending' },
   tlsStatus: { type: String, enum: ['not_started', 'provisioning', 'active', 'failed'], default: 'not_started' },
   providerRequestId: { type: String, default: '' },
+  providerMetadata: { type: providerMetadataSchema, default: () => ({ hostnames: [] }) },
   requiredDns: { type: [Schema.Types.Mixed], default: [] },
   diagnostics: { type: [Schema.Types.Mixed], default: [] },
   failureReason: { type: String, default: '' },
@@ -64,6 +77,7 @@ const domainRecordSchema = new Schema({
   tlsStatus: { type: String, enum: ['not_started', 'provisioning', 'active', 'failed'], default: 'not_started' },
 
   providerRequestId: { type: String, default: '' },
+  providerMetadata: { type: providerMetadataSchema, default: () => ({ hostnames: [] }) },
   requiredDns: { type: [Schema.Types.Mixed], default: [] },
   diagnostics: { type: [Schema.Types.Mixed], default: [] },
   failureReason: { type: String, default: '' },

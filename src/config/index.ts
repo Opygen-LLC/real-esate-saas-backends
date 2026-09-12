@@ -181,6 +181,12 @@ const vercelApiToken = process.env.VERCEL_API_TOKEN?.trim() || ''
 const vercelTeamId = process.env.VERCEL_TEAM_ID?.trim() || ''
 const vercelRequireTeamId = envBoolean('VERCEL_REQUIRE_TEAM_ID', false)
 const vercelApiBase = (process.env.VERCEL_API_BASE?.trim() || 'https://api.vercel.com').replace(/\/$/, '')
+const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || ''
+const cloudflareZoneId = process.env.CLOUDFLARE_ZONE_ID?.trim() || ''
+const cloudflareApiToken = process.env.CLOUDFLARE_API_TOKEN?.trim() || ''
+const cloudflareApiBase = (process.env.CLOUDFLARE_API_BASE?.trim() || 'https://api.cloudflare.com/client/v4').replace(/\/$/, '')
+const cloudflareSaasFallbackOrigin = (process.env.CLOUDFLARE_SAAS_FALLBACK_ORIGIN?.trim() || '').replace(/\.$/, '').toLowerCase()
+const cloudflareSaasCnameTarget = (process.env.CLOUDFLARE_SAAS_CNAME_TARGET?.trim() || '').replace(/\.$/, '').toLowerCase()
 const domainReplacementGraceHours = Math.max(1, Math.min(24 * 30, Number(process.env.DOMAIN_REPLACEMENT_GRACE_HOURS || 168)))
 const workerEnabled = envBoolean('WORKER_ENABLED', true)
 
@@ -240,13 +246,16 @@ const imageTransformBaseUrl = normalizeStorageUrl(
 )
 
 
-if (!['vercel', 'generic'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic')
+if (!['vercel', 'generic', 'cloudflare'].includes(domainProvider)) throw new Error('DOMAIN_PROVIDER must be one of: vercel, generic, cloudflare')
 if (domainATarget && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domainATarget)) throw new Error('DOMAIN_A_TARGET must be an IPv4 address')
 if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget.includes('/'))) throw new Error('DOMAIN_CNAME_TARGET must be a hostname only')
 if (domainProvider === 'generic' && isProduction && (!domainATarget || !domainCnameTarget)) {
   throw new Error('DOMAIN_A_TARGET and DOMAIN_CNAME_TARGET are required when DOMAIN_PROVIDER=generic')
 }
 if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
+if (domainProvider === 'cloudflare' && !z.string().url().safeParse(cloudflareApiBase).success) throw new Error('CLOUDFLARE_API_BASE must be a valid absolute URL')
+if (cloudflareSaasFallbackOrigin && (cloudflareSaasFallbackOrigin.includes('://') || cloudflareSaasFallbackOrigin.includes('/'))) throw new Error('CLOUDFLARE_SAAS_FALLBACK_ORIGIN must be a hostname only')
+if (cloudflareSaasCnameTarget && (cloudflareSaasCnameTarget.includes('://') || cloudflareSaasCnameTarget.includes('/'))) throw new Error('CLOUDFLARE_SAAS_CNAME_TARGET must be a hostname only')
 
 const assertProductionDatabaseUrl = (value: string): void => {
   let parsed: URL
@@ -318,6 +327,16 @@ if (isProduction) {
   if (domainProvider === 'generic') {
     requiredInProduction('DOMAIN_A_TARGET')
     requiredInProduction('DOMAIN_CNAME_TARGET')
+  }
+  if (domainProvider === 'cloudflare') {
+    requiredInProduction('CLOUDFLARE_ACCOUNT_ID', 32)
+    requiredInProduction('CLOUDFLARE_ZONE_ID', 32)
+    requiredInProduction('CLOUDFLARE_API_TOKEN', 20)
+    requiredInProduction('CLOUDFLARE_SAAS_FALLBACK_ORIGIN')
+    requiredInProduction('CLOUDFLARE_SAAS_CNAME_TARGET')
+    if (!/^[a-f0-9]{32}$/i.test(cloudflareAccountId)) throw new Error('CLOUDFLARE_ACCOUNT_ID must be a 32-character Cloudflare account identifier')
+    if (!/^[a-f0-9]{32}$/i.test(cloudflareZoneId)) throw new Error('CLOUDFLARE_ZONE_ID must be a 32-character Cloudflare zone identifier')
+    if (/placeholder|change[-_ ]?me|default_20bytes/i.test(cloudflareApiToken)) throw new Error('CLOUDFLARE_API_TOKEN must be a real production API token, not a placeholder')
   }
   if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
   // Object storage: Cloudflare R2 is canonical and production fails closed when
@@ -495,6 +514,12 @@ export default {
     vercel_team_id: vercelTeamId,
     vercel_require_team_id: vercelRequireTeamId,
     vercel_api_base: vercelApiBase,
+    cloudflare_account_id: cloudflareAccountId,
+    cloudflare_zone_id: cloudflareZoneId,
+    cloudflare_api_token: cloudflareApiToken,
+    cloudflare_api_base: cloudflareApiBase,
+    cloudflare_saas_fallback_origin: cloudflareSaasFallbackOrigin,
+    cloudflare_saas_cname_target: cloudflareSaasCnameTarget,
     replacement_grace_ms: domainReplacementGraceHours * 60 * 60_000,
   },
   realtime: {
