@@ -225,9 +225,9 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   const providerChanged = Boolean(slot.provider && slot.provider !== provider.name)
   const ownership = await ownershipDiagnostic(slot)
 
-  // When production is moved from the old generic provider to Vercel, never
-  // keep presenting the obsolete generic A/CNAME records. Keep only Opygen's
-  // ownership TXT until fresh provider-specific records are available.
+  // During a provider change, never keep presenting obsolete routing records.
+  // Keep only Opygen's ownership TXT until fresh records from the current
+  // provider are available.
   let requiredDns = Array.isArray(slot.requiredDns) ? slot.requiredDns : []
   if (providerChanged) {
     requiredDns = requiredDns.filter((record: any) => record?.purpose === 'ownership' || record?.source === 'opygen_ownership')
@@ -257,8 +257,8 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   }
 
   // Provider registration must happen before the customer is asked to change
-  // DNS. This also makes existing generic records self-migrate after
-  // DOMAIN_PROVIDER=vercel without requiring the old DNS to match Vercel first.
+  // DNS. This also lets existing records migrate to a newly selected provider
+  // without requiring the old provider's DNS to match first.
   if (providerChanged || providerRegistrationStatus !== 'registered') {
     await registerWithCurrentProvider()
   }
@@ -292,10 +292,10 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
     }
   }
 
-  // Self-heal if the hostname was removed from the Vercel project after it had
-  // previously been marked registered. Do not wait for DNS to be correct first;
-  // Vercel needs the project attachment in place in order to expose verification
-  // challenges and begin managed TLS issuance.
+  // Self-heal if the hostname was removed from the active hosting provider after
+  // it had previously been marked registered. Do not wait for DNS to be correct
+  // first; provider registration may be required before verification challenges
+  // and managed TLS can be issued.
   if (!routing.registered && !registrationFailure) {
     const registered = await registerWithCurrentProvider()
     if (registered) {
