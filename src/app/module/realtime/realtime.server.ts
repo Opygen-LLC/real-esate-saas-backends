@@ -11,6 +11,7 @@ import { DomainRecord } from '../domain/domain.model'
 import { User } from '../user/user.model'
 import { RealtimeService } from './realtime.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
+import { Metrics } from '../../../shared/metrics'
 
 let io: SocketIOServer | undefined
 let pubClient: any
@@ -147,7 +148,13 @@ const initializeRealtimeServer = async (httpServer: HttpServer) => {
       credentials: true,
       methods: ['GET', 'POST'],
       origin: (origin, callback) => {
-        void safeOrigin(origin).then((allowed) => callback(allowed ? null : new Error('Origin not allowed'), allowed)).catch(() => callback(new Error('Origin validation failed'), false))
+        void safeOrigin(origin).then((allowed) => {
+          if (!allowed) Metrics.inc('realtime_origin_rejections_total')
+          callback(allowed ? null : new Error('Origin not allowed'), allowed)
+        }).catch(() => {
+          Metrics.inc('realtime_origin_rejections_total', { reason: 'validation_error' })
+          callback(new Error('Origin validation failed'), false)
+        })
       },
     },
   })
@@ -183,6 +190,8 @@ const initializeRealtimeServer = async (httpServer: HttpServer) => {
   })
 
   dashboard.on('connection', (socket) => {
+    Metrics.inc('realtime_connections_total', { namespace: 'dashboard', transport: socket.conn.transport.name })
+    socket.on('disconnect', (reason) => Metrics.inc('realtime_disconnects_total', { namespace: 'dashboard', reason: String(reason).slice(0, 40) }))
     socket.join(`user:${socket.data.userId}`)
     if (socket.data.organizationId) socket.join(`org:${socket.data.organizationId}`)
     socket.join(`role:${socket.data.userRole}`)
@@ -191,6 +200,8 @@ const initializeRealtimeServer = async (httpServer: HttpServer) => {
 
   const publicNamespace = io.of('/public')
   publicNamespace.on('connection', (socket) => {
+    Metrics.inc('realtime_connections_total', { namespace: 'public', transport: socket.conn.transport.name })
+    socket.on('disconnect', (reason) => Metrics.inc('realtime_disconnects_total', { namespace: 'public', reason: String(reason).slice(0, 40) }))
     let subscriptionCount = 0
     socket.on('tenant:subscribe', async (payload: { identifier?: string }, acknowledge?: (value: unknown) => void) => {
       subscriptionCount += 1

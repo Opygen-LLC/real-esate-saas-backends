@@ -9,6 +9,7 @@ type Histogram = {
 const MAX_SERIES = 1500
 const HTTP_BUCKETS_MS = [25, 50, 100, 200, 300, 500, 1000, 2000, 5000]
 const EXTERNAL_BUCKETS_MS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 20000]
+const DOMAIN_ACTIVATION_BUCKETS_MS = [1000, 10000, 60000, 300000, 900000, 3600000, 21600000, 86400000]
 const counters = new Map<string, number>()
 const histograms = new Map<string, Histogram>()
 const gauges = new Map<string, number>()
@@ -73,6 +74,7 @@ const observeExternal = (input: { service: string; outcome: string; durationMs: 
   observe('external_request_duration_ms', input.durationMs, EXTERNAL_BUCKETS_MS, labels)
 }
 
+const observeDomainActivation = (durationMs: number, labels: Labels = {}): void => observe('domain_activation_duration_ms', Math.max(0, durationMs), DOMAIN_ACTIVATION_BUCKETS_MS, labels)
 const observeQueue = (type: string, outcome: string): void => inc('operations_jobs_total', { type, outcome })
 const cache = (namespace: string, outcome: 'hit' | 'miss' | 'error'): void => inc('cache_operations_total', { namespace, outcome })
 
@@ -89,7 +91,11 @@ const render = (): string => {
     const brace = key.indexOf('{')
     const name = brace === -1 ? key : key.slice(0, brace)
     const labels = brace === -1 ? '' : key.slice(brace + 1, -1)
-    const buckets = name === 'http_request_duration_ms' ? HTTP_BUCKETS_MS : EXTERNAL_BUCKETS_MS
+    const buckets = name === 'http_request_duration_ms'
+      ? HTTP_BUCKETS_MS
+      : name === 'domain_activation_duration_ms'
+        ? DOMAIN_ACTIVATION_BUCKETS_MS
+        : EXTERNAL_BUCKETS_MS
     buckets.forEach((bucket, index) => {
       const bucketLabels = labels ? `${labels},le="${bucket}"` : `le="${bucket}"`
       lines.push(`${name}_bucket{${bucketLabels}} ${histogram.buckets[index]}`)
@@ -102,4 +108,4 @@ const render = (): string => {
   return `${lines.join('\n')}\n`
 }
 
-export const Metrics = { inc, setGauge, observeHttp, observeExternal, observeQueue, cache, render, normalizeRoute }
+export const Metrics = { inc, setGauge, observeHttp, observeExternal, observeDomainActivation, observeQueue, cache, render, normalizeRoute }

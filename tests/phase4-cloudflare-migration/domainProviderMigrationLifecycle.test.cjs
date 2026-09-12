@@ -131,6 +131,7 @@ const customRequire = (id) => {
   if (id === 'http-status') return { __esModule: true, default: { BAD_REQUEST: 400, NOT_FOUND: 404, CONFLICT: 409 } }
   if (id === '../../../errors/ApiError') return { __esModule: true, default: ApiError }
   if (id === '../../../config') return { __esModule: true, default: config }
+  if (id === '../../../shared/metrics') return { Metrics: { inc() {}, observeDomainActivation() {} } }
   if (id === '../organization/organization.model') return { Organization }
   if (id === './domain.model') return { DomainRecord, DOMAIN_LIFECYCLE_STATUSES: ['PENDING_DNS', 'OWNERSHIP_VERIFIED', 'ROUTING_VERIFIED', 'TLS_PROVISIONING', 'ACTIVE'] }
   if (id === '../entitlement/entitlement.service') return { EntitlementService: { assertFeature: async () => {} } }

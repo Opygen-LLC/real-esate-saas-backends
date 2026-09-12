@@ -148,6 +148,7 @@ const customRequire = (id) => {
   if (id === '../../../../errors/ApiError') return { __esModule: true, default: ApiError }
   if (id === '../../../../config') return { __esModule: true, default: config }
   if (id === '../../../../shared/resilience') return { Resilience: { fetch: providerApiFetch } }
+  if (id === '../../../../shared/metrics') return { Metrics: { inc() {}, observeDomainActivation() {} } }
   throw new Error(`Unexpected require from provider: ${id}`)
 }
 new Function('require', 'module', 'exports', compiled)(customRequire, moduleUnderTest, moduleUnderTest.exports)

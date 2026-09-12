@@ -17,7 +17,7 @@ const schema = z.object({ body: z.object({
 }).strict() })
 
 const operationalEventSchema = z.object({ body: z.object({
-  event: z.enum(['form_validation_failed', 'website_template_render_failed', 'website_image_delivery_failed']),
+  event: z.enum(['form_validation_failed', 'website_template_render_failed', 'website_image_delivery_failed', 'realtime_reconnect', 'realtime_connection_error', 'tenant_routing_mismatch']),
   route: z.string().max(1500).optional(),
   templateId: z.string().max(40).optional(),
   fields: z.array(z.string().max(120)).max(50).optional(),

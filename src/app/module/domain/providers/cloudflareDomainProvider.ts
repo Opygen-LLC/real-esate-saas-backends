@@ -2,6 +2,7 @@ import dns from 'dns/promises'
 import ApiError from '../../../../errors/ApiError'
 import config from '../../../../config'
 import { Resilience } from '../../../../shared/resilience'
+import { Metrics } from '../../../../shared/metrics'
 import type {
   DomainDiagnostic,
   DomainProvider,
@@ -139,10 +140,17 @@ const cloudflareFetch = async (
   headers.set('authorization', `Bearer ${config.domains.cloudflare_api_token}`)
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json')
   headers.set('accept', 'application/json')
-  return Resilience.fetch(service, url, { ...init, headers }, {
-    timeoutMs: config.domains.provider_timeout_ms,
-    expectedStatuses,
-  })
+  try {
+    const response = await Resilience.fetch(service, url, { ...init, headers }, {
+      timeoutMs: config.domains.provider_timeout_ms,
+      expectedStatuses,
+    })
+    if (response.status >= 500) Metrics.inc('cloudflare_domain_api_failures_total', { service, status: response.status })
+    return response
+  } catch (error) {
+    Metrics.inc('cloudflare_domain_api_failures_total', { service, status: 'exception' })
+    throw error
+  }
 }
 
 const parseEnvelope = async <T>(response: Response): Promise<CloudflareEnvelope<T>> => {
@@ -400,6 +408,9 @@ const getTlsStatus = async (input: DomainProviderInput): Promise<DomainTlsResult
     www: { hostname: www?.hostname || `www.${input.domain}`, required: true, status: www?.status || 'missing', sslStatus: www?.ssl?.status || 'missing', errors: sslErrors(www) },
   }
   const status: DomainTlsResult['status'] = active ? 'active' : failed ? 'failed' : 'provisioning'
+  if (failed) Metrics.inc('cloudflare_domain_certificate_failures_total', { mode: requireApex ? 'apex_and_www' : 'www_required' })
+  const hostnameValidationFailures = [apex, www].filter((item) => Array.isArray(item?.verification_errors) && item!.verification_errors!.length > 0).length
+  if (hostnameValidationFailures) Metrics.inc('cloudflare_domain_hostname_validation_failures_total', { count: hostnameValidationFailures })
   const message = !registered
     ? 'Cloudflare custom-hostname registration is incomplete'
     : failed

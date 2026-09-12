@@ -8,6 +8,7 @@ import { DomainService } from './domain.service'
 import { DomainProviderService } from './providers'
 import { OperationsQueueService } from '../operationsQueue/operationsQueue.service'
 import { getWorkerHealth } from '../cron/phase3.worker'
+import { Metrics } from '../../../shared/metrics'
 
 const getCustomDomain = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Custom domain status fetched', data: await DomainService.get(requireTenant(req)) })
@@ -59,10 +60,25 @@ const changeSubdomain = catchAsync(async (req: Request, res: Response) => {
 })
 
 const resolveSubdomain = catchAsync(async (req: Request, res: Response) => {
-  const data = await DomainService.resolveSubdomain(req.params.subdomain)
-  sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subdomain resolution completed', data })
+  try {
+    const data = await DomainService.resolveSubdomain(req.params.subdomain)
+    Metrics.inc('domain_resolver_requests_total', { kind: 'subdomain', outcome: data ? (data.isAlias ? 'alias' : 'resolved') : 'not_found' })
+    sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Subdomain resolution completed', data })
+  } catch (error) {
+    Metrics.inc('domain_resolver_requests_total', { kind: 'subdomain', outcome: 'error' })
+    throw error
+  }
 })
 
 
-const resolveHost = catchAsync(async (req: Request, res: Response) => sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data: await DomainService.resolveVerifiedHost(req.params.host) }))
+const resolveHost = catchAsync(async (req: Request, res: Response) => {
+  try {
+    const data = await DomainService.resolveVerifiedHost(req.params.host)
+    Metrics.inc('domain_resolver_requests_total', { kind: 'custom', outcome: data ? (data.redirectTo ? 'redirect' : 'resolved') : 'not_found' })
+    sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Host resolution completed', data })
+  } catch (error) {
+    Metrics.inc('domain_resolver_requests_total', { kind: 'custom', outcome: 'error' })
+    throw error
+  }
+})
 export const DomainController = { getCustomDomain, addCustomDomain, verifyCustomDomain, getDomainHealth, getSubdomainAvailability, changeSubdomain, resolveSubdomain, resolveHost }

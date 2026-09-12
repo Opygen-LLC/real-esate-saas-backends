@@ -15,6 +15,7 @@ import { DomainProviderService, type DomainDiagnostic, type DomainProviderMetada
 import { TenantPurgeBarrier } from '../compliance/tenantPurgeBarrier.service'
 import { TenantAccessService } from '../tenantAccess/tenantAccess.service'
 import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonitoring.service'
+import { Metrics } from '../../../shared/metrics'
 
 const ACTIVE_RECHECK_MS = 6 * 60 * 60_000
 const TLS_RECHECK_MS = 2 * 60_000
@@ -651,7 +652,11 @@ const advanceProviderMigration = async (record: any) => {
         applyLifecycleResult(record, target)
         record.ownershipToken = target.ownershipToken
         migration.migrationStatus = 'TRAFFIC_SWITCHED'
+        const firstTrafficSwitch = !migration.trafficSwitchedAt
         migration.trafficSwitchedAt = migration.trafficSwitchedAt || now
+        if (firstTrafficSwitch && migration.startedAt) {
+          Metrics.observeDomainActivation(now.getTime() - new Date(migration.startedAt).getTime(), { provider: provider.name, path: 'migration' })
+        }
         migration.rollbackUntil = migration.rollbackUntil || new Date(now.getTime() + config.domains.provider_migration_rollback_grace_ms)
         migration.failureReason = ''
         migration.failureCount = 0
@@ -979,8 +984,13 @@ const verifyRecord = async (record: any) => {
   }
 
   if (record.candidate?.domain) {
+    const priorLifecycle = deriveLifecycle(record.candidate)
+    const activationStartedAt = record.candidate.providerRegisteredAt || record.candidate.createdAt || record.createdAt
     const result = await evaluateLifecycle(record.candidate, record.organizationId, record.candidate.provider || config.domains.provider)
     applyLifecycleResult(record.candidate, result)
+    if (priorLifecycle !== 'ACTIVE' && result.active && activationStartedAt) {
+      Metrics.observeDomainActivation(Date.now() - new Date(activationStartedAt).getTime(), { provider: result.provider || record.candidate.provider || 'unknown', path: 'replacement' })
+    }
     record.nextCheckAt = result.nextCheckAt
     if (result.active) {
       await promoteCandidate(record, result)
@@ -991,8 +1001,13 @@ const verifyRecord = async (record: any) => {
     return publicDomainStatus(record)
   }
 
+  const priorLifecycle = deriveLifecycle(record)
+  const activationStartedAt = record.providerRegisteredAt || record.createdAt
   const result = await evaluateLifecycle(record, record.organizationId, record.provider || config.domains.provider)
   applyLifecycleResult(record, result)
+  if (priorLifecycle !== 'ACTIVE' && result.active && activationStartedAt) {
+    Metrics.observeDomainActivation(Date.now() - new Date(activationStartedAt).getTime(), { provider: result.provider || record.provider || 'unknown', path: 'standard' })
+  }
   await record.save()
 
   await Organization.updateOne(
@@ -1105,7 +1120,12 @@ const resolveVerifiedHost = async (host: string) => {
   if (!org) return null
   const access = await TenantAccessService.evaluate(org.organizationId)
   if (!access.publicWebsiteAllowed) TenantAccessMonitoringService.recordPublicDenied(access)
-  const canonicalHost = record.canonicalHost || record.domain
+  const canonicalHost = String(record.canonicalHost || record.domain).toLowerCase().replace(/\.$/, '')
+  const allowedCanonicalHosts = new Set([String(record.domain).toLowerCase(), `www.${String(record.domain).toLowerCase()}`])
+  if (!allowedCanonicalHosts.has(canonicalHost)) {
+    Metrics.inc('tenant_routing_mismatch_total', { kind: 'custom', reason: 'invalid_canonical_host' })
+    return null
+  }
   return {
     organizationId: org.organizationId,
     agencyName: org.agencyName,

@@ -275,7 +275,17 @@
     "cloudflare:phase4:platform:cutover": "node scripts/cloudflare-phase4-platform.mjs cutover",
     "cloudflare:phase4:platform:verify": "node scripts/cloudflare-phase4-platform.mjs verify",
     "cloudflare:phase4:platform:rollback": "node scripts/cloudflare-phase4-platform.mjs rollback",
-    "test:phase4-cloudflare-migration": "node --test tests/phase4-cloudflare-migration/*.test.cjs"
+    "test:phase4-cloudflare-migration": "node --test tests/phase4-cloudflare-migration/*.test.cjs",
+    "cloudflare:phase5:preflight": "node scripts/cloudflare-phase5-release.mjs preflight",
+    "cloudflare:phase5:verify-staging": "node scripts/cloudflare-phase5-release.mjs verify-staging",
+    "cloudflare:phase5:verify-production": "node scripts/cloudflare-phase5-release.mjs verify-production",
+    "cloudflare:phase5:verify-dns-matrix": "node scripts/cloudflare-phase5-release.mjs verify-dns-matrix",
+    "cloudflare:phase5:domains:retirement-plan": "ts-node --transpile-only src/app/db/verifyCloudflarePhase5Retirement.ts plan",
+    "cloudflare:phase5:vercel-plan": "node scripts/cloudflare-phase5-release.mjs vercel-plan",
+    "cloudflare:phase5:retire-vercel": "ts-node --transpile-only src/app/db/verifyCloudflarePhase5Retirement.ts assert-retirement-ready && node scripts/cloudflare-phase5-release.mjs vercel-remove",
+    "test:phase5-cloudflare-release": "node --test tests/phase5-cloudflare-release/*.test.cjs",
+    "gate:cloudflare-phase5": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test:unit && pnpm test:contract && pnpm test:security && pnpm test:phase2-cloudflare-domain && pnpm test:phase3-cloudflare-platform && pnpm test:phase4-cloudflare-migration && pnpm test:phase5-cloudflare-release && pnpm cloudflare:phase5:preflight && pnpm audit --prod --audit-level=high",
+    "gate:cloudflare-phase5:staging": "pnpm gate:cloudflare-phase5 && pnpm test:integration && pnpm cloudflare:phase5:verify-staging"
   },
   "keywords": [
     "real-estate",

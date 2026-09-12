@@ -2,6 +2,7 @@ import config from '../../../config'
 import { logger } from '../../../shared/logger'
 import { emitProductionEvent } from '../../../shared/productionEvents'
 import { Resilience } from '../../../shared/resilience'
+import { Metrics } from '../../../shared/metrics'
 
 type ClientError = {
   name?: string
@@ -14,7 +15,7 @@ type ClientError = {
 }
 
 type OperationalEventInput = {
-  event: 'form_validation_failed' | 'website_template_render_failed' | 'website_image_delivery_failed'
+  event: 'form_validation_failed' | 'website_template_render_failed' | 'website_image_delivery_failed' | 'realtime_reconnect' | 'realtime_connection_error' | 'tenant_routing_mismatch'
   route?: string
   templateId?: string
   fields?: string[]
@@ -64,6 +65,7 @@ const reportClientError = async (input: ClientError): Promise<{ accepted: true }
 
 const reportOperationalEvent = async (input: OperationalEventInput): Promise<{ accepted: true }> => {
   const fields = Array.from(new Set((input.fields || []).map(sanitizeFieldName).filter(Boolean))).slice(0, 50)
+  Metrics.inc('frontend_operational_events_total', { event: input.event, source: input.source || 'client' })
   emitProductionEvent(input.event, {
     route: stripQuery(input.route),
     templateId: String(input.templateId || '').slice(0, 40),
