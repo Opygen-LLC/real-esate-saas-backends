@@ -113,8 +113,7 @@ const isApexHostname = (hostname: string | undefined, domain: string) => normali
 const canonicalFor = (domain: string, apexUsable: boolean) => apexUsable ? normalizeTarget(domain) : `www.${normalizeTarget(domain)}`
 
 const providerConfigured = () => Boolean(
-  config.domains.provider === 'cloudflare'
-  && config.domains.cloudflare_account_id
+  config.domains.cloudflare_account_id
   && config.domains.cloudflare_zone_id
   && config.domains.cloudflare_api_token
   && config.domains.cloudflare_saas_fallback_origin

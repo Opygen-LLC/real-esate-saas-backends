@@ -192,6 +192,8 @@ const cloudflareWorkerScriptName = process.env.CLOUDFLARE_WORKER_SCRIPT_NAME?.tr
 const cloudflarePlatformRootDomain = (process.env.CLOUDFLARE_PLATFORM_ROOT_DOMAIN?.trim() || 'realestate.opygen.com').replace(/\.$/, '').toLowerCase()
 const cloudflareApexRoutingMode = (process.env.CLOUDFLARE_APEX_ROUTING_MODE?.trim() || 'optional').toLowerCase()
 const domainReplacementGraceHours = Math.max(1, Math.min(24 * 30, Number(process.env.DOMAIN_REPLACEMENT_GRACE_HOURS || 168)))
+const domainProviderMigrationTarget = (process.env.DOMAIN_PROVIDER_MIGRATION_TARGET?.trim().toLowerCase() || 'cloudflare')
+const domainProviderMigrationRollbackGraceHours = Math.max(1, Math.min(24 * 30, Number(process.env.DOMAIN_PROVIDER_MIGRATION_ROLLBACK_GRACE_HOURS || 168)))
 const workerEnabled = envBoolean('WORKER_ENABLED', true)
 
 
@@ -256,14 +258,15 @@ if (domainCnameTarget && (domainCnameTarget.includes('://') || domainCnameTarget
 if (domainProvider === 'generic' && isProduction && (!domainATarget || !domainCnameTarget)) {
   throw new Error('DOMAIN_A_TARGET and DOMAIN_CNAME_TARGET are required when DOMAIN_PROVIDER=generic')
 }
-if (domainProvider === 'vercel' && !z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
-if (domainProvider === 'cloudflare' && !z.string().url().safeParse(cloudflareApiBase).success) throw new Error('CLOUDFLARE_API_BASE must be a valid absolute URL')
+if ((domainProvider === 'vercel' || vercelApiToken || vercelProject) && !z.string().url().safeParse(vercelApiBase).success) throw new Error('VERCEL_API_BASE must be a valid absolute URL')
+if ((domainProvider === 'cloudflare' || cloudflareApiToken || cloudflareZoneId) && !z.string().url().safeParse(cloudflareApiBase).success) throw new Error('CLOUDFLARE_API_BASE must be a valid absolute URL')
 if (cloudflareSaasFallbackOrigin && (cloudflareSaasFallbackOrigin.includes('://') || cloudflareSaasFallbackOrigin.includes('/'))) throw new Error('CLOUDFLARE_SAAS_FALLBACK_ORIGIN must be a hostname only')
 if (cloudflareSaasCnameTarget && (cloudflareSaasCnameTarget.includes('://') || cloudflareSaasCnameTarget.includes('/'))) throw new Error('CLOUDFLARE_SAAS_CNAME_TARGET must be a hostname only')
 if (cloudflareZoneName && (cloudflareZoneName.includes('://') || cloudflareZoneName.includes('/'))) throw new Error('CLOUDFLARE_ZONE_NAME must be a hostname only')
 if (cloudflarePlatformRootDomain && (cloudflarePlatformRootDomain.includes('://') || cloudflarePlatformRootDomain.includes('/'))) throw new Error('CLOUDFLARE_PLATFORM_ROOT_DOMAIN must be a hostname only')
 if (!/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(cloudflareWorkerScriptName)) throw new Error('CLOUDFLARE_WORKER_SCRIPT_NAME contains unsupported characters')
 if (!['optional', 'required'].includes(cloudflareApexRoutingMode)) throw new Error('CLOUDFLARE_APEX_ROUTING_MODE must be optional or required')
+if (!['cloudflare'].includes(domainProviderMigrationTarget)) throw new Error('DOMAIN_PROVIDER_MIGRATION_TARGET currently supports only cloudflare')
 
 const assertProductionDatabaseUrl = (value: string): void => {
   let parsed: URL
@@ -348,6 +351,22 @@ if (isProduction) {
     if (!/^[a-f0-9]{32}$/i.test(cloudflareAccountId)) throw new Error('CLOUDFLARE_ACCOUNT_ID must be a 32-character Cloudflare account identifier')
     if (!/^[a-f0-9]{32}$/i.test(cloudflareZoneId)) throw new Error('CLOUDFLARE_ZONE_ID must be a 32-character Cloudflare zone identifier')
     if (/placeholder|change[-_ ]?me|default_20bytes/i.test(cloudflareApiToken)) throw new Error('CLOUDFLARE_API_TOKEN must be a real production API token, not a placeholder')
+  }
+  if (cloudflareApiToken || cloudflareZoneId || cloudflareAccountId) {
+    requiredInProduction('CLOUDFLARE_ACCOUNT_ID', 32)
+    requiredInProduction('CLOUDFLARE_ZONE_ID', 32)
+    requiredInProduction('CLOUDFLARE_API_TOKEN', 20)
+    requiredInProduction('CLOUDFLARE_SAAS_FALLBACK_ORIGIN')
+    requiredInProduction('CLOUDFLARE_SAAS_CNAME_TARGET')
+  }
+  // During the staged Vercel -> Cloudflare migration both control planes must
+  // remain usable even after DOMAIN_PROVIDER is switched for newly added domains.
+  // If either legacy Vercel credential is supplied, require the complete pair so
+  // rollback/finalization cannot fail because of a half-configured provider.
+  if (vercelApiToken || process.env.VERCEL_PROJECT_ID_OR_NAME) {
+    requiredInProduction('VERCEL_PROJECT_ID_OR_NAME')
+    requiredInProduction('VERCEL_API_TOKEN', 20)
+    if (vercelRequireTeamId) requiredInProduction('VERCEL_TEAM_ID')
   }
   if (!workerEnabled) throw new Error('WORKER_ENABLED must be true in production because custom-domain lifecycle retries depend on the operations worker')
   // Object storage: Cloudflare R2 is canonical and production fails closed when
@@ -536,6 +555,8 @@ export default {
     cloudflare_platform_root_domain: cloudflarePlatformRootDomain,
     cloudflare_apex_routing_mode: cloudflareApexRoutingMode as 'optional' | 'required',
     replacement_grace_ms: domainReplacementGraceHours * 60 * 60_000,
+    provider_migration_target: domainProviderMigrationTarget as 'cloudflare',
+    provider_migration_rollback_grace_ms: domainProviderMigrationRollbackGraceHours * 60 * 60_000,
   },
   realtime: {
     enabled: realtimeEnabled,

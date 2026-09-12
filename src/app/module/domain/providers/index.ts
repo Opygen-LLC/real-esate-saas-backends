@@ -11,10 +11,13 @@ const providers: Record<string, DomainProvider> = {
 }
 
 export const DomainProviderService = {
-  current(): DomainProvider {
-    const provider = providers[config.domains.provider]
-    if (!provider) throw new Error(`Unsupported domain provider: ${config.domains.provider}. Supported values: vercel, generic, cloudflare`)
+  byName(name: string): DomainProvider {
+    const provider = providers[String(name || '').trim().toLowerCase()]
+    if (!provider) throw new Error(`Unsupported domain provider: ${name}. Supported values: vercel, generic, cloudflare`)
     return provider
+  },
+  current(): DomainProvider {
+    return DomainProviderService.byName(config.domains.provider)
   },
   health(force = false) {
     return DomainProviderService.current().health(force)

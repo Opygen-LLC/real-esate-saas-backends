@@ -32,6 +32,7 @@ const LIVE_MARKER_PATH = '/.well-known/opygen-domain-check'
 const LIVE_MARKER_HEADER = 'x-opygen-domain-check'
 const LIVE_MARKER_VALUE = 'real-estate-saas'
 const REQUIRED_CERT_HOSTS = [ZONE_NAME, PLATFORM_ROOT, `*.${PLATFORM_ROOT}`]
+const WEB_ROUTING_TYPES = new Set(['A', 'AAAA', 'CNAME'])
 
 function normalizeHost(value) {
   return String(value || '').trim().replace(/\.$/, '').toLowerCase()
@@ -234,15 +235,18 @@ async function deleteDns(id) {
 async function ensureDnsSpec(spec, dnsRecords, { allowReplace = false } = {}) {
   const sameName = dnsRecords.filter((record) => normalizeHost(record.name) === normalizeHost(spec.name))
   const match = sameName.find((record) => recordMatches(record, spec))
-  const conflicts = sameName.filter((record) => !recordMatches(record, spec))
+  // A platform web cutover must never remove TXT/MX/CAA or other unrelated
+  // records sharing the hostname. Only web-routing A/AAAA/CNAME records are in
+  // scope for replacement.
+  const conflicts = sameName.filter((record) => WEB_ROUTING_TYPES.has(String(record?.type || '').toUpperCase()) && !recordMatches(record, spec))
   if (match && conflicts.length === 0) return { status: 'ok', record: match }
-  if (conflicts.length || (sameName.length && !match)) {
+  if (conflicts.length) {
     if (!allowReplace) {
       throw new Error(`DNS conflict at ${spec.name}. Existing ${sameName.map((row) => `${row.type} ${row.content}`).join(', ')} was not modified. Review ${PLAN_FILE} before cutover.`)
     }
-    for (const record of sameName) await deleteDns(record.id)
+    for (const record of conflicts) await deleteDns(record.id)
   }
-  return { status: conflicts.length || sameName.length ? 'replaced' : 'created', record: await createDns(spec) }
+  return { status: conflicts.length ? 'replaced' : 'created', record: await createDns(spec) }
 }
 
 async function ensureFallbackOrigin() {

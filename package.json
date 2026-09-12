@@ -265,7 +265,17 @@
     "cloudflare:phase3:cutover": "node scripts/cloudflare-phase3.mjs cutover",
     "cloudflare:phase3:verify": "node scripts/cloudflare-phase3.mjs verify",
     "test:phase3-cloudflare-platform": "node --test tests/phase3-cloudflare-platform/*.test.cjs",
-    "cloudflare:phase3:sync-routes": "node scripts/cloudflare-phase3.mjs bootstrap"
+    "cloudflare:phase3:sync-routes": "node scripts/cloudflare-phase3.mjs bootstrap",
+    "cloudflare:phase4:domains:plan": "ts-node --transpile-only src/app/db/migrateVercelDomainsToCloudflare.ts plan",
+    "cloudflare:phase4:domains:start": "ts-node --transpile-only src/app/db/migrateVercelDomainsToCloudflare.ts start",
+    "cloudflare:phase4:domains:advance": "ts-node --transpile-only src/app/db/migrateVercelDomainsToCloudflare.ts advance",
+    "cloudflare:phase4:domains:finalize": "ts-node --transpile-only src/app/db/migrateVercelDomainsToCloudflare.ts finalize",
+    "cloudflare:phase4:domains:rollback": "ts-node --transpile-only src/app/db/migrateVercelDomainsToCloudflare.ts rollback",
+    "cloudflare:phase4:platform:plan": "node scripts/cloudflare-phase4-platform.mjs plan",
+    "cloudflare:phase4:platform:cutover": "node scripts/cloudflare-phase4-platform.mjs cutover",
+    "cloudflare:phase4:platform:verify": "node scripts/cloudflare-phase4-platform.mjs verify",
+    "cloudflare:phase4:platform:rollback": "node scripts/cloudflare-phase4-platform.mjs rollback",
+    "test:phase4-cloudflare-migration": "node --test tests/phase4-cloudflare-migration/*.test.cjs"
   },
   "keywords": [
     "real-estate",

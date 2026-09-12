@@ -19,6 +19,7 @@ import { TenantAccessMonitoringService } from '../tenantAccess/tenantAccessMonit
 const ACTIVE_RECHECK_MS = 6 * 60 * 60_000
 const TLS_RECHECK_MS = 2 * 60_000
 const DNS_RECHECK_MS = 5 * 60_000
+const MIGRATION_RECHECK_MS = 2 * 60_000
 
 const normalizeDomain = (input: string): string => {
   const candidate = String(input || '').trim().toLowerCase()
@@ -154,15 +155,42 @@ const ownershipDiagnostic = async (record: { domain: string; ownershipToken: str
 const publicLifecycleSlot = (source: any) => {
   if (!source) return null
   const raw = typeof source.toObject === 'function' ? source.toObject() : source
-  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, ...safe } = raw
+  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, providerRequestId: _providerRequestId, ...safe } = raw
   return { ...safe, lifecycleStatus: deriveLifecycle(raw) }
+}
+
+const publicProviderMigration = (source: any) => {
+  if (!source) return null
+  const raw = typeof source.toObject === 'function' ? source.toObject() : source
+  const target = publicLifecycleSlot(raw.target)
+  const legacy = publicLifecycleSlot(raw.legacy)
+  return {
+    legacyProvider: raw.legacyProvider || legacy?.provider || 'vercel',
+    targetProvider: raw.targetProvider || target?.provider || 'cloudflare',
+    migrationStatus: raw.migrationStatus || 'NOT_STARTED',
+    startedAt: raw.startedAt || null,
+    cloudflareRegisteredAt: raw.cloudflareRegisteredAt || null,
+    waitingDnsAt: raw.waitingDnsAt || null,
+    cloudflareTlsActiveAt: raw.cloudflareTlsActiveAt || null,
+    trafficSwitchedAt: raw.trafficSwitchedAt || null,
+    rollbackUntil: raw.rollbackUntil || null,
+    vercelRemovedAt: raw.vercelRemovedAt || null,
+    lastCheckedAt: raw.lastCheckedAt || null,
+    nextCheckAt: raw.nextCheckAt || null,
+    failureReason: raw.failureReason || '',
+    target,
+    // Expose the old provider's DNS only during the rollback window. This is
+    // intentionally provider-neutral data; provider IDs/metadata stay private.
+    rollbackDns: ['TRAFFIC_SWITCHED'].includes(raw.migrationStatus) ? (legacy?.requiredDns || []) : [],
+  }
 }
 
 const publicDomainStatus = (record: any) => {
   if (!record) return null
   const source = typeof record.toObject === 'function' ? record.toObject() : record
-  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, candidate: rawCandidate, ...safe } = source
+  const { ownershipToken: _ownershipToken, providerMetadata: _providerMetadata, providerRequestId: _providerRequestId, candidate: rawCandidate, providerMigration: rawProviderMigration, ...safe } = source
   const candidate = publicLifecycleSlot(rawCandidate)
+  const providerMigration = publicProviderMigration(rawProviderMigration)
   const lifecycleStatus = deriveLifecycle(source)
   return {
     ...safe,
@@ -170,6 +198,8 @@ const publicDomainStatus = (record: any) => {
     canonicalHost: source.canonicalHost || source.domain,
     activeDomain: lifecycleStatus === 'ACTIVE' && source.tlsStatus === 'active' && source.publicRoutingStatus === 'active' ? (source.canonicalHost || source.domain) : null,
     candidate,
+    providerMigration,
+    providerMigrationInProgress: Boolean(providerMigration && providerMigration.migrationStatus !== 'VERCEL_REMOVED'),
     replacementInProgress: Boolean(candidate?.domain),
     replacementGraceHours: Math.round(config.domains.replacement_grace_ms / 3_600_000),
     provider: source.provider || config.domains.provider,
@@ -211,6 +241,36 @@ const newLifecycleState = (input: {
   verifiedAt: null,
 })
 
+const snapshotLifecycleState = (source: any) => {
+  const raw = typeof source?.toObject === 'function' ? source.toObject() : source
+  if (!raw?.domain || !raw?.ownershipToken) return null
+  return {
+    domain: raw.domain,
+    canonicalHost: raw.canonicalHost || raw.domain,
+    ownershipToken: raw.ownershipToken,
+    provider: raw.provider || config.domains.provider,
+    lifecycleStatus: deriveLifecycle(raw),
+    providerRegistrationStatus: raw.providerRegistrationStatus || 'pending',
+    providerRegisteredAt: raw.providerRegisteredAt || null,
+    publicRoutingStatus: raw.publicRoutingStatus || 'pending',
+    status: raw.status || 'pending',
+    tlsStatus: raw.tlsStatus || 'not_started',
+    providerRequestId: raw.providerRequestId || '',
+    providerMetadata: raw.providerMetadata?.hostnames ? { hostnames: Array.from(raw.providerMetadata.hostnames) } : { hostnames: [] },
+    requiredDns: Array.isArray(raw.requiredDns) ? raw.requiredDns : [],
+    diagnostics: Array.isArray(raw.diagnostics) ? raw.diagnostics : [],
+    failureReason: raw.failureReason || '',
+    failureCount: Number(raw.failureCount || 0),
+    lastCheckedAt: raw.lastCheckedAt || null,
+    nextCheckAt: raw.nextCheckAt || new Date(),
+    ownershipVerifiedAt: raw.ownershipVerifiedAt || null,
+    routingVerifiedAt: raw.routingVerifiedAt || null,
+    tlsActiveAt: raw.tlsActiveAt || null,
+    activeAt: raw.activeAt || null,
+    verifiedAt: raw.verifiedAt || null,
+  }
+}
+
 const applyLifecycleResult = (target: any, result: any) => {
   const fields = [
     'requiredDns', 'canonicalHost', 'lifecycleStatus', 'provider', 'providerRegistrationStatus', 'providerRegisteredAt',
@@ -222,8 +282,11 @@ const applyLifecycleResult = (target: any, result: any) => {
   for (const field of fields) target[field] = result[field]
 }
 
-const evaluateLifecycle = async (slot: any, organizationId: string) => {
-  const provider = DomainProviderService.current()
+const evaluateLifecycle = async (slot: any, organizationId: string, providerName?: string) => {
+  // Existing records stay pinned to their persisted provider. Changing
+  // DOMAIN_PROVIDER only affects newly added domains; it must never silently
+  // migrate live Vercel traffic to Cloudflare.
+  const provider = DomainProviderService.byName(providerName || slot.provider || config.domains.provider)
   const now = new Date()
   const input = { domain: slot.domain, organizationId, ownershipToken: slot.ownershipToken }
   const providerChanged = Boolean(slot.provider && slot.provider !== provider.name)
@@ -415,14 +478,335 @@ const evaluateLifecycle = async (slot: any, organizationId: string) => {
   }
 }
 
-const queueProviderCleanup = (record: any, domain: string, retireAfter: Date, redirectStartedAt = new Date()) => {
+const migrationStatus = (record: any): string => String(record?.providerMigration?.migrationStatus || '')
+const migrationActiveBeforeSwitch = (record: any) => ['CF_REGISTERED', 'WAITING_DNS', 'CF_TLS_ACTIVE'].includes(migrationStatus(record))
+
+const eligibleForProviderMigration = (record: any) => Boolean(
+  record
+  && !record.candidate?.domain
+  && record.entitlementStatus !== 'suspended'
+  && (record.provider || 'vercel') === 'vercel'
+  && deriveLifecycle(record) === 'ACTIVE'
+  && record.status === 'verified'
+  && record.tlsStatus === 'active'
+  && record.publicRoutingStatus === 'active'
+  && (!record.providerMigration || ['NOT_STARTED'].includes(migrationStatus(record))),
+)
+
+const startProviderMigration = async (record: any) => {
+  if (!record) throw new ApiError(404, 'Custom domain record not found')
+  if (record.providerMigration && !['NOT_STARTED'].includes(migrationStatus(record))) return publicDomainStatus(record)
+  if (!eligibleForProviderMigration(record)) {
+    throw new ApiError(409, 'Only ACTIVE Vercel custom domains without a pending replacement can start the Cloudflare migration')
+  }
+
+  const legacyProvider = String(record.provider || 'vercel')
+  const targetProvider = config.domains.provider_migration_target
+  if (legacyProvider === targetProvider) throw new ApiError(409, 'This custom domain is already using the target provider')
+  const provider = DomainProviderService.byName(targetProvider)
+  const input = { domain: record.domain, organizationId: record.organizationId, ownershipToken: record.ownershipToken }
+  const registration = await provider.registerDomain(input)
+  if (!registration.registered) throw new ApiError(503, `Target domain provider (${targetProvider}) did not register the domain`)
+  const requiredDns = await provider.getRequiredDns(input)
+  const now = new Date()
+  const target = newLifecycleState({
+    domain: record.domain,
+    ownershipToken: record.ownershipToken,
+    provider: targetProvider,
+    providerRequestId: registration.providerRequestId,
+    providerMetadata: registration.providerMetadata,
+    registered: true,
+    requiredDns,
+  })
+  target.providerRegisteredAt = now
+  if (Array.isArray(record.retiredDomains)) {
+    for (const retired of record.retiredDomains) {
+      if (!retired.provider) retired.provider = legacyProvider
+    }
+  }
+  record.providerMigration = {
+    legacyProvider,
+    targetProvider,
+    migrationStatus: 'CF_REGISTERED',
+    legacy: snapshotLifecycleState(record),
+    target,
+    startedAt: now,
+    cloudflareRegisteredAt: now,
+    waitingDnsAt: null,
+    cloudflareTlsActiveAt: null,
+    trafficSwitchedAt: null,
+    rollbackUntil: null,
+    vercelRemovedAt: null,
+    lastCheckedAt: now,
+    nextCheckAt: now,
+    failureReason: '',
+    failureCount: 0,
+  }
+  record.nextCheckAt = now
+  await record.save()
+  await CacheInvalidationService.invalidateTenant(record.organizationId)
+  return publicDomainStatus(record)
+}
+
+const updateMigrationTarget = (target: any, patch: Record<string, unknown>) => {
+  for (const [key, value] of Object.entries(patch)) target[key] = value
+}
+
+const advanceProviderMigration = async (record: any) => {
+  const migration = record?.providerMigration
+  if (!migration || ['NOT_STARTED', 'VERCEL_REMOVED'].includes(migrationStatus(record))) return publicDomainStatus(record)
+  if (migration.migrationStatus === 'TRAFFIC_SWITCHED') return publicDomainStatus(record)
+  const target = migration.target
+  if (!target?.domain) throw new ApiError(500, 'Provider migration target state is missing')
+
+  const now = new Date()
+  const provider = DomainProviderService.byName(migration.targetProvider || target.provider || 'cloudflare')
+  const input = { domain: target.domain, organizationId: record.organizationId, ownershipToken: target.ownershipToken }
+  try {
+    // Registration is idempotent for the Cloudflare provider and also repairs a
+    // partially deleted apex/www pair before we ask the customer to touch DNS.
+    const registration: DomainRegistrationResult = await provider.registerDomain(input)
+    if (registration?.registered) {
+      target.providerRegistrationStatus = 'registered'
+      target.providerRegisteredAt = target.providerRegisteredAt || now
+      if (registration.providerRequestId) target.providerRequestId = registration.providerRequestId
+      if (registration.providerMetadata) target.providerMetadata = registration.providerMetadata
+    }
+
+    target.requiredDns = await provider.getRequiredDns(input)
+    const [ownership, routing, tls] = await Promise.all([
+      ownershipDiagnostic(target),
+      provider.verifyRouting(input),
+      provider.getTlsStatus(input),
+    ])
+    if (routing.providerMetadata) target.providerMetadata = routing.providerMetadata
+    if (tls.providerMetadata) target.providerMetadata = tls.providerMetadata
+    const registered = routing.registered || target.providerRegistrationStatus === 'registered'
+    const providerValidated = registered && routing.providerVerified
+    const tlsActive = tls.status === 'active'
+    const routeReady = Boolean(routing.routingReady ?? (routing.apexOk && routing.wwwOk))
+    const diagnostics = [ownership, ...routing.diagnostics, ...tls.diagnostics]
+    const failure = diagnostics.find((item) => item.state === 'failed')
+
+    updateMigrationTarget(target, {
+      provider: provider.name,
+      canonicalHost: routing.canonicalHost || target.canonicalHost || target.domain,
+      providerRegistrationStatus: registered ? 'registered' : 'pending',
+      providerRegisteredAt: registered ? (target.providerRegisteredAt || now) : target.providerRegisteredAt,
+      lifecycleStatus: !ownership.ok ? 'PENDING_DNS' : !providerValidated ? 'OWNERSHIP_VERIFIED' : tlsActive ? 'ROUTING_VERIFIED' : 'TLS_PROVISIONING',
+      status: 'pending',
+      tlsStatus: tls.status,
+      publicRoutingStatus: 'pending',
+      diagnostics,
+      failureReason: failure?.message || '',
+      failureCount: failure ? Number(target.failureCount || 0) + 1 : Number(target.failureCount || 0),
+      lastCheckedAt: now,
+      nextCheckAt: new Date(now.getTime() + MIGRATION_RECHECK_MS),
+      ownershipVerifiedAt: ownership.ok ? (target.ownershipVerifiedAt || now) : null,
+      tlsActiveAt: tlsActive ? (target.tlsActiveAt || now) : null,
+    })
+
+    migration.lastCheckedAt = now
+    migration.nextCheckAt = target.nextCheckAt
+    migration.failureReason = failure?.message || ''
+    migration.failureCount = failure ? Number(migration.failureCount || 0) + 1 : 0
+
+    if (!providerValidated || !tlsActive) {
+      migration.migrationStatus = 'WAITING_DNS'
+      migration.waitingDnsAt = migration.waitingDnsAt || now
+      record.nextCheckAt = target.nextCheckAt
+      await record.save()
+      await CacheInvalidationService.invalidateTenant(record.organizationId)
+      return publicDomainStatus(record)
+    }
+
+    migration.migrationStatus = 'CF_TLS_ACTIVE'
+    migration.cloudflareTlsActiveAt = migration.cloudflareTlsActiveAt || now
+
+    // Do not use the public marker alone to decide that traffic switched: while
+    // DNS still points at Vercel the same Opygen runtime can answer that marker.
+    // The DNS route must point at Cloudflare AND the Cloudflare runtime marker
+    // must pass before the serving provider is changed in MongoDB.
+    if (routeReady) {
+      const publicRouting = await provider.verifyPublicRouting(input)
+      target.diagnostics = [...diagnostics, ...publicRouting.diagnostics]
+      if (publicRouting.active) {
+        const canonicalHost = routing.canonicalHost || publicRouting.canonicalHost || target.domain
+        updateMigrationTarget(target, {
+          canonicalHost,
+          lifecycleStatus: 'ACTIVE',
+          status: 'verified',
+          tlsStatus: 'active',
+          publicRoutingStatus: 'active',
+          routingVerifiedAt: target.routingVerifiedAt || now,
+          activeAt: target.activeAt || now,
+          verifiedAt: target.verifiedAt || now,
+          failureReason: '',
+          failureCount: 0,
+          lastCheckedAt: now,
+          nextCheckAt: new Date(now.getTime() + ACTIVE_RECHECK_MS),
+        })
+        // Keep the Vercel registration untouched. Only the serving provider
+        // snapshot changes here; Vercel is deleted later by explicit finalize.
+        applyLifecycleResult(record, target)
+        record.ownershipToken = target.ownershipToken
+        migration.migrationStatus = 'TRAFFIC_SWITCHED'
+        migration.trafficSwitchedAt = migration.trafficSwitchedAt || now
+        migration.rollbackUntil = migration.rollbackUntil || new Date(now.getTime() + config.domains.provider_migration_rollback_grace_ms)
+        migration.failureReason = ''
+        migration.failureCount = 0
+        migration.nextCheckAt = migration.rollbackUntil
+        record.nextCheckAt = migration.rollbackUntil
+        await record.save()
+        await Organization.updateOne(
+          { organizationId: record.organizationId },
+          { $set: { domain: record.domain, domain_Verify: true, domain_dns: record.requiredDns } },
+        )
+        await CacheInvalidationService.invalidateTenant(record.organizationId, [record.domain, `www.${record.domain}`])
+        return publicDomainStatus(record)
+      }
+    }
+
+    record.nextCheckAt = target.nextCheckAt
+    await record.save()
+    await CacheInvalidationService.invalidateTenant(record.organizationId)
+    return publicDomainStatus(record)
+  } catch (error) {
+    const message = (error instanceof Error ? error.message : 'Target provider migration check failed').slice(0, 500)
+    migration.failureReason = message
+    migration.failureCount = Number(migration.failureCount || 0) + 1
+    migration.lastCheckedAt = now
+    migration.nextCheckAt = new Date(now.getTime() + MIGRATION_RECHECK_MS)
+    record.nextCheckAt = migration.nextCheckAt
+    if (target) {
+      target.failureReason = message
+      target.failureCount = Number(target.failureCount || 0) + 1
+      target.lastCheckedAt = now
+      target.nextCheckAt = migration.nextCheckAt
+    }
+    await record.save()
+    await CacheInvalidationService.invalidateTenant(record.organizationId)
+    return publicDomainStatus(record)
+  }
+}
+
+const finalizeProviderMigration = async (record: any) => {
+  const migration = record?.providerMigration
+  if (!migration || migration.migrationStatus !== 'TRAFFIC_SWITCHED') {
+    throw new ApiError(409, 'Provider migration is not ready for legacy-provider removal')
+  }
+  const now = new Date()
+  const rollbackUntil = migration.rollbackUntil ? new Date(migration.rollbackUntil) : null
+  if (!rollbackUntil || rollbackUntil.getTime() > now.getTime()) {
+    throw new ApiError(409, `Rollback grace period is still active until ${rollbackUntil?.toISOString() || 'unknown'}`)
+  }
+  const legacyProvider = DomainProviderService.byName(migration.legacyProvider || 'vercel')
+  await legacyProvider.removeDomain(record.domain)
+  migration.migrationStatus = 'VERCEL_REMOVED'
+  migration.vercelRemovedAt = now
+  migration.lastCheckedAt = now
+  migration.nextCheckAt = null
+  migration.failureReason = ''
+  migration.failureCount = 0
+  record.nextCheckAt = new Date(now.getTime() + ACTIVE_RECHECK_MS)
+  await record.save()
+  await CacheInvalidationService.invalidateTenant(record.organizationId)
+  return publicDomainStatus(record)
+}
+
+const rollbackProviderMigration = async (record: any) => {
+  const migration = record?.providerMigration
+  if (!migration || ['NOT_STARTED', 'VERCEL_REMOVED'].includes(migration.migrationStatus)) {
+    throw new ApiError(409, migration?.migrationStatus === 'VERCEL_REMOVED'
+      ? 'Vercel has already been removed; automatic rollback is no longer available'
+      : 'No active provider migration exists')
+  }
+  const targetProvider = DomainProviderService.byName(migration.targetProvider || 'cloudflare')
+  const legacyProvider = DomainProviderService.byName(migration.legacyProvider || 'vercel')
+  const legacy = migration.legacy
+  if (!legacy?.domain) throw new ApiError(500, 'Legacy provider snapshot is missing')
+  const input = { domain: legacy.domain, organizationId: record.organizationId, ownershipToken: legacy.ownershipToken }
+  const switched = migration.migrationStatus === 'TRAFFIC_SWITCHED'
+
+  if (switched) {
+    // Operators/customers must first point DNS back to the records exposed as
+    // rollbackDns. We verify Vercel is actually serving HTTPS before restoring
+    // the database provider snapshot, preventing a rollback-induced outage.
+    if (!(await legacyProvider.hasDomain(legacy.domain))) throw new ApiError(409, 'Legacy Vercel hostname is no longer registered; rollback is blocked')
+    const [routing, tls, publicRouting] = await Promise.all([
+      legacyProvider.verifyRouting(input),
+      legacyProvider.getTlsStatus(input),
+      legacyProvider.verifyPublicRouting(input),
+    ])
+    const routeReady = Boolean(routing.routingReady ?? (routing.apexOk && routing.wwwOk))
+    if (!routeReady || !routing.registered || !routing.providerVerified || tls.status !== 'active' || !publicRouting.active) {
+      throw new ApiError(409, 'Rollback DNS is not serving from Vercel yet. Restore the shown rollback DNS records, wait for propagation, then retry rollback.')
+    }
+    applyLifecycleResult(record, legacy)
+    record.ownershipToken = legacy.ownershipToken
+    record.canonicalHost = routing.canonicalHost || publicRouting.canonicalHost || legacy.canonicalHost || legacy.domain
+    record.lifecycleStatus = 'ACTIVE'
+    record.status = 'verified'
+    record.tlsStatus = 'active'
+    record.publicRoutingStatus = 'active'
+    record.nextCheckAt = new Date(Date.now() + ACTIVE_RECHECK_MS)
+    migration.migrationStatus = 'NOT_STARTED'
+    migration.failureReason = ''
+    migration.failureCount = 0
+    migration.lastCheckedAt = new Date()
+    migration.nextCheckAt = null
+    await record.save()
+    await Organization.updateOne(
+      { organizationId: record.organizationId },
+      { $set: { domain: record.domain, domain_Verify: true, domain_dns: record.requiredDns } },
+    )
+    await CacheInvalidationService.invalidateTenant(record.organizationId, [record.domain, `www.${record.domain}`])
+  }
+
+  try {
+    await targetProvider.removeDomain(record.domain)
+    record.providerMigration = null
+  } catch (error) {
+    migration.migrationStatus = 'NOT_STARTED'
+    migration.failureReason = `Serving provider rolled back successfully, but Cloudflare cleanup must be retried: ${error instanceof Error ? error.message : 'cleanup failed'}`.slice(0, 500)
+    migration.nextCheckAt = null
+  }
+  await record.save()
+  await CacheInvalidationService.invalidateTenant(record.organizationId)
+  return publicDomainStatus(record)
+}
+
+const startProviderMigrationByOrganization = async (organizationId: string) => {
+  const record: any = await DomainRecord.findOne({ organizationId })
+  return startProviderMigration(record)
+}
+
+const advanceProviderMigrationByOrganization = async (organizationId: string) => {
+  const record: any = await DomainRecord.findOne({ organizationId })
+  if (!record) throw new ApiError(404, 'Custom domain record not found')
+  return advanceProviderMigration(record)
+}
+
+const finalizeProviderMigrationByOrganization = async (organizationId: string) => {
+  const record: any = await DomainRecord.findOne({ organizationId })
+  if (!record) throw new ApiError(404, 'Custom domain record not found')
+  return finalizeProviderMigration(record)
+}
+
+const rollbackProviderMigrationByOrganization = async (organizationId: string) => {
+  const record: any = await DomainRecord.findOne({ organizationId })
+  if (!record) throw new ApiError(404, 'Custom domain record not found')
+  return rollbackProviderMigration(record)
+}
+
+const queueProviderCleanup = (record: any, domain: string, retireAfter: Date, redirectStartedAt = new Date(), providerName?: string) => {
   if (!domain || domain === record.domain) return
   const existing = (Array.isArray(record.retiredDomains) ? record.retiredDomains : [])
     .map((item: any) => typeof item.toObject === 'function' ? item.toObject() : item)
     .filter((item: any) => item.domain !== domain)
   record.retiredDomains = [
     ...existing,
-    { domain, redirectStartedAt, retireAfter, providerRemovedAt: null, lastRemovalAttemptAt: null, removalError: '' },
+    { domain, provider: providerName || record.provider || config.domains.provider, redirectStartedAt, retireAfter, providerRemovedAt: null, lastRemovalAttemptAt: null, removalError: '' },
   ]
   const currentNext = record.nextCheckAt ? new Date(record.nextCheckAt) : null
   if (!currentNext || retireAfter.getTime() < currentNext.getTime()) record.nextCheckAt = retireAfter
@@ -431,7 +815,6 @@ const queueProviderCleanup = (record: any, domain: string, retireAfter: Date, re
 const cleanupRetiredDomains = async (record: any) => {
   const retired = Array.isArray(record.retiredDomains) ? record.retiredDomains : []
   if (!retired.length) return
-  const provider = DomainProviderService.current()
   const now = new Date()
   const keep: any[] = []
   for (const item of retired) {
@@ -442,6 +825,7 @@ const cleanupRetiredDomains = async (record: any) => {
       continue
     }
     try {
+      const provider = DomainProviderService.byName(raw.provider || record.provider || config.domains.provider)
       await provider.removeDomain(raw.domain)
     } catch (error) {
       keep.push({
@@ -459,6 +843,7 @@ const promoteCandidate = async (record: any, result: any) => {
   if (!candidate?.domain || !result.active) return false
   const now = new Date()
   const previousDomain = record.domain
+  const previousProvider = record.provider || config.domains.provider
   const retireAfter = new Date(now.getTime() + config.domains.replacement_grace_ms)
   record.domain = candidate.domain
   record.ownershipToken = candidate.ownershipToken
@@ -466,7 +851,7 @@ const promoteCandidate = async (record: any, result: any) => {
   record.providerMetadata = candidate.providerMetadata || { hostnames: [] }
   applyLifecycleResult(record, result)
   record.candidate = null
-  queueProviderCleanup(record, previousDomain, retireAfter, now)
+  queueProviderCleanup(record, previousDomain, retireAfter, now, previousProvider)
   await record.save()
 
   await Organization.updateOne(
@@ -488,6 +873,9 @@ const add = async (organizationId: string, input: string) => {
 
   const current: any = await DomainRecord.findOne({ organizationId })
   if (current?.domain === domain || current?.candidate?.domain === domain) return publicDomainStatus(current)
+  if (current?.providerMigration && !['NOT_STARTED', 'VERCEL_REMOVED'].includes(migrationStatus(current))) {
+    throw new ApiError(409, 'Finish or roll back the hosting-provider migration before replacing the custom domain')
+  }
   if (conflicting?.organizationId === organizationId && (conflicting.retiredDomains || []).some((item: any) => item.domain === domain)) {
     throw new ApiError(409, 'This hostname is still in its redirect grace period or awaiting provider cleanup and cannot be re-added yet')
   }
@@ -529,12 +917,13 @@ const add = async (organizationId: string, input: string) => {
 
   if (current && hasServingDomain) {
     const previousCandidate = current.candidate?.domain && current.candidate.domain !== domain ? current.candidate.domain : null
+    const previousCandidateProvider = previousCandidate ? (current.candidate?.provider || current.provider || config.domains.provider) : null
     current.candidate = state
     current.entitlementStatus = 'active'
     current.entitlementSuspendedAt = null
     current.entitlementSuspendedReason = ''
     current.nextCheckAt = new Date()
-    if (previousCandidate) queueProviderCleanup(current, previousCandidate, new Date())
+    if (previousCandidate) queueProviderCleanup(current, previousCandidate, new Date(), new Date(), previousCandidateProvider || undefined)
     try {
       await current.save()
     } catch (error: any) {
@@ -569,7 +958,7 @@ const add = async (organizationId: string, input: string) => {
   if (!record) throw new ApiError(500, 'Failed to persist custom domain configuration')
 
   if (previousPendingDomain) {
-    queueProviderCleanup(record, previousPendingDomain, new Date())
+    queueProviderCleanup(record, previousPendingDomain, new Date(), new Date(), current?.provider || config.domains.provider)
     await record.save()
   }
   await Organization.updateOne({ organizationId }, { $set: { domain, domain_Verify: false, domain_dns: dnsRecords } })
@@ -580,8 +969,17 @@ const add = async (organizationId: string, input: string) => {
 const verifyRecord = async (record: any) => {
   await cleanupRetiredDomains(record)
 
+  // A live Vercel hostname must remain ACTIVE while Cloudflare is being
+  // pre-validated. In particular, once the customer changes the CNAME, Vercel
+  // DNS checks would naturally fail before the Cloudflare check completes; we
+  // therefore advance the staged target first and do not downgrade the serving
+  // legacy record during that hand-off window.
+  if (migrationActiveBeforeSwitch(record)) {
+    return advanceProviderMigration(record)
+  }
+
   if (record.candidate?.domain) {
-    const result = await evaluateLifecycle(record.candidate, record.organizationId)
+    const result = await evaluateLifecycle(record.candidate, record.organizationId, record.candidate.provider || config.domains.provider)
     applyLifecycleResult(record.candidate, result)
     record.nextCheckAt = result.nextCheckAt
     if (result.active) {
@@ -593,7 +991,7 @@ const verifyRecord = async (record: any) => {
     return publicDomainStatus(record)
   }
 
-  const result = await evaluateLifecycle(record, record.organizationId)
+  const result = await evaluateLifecycle(record, record.organizationId, record.provider || config.domains.provider)
   applyLifecycleResult(record, result)
   await record.save()
 
@@ -733,4 +1131,9 @@ export const DomainService = {
   changeSubdomain,
   resolveSubdomain,
   publicDomainStatus,
+  startProviderMigrationByOrganization,
+  advanceProviderMigrationByOrganization,
+  finalizeProviderMigrationByOrganization,
+  rollbackProviderMigrationByOrganization,
+  eligibleForProviderMigration,
 }

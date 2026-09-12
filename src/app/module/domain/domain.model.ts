@@ -12,6 +12,17 @@ export type DomainLifecycleStatus = typeof DOMAIN_LIFECYCLE_STATUSES[number]
 export type DomainStatus = 'pending' | 'verified' | 'failed'
 export type TlsStatus = 'not_started' | 'provisioning' | 'active' | 'failed'
 
+export const DOMAIN_PROVIDER_MIGRATION_STATUSES = [
+  'NOT_STARTED',
+  'CF_REGISTERED',
+  'WAITING_DNS',
+  'CF_TLS_ACTIVE',
+  'TRAFFIC_SWITCHED',
+  'VERCEL_REMOVED',
+] as const
+
+export type DomainProviderMigrationStatus = typeof DOMAIN_PROVIDER_MIGRATION_STATUSES[number]
+
 
 const providerHostnameMetadataSchema = new Schema({
   hostname: { type: String, required: true },
@@ -50,8 +61,30 @@ const candidateDomainSchema = new Schema({
   verifiedAt: { type: Date, default: null },
 }, { _id: false })
 
+const providerMigrationSchema = new Schema({
+  legacyProvider: { type: String, required: true, default: 'vercel' },
+  targetProvider: { type: String, required: true, default: 'cloudflare' },
+  migrationStatus: { type: String, enum: DOMAIN_PROVIDER_MIGRATION_STATUSES, default: 'NOT_STARTED', index: true },
+  // Keep complete provider snapshots so rollback never requires manual database
+  // reconstruction. Secrets are stripped before this object is returned publicly.
+  legacy: { type: candidateDomainSchema, default: null },
+  target: { type: candidateDomainSchema, default: null },
+  startedAt: { type: Date, default: null },
+  cloudflareRegisteredAt: { type: Date, default: null },
+  waitingDnsAt: { type: Date, default: null },
+  cloudflareTlsActiveAt: { type: Date, default: null },
+  trafficSwitchedAt: { type: Date, default: null },
+  rollbackUntil: { type: Date, default: null },
+  vercelRemovedAt: { type: Date, default: null },
+  lastCheckedAt: { type: Date, default: null },
+  nextCheckAt: { type: Date, default: null },
+  failureReason: { type: String, default: '', maxlength: 500 },
+  failureCount: { type: Number, default: 0 },
+}, { _id: false })
+
 const retiredDomainSchema = new Schema({
   domain: { type: String, required: true },
+  provider: { type: String, default: '' },
   redirectStartedAt: { type: Date, required: true },
   retireAfter: { type: Date, required: true },
   providerRemovedAt: { type: Date, default: null },
@@ -95,11 +128,13 @@ const domainRecordSchema = new Schema({
   verifiedAt: { type: Date, default: null },
 
   candidate: { type: candidateDomainSchema, default: null },
+  providerMigration: { type: providerMigrationSchema, default: null },
   retiredDomains: { type: [retiredDomainSchema], default: [] },
 }, { timestamps: true })
 
 domainRecordSchema.index({ lifecycleStatus: 1, nextCheckAt: 1 })
 domainRecordSchema.index({ status: 1, nextCheckAt: 1 })
+domainRecordSchema.index({ 'providerMigration.migrationStatus': 1, 'providerMigration.nextCheckAt': 1 })
 domainRecordSchema.index({ 'candidate.domain': 1 }, { unique: true, partialFilterExpression: { 'candidate.domain': { $type: 'string' } } })
 domainRecordSchema.index({ 'retiredDomains.domain': 1 })
 domainRecordSchema.index({ 'retiredDomains.retireAfter': 1 })

@@ -87,8 +87,7 @@ const providerHeaders = () => ({
 })
 
 const providerConfigured = () => Boolean(
-  config.domains.provider === 'vercel'
-  && config.domains.vercel_project
+  config.domains.vercel_project
   && config.domains.vercel_api_token
   && (!config.domains.vercel_require_team_id || config.domains.vercel_team_id),
 )
